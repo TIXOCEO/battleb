@@ -2,57 +2,92 @@
 import pool from './db';
 import { User, QueueEntry } from './types';
 
-export async function addToQueue(tiktok_id: string, username: string, boost = 0): Promise<QueueEntry> {
+export type QueueEntry = {
+  position: number;
+  user: {
+    username: string;
+    badges: string[];
+    priority: number;
+  };
+  boost_spots: number;
+};
+
+export async function addToQueue(tiktok_id: string, username: string): Promise<void> {
   let user = await getUser(tiktok_id);
   if (!user) {
     user = await createUser(tiktok_id, username);
   }
+  if (user.blocks?.queue) throw new Error('Geblokkeerd in queue');
 
-  if (user.blocks.queue) throw new Error('Geblokkeerd in queue');
+  await pool.query('DELETE FROM queue WHERE user_tiktok_id = $1', [tiktok_id]);
+  await pool.query(
+    'INSERT INTO queue (user_tiktok_id, boost_spots) VALUES ($1, 0)',
+    [tiktok_id]
+  );
+}
 
-  // Verwijder bestaande
+export async function boostQueue(tiktok_id: string, spots: number): Promise<void> {
+  if (spots < 1 || spots > 5) throw new Error('Boost 1-5 plekken');
+ 
+  const cost = spots * 200;
+  const userRes = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [tiktok_id]);
+  if (!userRes.rows[0] || userRes.rows[0].bp_total < cost) {
+    throw new Error('Niet genoeg BP');
+  }
+
+  await pool.query('UPDATE users SET bp_total = bp_total - $1 WHERE tiktok_id = $2', [cost, tiktok_id]);
+  await pool.query(
+    'UPDATE queue SET boost_spots = boost_spots + $1 WHERE user_tiktok_id = $2',
+    [spots, tiktok_id]
+  );
+}
+
+export async function leaveQueue(tiktok_id: string): Promise<number> {
+  const res = await pool.query('SELECT boost_spots FROM queue WHERE user_tiktok_id = $1', [tiktok_id]);
+  if (res.rows.length === 0) return 0;
+
+  const boost_spots = res.rows[0].boost_spots;
+  const refund = Math.floor(boost_spots * 200 * 0.5);
+
+  await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [refund, tiktok_id]);
   await pool.query('DELETE FROM queue WHERE user_tiktok_id = $1', [tiktok_id]);
 
-  const res = await pool.query(
-    'INSERT INTO queue (user_tiktok_id, boost_spots) VALUES ($1, $2) RETURNING *',
-    [tiktok_id, boost]
-  );
+  return refund;
+}
 
-  return { user, boost_spots: res.rows[0].boost_spots };
+function calculatePriority(badges: string[] = [], boost_spots: number): number {
+  let priority = boost_spots;
+  if (badges.includes('superfan')) priority += 10;
+  if (badges.includes('fanclub')) priority += 5;
+  if (badges.includes('vip')) priority += 10;
+  return priority;
 }
 
 export async function getQueue(): Promise<QueueEntry[]> {
   const res = await pool.query(`
-    SELECT u.*, q.boost_spots 
-    FROM queue q 
-    JOIN users u ON q.user_tiktok_id = u.tiktok_id 
-    ORDER BY q.joined_at ASC
+    SELECT u.username, u.badges, q.boost_spots
+    FROM queue q
+    JOIN users u ON q.user_tiktok_id = u.tiktok_id
+    ORDER BY 
+      (q.boost_spots) +
+      (CASE WHEN u.badges @> '["superfan"]'::jsonb THEN 10 ELSE 0 END) +
+      (CASE WHEN u.badges @> '["fanclub"]'::jsonb THEN 5 ELSE 0 END) +
+      (CASE WHEN u.badges @> '["vip"]'::jsonb THEN 10 ELSE 0 END) DESC,
+      q.joined_at ASC
   `);
-  return res.rows.map(r => ({
+
+  return res.rows.map((row, index) => ({
+    position: index + 1,
     user: {
-      id: r.id,
-      username: r.username,
-      tiktok_id: r.tiktok_id,
-      bp_daily: r.bp_daily,
-      bp_total: r.bp_total,
-      streak: r.streak,
-      priority: calculatePriority(r.badges, r.boost_spots),
-      badges: r.badges,
-      blocks: r.blocks
+      username: row.username,
+      badges: row.badges || [],
+      priority: calculatePriority(row.badges || [], row.boost_spots)
     },
-    boost_spots: r.boost_spots
+    boost_spots: row.boost_spots
   }));
 }
 
-function calculatePriority(badges: string[], boost: number): number {
-  let prio = 0;
-  if (badges.includes('superfan')) prio += 10;
-  else if (badges.includes('fanclub')) prio += 5;
-  else if (badges.includes('vip')) prio += 5;
-  prio += Math.min(boost, 5); // max +5
-  return prio;
-}
-
+// Helper functies
 async function getUser(tiktok_id: string): Promise<User | null> {
   const res = await pool.query('SELECT * FROM users WHERE tiktok_id = $1', [tiktok_id]);
   return res.rows[0] || null;
@@ -60,8 +95,8 @@ async function getUser(tiktok_id: string): Promise<User | null> {
 
 async function createUser(tiktok_id: string, username: string): Promise<User> {
   const res = await pool.query(
-    'INSERT INTO users (tiktok_id, username) VALUES ($1, $2) RETURNING *',
-    [tiktok_id, username]
+    'INSERT INTO users (tiktok_id, username, badges, blocks) VALUES ($1, $2, $3, $4) RETURNING *',
+    [tiktok_id, username, [], '{}']
   );
   return res.rows[0];
 }

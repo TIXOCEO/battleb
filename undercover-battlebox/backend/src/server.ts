@@ -1,81 +1,50 @@
-// backend/src/server.ts (volledige bijgewerkte versie)
-import express from 'express';
-import http from 'http';
-import { Server } from 'socket.io';
-import { WebcastPushConnection } from 'tiktok-live-connector';  // ← Correcte import
-import { initDB } from './db';
-import { addToQueue, getQueue } from './queue';
-import { User, QueueEntry } from './types';
-import cors from 'cors';
-import dotenv from 'dotenv';
+// In tiktokLiveConnection.on('chat', ...)
+const msg = data.comment.toLowerCase().trim();
+const user = data.uniqueId;
+const nick = data.nickname;
 
-dotenv.config();  // ← Voeg dit toe voor .env support
+// Badge detectie
+const badges: string[] = [];
+if (data.isSuperFan) badges.push('superfan');
+if (data.isFanClub) badges.push('fanclub');
+if (data.isVip) badges.push('vip');
 
-const app = express();
-app.use(cors());
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: '*' }
-});
+// Update user badges
+await pool.query(
+  'INSERT INTO users (tiktok_id, username, badges) VALUES ($1, $2, $3) ON CONFLICT (tiktok_id) DO UPDATE SET badges = $3',
+  [user, nick, badges]
+);
 
-app.get('/queue', async (req, res) => {
-  const queue = await getQueue();
-  res.json(queue);
-});
-
-io.on('connection', (socket) => {
-  console.log('Overlay connected:', socket.id);
-  emitQueue();
-});
-
-async function emitQueue() {
-  const queue = await getQueue();
-  io.emit('queue:update', queue.slice(0, 50)); // max 50
+if (msg === '!join') {
+  try {
+    await addToQueue(user, nick);
+    emitQueue();
+  } catch (e: any) {
+    console.log('Join error:', e.message);
+  }
 }
 
-// Start TikTok Live (bijgewerkt voor WebcastPushConnection)
-async function startTikTokLive(username: string) {
-  const tiktokLiveConnection = new WebcastPushConnection(username);
-  
-  tiktokLiveConnection.connect().then(state => {
-    console.info(`Verbonden met roomId ${state.roomId}`);
-  }).catch(err => {
-    console.error('Failed to connect to TikTok Live:', err);
-  });
-  
-  tiktokLiveConnection.on('chat', async (data: any) => {
-    const msg = data.comment.toLowerCase();
-    const user = data.uniqueId;
-    const nick = data.nickname;
-
-    if (msg === '!join') {
-      try {
-        await addToQueue(user, nick);
-        emitQueue();
-        console.log(`@${nick} joined queue!`);
-      } catch (e) { 
-        console.log('Queue error:', e); 
-      }
+if (msg.startsWith('!boost rij ')) {
+  const spots = parseInt(msg.split(' ')[2]);
+  if (spots >= 1 && spots <= 5) {
+    try {
+      await boostQueue(user, spots);
+      emitQueue();
+      console.log(`@${nick} boost +${spots} plekken`);
+    } catch (e: any) {
+      console.log('Boost error:', e.message);
     }
-    // !boost, !leave later
-  });
-
-  tiktokLiveConnection.on('gift', (data: any) => {
-    console.log('Gift ontvangen:', data.nickname, data.giftName, data.diamondCount);
-    // BP + points later
-  });
-
-  tiktokLiveConnection.on('connected', () => {
-    console.log('Volledig verbonden met TikTok Live!');
-  });
+  }
 }
 
-// === START ===
-const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME || 'JOUW_TIKTOK_USERNAME';  // ← Gebruik .env
-
-initDB().then(() => {
-  server.listen(4000, () => {
-    console.log('Backend draait op :4000');
-    startTikTokLive(TIKTOK_USERNAME);
-  });
-});
+if (msg === '!leave') {
+  try {
+    const refund = await leaveQueue(user);
+    if (refund > 0) {
+      console.log(`@${nick} kreeg ${refund} BP terug`);
+    }
+    emitQueue();
+  } catch (e) {
+    console.log('Leave error:', e);
+  }
+}
