@@ -1,0 +1,22 @@
+{
+  "hostUsername": "your_tiktok_username",
+  "sessionId": "your_session_id_here",
+  "enableTwists": true,
+  "enableBoosters": true,
+  "enableQueue": true,
+  "queueMax": 50,
+  "bpDailyCap": 500,
+  "roundTime": {
+    "pre": 180,
+    "final": 300
+  },
+  "vipMultipliers": {
+    "fanclub": 1.25,
+    "superfan": 1.5
+  },
+  "prizes": {
+    "winnerBP": 10000,
+    "hostGiftShare": 0.4
+  },
+  "dashboardKey": "admin123"
+}
