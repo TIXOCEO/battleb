@@ -68,17 +68,17 @@ async function activateFanStatus(tiktok_id: bigint, display_name: string) {
 // HAAL USER + FAN/VIP OP
 async function getUserData(tiktok_id: bigint, display_name: string) {
   const query = `
-    INSERT INTO users (tiktok_id, display_name, username, bp_total, is_fan, fan_expires_at, is_vip)
-    VALUES ($1, $2, $2, 0, false, NULL, false)
+    INSERT INTO users (tiktok_id, display_name, username, bp_total, is_fan, fan_expires_at, is_vip, vip_expires_at)
+    VALUES ($1, $2, $2, 0, false, NULL, false, NULL)
     ON CONFLICT (tiktok_id) 
     DO UPDATE SET display_name = EXCLUDED.display_name, username = EXCLUDED.display_name
-    RETURNING bp_total, is_fan, fan_expires_at, is_vip;
+    RETURNING bp_total, is_fan, fan_expires_at, is_vip, vip_expires_at;
   `;
 
   const res = await pool.query(query, [tiktok_id, display_name]);
   const row = res.rows[0];
   const isFan = row.is_fan && row.fan_expires_at && new Date(row.fan_expires_at) > new Date();
-  const isVip = row.is_vip === true;
+  const isVip = row.is_vip && row.vip_expires_at && new Date(row.vip_expires_at) > new Date();
 
   if (!row.bp_total) console.log(`[NEW USER] ${display_name} (ID: ${tiktok_id})`);
 
@@ -113,15 +113,15 @@ async function deductBP(tiktok_id: bigint, amount: number): Promise<boolean> {
 async function startTikTokLive(username: string) {
   const tiktokLiveConnection = await connectWithRetry(username);
 
-  // === GLOBALE STATE VOOR DEZE SESSIE ===
-  const pendingLikes = new Map<string, number>();   // userIdStr → eigen likes deze sessie
+  const pendingLikes = new Map<string, number>();
   const hasFollowed = new Set<string>();
   const nameCache = new Map<string, string>();
 
-  // === CHAT ===
+  // === CHAT + ADMIN COMMANDOS ===
   tiktokLiveConnection.on('chat', async (data: any) => {
     const rawComment = data.comment || '';
-    const msg = rawComment.toLowerCase().trim();
+    const msg = rawComment.trim();
+    const msgLower = msg.toLowerCase();
     if (!msg) return;
 
     const userIdRaw = data.userId || data.uniqueId || '0';
@@ -129,87 +129,92 @@ async function startTikTokLive(username: string) {
     const display_name = data.nickname || 'Onbekend';
     const isAdmin = userId.toString() === ADMIN_ID;
 
-    console.log(`[CHAT] Raw: "${rawComment}" → Parsed: "${msg}" (user: ${display_name}, ID: ${userId})`);
+    console.log(`[CHAT] Raw: "${rawComment}" → Parsed: "${msgLower}" (user: ${display_name}, ID: ${userId})`);
 
     const { isFan, isVip } = await getUserData(userId, display_name);
     await addBP(userId, 1, 'CHAT', display_name, isFan, isVip);
 
-    // ADMIN COMMANDS
-    if (isAdmin && msg.startsWith('!admin ')) {
-      const cmd = msg.slice(7).trim();
-      if (cmd === 'reset fans') {
-        await pool.query('UPDATE users SET is_fan = false, fan_expires_at = NULL');
-        console.log('[ADMIN] Alle fans gereset');
-      }
-      if (cmd.startsWith('givebp ')) {
-        const parts = cmd.split(' ');
-        const targetNick = parts[1];
-        const amount = parseFloat(parts[2]);
-        if (targetNick && amount) {
-          const targetRes = await pool.query('SELECT tiktok_id FROM users WHERE display_name ILIKE $1', [`%${targetNick}%`]);
-          if (targetRes.rows[0]) {
-            await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [amount, targetRes.rows[0].tiktok_id]);
-            console.log(`[ADMIN] +${amount} BP aan ${targetNick}`);
-          }
-        }
+    // === ALLEEN ADMIN ===
+    if (!isAdmin) return;
+
+    if (!msgLower.startsWith('!adm ')) return;
+    const args = msg.slice(5).trim().split(' ');
+    const cmd = args[0].toLowerCase();
+
+    // !adm geef @user aantal
+    if (cmd === 'geef' && args[1]?.startsWith('@') && args[2]) {
+      const targetName = args[1].slice(1);
+      const amount = parseFloat(args[2]);
+      if (isNaN(amount)) return;
+      const targetRes = await pool.query('SELECT tiktok_id FROM users WHERE display_name ILIKE $1', [`%${targetName}%`]);
+      if (targetRes.rows[0]) {
+        await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [amount, targetRes.rows[0].tiktok_id]);
+        console.log(`[ADMIN] +${amount} BP gegeven aan @${targetName}`);
       }
       return;
     }
 
-    // !KOOP COMMANDS
-    if (msg.startsWith('!koop ')) {
-      const item = msg.slice(6).trim();
-      if (item === 'vip') {
-        if (await deductBP(userId, 5000)) {
-          await pool.query('UPDATE users SET is_vip = true WHERE tiktok_id = $1', [userId]);
-          console.log(`[KOOP] ${display_name} kocht VIP voor 5000 BP`);
-        } else {
-          console.log(`[KOOP FAIL] ${display_name} heeft niet genoeg BP voor VIP`);
-        }
-        return;
+    // !adm verw @user aantal
+    if (cmd === 'verw' && args[1]?.startsWith('@') && args[2]) {
+      const targetName = args[1].slice(1);
+      const amount = parseFloat(args[2]);
+      if (isNaN(amount)) return;
+      const targetRes = await pool.query('SELECT tiktok_id FROM users WHERE display_name ILIKE $1', [`%${targetName}%`]);
+      if (targetRes.rows[0]) {
+        await pool.query('UPDATE users SET bp_total = GREATEST(bp_total - $1, 0) WHERE tiktok_id = $2', [amount, targetRes.rows[0].tiktok_id]);
+        console.log(`[ADMIN] -${amount} BP afgetrokken van @${targetName}`);
       }
-      if (item === 'rij') {
-        if (await deductBP(userId, 10000)) {
-          try {
-            await addToQueue(userId.toString(), display_name);
-            emitQueue();
-            console.log(`[KOOP] ${display_name} kocht wachtrijplek voor 10000 BP`);
-          } catch (e: any) {
-            await pool.query('UPDATE users SET bp_total = bp_total + 10000 WHERE tiktok_id = $1', [userId]);
-            console.log(`[KOOP RIJ FAIL] ${e.message}`);
-          }
-        } else {
-          console.log(`[KOOP FAIL] ${display_name} heeft niet genoeg BP voor rij`);
-        }
-        return;
-      }
-    }
-
-    // === WACHTRIJ COMMANDS – ALLEEN VOOR FANS ===
-    const isQueueCommand = msg === '!join' || msg.startsWith('!boost rij ') || msg === '!leave';
-    if (isQueueCommand && !isFan) {
-      console.log(`[NO FAN] ${display_name} probeerde !join/!boost/!leave zonder Heart Me`);
       return;
     }
 
-    if (msg === '!join') {
-      console.log(`!join ontvangen van ${display_name} [FAN]`);
-      try { await addToQueue(userId.toString(), display_name); emitQueue(); }
-      catch (e: any) { console.log('Join error:', e.message); }
-    } else if (msg.startsWith('!boost rij ')) {
-      const spots = parseInt(msg.split(' ')[2] || '0');
-      if (spots >= 1 && spots <= 5) {
-        console.log(`!boost rij ${spots} van ${display_name} [FAN]`);
-        try { await boostQueue(userId.toString(), spots); emitQueue(); }
-        catch (e: any) { console.log('Boost error:', e.message); }
-      }
-    } else if (msg === '!leave') {
-      console.log(`!leave ontvangen van ${display_name} [FAN]`);
-      try {
-        const refund = await leaveQueue(userId.toString());
-        if (refund > 0) console.log(`${display_name} kreeg ${refund} BP terug`);
+    // !adm voegrij @user
+    if (cmd === 'voegrij' && args[1]?.startsWith('@')) {
+      const targetName = args[1].slice(1);
+      const targetRes = await pool.query('SELECT tiktok_id FROM users WHERE display_name ILIKE $1', [`%${targetName}%`]);
+      if (targetRes.rows[0]) {
+        await addToQueue(targetRes.rows[0].tiktok_id.toString(), targetName);
         emitQueue();
-      } catch (e: any) { console.log('Leave error:', e.message); }
+        console.log(`[ADMIN] @${targetName} toegevoegd aan wachtrij (force)`);
+      }
+      return;
+    }
+
+    // !adm verwrij @user → 50% refund
+    if (cmd === 'verwrij' && args[1]?.startsWith('@')) {
+      const targetName = args[1].slice(1);
+      const targetRes = await pool.query('SELECT tiktok_id FROM users WHERE display_name ILIKE $1', [`%${targetName}%`]);
+      if (targetRes.rows[0]) {
+        const refund = await leaveQueue(targetRes.rows[0].tiktok_id.toString());
+        if (refund > 0) {
+          const halfRefund = Math.floor(refund * 0.5);
+          await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [halfRefund, targetRes.rows[0].tiktok_id]);
+          console.log(`[ADMIN] @${targetName} verwijderd uit rij → 50% refund: +${halfRefund} BP`);
+        }
+        emitQueue();
+      }
+      return;
+    }
+
+    // !adm geefvip @user → VIP voor 30 dagen
+    if (cmd === 'geefvip' && args[1]?.startsWith('@')) {
+      const targetName = args[1].slice(1);
+      const targetRes = await pool.query('SELECT tiktok_id FROM users WHERE display_name ILIKE $1', [`%${targetName}%`]);
+      if (targetRes.rows[0]) {
+        await pool.query('UPDATE users SET is_vip = true, vip_expires_at = NOW() + INTERVAL \'30 days\' WHERE tiktok_id = $1', [targetRes.rows[0].tiktok_id]);
+        console.log(`[ADMIN] VIP gegeven aan @${targetName} (30 dagen)`);
+      }
+      return;
+    }
+
+    // !adm verwvip @user
+    if (cmd === 'verwvip' && args[1]?.startsWith('@')) {
+      const targetName = args[1].slice(1);
+      const targetRes = await pool.query('SELECT tiktok_id FROM users WHERE display_name ILIKE $1', [`%${targetName}%`]);
+      if (targetRes.rows[0]) {
+        await pool.query('UPDATE users SET is_vip = false, vip_expires_at = NULL WHERE tiktok_id = $1', [targetRes.rows[0].tiktok_id]);
+        console.log(`[ADMIN] VIP verwijderd van @${targetName}`);
+      }
+      return;
     }
   });
 
@@ -237,7 +242,7 @@ async function startTikTokLive(username: string) {
     console.log(`${data.giftName} (${diamonds} diamonds)`);
   });
 
-  // === LIKE – ALLEEN EIGEN LIKES, PER SESSIE, ZUIVER ===
+  // === LIKE – ALLEEN EIGEN LIKES DEZE SESSIE ===
   tiktokLiveConnection.on('like', async (data: any) => {
     const userIdRaw = data.userId || data.uniqueId || '0';
     const userId = BigInt(userIdRaw);
