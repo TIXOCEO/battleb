@@ -64,7 +64,7 @@ async function activateFanStatus(tiktok_id: bigint, display_name: string) {
        username = EXCLUDED.display_name`,
     [tiktok_id, display_name]
   );
-  console.log(`[FAN ACTIVATED 24H] ${displayName} (ID: ${tiktok_id})`);
+  console.log(`[FAN ACTIVATED 24H] ${display_name} (ID: ${tiktok_id})`);
 }
 
 // HAAL USER + FAN/VIP OP (MET EXPIRY CHECK)
