@@ -33,6 +33,9 @@ async function emitQueue() {
   io.emit('queue:update', queue.slice(0, 50));
 }
 
+// === LIKE COUNTER (per user) ===
+const likeCounter = new Map<string, number>();
+
 async function startTikTokLive(username: string) {
   const tiktokLiveConnection = new WebcastPushConnection(username);
 
@@ -72,7 +75,7 @@ async function startTikTokLive(username: string) {
       oldBP = parseFloat(userCheck.rows[0].bp_total) || 0;
     }
 
-    // === UPDATE USER (badges + bp_total) ===
+    // === UPDATE USER (badges + username) ===
     try {
       await pool.query(
         `INSERT INTO users (tiktok_id, username, badges, bp_total) 
@@ -86,8 +89,8 @@ async function startTikTokLive(username: string) {
       console.log('User update error:', e);
     }
 
-    // === BP VOOR CHAT ===
-    const chatBP = 3;
+    // === BP VOOR CHAT: +1 ===
+    const chatBP = 1;
     await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [chatBP, user]);
     const newBP = oldBP + chatBP;
 
@@ -148,6 +151,29 @@ async function startTikTokLive(username: string) {
 
       console.log(`[GIFT] @${data.nickname} → ${data.giftName} (${diamonds} diamonds)`);
       console.log(`[BP: +${giftBP} | ${totalBP.toFixed(1)}]`);
+    }
+  });
+
+  // === LIKES – +1 BP per 100 likes ===
+  tiktokLiveConnection.on('like', async (data: any) => {
+    const user = data.uniqueId;
+    const nick = data.nickname;
+    const likes = data.likeCount || 1;
+
+    const current = likeCounter.get(user) || 0;
+    const total = current + likes;
+    const fullHundreds = Math.floor(total / 100);
+    likeCounter.set(user, total % 100);
+
+    if (fullHundreds > 0) {
+      const likeBP = fullHundreds * 1;
+      await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [likeBP, user]);
+
+      const res = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [user]);
+      const totalBP = parseFloat(res.rows[0]?.bp_total) || 0;
+
+      console.log(`[LIKE] @${nick} → +${likes} likes → ${fullHundreds}x100`);
+      console.log(`[BP: +${likeBP} | ${totalBP.toFixed(1)}]`);
     }
   });
 
