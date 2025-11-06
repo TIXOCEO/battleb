@@ -28,6 +28,13 @@ export async function initDB() {
       boost_spots INTEGER DEFAULT 0,
       joined_at TIMESTAMPTZ DEFAULT NOW()
     );
+
+    -- FIX: Zet bp_total naar DOUBLE PRECISION (run 1x)
+    DO $$ BEGIN
+      ALTER TABLE users ALTER COLUMN bp_total TYPE DOUBLE PRECISION USING bp_total::DOUBLE PRECISION;
+    EXCEPTION
+      WHEN duplicate_object THEN null;
+    END $$;
   `);
 }
 
