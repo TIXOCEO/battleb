@@ -36,10 +36,10 @@ const hasFollowed = new Set<string>();
 const pendingLikes = new Map<string, number>();
 
 // === HELPER: Zorg dat user bestaat + oude BP ===
-async function ensureUserAndGetOldBP(tiktok_id: string, username: string, badges: string[]) {
+async function ensureUserAndGetOldBP(tiktok_id: string, username: string, isFanClubMember: boolean) {
   const updateRes = await pool.query(
-    `UPDATE users SET username = $2, badges = $3 WHERE tiktok_id = $1 RETURNING bp_total`,
-    [tiktok_id, username, badges]
+    `UPDATE users SET username = $2 WHERE tiktok_id = $1 RETURNING bp_total`,
+    [tiktok_id, username]
   );
 
   if ((updateRes.rowCount ?? 0) > 0) {
@@ -47,18 +47,16 @@ async function ensureUserAndGetOldBP(tiktok_id: string, username: string, badges
   }
 
   await pool.query(
-    `INSERT INTO users (tiktok_id, username, badges, bp_total)
-     VALUES ($1, $2, $3, 0)
-     ON CONFLICT (tiktok_id) DO NOTHING`,
-    [tiktok_id, username, badges]
+    `INSERT INTO users (tiktok_id, username, bp_total) VALUES ($1, $2, 0) ON CONFLICT (tiktok_id) DO NOTHING`,
+    [tiktok_id, username]
   );
 
   console.log(`[NEW USER] @${username}`);
   return 0;
 }
 
-// === HELPER: Voeg BP toe + log oude → nieuwe ===
-async function addBP(tiktok_id: string, amount: number, action: string, nick: string) {
+// === HELPER: Voeg BP toe + log met [FAN] als nodig ===
+async function addBP(tiktok_id: string, amount: number, action: string, nick: string, isFan: boolean = false) {
   const oldRes = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [tiktok_id]);
   const oldBP = parseFloat(oldRes.rows[0]?.bp_total) || 0;
 
@@ -67,7 +65,8 @@ async function addBP(tiktok_id: string, amount: number, action: string, nick: st
   const newRes = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [tiktok_id]);
   const newBP = parseFloat(newRes.rows[0]?.bp_total) || 0;
 
-  console.log(`[${action}] @${nick}`);
+  const fanTag = isFan ? ' [FAN]' : '';
+  console.log(`[${action}] @${nick}${fanTag}`);
   console.log(`[BP: +${amount} | ${oldBP.toFixed(1)} → ${newBP.toFixed(1)}]`);
 }
 
@@ -82,60 +81,32 @@ async function startTikTokLive(username: string) {
 
   // === CHAT ===
   tiktokLiveConnection.on('chat', async (data: any) => {
-    const rawComment = data.comment;
-    const msg = rawComment ? String(rawComment).toLowerCase().trim() : '';
+    const rawComment = data.comment || '';
+    const msg = rawComment.toLowerCase().trim();
     console.log(`[CHAT] Raw: "${rawComment}" → Parsed: "${msg}" (user: @${data.nickname})`);
     if (!msg) return;
 
     const user = data.uniqueId;
     const nick = data.nickname;
+    const isFan = data.isFanClubMember === true;
 
-    // === BADGE DETECTIE MET CUSTOM FANCLUB NAAM ===
-    const badges: string[] = [];
-    if (data.isSuperFan === true) badges.push('superfan');
-    if (data.isVip === true) badges.push('vip');
-    if (data.isFanClubMember === true) {
-      // CUSTOM NAAM UIT data.userBadge OF data.fanClubName
-      const clubName = data.fanClubName || data.userBadge?.clubName || 'fanclub';
-      badges.push(`fanclub:${clubName}`);
-    }
-
-    if (badges.length > 0) {
-      console.log(`[BADGES: ${badges.join(' | ')}]`);
-    }
-
-    await ensureUserAndGetOldBP(user, nick, badges);
-    await addBP(user, 1, 'CHAT', nick);
+    await ensureUserAndGetOldBP(user, nick, isFan);
+    await addBP(user, 1, 'CHAT', nick, isFan);
 
     // === COMMANDOS ===
     if (msg === '!join') {
       console.log(`!join ontvangen van @${nick}`);
-      try {
-        await addToQueue(user, nick);
-        emitQueue();
-      } catch (e: any) {
-        console.log('Join error:', e.message);
-      }
+      try { await addToQueue(user, nick); emitQueue(); } catch (e: any) { console.log('Join error:', e.message); }
     } else if (msg.startsWith('!boost rij ')) {
       const spots = parseInt(msg.split(' ')[2] || '0');
       if (spots >= 1 && spots <= 5) {
         console.log(`!boost rij ${spots} van @${nick}`);
-        try {
-          await boostQueue(user, spots);
-          emitQueue();
-        } catch (e: any) {
-          console.log('Boost error:', e.message);
-        }
+        try { await boostQueue(user, spots); emitQueue(); } catch (e: any) { console.log('Boost error:', e.message); }
       }
     } else if (msg === '!leave') {
       console.log(`!leave ontvangen van @${nick}`);
-      try {
-        const refund = await leaveQueue(user);
-        if (refund > 0) console.log(`@${nick} kreeg ${refund} BP terug`);
-        emitQueue();
-      } catch (e: any) {
-        console.log('Leave error:', e.message);
-      }
+      try { const refund = await leaveQueue(user); if (refund > 0) console.log(`@${nick} kreeg ${refund} BP terug`); emitQueue(); }
+      catch (e: any) { console.log('Leave error:', e.message); }
     }
   });
 
@@ -147,19 +118,10 @@ async function startTikTokLive(username: string) {
 
     const user = data.uniqueId;
     const nick = data.nickname;
+    const isFan = data.isFanClubMember === true;
 
-    const badges: string[] = [];
-    if (data.isSuperFan === true) badges.push('superfan');
-    if (data.isVip === true) badges.push('vip');
-    if (data.isFanClubMember === true) {
-      const clubName = data.fanClubName || data.userBadge?.clubName || 'fanclub';
-      badges.push(`fanclub:${clubName}`);
-    }
-
-    if (badges.length > 0) console.log(`[BADGES: ${badges.join(' | ')}]`);
-
-    await ensureUserAndGetOldBP(user, nick, badges);
-    await addBP(user, giftBP, 'GIFT', nick);
+    await ensureUserAndGetOldBP(user, nick, isFan);
+    await addBP(user, giftBP, 'GIFT', nick, isFan);
     console.log(`→ ${data.giftName} (${diamonds} diamonds)`);
   });
 
@@ -168,28 +130,18 @@ async function startTikTokLive(username: string) {
     const user = data.uniqueId;
     const nick = data.nickname;
     const likes = data.likeCount || 1;
+    const isFan = data.isFanClubMember === true;
 
     const current = pendingLikes.get(user) || 0;
     const total = current + likes;
     pendingLikes.set(user, total);
 
     const fullHundreds = Math.floor(total / 100);
-    const remainder = total % 100;
-
     if (fullHundreds > 0) {
-      const badges: string[] = [];
-      if (data.isSuperFan === true) badges.push('superfan');
-      if (data.isVip === true) badges.push('vip');
-      if (data.isFanClubMember === true) {
-        const clubName = data.fanClubName || data.userBadge?.clubName || 'fanclub';
-        badges.push(`fanclub:${clubName}`);
-      }
-      if (badges.length > 0) console.log(`[BADGES: ${badges.join(' | ')}]`);
-
-      await ensureUserAndGetOldBP(user, nick, badges);
-      await addBP(user, fullHundreds * 1, 'LIKE', nick);
+      await ensureUserAndGetOldBP(user, nick, isFan);
+      await addBP(user, fullHundreds * 1, 'LIKE', nick, isFan);
       console.log(`→ +${likes} likes → ${fullHundreds}x100 (totaal: ${total})`);
-      pendingLikes.set(user, remainder);
+      pendingLikes.set(user, total % 100);
     }
   });
 
@@ -197,21 +149,12 @@ async function startTikTokLive(username: string) {
   tiktokLiveConnection.on('follow', async (data: any) => {
     const user = data.uniqueId;
     const nick = data.nickname;
-
     if (hasFollowed.has(user)) return;
     hasFollowed.add(user);
+    const isFan = data.isFanClubMember === true;
 
-    const badges: string[] = [];
-    if (data.isSuperFan === true) badges.push('superfan');
-    if (data.isVip === true) badges.push('vip');
-    if (data.isFanClubMember === true) {
-      const clubName = data.fanClubName || data.userBadge?.clubName || 'fanclub';
-      badges.push(`fanclub:${clubName}`);
-    }
-    if (badges.length > 0) console.log(`[BADGES: ${badges.join(' | ')}]`);
-
-    await ensureUserAndGetOldBP(user, nick, badges);
-    await addBP(user, 5, 'FOLLOW', nick);
+    await ensureUserAndGetOldBP(user, nick, isFan);
+    await addBP(user, 5, 'FOLLOW', nick, isFan);
     console.log(`→ eerste follow in deze stream`);
   });
 
@@ -219,18 +162,10 @@ async function startTikTokLive(username: string) {
   tiktokLiveConnection.on('share', async (data: any) => {
     const user = data.uniqueId;
     const nick = data.nickname;
+    const isFan = data.isFanClubMember === true;
 
-    const badges: string[] = [];
-    if (data.isSuperFan === true) badges.push('superfan');
-    if (data.isVip === true) badges.push('vip');
-    if (data.isFanClubMember === true) {
-      const clubName = data.fanClubName || data.userBadge?.clubName || 'fanclub';
-      badges.push(`fanclub:${clubName}`);
-    }
-    if (badges.length > 0) console.log(`[BADGES: ${badges.join(' | ')}]`);
-
-    await ensureUserAndGetOldBP(user, nick, badges);
-    await addBP(user, 5, 'SHARE', nick);
+    await ensureUserAndGetOldBP(user, nick, isFan);
+    await addBP(user, 5, 'SHARE', nick, isFan);
     console.log(`→ stream gedeeld`);
   });
 
