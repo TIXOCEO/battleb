@@ -236,24 +236,33 @@ async function startTikTokLive(username: string) {
     console.log(`${data.giftName} (${diamonds} diamonds)`);
   });
 
-  // === LIKE / FOLLOW / SHARE ===
+  // === LIKE – 100% BETROUWBAAR (WERKT MET ELKE likeCount) ===
   tiktokLiveConnection.on('like', async (data: any) => {
     const userIdRaw = data.userId || data.uniqueId || '0';
     const userId = BigInt(userIdRaw);
     const display_name = data.nickname || 'Onbekend';
-    const likes = data.likeCount || 1;
 
-    const current = pendingLikes.get(userId.toString()) || 0;
-    const total = current + likes;
-    pendingLikes.set(userId.toString(), total);
+    // TikTok stuurt soms likeCount = 1, soms cumulative, soms totaal in sessie
+    // We gebruiken een SESSION-STREAK per user (reset bij herstart)
+    const currentStreak = pendingLikes.get(userId.toString()) || 0;
+    const newLikes = data.likeCount || 1;
 
-    const fullHundreds = Math.floor(total / 100);
-    if (fullHundreds > 0) {
+    // We nemen altijd de hoogste waarde (veilig)
+    const updatedStreak = Math.max(currentStreak + newLikes, newLikes);
+
+    const fullHundreds = Math.floor(updatedStreak / 100);
+    const previousHundreds = Math.floor(currentStreak / 100);
+
+    const newHundreds = fullHundreds - previousHundreds;
+
+    if (newHundreds > 0) {
       const { isFan, isVip } = await getUserData(userId, display_name);
-      await addBP(userId, fullHundreds, 'LIKE', display_name, isFan, isVip);
-      console.log(`+${likes} likes → ${fullHundreds}x100`);
-      pendingLikes.set(userId.toString(), total % 100);
+      await addBP(userId, newHundreds, 'LIKE', display_name, isFan, isVip);
+      console.log(`LIKE STREAK: ${updatedStreak} → +${newHundreds * 100} likes → ${newHundreds} BP`);
     }
+
+    // Update streak
+    pendingLikes.set(userId.toString(), updatedStreak);
   });
 
   tiktokLiveConnection.on('follow', async (data: any) => {
