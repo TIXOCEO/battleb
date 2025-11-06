@@ -33,8 +33,9 @@ async function emitQueue() {
   io.emit('queue:update', queue.slice(0, 50));
 }
 
-// === STATE VOOR DEZE STREAM ===
-const hasFollowed = new Set<string>(); // user → al gefollowd in deze stream
+// === STATE VOOR DEZE STREAM (reset bij herstart) ===
+const hasFollowed = new Set<string>();
+const pendingLikes = new Map<string, number>(); // user → likes in deze stream
 
 async function startTikTokLive(username: string) {
   const tiktokLiveConnection = new WebcastPushConnection(username);
@@ -49,9 +50,7 @@ async function startTikTokLive(username: string) {
   tiktokLiveConnection.on('chat', async (data: any) => {
     const rawComment = data.comment;
     const msg = rawComment ? String(rawComment).toLowerCase().trim() : '';
-
     console.log(`[CHAT] Raw: "${rawComment}" → Parsed: "${msg}" (user: @${data.nickname})`);
-
     if (!msg) return;
 
     const user = data.uniqueId;
@@ -60,22 +59,20 @@ async function startTikTokLive(username: string) {
     // === BADGE DETECTIE ===
     const badges: string[] = [];
     if (data.isSuperFan === true) badges.push('superfan');
-    if (data.isFanClubMember === true) badges.push('fanclub'); // ← Automatisch voor custom 'Meow'
+    if (data.isFanClubMember === true) badges.push('fanclub'); // ← Werkt voor 'Meow'
     if (data.isVip === true) badges.push('vip');
 
     // === USER CHECK + NEW USER ===
     let isNewUser = false;
-    let oldBP = 0;
-
     const userCheck = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [user]);
+    const oldBP = userCheck.rows.length === 0 ? 0 : parseFloat(userCheck.rows[0].bp_total) || 0;
+
     if (userCheck.rows.length === 0) {
       isNewUser = true;
       console.log(`[NEW USER] @${nick}`);
-    } else {
-      oldBP = parseFloat(userCheck.rows[0].bp_total) || 0;
     }
 
-    // === UPDATE USER ===
+    // === UPDATE USER (badges + username) ===
     try {
       await pool.query(
         `INSERT INTO users (tiktok_id, username, badges, bp_total) 
@@ -93,13 +90,13 @@ async function startTikTokLive(username: string) {
     const chatBP = 1;
     await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [chatBP, user]);
 
-    // Query NA update voor correcte newBP
+    // === QUERY NA UPDATE VOOR NIEUWE BALANS ===
     const res = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [user]);
     const newBP = parseFloat(res.rows[0]?.bp_total) || 0;
 
     // === LOGS ===
-    if (badges.length > 0) console.log(`[BADGES: ${badges.join(', ')}]`); // ← Nu altijd getoond
-    console.log(`[BP: +${chatBP} | ${newBP.toFixed(1)}]`);
+    if (badges.length > 0) console.log(`[BADGES: ${badges.join(', ')}]`);
+    console.log(`[BP: +${chatBP} | ${oldBP.toFixed(1)} → ${newBP.toFixed(1)}]`);
 
     // === COMMANDOS ===
     if (msg === '!join') {
@@ -110,9 +107,7 @@ async function startTikTokLive(username: string) {
       } catch (e: any) {
         console.log('Join error:', e.message);
       }
-    }
-
-    else if (msg.startsWith('!boost rij ')) {
+    } else if (msg.startsWith('!boost rij ')) {
       const parts = msg.split(' ');
       const spots = parseInt(parts[2] || '0');
       if (spots >= 1 && spots <= 5) {
@@ -124,9 +119,7 @@ async function startTikTokLive(username: string) {
           console.log('Boost error:', e.message);
         }
       }
-    }
-
-    else if (msg === '!leave') {
+    } else if (msg === '!leave') {
       console.log(`!leave ontvangen van @${nick}`);
       try {
         const refund = await leaveQueue(user);
@@ -147,17 +140,50 @@ async function startTikTokLive(username: string) {
     const user = data.uniqueId;
 
     if (giftBP > 0) {
+      const oldRes = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [user]);
+      const oldBP = parseFloat(oldRes.rows[0]?.bp_total) || 0;
+
       await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [giftBP, user]);
 
-      const res = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [user]);
-      const totalBP = parseFloat(res.rows[0]?.bp_total) || 0;
+      const newRes = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [user]);
+      const newBP = parseFloat(newRes.rows[0]?.bp_total) || 0;
 
       console.log(`[GIFT] @${data.nickname} → ${data.giftName} (${diamonds} diamonds)`);
-      console.log(`[BP: +${giftBP} | ${totalBP.toFixed(1)}]`);
+      console.log(`[BP: +${giftBP} | ${oldBP.toFixed(1)} → ${newBP.toFixed(1)}]`);
     }
   });
 
-  // === FOLLOW – +5 BP (alleen eerste keer per stream) ===
+  // === LIKES – +1 BP per 100 likes per gebruiker per stream ===
+  tiktokLiveConnection.on('like', async (data: any) => {
+    const user = data.uniqueId;
+    const nick = data.nickname;
+    const likes = data.likeCount || 1;
+
+    const current = pendingLikes.get(user) || 0;
+    const total = current + likes;
+    pendingLikes.set(user, total);
+
+    const fullHundreds = Math.floor(total / 100);
+    const remainder = total % 100;
+
+    if (fullHundreds > 0) {
+      const oldRes = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [user]);
+      const oldBP = parseFloat(oldRes.rows[0]?.bp_total) || 0;
+
+      const likeBP = fullHundreds * 1;
+      await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [likeBP, user]);
+
+      const newRes = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [user]);
+      const newBP = parseFloat(newRes.rows[0]?.bp_total) || 0;
+
+      console.log(`[LIKE] @${nick} → +${likes} likes → ${fullHundreds}x100`);
+      console.log(`[BP: +${likeBP} | ${oldBP.toFixed(1)} → ${newBP.toFixed(1)}]`);
+
+      pendingLikes.set(user, remainder); // Reset naar rest
+    }
+  });
+
+  // === FOLLOW – +5 BP (alleen eerste keer) ===
   tiktokLiveConnection.on('follow', async (data: any) => {
     const user = data.uniqueId;
     const nick = data.nickname;
@@ -165,14 +191,17 @@ async function startTikTokLive(username: string) {
     if (hasFollowed.has(user)) return;
     hasFollowed.add(user);
 
+    const oldRes = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [user]);
+    const oldBP = parseFloat(oldRes.rows[0]?.bp_total) || 0;
+
     const followBP = 5;
     await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [followBP, user]);
 
-    const res = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [user]);
-    const totalBP = parseFloat(res.rows[0]?.bp_total) || 0;
+    const newRes = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [user]);
+    const newBP = parseFloat(newRes.rows[0]?.bp_total) || 0;
 
     console.log(`[FOLLOW] @${nick} → eerste follow in deze stream`);
-    console.log(`[BP: +${followBP} | ${totalBP.toFixed(1)}]`); // ← Query NA update
+    console.log(`[BP: +${followBP} | ${oldBP.toFixed(1)} → ${newBP.toFixed(1)}]`);
   });
 
   // === SHARE – +5 BP (elke keer) ===
@@ -180,14 +209,17 @@ async function startTikTokLive(username: string) {
     const user = data.uniqueId;
     const nick = data.nickname;
 
+    const oldRes = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [user]);
+    const oldBP = parseFloat(oldRes.rows[0]?.bp_total) || 0;
+
     const shareBP = 5;
     await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [shareBP, user]);
 
-    const res = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [user]);
-    const totalBP = parseFloat(res.rows[0]?.bp_total) || 0;
+    const newRes = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [user]);
+    const newBP = parseFloat(newRes.rows[0]?.bp_total) || 0;
 
     console.log(`[SHARE] @${nick} → stream gedeeld`);
-    console.log(`[BP: +${shareBP} | ${totalBP.toFixed(1)}]`); // ← Query NA update
+    console.log(`[BP: +${shareBP} | ${oldBP.toFixed(1)} → ${newBP.toFixed(1)}]`);
   });
 
   tiktokLiveConnection.on('connected', () => {
