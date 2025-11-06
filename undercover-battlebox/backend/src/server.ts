@@ -31,12 +31,20 @@ async function emitQueue() {
   io.emit('queue:update', queue.slice(0, 50));
 }
 
-// === STATE PER STREAM ===
 const hasFollowed = new Set<string>();
 const pendingLikes = new Map<string, number>();
 
-// === HELPER: Zorg dat user bestaat + oude BP ===
-async function ensureUserAndGetOldBP(tiktok_id: string, username: string, isFanClubMember: boolean) {
+// === HELPER: Detecteer FAN op ALLE mogelijke plekken ===
+function isFanClubMember(data: any): boolean {
+  if (data.isFanClubMember === true) return true;
+  if (data.userBadges?.some((b: any) => b.type === 'fanclub')) return true;
+  if (data.badgeList?.some((b: any) => b.type === 'fanclub')) return true;
+  if (data.fanClubInfo?.fanClubName) return true;
+  return false;
+}
+
+// === HELPER: User aanmaken/updaten ===
+async function ensureUserAndGetOldBP(tiktok_id: string, username: string) {
   const updateRes = await pool.query(
     `UPDATE users SET username = $2 WHERE tiktok_id = $1 RETURNING bp_total`,
     [tiktok_id, username]
@@ -55,7 +63,7 @@ async function ensureUserAndGetOldBP(tiktok_id: string, username: string, isFanC
   return 0;
 }
 
-// === HELPER: Voeg BP toe + log met [FAN] als nodig ===
+// === HELPER: BP toevoegen met [FAN] tag ===
 async function addBP(tiktok_id: string, amount: number, action: string, nick: string, isFan: boolean = false) {
   const oldRes = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [tiktok_id]);
   const oldBP = parseFloat(oldRes.rows[0]?.bp_total) || 0;
@@ -88,12 +96,11 @@ async function startTikTokLive(username: string) {
 
     const user = data.uniqueId;
     const nick = data.nickname;
-    const isFan = data.isFanClubMember === true;
+    const isFan = isFanClubMember(data);
 
-    await ensureUserAndGetOldBP(user, nick, isFan);
+    await ensureUserAndGetOldBP(user, nick);
     await addBP(user, 1, 'CHAT', nick, isFan);
 
-    // === COMMANDOS ===
     if (msg === '!join') {
       console.log(`!join ontvangen van @${nick}`);
       try { await addToQueue(user, nick); emitQueue(); } catch (e: any) { console.log('Join error:', e.message); }
@@ -118,9 +125,9 @@ async function startTikTokLive(username: string) {
 
     const user = data.uniqueId;
     const nick = data.nickname;
-    const isFan = data.isFanClubMember === true;
+    const isFan = isFanClubMember(data);
 
-    await ensureUserAndGetOldBP(user, nick, isFan);
+    await ensureUserAndGetOldBP(user, nick);
     await addBP(user, giftBP, 'GIFT', nick, isFan);
     console.log(`→ ${data.giftName} (${diamonds} diamonds)`);
   });
@@ -130,7 +137,7 @@ async function startTikTokLive(username: string) {
     const user = data.uniqueId;
     const nick = data.nickname;
     const likes = data.likeCount || 1;
-    const isFan = data.isFanClubMember === true;
+    const isFan = isFanClubMember(data);
 
     const current = pendingLikes.get(user) || 0;
     const total = current + likes;
@@ -138,7 +145,7 @@ async function startTikTokLive(username: string) {
 
     const fullHundreds = Math.floor(total / 100);
     if (fullHundreds > 0) {
-      await ensureUserAndGetOldBP(user, nick, isFan);
+      await ensureUserAndGetOldBP(user, nick);
       await addBP(user, fullHundreds * 1, 'LIKE', nick, isFan);
       console.log(`→ +${likes} likes → ${fullHundreds}x100 (totaal: ${total})`);
       pendingLikes.set(user, total % 100);
@@ -151,9 +158,9 @@ async function startTikTokLive(username: string) {
     const nick = data.nickname;
     if (hasFollowed.has(user)) return;
     hasFollowed.add(user);
-    const isFan = data.isFanClubMember === true;
+    const isFan = isFanClubMember(data);
 
-    await ensureUserAndGetOldBP(user, nick, isFan);
+    await ensureUserAndGetOldBP(user, nick);
     await addBP(user, 5, 'FOLLOW', nick, isFan);
     console.log(`→ eerste follow in deze stream`);
   });
@@ -162,9 +169,9 @@ async function startTikTokLive(username: string) {
   tiktokLiveConnection.on('share', async (data: any) => {
     const user = data.uniqueId;
     const nick = data.nickname;
-    const isFan = data.isFanClubMember === true;
+    const isFan = isFanClubMember(data);
 
-    await ensureUserAndGetOldBP(user, nick, isFan);
+    await ensureUserAndGetOldBP(user, nick);
     await addBP(user, 5, 'SHARE', nick, isFan);
     console.log(`→ stream gedeeld`);
   });
