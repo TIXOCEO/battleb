@@ -39,30 +39,40 @@ async function updateFanStatus(tiktok_id: string, isFan: boolean) {
   await pool.query('UPDATE users SET is_fan = $1 WHERE tiktok_id = $2', [isFan, tiktok_id]);
 }
 
-// === HAAL USER + FAN STATUS OP (gebruik DB voor FAN) ===
+// === HAAL USER + FAN STATUS OP – 100% ZONDER DUPLICATE ERRORS ===
 async function getUserData(tiktok_id: string, username: string) {
-  // Eerst updaten username
-  await pool.query('UPDATE users SET username = $1 WHERE tiktok_id = $2', [username, tiktok_id]);
+  const query = `
+    INSERT INTO users (tiktok_id, username, bp_total, is_fan)
+    VALUES ($1, $2, 0, false)
+    ON CONFLICT (tiktok_id) 
+    DO UPDATE SET username = EXCLUDED.username
+    RETURNING bp_total, is_fan;
+  `;
 
-  // Dan data ophalen
-  const res = await pool.query(
-    'SELECT bp_total, is_fan FROM users WHERE tiktok_id = $1',
-    [tiktok_id]
-  );
+  try {
+    const res = await pool.query(query, [tiktok_id, username]);
+    const row = res.rows[0];
 
-  if (res.rows.length === 0) {
-    await pool.query(
-      'INSERT INTO users (tiktok_id, username, bp_total, is_fan) VALUES ($1, $2, 0, false)',
-      [tiktok_id, username]
-    );
-    console.log(`[NEW USER] @${username}`);
-    return { oldBP: 0, isFan: false };
+    if (res.rowCount === 1 && !row) {
+      console.log(`[NEW USER] @${username}`);
+      return { oldBP: 0, isFan: false };
+    }
+
+    return {
+      oldBP: parseFloat(row.bp_total) || 0,
+      isFan: row.is_fan === true
+    };
+  } catch (err: any) {
+    if (err.code === '23505') {
+      console.log(`[DUPLICATE FIX] @${username} – retrying...`);
+      const res = await pool.query('SELECT bp_total, is_fan FROM users WHERE tiktok_id = $1', [tiktok_id]);
+      return {
+        oldBP: parseFloat(res.rows[0].bp_total) || 0,
+        isFan: res.rows[0].is_fan === true
+      };
+    }
+    throw err;
   }
-
-  return {
-    oldBP: parseFloat(res.rows[0].bp_total) || 0,
-    isFan: res.rows[0].is_fan === true
-  };
 }
 
 // === BP TOEVOEGEN + LOG MET [FAN] ===
