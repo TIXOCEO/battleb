@@ -101,15 +101,35 @@ async function startTikTokLive(username: string) {
     const { oldBP, isFan } = await getUserData(user, nick);
     await addBP(user, 1, 'CHAT', nick, isFan);
 
-    // Commandos
-    if (msg === '!join') await addToQueue(user, nick) && emitQueue();
-    else if (msg.startsWith('!boost rij ')) {
+    // === COMMANDOS (GEFIXT – GEEN && MEER) ===
+    if (msg === '!join') {
+      console.log(`!join ontvangen van @${nick}`);
+      try {
+        await addToQueue(user, nick);
+        emitQueue();
+      } catch (e: any) {
+        console.log('Join error:', e.message);
+      }
+    } else if (msg.startsWith('!boost rij ')) {
       const spots = parseInt(msg.split(' ')[2] || '0');
-      if (spots >= 1 && spots <= 5) await boostQueue(user, spots) && emitQueue();
+      if (spots >= 1 && spots <= 5) {
+        console.log(`!boost rij ${spots} van @${nick}`);
+        try {
+          await boostQueue(user, spots);
+          emitQueue();
+        } catch (e: any) {
+          console.log('Boost error:', e.message);
+        }
+      }
     } else if (msg === '!leave') {
-      const refund = await leaveQueue(user);
-      if (refund > 0) console.log(`@${nick} kreeg ${refund} BP terug`);
-      emitQueue();
+      console.log(`!leave ontvangen van @${nick}`);
+      try {
+        const refund = await leaveQueue(user);
+        if (refund > 0) console.log(`@${nick} kreeg ${refund} BP terug`);
+        emitQueue();
+      } catch (e: any) {
+        console.log('Leave error:', e.message);
+      }
     }
   });
 
