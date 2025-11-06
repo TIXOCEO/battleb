@@ -8,6 +8,7 @@ import pool from './db';
 import { addToQueue, boostQueue, leaveQueue, getQueue } from './queue';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { GameEngine } from './game'; // ✅ TOEGEVOEGD
 
 dotenv.config();
 
@@ -15,6 +16,9 @@ const app = express();
 app.use(cors());
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
+
+// ✅ Referentie naar game engine (voor later gebruik indien nodig)
+let game: GameEngine | null = null;
 
 app.get('/queue', async (req, res) => {
   const queue = await getQueue();
@@ -116,6 +120,9 @@ async function deductBP(tiktok_id: bigint, amount: number): Promise<boolean> {
 
 async function startTikTokLive(username: string) {
   const tiktokLiveConnection = await connectWithRetry(username);
+
+  // ✅ GameEngine initialiseren – hier worden multi-guest deelnemers bijgehouden
+  game = new GameEngine(io, tiktokLiveConnection);
 
   const pendingLikes = new Map<string, number>();
   const hasFollowed = new Set<string>();
