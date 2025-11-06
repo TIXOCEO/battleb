@@ -31,8 +31,6 @@ async function emitQueue() {
   io.emit('queue:update', queue.slice(0, 50));
 }
 
-const hasFollowed = new Set<string>();
-const pendingLikes = new Map<string, number>();
 const ADMIN_ID = process.env.ADMIN_TIKTOK_ID?.trim();
 
 // AUTO-RETRY BIJ SIGN ERROR
@@ -79,7 +77,6 @@ async function getUserData(tiktok_id: bigint, display_name: string) {
 
   const res = await pool.query(query, [tiktok_id, display_name]);
   const row = res.rows[0];
-
   const isFan = row.is_fan && row.fan_expires_at && new Date(row.fan_expires_at) > new Date();
   const isVip = row.is_vip === true;
 
@@ -115,6 +112,11 @@ async function deductBP(tiktok_id: bigint, amount: number): Promise<boolean> {
 
 async function startTikTokLive(username: string) {
   const tiktokLiveConnection = await connectWithRetry(username);
+
+  // === GLOBALE STATE VOOR DEZE SESSIE ===
+  const pendingLikes = new Map<string, number>();   // userIdStr → eigen likes deze sessie
+  const hasFollowed = new Set<string>();
+  const nameCache = new Map<string, string>();
 
   // === CHAT ===
   tiktokLiveConnection.on('chat', async (data: any) => {
@@ -185,7 +187,6 @@ async function startTikTokLive(username: string) {
 
     // === WACHTRIJ COMMANDS – ALLEEN VOOR FANS ===
     const isQueueCommand = msg === '!join' || msg.startsWith('!boost rij ') || msg === '!leave';
-
     if (isQueueCommand && !isFan) {
       console.log(`[NO FAN] ${display_name} probeerde !join/!boost/!leave zonder Heart Me`);
       return;
@@ -210,7 +211,7 @@ async function startTikTokLive(username: string) {
         emitQueue();
       } catch (e: any) { console.log('Leave error:', e.message); }
     }
-  }); // <--- SLUIT CHAT HANDLER
+  });
 
   // === GIFT ===
   tiktokLiveConnection.on('gift', async (data: any) => {
@@ -236,60 +237,19 @@ async function startTikTokLive(username: string) {
     console.log(`${data.giftName} (${diamonds} diamonds)`);
   });
 
-  // === LIKE / FOLLOW / SHARE – 100% PERFECT MET totalLikeCount ===
-  const pendingLikes = new Map<string, number>();
-  const hasFollowed = new Set<string>();
-  const nameCache = new Map<string, string>();
-
-  // CONSTANTEN (nu binnen de functie, dus altijd beschikbaar)
-  const LIKES_THRESHOLD = 100;
-  const LIKE_FLUSH_INTERVAL = 4000;
-
-  // Flush kleine restjes elke 4 seconden
-  setInterval(async () => {
-    for (const [userIdStr, likes] of pendingLikes.entries()) {
-      if (likes > 0 && likes < LIKES_THRESHOLD) {
-        const userId = BigInt(userIdStr);
-        const display_name = nameCache.get(userIdStr) || 'Onbekend';
-        const bpToGive = Math.floor(likes / 100);
-        if (bpToGive > 0) {
-          const { isFan, isVip } = await getUserData(userId, display_name);
-          await addBP(userId, bpToGive, 'LIKE', display_name, isFan, isVip);
-          console.log(`FLUSH: ${likes} likes → +${bpToGive} BP voor ${display_name}`);
-        }
-        pendingLikes.set(userIdStr, likes % 100);
-      }
-    }
-  }, LIKE_FLUSH_INTERVAL);
-
-  // Helper: display_name ophalen
-  async function getDisplayNameFromId(userId: bigint): Promise<string> {
-    const cached = nameCache.get(userId.toString());
-    if (cached) return cached;
-    const res = await pool.query('SELECT display_name FROM users WHERE tiktok_id = $1', [userId]);
-    const name = res.rows[0]?.display_name || 'Onbekend';
-    nameCache.set(userId.toString(), name);
-    return name;
-  }
-
-  // === LIKE – 100% PER SESSIE, PER GEBRUIKER (ZOALS JIJ WILT) ===
+  // === LIKE – ALLEEN EIGEN LIKES, PER SESSIE, ZUIVER ===
   tiktokLiveConnection.on('like', async (data: any) => {
     const userIdRaw = data.userId || data.uniqueId || '0';
     const userId = BigInt(userIdRaw);
     const userIdStr = userId.toString();
     const display_name = data.nickname || 'Onbekend';
 
-    // Update naam cache
     nameCache.set(userIdStr, display_name);
 
-    // Huidige sessie-streak voor deze gebruiker (start altijd bij 0 bij herstart)
-    const previousStreak = pendingLikes.get(userIdStr) || 0;
     const batchLikes = data.likeCount || 1;
-
-    // Nieuwe streak = vorige + nieuwe batch (streamtotaal wordt compleet genegeerd)
+    const previousStreak = pendingLikes.get(userIdStr) || 0;
     const newStreak = previousStreak + batchLikes;
 
-    // Alleen BP als we over een nieuwe 100-grens gaan
     const previousHundreds = Math.floor(previousStreak / 100);
     const newHundreds = Math.floor(newStreak / 100);
     const bpToGive = newHundreds - previousHundreds;
@@ -297,17 +257,14 @@ async function startTikTokLive(username: string) {
     if (bpToGive > 0) {
       const { isFan, isVip } = await getUserData(userId, display_name);
       await addBP(userId, bpToGive, 'LIKE', display_name, isFan, isVip);
-      console.log(`LIKE → +${bpToGive} BP voor ${display_name} (${newStreak} likes deze sessie)`);
+      console.log(`LIKE → +${bpToGive} BP voor ${display_name} (${newStreak} eigen likes deze sessie)`);
     }
 
-    // Altijd loggen voor duidelijkheid
-    console.log(`LIKES: ${display_name} +${batchLikes} → ${newStreak} (sessie)`);
-
-    // Update voor volgende keer
+    console.log(`LIKES: ${display_name} +${batchLikes} → ${newStreak} (eigen sessie)`);
     pendingLikes.set(userIdStr, newStreak);
   });
 
-  // === FOLLOW ===
+  // === FOLLOW & SHARE ===
   tiktokLiveConnection.on('follow', async (data: any) => {
     const userIdRaw = data.userId || data.uniqueId || '0';
     const userId = BigInt(userIdRaw);
@@ -323,13 +280,11 @@ async function startTikTokLive(username: string) {
     console.log(`Follow van ${display_name}`);
   });
 
-  // === SHARE ===
   tiktokLiveConnection.on('share', async (data: any) => {
     const userIdRaw = data.userId || data.uniqueId || '0';
     const userId = BigInt(userIdRaw);
-    const userIdStr = userId.toString();
     const display_name = data.nickname || 'Onbekend';
-    nameCache.set(userIdStr, display_name);
+    nameCache.set(userId.toString(), display_name);
 
     const { isFan, isVip } = await getUserData(userId, display_name);
     await addBP(userId, 5, 'SHARE', display_name, isFan, isVip);
@@ -340,7 +295,6 @@ async function startTikTokLive(username: string) {
     console.log('Volledig verbonden met TikTok Live!');
   });
 }
-
 
 const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME || 'JOUW_TIKTOK_USERNAME';
 
