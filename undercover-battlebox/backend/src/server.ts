@@ -4,7 +4,7 @@ import http from 'http';
 import { Server } from 'socket.io';
 import { WebcastPushConnection } from 'tiktok-live-connector';
 import { initDB } from './db';
-import pool from './db'; // ← TOEGEVOEGD
+import pool from './db';
 import { addToQueue, boostQueue, leaveQueue, getQueue } from './queue';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -18,13 +18,11 @@ const io = new Server(server, {
   cors: { origin: '*' }
 });
 
-// API endpoint
 app.get('/queue', async (req, res) => {
   const queue = await getQueue();
   res.json(queue);
 });
 
-// Socket.io connection
 io.on('connection', (socket) => {
   console.log('Overlay connected:', socket.id);
   emitQueue();
@@ -35,7 +33,6 @@ async function emitQueue() {
   io.emit('queue:update', queue.slice(0, 50));
 }
 
-// Start TikTok Live
 async function startTikTokLive(username: string) {
   const tiktokLiveConnection = new WebcastPushConnection(username);
 
@@ -48,9 +45,7 @@ async function startTikTokLive(username: string) {
   // === CHAT HANDLER ===
   tiktokLiveConnection.on('chat', async (data: any) => {
     const rawComment = data.comment;
-    const msg = rawComment 
-      ? String(rawComment).toLowerCase().trim() 
-      : '';
+    const msg = rawComment ? String(rawComment).toLowerCase().trim() : '';
 
     console.log(`[CHAT] Raw: "${rawComment}" → Parsed: "${msg}" (user: @${data.nickname})`);
 
@@ -65,16 +60,40 @@ async function startTikTokLive(username: string) {
     if (data.isFanClubMember === true) badges.push('fanclub');
     if (data.isVip === true) badges.push('vip');
 
+    // === USER CHECK + NEW USER ===
+    let isNewUser = false;
+    let oldBP = 0;
+
+    const userCheck = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [user]);
+    if (userCheck.rows.length === 0) {
+      isNewUser = true;
+      console.log(`[NEW USER] @${nick}`);
+    } else {
+      oldBP = parseFloat(userCheck.rows[0].bp_total) || 0;
+    }
+
+    // === UPDATE USER (badges + bp_total) ===
     try {
       await pool.query(
-        `INSERT INTO users (tiktok_id, username, badges) 
-         VALUES ($1, $2, $3) 
-         ON CONFLICT (tiktok_id) DO UPDATE SET badges = $3`,
+        `INSERT INTO users (tiktok_id, username, badges, bp_total) 
+         VALUES ($1, $2, $3, 0) 
+         ON CONFLICT (tiktok_id) DO UPDATE SET 
+           username = EXCLUDED.username,
+           badges = EXCLUDED.badges`,
         [user, nick, badges]
       );
     } catch (e) {
-      console.log('Badge update error:', e);
+      console.log('User update error:', e);
     }
+
+    // === BP VOOR CHAT ===
+    const chatBP = 3;
+    await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [chatBP, user]);
+    const newBP = oldBP + chatBP;
+
+    // === LOGS ===
+    if (badges.length > 0) console.log(`[BADGES: ${badges.join(', ')}]`);
+    console.log(`[BP: +${chatBP} | ${newBP.toFixed(1)}]`);
 
     // === COMMANDOS ===
     if (msg === '!join') {
@@ -98,8 +117,6 @@ async function startTikTokLive(username: string) {
         } catch (e: any) {
           console.log('Boost error:', e.message);
         }
-      } else {
-        console.log(`Ongeldige boost: ${spots} (moet 1-5 zijn)`);
       }
     }
 
@@ -109,8 +126,6 @@ async function startTikTokLive(username: string) {
         const refund = await leaveQueue(user);
         if (refund > 0) {
           console.log(`@${nick} kreeg ${refund} BP terug`);
-        } else {
-          console.log(`@${nick} had geen boost → geen refund`);
         }
         emitQueue();
       } catch (e: any) {
@@ -119,9 +134,21 @@ async function startTikTokLive(username: string) {
     }
   });
 
-  // === GIFTS ===
-  tiktokLiveConnection.on('gift', (data: any) => {
-    console.log('Gift ontvangen:', data.nickname, data.giftName, data.diamondCount);
+  // === GIFTS – 50% BP ===
+  tiktokLiveConnection.on('gift', async (data: any) => {
+    const diamonds = data.diamondCount || 0;
+    const giftBP = diamonds * 0.5;
+    const user = data.uniqueId;
+
+    if (giftBP > 0) {
+      await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [giftBP, user]);
+
+      const res = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [user]);
+      const totalBP = parseFloat(res.rows[0]?.bp_total) || 0;
+
+      console.log(`[GIFT] @${data.nickname} → ${data.giftName} (${diamonds} diamonds)`);
+      console.log(`[BP: +${giftBP} | ${totalBP.toFixed(1)}]`);
+    }
   });
 
   tiktokLiveConnection.on('connected', () => {
@@ -129,7 +156,6 @@ async function startTikTokLive(username: string) {
   });
 }
 
-// === START SERVER ===
 const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME || 'JOUW_TIKTOK_USERNAME';
 
 initDB().then(() => {
