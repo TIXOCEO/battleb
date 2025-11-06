@@ -16,11 +16,6 @@ export type User = {
   };
 };
 
-export type QueueEntry = {
-  user: User;
-  boost_spots: number;
-};
-
 export type GameEvent =
   | { type: 'gift'; user: string; gift: string; diamonds: number; toHost: boolean }
   | { type: 'chat'; user: string; message: string }
