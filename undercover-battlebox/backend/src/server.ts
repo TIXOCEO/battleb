@@ -326,7 +326,7 @@ async function startTikTokLive(username: string) {
     console.log('Volledig verbonden met TikTok Live!');
   });
 }
-}
+
 
 const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME || 'JOUW_TIKTOK_USERNAME';
 
