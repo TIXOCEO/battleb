@@ -31,11 +31,11 @@ async function emitQueue() {
   io.emit('queue:update', queue.slice(0, 50));
 }
 
-// === STATE PER STREAM (reset bij herstart) ===
+// === STATE PER STREAM ===
 const hasFollowed = new Set<string>();
-const pendingLikes = new Map<string, number>(); // user → likes in deze stream
+const pendingLikes = new Map<string, number>();
 
-// === HELPER: Zorg dat user bestaat + haal oude BP op (100% crash-vrij + TS-vriendelijk) ===
+// === HELPER: Zorg dat user bestaat + oude BP ===
 async function ensureUserAndGetOldBP(tiktok_id: string, username: string, badges: string[]) {
   const updateRes = await pool.query(
     `UPDATE users SET username = $2, badges = $3 WHERE tiktok_id = $1 RETURNING bp_total`,
@@ -95,11 +95,11 @@ async function startTikTokLive(username: string) {
     if (data.isSuperFan === true) badges.push('superfan');
     if (data.isVip === true) badges.push('vip');
     if (data.isFanClubMember === true) {
-      const clubName = data.fanClubName || 'fanclub';
-      badges.push(`fanclub:${clubName}`); // → fanclub:Cats
+      // CUSTOM NAAM UIT data.userBadge OF data.fanClubName
+      const clubName = data.fanClubName || data.userBadge?.clubName || 'fanclub';
+      badges.push(`fanclub:${clubName}`);
     }
 
-    // Log badges ALTIJD als ze er zijn
     if (badges.length > 0) {
       console.log(`[BADGES: ${badges.join(' | ')}]`);
     }
@@ -139,7 +139,7 @@ async function startTikTokLive(username: string) {
     }
   });
 
-  // === GIFTS – 50% BP ===
+  // === GIFTS ===
   tiktokLiveConnection.on('gift', async (data: any) => {
     const diamonds = data.diamondCount || 0;
     const giftBP = diamonds * 0.5;
@@ -152,7 +152,7 @@ async function startTikTokLive(username: string) {
     if (data.isSuperFan === true) badges.push('superfan');
     if (data.isVip === true) badges.push('vip');
     if (data.isFanClubMember === true) {
-      const clubName = data.fanClubName || 'fanclub';
+      const clubName = data.fanClubName || data.userBadge?.clubName || 'fanclub';
       badges.push(`fanclub:${clubName}`);
     }
 
@@ -163,7 +163,7 @@ async function startTikTokLive(username: string) {
     console.log(`→ ${data.giftName} (${diamonds} diamonds)`);
   });
 
-  // === LIKES – +1 BP per 100 likes ===
+  // === LIKES ===
   tiktokLiveConnection.on('like', async (data: any) => {
     const user = data.uniqueId;
     const nick = data.nickname;
@@ -181,7 +181,7 @@ async function startTikTokLive(username: string) {
       if (data.isSuperFan === true) badges.push('superfan');
       if (data.isVip === true) badges.push('vip');
       if (data.isFanClubMember === true) {
-        const clubName = data.fanClubName || 'fanclub';
+        const clubName = data.fanClubName || data.userBadge?.clubName || 'fanclub';
         badges.push(`fanclub:${clubName}`);
       }
       if (badges.length > 0) console.log(`[BADGES: ${badges.join(' | ')}]`);
@@ -193,7 +193,7 @@ async function startTikTokLive(username: string) {
     }
   });
 
-  // === FOLLOW – +5 BP (1e keer) ===
+  // === FOLLOW ===
   tiktokLiveConnection.on('follow', async (data: any) => {
     const user = data.uniqueId;
     const nick = data.nickname;
@@ -205,7 +205,7 @@ async function startTikTokLive(username: string) {
     if (data.isSuperFan === true) badges.push('superfan');
     if (data.isVip === true) badges.push('vip');
     if (data.isFanClubMember === true) {
-      const clubName = data.fanClubName || 'fanclub';
+      const clubName = data.fanClubName || data.userBadge?.clubName || 'fanclub';
       badges.push(`fanclub:${clubName}`);
     }
     if (badges.length > 0) console.log(`[BADGES: ${badges.join(' | ')}]`);
@@ -215,7 +215,7 @@ async function startTikTokLive(username: string) {
     console.log(`→ eerste follow in deze stream`);
   });
 
-  // === SHARE – +5 BP (elke keer) ===
+  // === SHARE ===
   tiktokLiveConnection.on('share', async (data: any) => {
     const user = data.uniqueId;
     const nick = data.nickname;
@@ -224,7 +224,7 @@ async function startTikTokLive(username: string) {
     if (data.isSuperFan === true) badges.push('superfan');
     if (data.isVip === true) badges.push('vip');
     if (data.isFanClubMember === true) {
-      const clubName = data.fanClubName || 'fanclub';
+      const clubName = data.fanClubName || data.userBadge?.clubName || 'fanclub';
       badges.push(`fanclub:${clubName}`);
     }
     if (badges.length > 0) console.log(`[BADGES: ${badges.join(' | ')}]`);
