@@ -16,7 +16,7 @@ export async function initDB() {
       tiktok_id TEXT UNIQUE NOT NULL,
       username TEXT NOT NULL,
       bp_daily INTEGER DEFAULT 0,
-      bp_total INTEGER DEFAULT 0,
+      bp_total DOUBLE PRECISION DEFAULT 0,
       streak INTEGER DEFAULT 0,
       badges TEXT[] DEFAULT '{}',
       blocks JSONB DEFAULT '{"queue": false, "twists": false, "boosters": false}'
