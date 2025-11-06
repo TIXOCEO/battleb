@@ -33,8 +33,9 @@ async function emitQueue() {
   io.emit('queue:update', queue.slice(0, 50));
 }
 
-// === LIKE COUNTER (per user) ===
-const likeCounter = new Map<string, number>();
+// === STATE VOOR LIKES, FOLLOWS, SHARES ===
+const lastLikeCount = new Map<string, number>(); // user → laatste totaal
+const hasFollowed = new Set<string>();         // user → eerste follow
 
 async function startTikTokLive(username: string) {
   const tiktokLiveConnection = new WebcastPushConnection(username);
@@ -75,7 +76,7 @@ async function startTikTokLive(username: string) {
       oldBP = parseFloat(userCheck.rows[0].bp_total) || 0;
     }
 
-    // === UPDATE USER (badges + username) ===
+    // === UPDATE USER ===
     try {
       await pool.query(
         `INSERT INTO users (tiktok_id, username, badges, bp_total) 
@@ -154,27 +155,60 @@ async function startTikTokLive(username: string) {
     }
   });
 
-  // === LIKES – +1 BP per 100 likes ===
+  // === LIKES – +1 BP per 100 totaal likes ===
   tiktokLiveConnection.on('like', async (data: any) => {
     const user = data.uniqueId;
     const nick = data.nickname;
-    const likes = data.likeCount || 1;
+    const totalLikes = data.totalLikeCount || 0; // TOTAAL LIKES VAN USER
 
-    const current = likeCounter.get(user) || 0;
-    const total = current + likes;
-    const fullHundreds = Math.floor(total / 100);
-    likeCounter.set(user, total % 100);
+    const last = lastLikeCount.get(user) || 0;
+    const newHundreds = Math.floor(totalLikes / 100) - Math.floor(last / 100);
 
-    if (fullHundreds > 0) {
-      const likeBP = fullHundreds * 1;
+    if (newHundreds > 0) {
+      const likeBP = newHundreds * 1;
       await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [likeBP, user]);
 
       const res = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [user]);
       const totalBP = parseFloat(res.rows[0]?.bp_total) || 0;
 
-      console.log(`[LIKE] @${nick} → +${likes} likes → ${fullHundreds}x100`);
+      console.log(`[LIKE] @${nick} → totaal ${totalLikes} likes → +${newHundreds}x100`);
       console.log(`[BP: +${likeBP} | ${totalBP.toFixed(1)}]`);
     }
+
+    lastLikeCount.set(user, totalLikes);
+  });
+
+  // === FOLLOW – +5 BP (alleen eerste keer) ===
+  tiktokLiveConnection.on('follow', async (data: any) => {
+    const user = data.uniqueId;
+    const nick = data.nickname;
+
+    if (hasFollowed.has(user)) return;
+    hasFollowed.add(user);
+
+    const followBP = 5;
+    await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [followBP, user]);
+
+    const res = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [user]);
+    const totalBP = parseFloat(res.rows[0]?.bp_total) || 0;
+
+    console.log(`[FOLLOW] @${nick} → eerste follow`);
+    console.log(`[BP: +${followBP} | ${totalBP.toFixed(1)}]`);
+  });
+
+  // === SHARE – +5 BP (elke keer) ===
+  tiktokLiveConnection.on('share', async (data: any) => {
+    const user = data.uniqueId;
+    const nick = data.nickname;
+
+    const shareBP = 5;
+    await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [shareBP, user]);
+
+    const res = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [user]);
+    const totalBP = parseFloat(res.rows[0]?.bp_total) || 0;
+
+    console.log(`[SHARE] @${nick} → stream gedeeld`);
+    console.log(`[BP: +${shareBP} | ${totalBP.toFixed(1)}]`);
   });
 
   tiktokLiveConnection.on('connected', () => {
