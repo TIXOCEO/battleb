@@ -50,8 +50,8 @@ async function connectWithRetry(username: string, retries = 6): Promise<WebcastP
 }
 
 // HEART ME = FAN VOOR 24 UUR
-async function activateFanStatus(tiktok_id: bigint, display_name: string) {
-  const usernameWithAt = '@' + display_name.toLowerCase();
+async function activateFanStatus(tiktok_id: bigint, display_name: string, username: string) {
+  const usernameWithAt = '@' + username.toLowerCase();
   await pool.query(
     `INSERT INTO users (tiktok_id, display_name, username, bp_total, is_fan, fan_expires_at)
      VALUES ($1, $2, $3, 0, true, NOW() + INTERVAL '24 hours')
@@ -66,9 +66,9 @@ async function activateFanStatus(tiktok_id: bigint, display_name: string) {
   console.log(`[FAN ACTIVATED 24H] ${display_name} (${usernameWithAt})`);
 }
 
-// HAAL USER + FAN/VIP OP
-async function getUserData(tiktok_id: bigint, display_name: string) {
-  const usernameWithAt = '@' + display_name.toLowerCase();
+// HAAL USER + FAN/VIP OP – GEBRUIKT uniqueId ALS USERNAME
+async function getUserData(tiktok_id: bigint, display_name: string, username: string) {
+  const usernameWithAt = '@' + username.toLowerCase();
   const query = `
     INSERT INTO users (tiktok_id, display_name, username, bp_total, is_fan, fan_expires_at, is_vip, vip_expires_at)
     VALUES ($1, $2, $3, 0, false, NULL, false, NULL)
@@ -131,11 +131,12 @@ async function startTikTokLive(username: string) {
     const userIdRaw = data.userId || data.uniqueId || '0';
     const userId = BigInt(userIdRaw);
     const display_name = data.nickname || 'Onbekend';
+    const tikTokUsername = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, ''); // fallback
     const isAdmin = userId.toString() === ADMIN_ID;
 
-    console.log(`[CHAT] Raw: "${rawComment}" → "${msgLower}" (user: ${display_name}, ID: ${userId})`);
+    console.log(`[CHAT] Raw: "${rawComment}" → "${msgLower}" (user: ${display_name} | @${tikTokUsername})`);
 
-    const { isFan, isVip } = await getUserData(userId, display_name);
+    const { isFan, isVip } = await getUserData(userId, display_name, tikTokUsername);
     await addBP(userId, 1, 'CHAT', display_name, isFan, isVip);
 
     if (!isAdmin || !msgLower.startsWith('!adm ')) return;
@@ -146,21 +147,19 @@ async function startTikTokLive(username: string) {
 
     if (!rawUsername?.startsWith('@')) return;
 
-    // Zoek case-insensitive op username mét @
     const targetRes = await pool.query(
       'SELECT tiktok_id, display_name FROM users WHERE LOWER(username) = LOWER($1)',
       [rawUsername]
     );
 
     if (!targetRes.rows[0]) {
-      console.log(`[ADMIN] Gebruiker ${rawUsername} niet gevonden in database`);
+      console.log(`[ADMIN] Gebruiker ${rawUsername} niet gevonden – probeer @${tikTokUsername}`);
       return;
     }
 
     const targetId = targetRes.rows[0].tiktok_id;
     const targetDisplay = targetRes.rows[0].display_name || rawUsername;
 
-    // === COMMANDOS ===
     if (cmd === 'geef' && args[2]) {
       const amount = parseFloat(args[2]);
       if (isNaN(amount) || amount <= 0) return;
@@ -213,13 +212,14 @@ async function startTikTokLive(username: string) {
     const userIdRaw = data.userId || data.uniqueId || '0';
     const userId = BigInt(userIdRaw);
     const display_name = data.nickname || 'Onbekend';
+    const tikTokUsername = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
     const giftName = (data.giftName || '').toLowerCase();
 
     if (giftName.includes('heart me')) {
-      await activateFanStatus(userId, display_name);
-      const { isFan, isVip } = await getUserData(userId, display_name);
+      await activateFanStatus(userId, display_name, tikTokUsername);
+      const { isFan, isVip } = await getUserData(userId, display_name, tikTokUsername);
       await addBP(userId, 0.5, 'GIFT', display_name, isFan, isVip);
-      console.log(`Heart Me → FAN ACTIVATED VOOR 24 UUR (${display_name})`);
+      console.log(`Heart Me → FAN ACTIVATED VOOR 24 UUR (${display_name} | @${tikTokUsername})`);
       return;
     }
 
@@ -227,17 +227,18 @@ async function startTikTokLive(username: string) {
     const giftBP = diamonds * 0.5;
     if (giftBP <= 0) return;
 
-    const { isFan, isVip } = await getUserData(userId, display_name);
+    const { isFan, isVip } = await getUserData(userId, display_name, tikTokUsername);
     await addBP(userId, giftBP, 'GIFT', display_name, isFan, isVip);
     console.log(`${data.giftName} (${diamonds} diamonds)`);
   });
 
-  // === LIKE – ALLEEN EIGEN LIKES DEZE SESSIE ===
+  // === LIKE ===
   tiktokLiveConnection.on('like', async (data: any) => {
     const userIdRaw = data.userId || data.uniqueId || '0';
     const userId = BigInt(userIdRaw);
     const userIdStr = userId.toString();
     const display_name = data.nickname || 'Onbekend';
+    const tikTokUsername = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
 
     nameCache.set(userIdStr, display_name);
 
@@ -250,12 +251,12 @@ async function startTikTokLive(username: string) {
     const bpToGive = newHundreds - previousHundreds;
 
     if (bpToGive > 0) {
-      const { isFan, isVip } = await getUserData(userId, display_name);
+      const { isFan, isVip } = await getUserData(userId, display_name, tikTokUsername);
       await addBP(userId, bpToGive, 'LIKE', display_name, isFan, isVip);
-      console.log(`LIKE → +${bpToGive} BP voor ${display_name} (${newStreak} eigen likes deze sessie)`);
+      console.log(`LIKE → +${bpToGive} BP voor ${display_name} (@${tikTokUsername}) (${newStreak} likes)`);
     }
 
-    console.log(`LIKES: ${display_name} +${batchLikes} → ${newStreak} (eigen sessie)`);
+    console.log(`LIKES: ${display_name} (@${tikTokUsername}) +${batchLikes} → ${newStreak}`);
     pendingLikes.set(userIdStr, newStreak);
   });
 
@@ -265,25 +266,28 @@ async function startTikTokLive(username: string) {
     const userId = BigInt(userIdRaw);
     const userIdStr = userId.toString();
     const display_name = data.nickname || 'Onbekend';
-    nameCache.set(userIdStr, display_name);
+    const tikTokUsername = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
 
+    nameCache.set(userIdStr, display_name);
     if (hasFollowed.has(userIdStr)) return;
     hasFollowed.add(userIdStr);
 
-    const { isFan, isVip } = await getUserData(userId, display_name);
+    const { isFan, isVip } = await getUserData(userId, display_name, tikTokUsername);
     await addBP(userId, 5, 'FOLLOW', display_name, isFan, isVip);
-    console.log(`Follow van ${display_name}`);
+    console.log(`Follow van ${display_name} (@${tikTokUsername})`);
   });
 
   tiktokLiveConnection.on('share', async (data: any) => {
     const userIdRaw = data.userId || data.uniqueId || '0';
     const userId = BigInt(userIdRaw);
     const display_name = data.nickname || 'Onbekend';
+    const tikTokUsername = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
+
     nameCache.set(userId.toString(), display_name);
 
-    const { isFan, isVip } = await getUserData(userId, display_name);
+    const { isFan, isVip } = await getUserData(userId, display_name, tikTokUsername);
     await addBP(userId, 5, 'SHARE', display_name, isFan, isVip);
-    console.log(`Share van ${display_name}`);
+    console.log(`Share van ${display_name} (@${tikTokUsername})`);
   });
 
   tiktokLiveConnection.on('connected', () => {
