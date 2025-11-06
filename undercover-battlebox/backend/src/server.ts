@@ -51,36 +51,40 @@ async function connectWithRetry(username: string, retries = 6): Promise<WebcastP
 
 // HEART ME = FAN VOOR 24 UUR
 async function activateFanStatus(tiktok_id: bigint, display_name: string) {
+  const usernameWithAt = '@' + display_name.toLowerCase();
   await pool.query(
     `INSERT INTO users (tiktok_id, display_name, username, bp_total, is_fan, fan_expires_at)
-     VALUES ($1, $2, $2, 0, true, NOW() + INTERVAL '24 hours')
+     VALUES ($1, $2, $3, 0, true, NOW() + INTERVAL '24 hours')
      ON CONFLICT (tiktok_id) 
      DO UPDATE SET 
        is_fan = true, 
        fan_expires_at = NOW() + INTERVAL '24 hours',
        display_name = EXCLUDED.display_name,
-       username = EXCLUDED.display_name`,
-    [tiktok_id, display_name]
+       username = EXCLUDED.username`,
+    [tiktok_id, display_name, usernameWithAt]
   );
-  console.log(`[FAN ACTIVATED 24H] ${display_name} (ID: ${tiktok_id})`);
+  console.log(`[FAN ACTIVATED 24H] ${display_name} (${usernameWithAt})`);
 }
 
 // HAAL USER + FAN/VIP OP
 async function getUserData(tiktok_id: bigint, display_name: string) {
+  const usernameWithAt = '@' + display_name.toLowerCase();
   const query = `
     INSERT INTO users (tiktok_id, display_name, username, bp_total, is_fan, fan_expires_at, is_vip, vip_expires_at)
-    VALUES ($1, $2, $2, 0, false, NULL, false, NULL)
+    VALUES ($1, $2, $3, 0, false, NULL, false, NULL)
     ON CONFLICT (tiktok_id) 
-    DO UPDATE SET display_name = EXCLUDED.display_name, username = EXCLUDED.display_name
+    DO UPDATE SET 
+      display_name = EXCLUDED.display_name,
+      username = EXCLUDED.username
     RETURNING bp_total, is_fan, fan_expires_at, is_vip, vip_expires_at;
   `;
 
-  const res = await pool.query(query, [tiktok_id, display_name]);
+  const res = await pool.query(query, [tiktok_id, display_name, usernameWithAt]);
   const row = res.rows[0];
   const isFan = row.is_fan && row.fan_expires_at && new Date(row.fan_expires_at) > new Date();
   const isVip = row.is_vip && row.vip_expires_at && new Date(row.vip_expires_at) > new Date();
 
-  if (!row.bp_total) console.log(`[NEW USER] ${display_name} (ID: ${tiktok_id})`);
+  if (!row.bp_total) console.log(`[NEW USER] ${display_name} (${usernameWithAt})`);
 
   return { oldBP: parseFloat(row.bp_total) || 0, isFan, isVip };
 }
@@ -129,27 +133,23 @@ async function startTikTokLive(username: string) {
     const display_name = data.nickname || 'Onbekend';
     const isAdmin = userId.toString() === ADMIN_ID;
 
-    console.log(`[CHAT] Raw: "${rawComment}" → Parsed: "${msgLower}" (user: ${display_name}, ID: ${userId})`);
+    console.log(`[CHAT] Raw: "${rawComment}" → "${msgLower}" (user: ${display_name}, ID: ${userId})`);
 
     const { isFan, isVip } = await getUserData(userId, display_name);
     await addBP(userId, 1, 'CHAT', display_name, isFan, isVip);
 
-      // === ALLEEN ADMIN – WERKT NU OP USERNAME MET @ ===
-    if (!isAdmin) return;
+    if (!isAdmin || !msgLower.startsWith('!adm ')) return;
 
-    if (!msgLower.startsWith('!adm ')) return;
     const args = msg.slice(5).trim().split(' ');
     const cmd = args[0].toLowerCase();
-
-    // Haal de username met @ op (bijv. @dangol__)
     const rawUsername = args[1];
-    if (!rawUsername?.startsWith('@')) return;
-    const username = rawUsername.slice(1); // zonder @
 
-    // Zoek exact op username (hoofdlettergevoelig zoals TikTok het stuurt)
+    if (!rawUsername?.startsWith('@')) return;
+
+    // Zoek case-insensitive op username mét @
     const targetRes = await pool.query(
-      'SELECT tiktok_id, display_name FROM users WHERE username = $1',
-      [rawUsername] // inclusief @
+      'SELECT tiktok_id, display_name FROM users WHERE LOWER(username) = LOWER($1)',
+      [rawUsername]
     );
 
     if (!targetRes.rows[0]) {
@@ -160,7 +160,7 @@ async function startTikTokLive(username: string) {
     const targetId = targetRes.rows[0].tiktok_id;
     const targetDisplay = targetRes.rows[0].display_name || rawUsername;
 
-    // !adm geef @dangol__ 500
+    // === COMMANDOS ===
     if (cmd === 'geef' && args[2]) {
       const amount = parseFloat(args[2]);
       if (isNaN(amount) || amount <= 0) return;
@@ -169,7 +169,6 @@ async function startTikTokLive(username: string) {
       return;
     }
 
-    // !adm verw @dangol__ 200
     if (cmd === 'verw' && args[2]) {
       const amount = parseFloat(args[2]);
       if (isNaN(amount) || amount <= 0) return;
@@ -178,7 +177,6 @@ async function startTikTokLive(username: string) {
       return;
     }
 
-    // !adm voegrij @dangol__
     if (cmd === 'voegrij') {
       await addToQueue(targetId.toString(), targetDisplay);
       emitQueue();
@@ -186,7 +184,6 @@ async function startTikTokLive(username: string) {
       return;
     }
 
-    // !adm verwrij @dangol__ → 50% refund
     if (cmd === 'verwrij') {
       const refund = await leaveQueue(targetId.toString());
       if (refund > 0) {
@@ -198,24 +195,19 @@ async function startTikTokLive(username: string) {
       return;
     }
 
-    // !adm geefvip @dangol__ → VIP voor 30 dagen
     if (cmd === 'geefvip') {
-      await pool.query(
-        'UPDATE users SET is_vip = true, vip_expires_at = NOW() + INTERVAL \'30 days\' WHERE tiktok_id = $1',
-        [targetId]
-      );
+      await pool.query('UPDATE users SET is_vip = true, vip_expires_at = NOW() + INTERVAL \'30 days\' WHERE tiktok_id = $1', [targetId]);
       console.log(`[ADMIN] VIP gegeven aan ${rawUsername} (30 dagen)`);
       return;
     }
 
-    // !adm verwvip @dangol__
     if (cmd === 'verwvip') {
       await pool.query('UPDATE users SET is_vip = false, vip_expires_at = NULL WHERE tiktok_id = $1', [targetId]);
       console.log(`[ADMIN] VIP verwijderd van ${rawUsername}`);
       return;
     }
-});
-  
+  });
+
   // === GIFT ===
   tiktokLiveConnection.on('gift', async (data: any) => {
     const userIdRaw = data.userId || data.uniqueId || '0';
@@ -227,7 +219,7 @@ async function startTikTokLive(username: string) {
       await activateFanStatus(userId, display_name);
       const { isFan, isVip } = await getUserData(userId, display_name);
       await addBP(userId, 0.5, 'GIFT', display_name, isFan, isVip);
-      console.log(`Heart Me → FAN ACTIVATED VOOR 24 UUR (ID: ${userId})`);
+      console.log(`Heart Me → FAN ACTIVATED VOOR 24 UUR (${display_name})`);
       return;
     }
 
