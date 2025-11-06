@@ -35,7 +35,7 @@ async function emitQueue() {
 const hasFollowed = new Set<string>();
 const pendingLikes = new Map<string, number>(); // user → likes in deze stream
 
-// === HELPER: Zorg dat user bestaat + haal oude BP op (100% crash-vrij) ===
+// === HELPER: Zorg dat user bestaat + haal oude BP op (100% crash-vrij + TS-vriendelijk) ===
 async function ensureUserAndGetOldBP(tiktok_id: string, username: string, badges: string[]) {
   // Probeer eerst te updaten (bestaande user)
   const updateRes = await pool.query(
@@ -43,7 +43,8 @@ async function ensureUserAndGetOldBP(tiktok_id: string, username: string, badges
     [tiktok_id, username, badges]
   );
 
-  if (updateRes.rowCount > 0) {
+  // FIX: rowCount kan null zijn → gebruik ?? 0
+  if ((updateRes.rowCount ?? 0) > 0) {
     return parseFloat(updateRes.rows[0].bp_total) || 0;
   }
 
