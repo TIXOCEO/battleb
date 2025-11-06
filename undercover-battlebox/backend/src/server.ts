@@ -134,89 +134,87 @@ async function startTikTokLive(username: string) {
     const { isFan, isVip } = await getUserData(userId, display_name);
     await addBP(userId, 1, 'CHAT', display_name, isFan, isVip);
 
-    // === ALLEEN ADMIN ===
+      // === ALLEEN ADMIN – WERKT NU OP USERNAME MET @ ===
     if (!isAdmin) return;
 
     if (!msgLower.startsWith('!adm ')) return;
     const args = msg.slice(5).trim().split(' ');
     const cmd = args[0].toLowerCase();
 
-    // !adm geef @user aantal
-    if (cmd === 'geef' && args[1]?.startsWith('@') && args[2]) {
-      const targetName = args[1].slice(1);
+    // Haal de username met @ op (bijv. @dangol__)
+    const rawUsername = args[1];
+    if (!rawUsername?.startsWith('@')) return;
+    const username = rawUsername.slice(1); // zonder @
+
+    // Zoek exact op username (hoofdlettergevoelig zoals TikTok het stuurt)
+    const targetRes = await pool.query(
+      'SELECT tiktok_id, display_name FROM users WHERE username = $1',
+      [rawUsername] // inclusief @
+    );
+
+    if (!targetRes.rows[0]) {
+      console.log(`[ADMIN] Gebruiker ${rawUsername} niet gevonden in database`);
+      return;
+    }
+
+    const targetId = targetRes.rows[0].tiktok_id;
+    const targetDisplay = targetRes.rows[0].display_name || rawUsername;
+
+    // !adm geef @dangol__ 500
+    if (cmd === 'geef' && args[2]) {
       const amount = parseFloat(args[2]);
-      if (isNaN(amount)) return;
-      const targetRes = await pool.query('SELECT tiktok_id FROM users WHERE display_name ILIKE $1', [`%${targetName}%`]);
-      if (targetRes.rows[0]) {
-        await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [amount, targetRes.rows[0].tiktok_id]);
-        console.log(`[ADMIN] +${amount} BP gegeven aan @${targetName}`);
-      }
+      if (isNaN(amount) || amount <= 0) return;
+      await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [amount, targetId]);
+      console.log(`[ADMIN] +${amount} BP gegeven aan ${rawUsername}`);
       return;
     }
 
-    // !adm verw @user aantal
-    if (cmd === 'verw' && args[1]?.startsWith('@') && args[2]) {
-      const targetName = args[1].slice(1);
+    // !adm verw @dangol__ 200
+    if (cmd === 'verw' && args[2]) {
       const amount = parseFloat(args[2]);
-      if (isNaN(amount)) return;
-      const targetRes = await pool.query('SELECT tiktok_id FROM users WHERE display_name ILIKE $1', [`%${targetName}%`]);
-      if (targetRes.rows[0]) {
-        await pool.query('UPDATE users SET bp_total = GREATEST(bp_total - $1, 0) WHERE tiktok_id = $2', [amount, targetRes.rows[0].tiktok_id]);
-        console.log(`[ADMIN] -${amount} BP afgetrokken van @${targetName}`);
-      }
+      if (isNaN(amount) || amount <= 0) return;
+      await pool.query('UPDATE users SET bp_total = GREATEST(bp_total - $1, 0) WHERE tiktok_id = $2', [amount, targetId]);
+      console.log(`[ADMIN] -${amount} BP afgetrokken van ${rawUsername}`);
       return;
     }
 
-    // !adm voegrij @user
-    if (cmd === 'voegrij' && args[1]?.startsWith('@')) {
-      const targetName = args[1].slice(1);
-      const targetRes = await pool.query('SELECT tiktok_id FROM users WHERE display_name ILIKE $1', [`%${targetName}%`]);
-      if (targetRes.rows[0]) {
-        await addToQueue(targetRes.rows[0].tiktok_id.toString(), targetName);
-        emitQueue();
-        console.log(`[ADMIN] @${targetName} toegevoegd aan wachtrij (force)`);
-      }
+    // !adm voegrij @dangol__
+    if (cmd === 'voegrij') {
+      await addToQueue(targetId.toString(), targetDisplay);
+      emitQueue();
+      console.log(`[ADMIN] ${rawUsername} toegevoegd aan wachtrij (force)`);
       return;
     }
 
-    // !adm verwrij @user → 50% refund
-    if (cmd === 'verwrij' && args[1]?.startsWith('@')) {
-      const targetName = args[1].slice(1);
-      const targetRes = await pool.query('SELECT tiktok_id FROM users WHERE display_name ILIKE $1', [`%${targetName}%`]);
-      if (targetRes.rows[0]) {
-        const refund = await leaveQueue(targetRes.rows[0].tiktok_id.toString());
-        if (refund > 0) {
-          const halfRefund = Math.floor(refund * 0.5);
-          await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [halfRefund, targetRes.rows[0].tiktok_id]);
-          console.log(`[ADMIN] @${targetName} verwijderd uit rij → 50% refund: +${halfRefund} BP`);
-        }
-        emitQueue();
+    // !adm verwrij @dangol__ → 50% refund
+    if (cmd === 'verwrij') {
+      const refund = await leaveQueue(targetId.toString());
+      if (refund > 0) {
+        const halfRefund = Math.floor(refund * 0.5);
+        await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [halfRefund, targetId]);
+        console.log(`[ADMIN] ${rawUsername} verwijderd uit rij → 50% refund: +${halfRefund} BP`);
       }
+      emitQueue();
       return;
     }
 
-    // !adm geefvip @user → VIP voor 30 dagen
-    if (cmd === 'geefvip' && args[1]?.startsWith('@')) {
-      const targetName = args[1].slice(1);
-      const targetRes = await pool.query('SELECT tiktok_id FROM users WHERE display_name ILIKE $1', [`%${targetName}%`]);
-      if (targetRes.rows[0]) {
-        await pool.query('UPDATE users SET is_vip = true, vip_expires_at = NOW() + INTERVAL \'30 days\' WHERE tiktok_id = $1', [targetRes.rows[0].tiktok_id]);
-        console.log(`[ADMIN] VIP gegeven aan @${targetName} (30 dagen)`);
-      }
+    // !adm geefvip @dangol__ → VIP voor 30 dagen
+    if (cmd === 'geefvip') {
+      await pool.query(
+        'UPDATE users SET is_vip = true, vip_expires_at = NOW() + INTERVAL \'30 days\' WHERE tiktok_id = $1',
+        [targetId]
+      );
+      console.log(`[ADMIN] VIP gegeven aan ${rawUsername} (30 dagen)`);
       return;
     }
 
-    // !adm verwvip @user
-    if (cmd === 'verwvip' && args[1]?.startsWith('@')) {
-      const targetName = args[1].slice(1);
-      const targetRes = await pool.query('SELECT tiktok_id FROM users WHERE display_name ILIKE $1', [`%${targetName}%`]);
-      if (targetRes.rows[0]) {
-        await pool.query('UPDATE users SET is_vip = false, vip_expires_at = NULL WHERE tiktok_id = $1', [targetRes.rows[0].tiktok_id]);
-        console.log(`[ADMIN] VIP verwijderd van @${targetName}`);
-      }
+    // !adm verwvip @dangol__
+    if (cmd === 'verwvip') {
+      await pool.query('UPDATE users SET is_vip = false, vip_expires_at = NULL WHERE tiktok_id = $1', [targetId]);
+      console.log(`[ADMIN] VIP verwijderd van ${rawUsername}`);
       return;
     }
-  });
+  );
 
   // === GIFT ===
   tiktokLiveConnection.on('gift', async (data: any) => {
