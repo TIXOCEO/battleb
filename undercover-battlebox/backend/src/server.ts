@@ -237,26 +237,46 @@ async function startTikTokLive(username: string) {
   });
 
   // === ROBUUSTE LIKE-SYSTEEM (GEBASEERD OP JOUW BINGO SCRIPT) ===
-  const pendingLikes = new Map<string, number>(); // userId.toString() → likes
-  const LIKES_THRESHOLD = 100;
-  const LIKE_FLUSH_INTERVAL = 4000; // Elke 4 sec kleine batches flushen
+   tiktokLiveConnection.on('like', async (data: any) => {
+    const userIdRaw = data.userId || data.uniqueId || '0';
+    const userId = BigInt(userIdRaw);
+    const userIdStr = userId.toString();
+    const display_name = data.nickname || 'Onbekend';
 
-  // Flush kleine batches (minder dan 100) elke 4 seconden
-  setInterval(async () => {
-    for (const [userIdStr, likes] of pendingLikes.entries()) {
-      if (likes > 0 && likes < LIKES_THRESHOLD) {
-        const userId = BigInt(userIdStr);
-        const display_name = await getDisplayNameFromId(userId) || 'Onbekend';
-        const bpToGive = Math.floor(likes / 100); // Alleen hele punten
-        if (bpToGive > 0) {
-          const { isFan, isVip } = await getUserData(userId, display_name);
-          await addBP(userId, bpToGive, 'LIKE', display_name, isFan, isVip);
-          console.log(`FLUSH: ${likes} likes → +${bpToGive} BP voor ${display_name}`);
-        }
-        pendingLikes.set(userIdStr, likes % 100); // Rest bewaren
-      }
+    // DIT IS DE MAGIE: gebruik totalLikeCount als het bestaat!
+    const realStreak = data.totalLikeCount ?? 0;
+    const batchLikes = data.likeCount || 1;
+
+    // Update cache
+    nameCache.set(userIdStr, display_name);
+
+    // Vorige streak uit pending (voor flush)
+    const previousPending = pendingLikes.get(userIdStr) || 0;
+
+    // Als TikTok totalLikeCount stuurt → gebruiken we die als bron van waarheid
+    let newTotal: number;
+    if (realStreak > 0) {
+      newTotal = realStreak;
+      console.log(`TOTAL STREAK: ${display_name} heeft ${realStreak} likes (batch: ${batchLikes})`);
+    } else {
+      newTotal = previousPending + batchLikes;
+      console.log(`BATCH: ${display_name} +${batchLikes} likes → totaal ${newTotal}`);
     }
-  }, LIKE_FLUSH_INTERVAL);
+
+    // Bereken hoeveel BP we moeten geven
+    const previousHundreds = Math.floor(previousPending / 100);
+    const newHundreds = Math.floor(newTotal / 100);
+    const bpToGive = newHundreds - previousHundreds;
+
+    if (bpToGive > 0) {
+      const { isFan, isVip } = await getUserData(userId, display_name);
+      await addBP(userId, bpToGive, 'LIKE', display_name, isFan, isVip);
+      console.log(`LIKE → +${bpToGive} BP voor ${display_name} (${newTotal} likes)`);
+    }
+
+    // Update pending voor flush
+    pendingLikes.set(userIdStr, newTotal);
+  });
 
   // Helper: haal display_name op (cache voor performance)
   const nameCache = new Map<string, string>();
