@@ -272,43 +272,39 @@ async function startTikTokLive(username: string) {
     return name;
   }
 
-  // === LIKE – GEBRUIKT totalLikeCount (EXACT WAT JE OP JE TELEFOON ZIET) ===
+  // === LIKE – 100% PER SESSIE, PER GEBRUIKER (ZOALS JIJ WILT) ===
   tiktokLiveConnection.on('like', async (data: any) => {
     const userIdRaw = data.userId || data.uniqueId || '0';
     const userId = BigInt(userIdRaw);
     const userIdStr = userId.toString();
     const display_name = data.nickname || 'Onbekend';
 
-    // Update cache
+    // Update naam cache
     nameCache.set(userIdStr, display_name);
 
-    // DIT IS DE MAGIE: totalLikeCount = echte streak op telefoon
-    const realStreak = data.totalLikeCount ?? 0;
+    // Huidige sessie-streak voor deze gebruiker (start altijd bij 0 bij herstart)
+    const previousStreak = pendingLikes.get(userIdStr) || 0;
     const batchLikes = data.likeCount || 1;
 
-    let newTotal: number;
-    if (realStreak > 0) {
-      newTotal = realStreak;
-      console.log(`TOTAL STREAK: ${display_name} → ${realStreak} likes (batch: ${batchLikes})`);
-    } else {
-      const previous = pendingLikes.get(userIdStr) || 0;
-      newTotal = previous + batchLikes;
-      console.log(`BATCH: ${display_name} +${batchLikes} → totaal ${newTotal}`);
-    }
+    // Nieuwe streak = vorige + nieuwe batch (streamtotaal wordt compleet genegeerd)
+    const newStreak = previousStreak + batchLikes;
 
-    // Bereken BP
-    const previousHundreds = Math.floor((pendingLikes.get(userIdStr) || 0) / 100);
-    const newHundreds = Math.floor(newTotal / 100);
+    // Alleen BP als we over een nieuwe 100-grens gaan
+    const previousHundreds = Math.floor(previousStreak / 100);
+    const newHundreds = Math.floor(newStreak / 100);
     const bpToGive = newHundreds - previousHundreds;
 
     if (bpToGive > 0) {
       const { isFan, isVip } = await getUserData(userId, display_name);
       await addBP(userId, bpToGive, 'LIKE', display_name, isFan, isVip);
-      console.log(`LIKE → +${bpToGive} BP voor ${display_name} (${newTotal} likes)`);
+      console.log(`LIKE → +${bpToGive} BP voor ${display_name} (${newStreak} likes deze sessie)`);
     }
 
-    // Update pending
-    pendingLikes.set(userIdStr, newTotal);
+    // Altijd loggen voor duidelijkheid
+    console.log(`LIKES: ${display_name} +${batchLikes} → ${newStreak} (sessie)`);
+
+    // Update voor volgende keer
+    pendingLikes.set(userIdStr, newStreak);
   });
 
   // === FOLLOW ===
