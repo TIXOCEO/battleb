@@ -236,35 +236,68 @@ async function startTikTokLive(username: string) {
     console.log(`${data.giftName} (${diamonds} diamonds)`);
   });
 
-  // === ROBUUSTE LIKE-SYSTEEM (GEBASEERD OP JOUW BINGO SCRIPT) ===
-   tiktokLiveConnection.on('like', async (data: any) => {
+  // === LIKE / FOLLOW / SHARE – 100% PERFECT MET totalLikeCount ===
+  const pendingLikes = new Map<string, number>();
+  const hasFollowed = new Set<string>();
+  const nameCache = new Map<string, string>();
+
+  // CONSTANTEN (nu binnen de functie, dus altijd beschikbaar)
+  const LIKES_THRESHOLD = 100;
+  const LIKE_FLUSH_INTERVAL = 4000;
+
+  // Flush kleine restjes elke 4 seconden
+  setInterval(async () => {
+    for (const [userIdStr, likes] of pendingLikes.entries()) {
+      if (likes > 0 && likes < LIKES_THRESHOLD) {
+        const userId = BigInt(userIdStr);
+        const display_name = nameCache.get(userIdStr) || 'Onbekend';
+        const bpToGive = Math.floor(likes / 100);
+        if (bpToGive > 0) {
+          const { isFan, isVip } = await getUserData(userId, display_name);
+          await addBP(userId, bpToGive, 'LIKE', display_name, isFan, isVip);
+          console.log(`FLUSH: ${likes} likes → +${bpToGive} BP voor ${display_name}`);
+        }
+        pendingLikes.set(userIdStr, likes % 100);
+      }
+    }
+  }, LIKE_FLUSH_INTERVAL);
+
+  // Helper: display_name ophalen
+  async function getDisplayNameFromId(userId: bigint): Promise<string> {
+    const cached = nameCache.get(userId.toString());
+    if (cached) return cached;
+    const res = await pool.query('SELECT display_name FROM users WHERE tiktok_id = $1', [userId]);
+    const name = res.rows[0]?.display_name || 'Onbekend';
+    nameCache.set(userId.toString(), name);
+    return name;
+  }
+
+  // === LIKE – GEBRUIKT totalLikeCount (EXACT WAT JE OP JE TELEFOON ZIET) ===
+  tiktokLiveConnection.on('like', async (data: any) => {
     const userIdRaw = data.userId || data.uniqueId || '0';
     const userId = BigInt(userIdRaw);
     const userIdStr = userId.toString();
     const display_name = data.nickname || 'Onbekend';
 
-    // DIT IS DE MAGIE: gebruik totalLikeCount als het bestaat!
-    const realStreak = data.totalLikeCount ?? 0;
-    const batchLikes = data.likeCount || 1;
-
     // Update cache
     nameCache.set(userIdStr, display_name);
 
-    // Vorige streak uit pending (voor flush)
-    const previousPending = pendingLikes.get(userIdStr) || 0;
+    // DIT IS DE MAGIE: totalLikeCount = echte streak op telefoon
+    const realStreak = data.totalLikeCount ?? 0;
+    const batchLikes = data.likeCount || 1;
 
-    // Als TikTok totalLikeCount stuurt → gebruiken we die als bron van waarheid
     let newTotal: number;
     if (realStreak > 0) {
       newTotal = realStreak;
-      console.log(`TOTAL STREAK: ${display_name} heeft ${realStreak} likes (batch: ${batchLikes})`);
+      console.log(`TOTAL STREAK: ${display_name} → ${realStreak} likes (batch: ${batchLikes})`);
     } else {
-      newTotal = previousPending + batchLikes;
-      console.log(`BATCH: ${display_name} +${batchLikes} likes → totaal ${newTotal}`);
+      const previous = pendingLikes.get(userIdStr) || 0;
+      newTotal = previous + batchLikes;
+      console.log(`BATCH: ${display_name} +${batchLikes} → totaal ${newTotal}`);
     }
 
-    // Bereken hoeveel BP we moeten geven
-    const previousHundreds = Math.floor(previousPending / 100);
+    // Bereken BP
+    const previousHundreds = Math.floor((pendingLikes.get(userIdStr) || 0) / 100);
     const newHundreds = Math.floor(newTotal / 100);
     const bpToGive = newHundreds - previousHundreds;
 
@@ -274,68 +307,33 @@ async function startTikTokLive(username: string) {
       console.log(`LIKE → +${bpToGive} BP voor ${display_name} (${newTotal} likes)`);
     }
 
-    // Update pending voor flush
+    // Update pending
     pendingLikes.set(userIdStr, newTotal);
   });
 
-  // Helper: haal display_name op (cache voor performance)
-  const nameCache = new Map<string, string>();
-  async function getDisplayNameFromId(userId: bigint): Promise<string | null> {
-    const cached = nameCache.get(userId.toString());
-    if (cached) return cached;
-    const res = await pool.query('SELECT display_name FROM users WHERE tiktok_id = $1', [userId]);
-    const name = res.rows[0]?.display_name || null;
-    if (name) nameCache.set(userId.toString(), name);
-    return name;
-  }
-
-  tiktokLiveConnection.on('like', async (data: any) => {
+  // === FOLLOW ===
+  tiktokLiveConnection.on('follow', async (data: any) => {
     const userIdRaw = data.userId || data.uniqueId || '0';
     const userId = BigInt(userIdRaw);
     const userIdStr = userId.toString();
     const display_name = data.nickname || 'Onbekend';
-    const likeCount = data.likeCount || 1;
-
-    // Update cache
     nameCache.set(userIdStr, display_name);
 
-    console.log(`Likes ontvangen van ${display_name}: ${likeCount} (totaal pending: ${(pendingLikes.get(userIdStr) || 0) + likeCount})`);
-
-    // Tel op
-    const current = pendingLikes.get(userIdStr) || 0;
-    const total = current + likeCount;
-    pendingLikes.set(userIdStr, total);
-
-    // Direct verwerken als threshold bereikt
-    if (total >= LIKES_THRESHOLD) {
-      const fullHundreds = Math.floor(total / 100);
-      const { isFan, isVip } = await getUserData(userId, display_name);
-      await addBP(userId, fullHundreds, 'LIKE', display_name, isFan, isVip);
-      console.log(`DIRECT: ${total} likes → +${fullHundreds} BP voor ${display_name}`);
-      pendingLikes.set(userIdStr, total % 100);
-    }
-  });
-
-  // FOLLOW & SHARE (blijven zoals ze waren, maar met nameCache)
-  tiktokLiveConnection.on('follow', async (data: any) => {
-    const userIdRaw = data.userId || data.uniqueId || '0';
-    const userId = BigInt(userIdRaw);
-    const display_name = data.nickname || 'Onbekend';
-    nameCache.set(userId.toString(), display_name);
-
-    if (hasFollowed.has(userId.toString())) return;
-    hasFollowed.add(userId.toString());
+    if (hasFollowed.has(userIdStr)) return;
+    hasFollowed.add(userIdStr);
 
     const { isFan, isVip } = await getUserData(userId, display_name);
     await addBP(userId, 5, 'FOLLOW', display_name, isFan, isVip);
     console.log(`Follow van ${display_name}`);
   });
 
+  // === SHARE ===
   tiktokLiveConnection.on('share', async (data: any) => {
     const userIdRaw = data.userId || data.uniqueId || '0';
     const userId = BigInt(userIdRaw);
+    const userIdStr = userId.toString();
     const display_name = data.nickname || 'Onbekend';
-    nameCache.set(userId.toString(), display_name);
+    nameCache.set(userIdStr, display_name);
 
     const { isFan, isVip } = await getUserData(userId, display_name);
     await addBP(userId, 5, 'SHARE', display_name, isFan, isVip);
