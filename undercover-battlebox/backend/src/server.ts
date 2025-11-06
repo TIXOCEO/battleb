@@ -35,7 +35,7 @@ const hasFollowed = new Set<string>();
 const pendingLikes = new Map<string, number>();
 const ADMIN_ID = process.env.ADMIN_TIKTOK_ID?.trim();
 
-// AUTO-RETRY BIJ SIGN ERROR (TikTok 500/504)
+// AUTO-RETRY BIJ SIGN ERROR
 async function connectWithRetry(username: string, retries = 6): Promise<WebcastPushConnection> {
   for (let i = 0; i < retries; i++) {
     try {
@@ -67,7 +67,7 @@ async function activateFanStatus(tiktok_id: bigint, display_name: string) {
   console.log(`[FAN ACTIVATED 24H] ${display_name} (ID: ${tiktok_id})`);
 }
 
-// HAAL USER + FAN/VIP OP (MET EXPIRY CHECK)
+// HAAL USER + FAN/VIP OP
 async function getUserData(tiktok_id: bigint, display_name: string) {
   const query = `
     INSERT INTO users (tiktok_id, display_name, username, bp_total, is_fan, fan_expires_at, is_vip)
@@ -88,7 +88,7 @@ async function getUserData(tiktok_id: bigint, display_name: string) {
   return { oldBP: parseFloat(row.bp_total) || 0, isFan, isVip };
 }
 
-// BP TOEVOEGEN + LOG MET TAGS
+// BP TOEVOEGEN
 async function addBP(tiktok_id: bigint, amount: number, action: string, display_name: string, isFan: boolean, isVip: boolean) {
   const oldRes = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [tiktok_id]);
   const oldBP = parseFloat(oldRes.rows[0]?.bp_total) || 0;
@@ -104,7 +104,7 @@ async function addBP(tiktok_id: bigint, amount: number, action: string, display_
   console.log(`[BP: +${amount} | ${oldBP.toFixed(1)} → ${newBP.toFixed(1)}]`);
 }
 
-// BP AFTREKKEN (VOOR !koop)
+// BP AFTREKKEN
 async function deductBP(tiktok_id: bigint, amount: number): Promise<boolean> {
   const res = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1 FOR UPDATE', [tiktok_id]);
   const current = parseFloat(res.rows[0]?.bp_total) || 0;
@@ -124,13 +124,13 @@ async function startTikTokLive(username: string) {
 
     const userIdRaw = data.userId || data.uniqueId || '0';
     const userId = BigInt(userIdRaw);
-    const displayName = data.nickname || 'Onbekend';
+    const display_name = data.nickname || 'Onbekend';
     const isAdmin = userId.toString() === ADMIN_ID;
 
-    console.log(`[CHAT] Raw: "${rawComment}" → Parsed: "${msg}" (user: ${displayName}, ID: ${userId})`);
+    console.log(`[CHAT] Raw: "${rawComment}" → Parsed: "${msg}" (user: ${display_name}, ID: ${userId})`);
 
-    const { isFan, isVip } = await getUserData(userId, displayName);
-    await addBP(userId, 1, 'CHAT', displayName, isFan, isVip);
+    const { isFan, isVip } = await getUserData(userId, display_name);
+    await addBP(userId, 1, 'CHAT', display_name, isFan, isVip);
 
     // ADMIN COMMANDS
     if (isAdmin && msg.startsWith('!admin ')) {
@@ -160,70 +160,69 @@ async function startTikTokLive(username: string) {
       if (item === 'vip') {
         if (await deductBP(userId, 5000)) {
           await pool.query('UPDATE users SET is_vip = true WHERE tiktok_id = $1', [userId]);
-          console.log(`[KOOP] ${displayName} kocht VIP voor 5000 BP`);
+          console.log(`[KOOP] ${display_name} kocht VIP voor 5000 BP`);
         } else {
-          console.log(`[KOOP FAIL] ${displayName} heeft niet genoeg BP voor VIP`);
+          console.log(`[KOOP FAIL] ${display_name} heeft niet genoeg BP voor VIP`);
         }
         return;
       }
       if (item === 'rij') {
         if (await deductBP(userId, 10000)) {
           try {
-            await addToQueue(userId.toString(), displayName);
+            await addToQueue(userId.toString(), display_name);
             emitQueue();
-            console.log(`[KOOP] ${displayName} kocht wachtrijplek voor 10000 BP`);
+            console.log(`[KOOP] ${display_name} kocht wachtrijplek voor 10000 BP`);
           } catch (e: any) {
             await pool.query('UPDATE users SET bp_total = bp_total + 10000 WHERE tiktok_id = $1', [userId]);
             console.log(`[KOOP RIJ FAIL] ${e.message}`);
           }
         } else {
-          console.log(`[KOOP FAIL] ${displayName} heeft niet genoeg BP voor rij`);
+          console.log(`[KOOP FAIL] ${display_name} heeft niet genoeg BP voor rij`);
         }
         return;
       }
     }
 
     // === WACHTRIJ COMMANDS – ALLEEN VOOR FANS ===
-    const isQueueCommand = msg === '!join' || 
-                          msg.startsWith('!boost rij ') || 
-                          msg === '!leave';
+    const isQueueCommand = msg === '!join' || msg.startsWith('!boost rij ') || msg === '!leave';
 
     if (isQueueCommand && !isFan) {
-      console.log(`[NO FAN] ${displayName} probeerde !join/!boost/!leave zonder Heart Me`);
+      console.log(`[NO FAN] ${display_name} probeerde !join/!boost/!leave zonder Heart Me`);
       return;
     }
 
     if (msg === '!join') {
-      console.log(`!join ontvangen van ${displayName} [FAN]`);
-      try { await addToQueue(userId.toString(), displayName); emitQueue(); } 
+      console.log(`!join ontvangen van ${display_name} [FAN]`);
+      try { await addToQueue(userId.toString(), display_name); emitQueue(); }
       catch (e: any) { console.log('Join error:', e.message); }
     } else if (msg.startsWith('!boost rij ')) {
       const spots = parseInt(msg.split(' ')[2] || '0');
       if (spots >= 1 && spots <= 5) {
-        console.log(`!boost rij ${spots} van ${displayName} [FAN]`);
-        try { await boostQueue(userId.toString(), spots); emitQueue(); } 
+        console.log(`!boost rij ${spots} van ${display_name} [FAN]`);
+        try { await boostQueue(userId.toString(), spots); emitQueue(); }
         catch (e: any) { console.log('Boost error:', e.message); }
       }
     } else if (msg === '!leave') {
-      console.log(`!leave ontvangen van ${displayName} [FAN]`);
-      try { 
-        const refund = await leaveQueue(userId.toString()); 
-        if (refund > 0) console.log(`${displayName} kreeg ${refund} BP terug`); 
-        emitQueue(); 
+      console.log(`!leave ontvangen van ${display_name} [FAN]`);
+      try {
+        const refund = await leaveQueue(userId.toString());
+        if (refund > 0) console.log(`${display_name} kreeg ${refund} BP terug`);
+        emitQueue();
       } catch (e: any) { console.log('Leave error:', e.message); }
     }
+  }); // <--- SLUIT CHAT HANDLER
 
   // === GIFT ===
   tiktokLiveConnection.on('gift', async (data: any) => {
     const userIdRaw = data.userId || data.uniqueId || '0';
     const userId = BigInt(userIdRaw);
-    const displayName = data.nickname || 'Onbekend';
+    const display_name = data.nickname || 'Onbekend';
     const giftName = (data.giftName || '').toLowerCase();
 
     if (giftName.includes('heart me')) {
-      await activateFanStatus(userId, displayName);
-      const { isFan, isVip } = await getUserData(userId, displayName);
-      await addBP(userId, 0.5, 'GIFT', displayName, isFan, isVip);
+      await activateFanStatus(userId, display_name);
+      const { isFan, isVip } = await getUserData(userId, display_name);
+      await addBP(userId, 0.5, 'GIFT', display_name, isFan, isVip);
       console.log(`Heart Me → FAN ACTIVATED VOOR 24 UUR (ID: ${userId})`);
       return;
     }
@@ -232,8 +231,8 @@ async function startTikTokLive(username: string) {
     const giftBP = diamonds * 0.5;
     if (giftBP <= 0) return;
 
-    const { isFan, isVip } = await getUserData(userId, displayName);
-    await addBP(userId, giftBP, 'GIFT', displayName, isFan, isVip);
+    const { isFan, isVip } = await getUserData(userId, display_name);
+    await addBP(userId, giftBP, 'GIFT', display_name, isFan, isVip);
     console.log(`${data.giftName} (${diamonds} diamonds)`);
   });
 
@@ -241,7 +240,7 @@ async function startTikTokLive(username: string) {
   tiktokLiveConnection.on('like', async (data: any) => {
     const userIdRaw = data.userId || data.uniqueId || '0';
     const userId = BigInt(userIdRaw);
-    const displayName = data.nickname || 'Onbekend';
+    const display_name = data.nickname || 'Onbekend';
     const likes = data.likeCount || 1;
 
     const current = pendingLikes.get(userId.toString()) || 0;
@@ -250,8 +249,8 @@ async function startTikTokLive(username: string) {
 
     const fullHundreds = Math.floor(total / 100);
     if (fullHundreds > 0) {
-      const { isFan, isVip } = await getUserData(userId, displayName);
-      await addBP(userId, fullHundreds, 'LIKE', displayName, isFan, isVip);
+      const { isFan, isVip } = await getUserData(userId, display_name);
+      await addBP(userId, fullHundreds, 'LIKE', display_name, isFan, isVip);
       console.log(`+${likes} likes → ${fullHundreds}x100`);
       pendingLikes.set(userId.toString(), total % 100);
     }
@@ -260,22 +259,22 @@ async function startTikTokLive(username: string) {
   tiktokLiveConnection.on('follow', async (data: any) => {
     const userIdRaw = data.userId || data.uniqueId || '0';
     const userId = BigInt(userIdRaw);
-    const displayName = data.nickname || 'Onbekend';
+    const display_name = data.nickname || 'Onbekend';
     if (hasFollowed.has(userId.toString())) return;
     hasFollowed.add(userId.toString());
 
-    const { isFan, isVip } = await getUserData(userId, displayName);
-    await addBP(userId, 5, 'FOLLOW', displayName, isFan, isVip);
+    const { isFan, isVip } = await getUserData(userId, display_name);
+    await addBP(userId, 5, 'FOLLOW', display_name, isFan, isVip);
     console.log(`eerste follow in deze stream`);
   });
 
   tiktokLiveConnection.on('share', async (data: any) => {
     const userIdRaw = data.userId || data.uniqueId || '0';
     const userId = BigInt(userIdRaw);
-    const displayName = data.nickname || 'Onbekend';
+    const display_name = data.nickname || 'Onbekend';
 
-    const { isFan, isVip } = await getUserData(userId, displayName);
-    await addBP(userId, 5, 'SHARE', displayName, isFan, isVip);
+    const { isFan, isVip } = await getUserData(userId, display_name);
+    await addBP(userId, 5, 'SHARE', display_name, isFan, isVip);
     console.log(`stream gedeeld`);
   });
 
