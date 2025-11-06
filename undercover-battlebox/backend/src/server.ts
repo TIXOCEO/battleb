@@ -34,51 +34,48 @@ async function emitQueue() {
 const hasFollowed = new Set<string>();
 const pendingLikes = new Map<string, number>();
 
-// === UPDATE FAN STATUS IN DB (alleen bij betrouwbare events) ===
+// === UPDATE FAN STATUS (alleen bij betrouwbare events) ===
 async function updateFanStatus(tiktok_id: string, isFan: boolean) {
-  await pool.query(
-    `UPDATE users SET is_fan = $1 WHERE tiktok_id = $2`,
-    [isFan, tiktok_id]
-  );
+  await pool.query('UPDATE users SET is_fan = $1 WHERE tiktok_id = $2', [isFan, tiktok_id]);
 }
 
-// === HELPER: User + fan status ophalen ===
-async function ensureUserAndGetData(tiktok_id: string, username: string) {
-  const updateRes = await pool.query(
-    `UPDATE users SET username = $2 WHERE tiktok_id = $1 RETURNING bp_total, is_fan`,
-    [tiktok_id, username]
+// === HAAL USER + FAN STATUS OP (gebruik DB voor FAN) ===
+async function getUserData(tiktok_id: string, username: string) {
+  // Eerst updaten username
+  await pool.query('UPDATE users SET username = $1 WHERE tiktok_id = $2', [username, tiktok_id]);
+
+  // Dan data ophalen
+  const res = await pool.query(
+    'SELECT bp_total, is_fan FROM users WHERE tiktok_id = $1',
+    [tiktok_id]
   );
 
-  if ((updateRes.rowCount ?? 0) > 0) {
-    return {
-      oldBP: parseFloat(updateRes.rows[0].bp_total) || 0,
-      isFan: updateRes.rows[0].is_fan === true
-    };
+  if (res.rows.length === 0) {
+    await pool.query(
+      'INSERT INTO users (tiktok_id, username, bp_total, is_fan) VALUES ($1, $2, 0, false)',
+      [tiktok_id, username]
+    );
+    console.log(`[NEW USER] @${username}`);
+    return { oldBP: 0, isFan: false };
   }
 
-  await pool.query(
-    `INSERT INTO users (tiktok_id, username, bp_total, is_fan) VALUES ($1, $2, 0, false) 
-     ON CONFLICT (tiktok_id) DO NOTHING`,
-    [tiktok_id, username]
-  );
-
-  console.log(`[NEW USER] @${username}`);
-  return { oldBP: 0, isFan: false };
+  return {
+    oldBP: parseFloat(res.rows[0].bp_total) || 0,
+    isFan: res.rows[0].is_fan === true
+  };
 }
 
-// === HELPER: BP toevoegen + log met [FAN] uit DB ===
-async function addBP(tiktok_id: string, amount: number, action: string, nick: string, isFan: boolean = false) {
-  const oldRes = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [tiktok_id]);
-  const oldBP = parseFloat(oldRes.rows[0]?.bp_total) || 0;
+// === BP TOEVOEGEN + LOG MET [FAN] ===
+async function addBP(tiktok_id: string, amount: number, action: string, nick: string, isFan: boolean) {
+  const oldBP = (await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [tiktok_id])).rows[0]?.bp_total || 0;
 
   await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [amount, tiktok_id]);
 
-  const newRes = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [tiktok_id]);
-  const newBP = parseFloat(newRes.rows[0]?.bp_total) || 0;
+  const newBP = (await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [tiktok_id])).rows[0].bp_total;
 
   const fanTag = isFan ? ' [FAN]' : '';
   console.log(`[${action}] @${nick}${fanTag}`);
-  console.log(`[BP: +${amount} | ${oldBP.toFixed(1)} → ${newBP.toFixed(1)}]`);
+  console.log(`[BP: +${amount} | ${parseFloat(oldBP).toFixed(1)} → ${parseFloat(newBP).toFixed(1)}]`);
 }
 
 async function startTikTokLive(username: string) {
@@ -94,79 +91,90 @@ async function startTikTokLive(username: string) {
   tiktokLiveConnection.on('chat', async (data: any) => {
     const rawComment = data.comment || '';
     const msg = rawComment.toLowerCase().trim();
-    console.log(`[CHAT] Raw: "${rawComment}" → Parsed: "${msg}" (user: @${data.nickname})`);
     if (!msg) return;
+
+    console.log(`[CHAT] Raw: "${rawComment}" → Parsed: "${msg}" (user: @${data.nickname})`);
 
     const user = data.uniqueId;
     const nick = data.nickname;
 
-    const { oldBP, isFan } = await ensureUserAndGetData(user, nick);
+    const { oldBP, isFan } = await getUserData(user, nick);
     await addBP(user, 1, 'CHAT', nick, isFan);
 
-    // === COMMANDOS ===
-    if (msg === '!join') {
-      console.log(`!join ontvangen van @${nick}`);
-      try { await addToQueue(user, nick); emitQueue(); } catch (e: any) { console.log('Join error:', e.message); }
-    } else if (msg.startsWith('!boost rij ')) {
+    // Commandos
+    if (msg === '!join') await addToQueue(user, nick) && emitQueue();
+    else if (msg.startsWith('!boost rij ')) {
       const spots = parseInt(msg.split(' ')[2] || '0');
-      if (spots >= 1 && spots <= 5) {
-        console.log(`!boost rij ${spots} van @${nick}`);
-        try { await boostQueue(user, spots); emitQueue(); } catch (e: any) { console.log('Boost error:', e.message); }
-      }
+      if (spots >= 1 && spots <= 5) await boostQueue(user, spots) && emitQueue();
     } else if (msg === '!leave') {
-      console.log(`!leave ontvangen van @${nick}`);
-      try { const refund = await leaveQueue(user); if (refund > 0) console.log(`@${nick} kreeg ${refund} BP terug`); emitQueue(); }
-      catch (e: any) { console.log('Leave error:', e.message); }
+      const refund = await leaveQueue(user);
+      if (refund > 0) console.log(`@${nick} kreeg ${refund} BP terug`);
+      emitQueue();
     }
   });
 
-  // === BETROUWBARE EVENTS: UPDATE FAN STATUS ===
-  const reliableEvents = ['gift', 'like', 'follow', 'share'];
-  reliableEvents.forEach(event => {
-    tiktokLiveConnection.on(event, async (data: any) => {
-      const user = data.uniqueId;
-      const nick = data.nickname;
+  // === GIFT, LIKE, FOLLOW, SHARE → UPDATE FAN STATUS + BP ===
+  tiktokLiveConnection.on('gift', async (data: any) => {
+    const user = data.uniqueId;
+    const nick = data.nickname;
+    const diamonds = data.diamondCount || 0;
+    const giftBP = diamonds * 0.5;
+    if (giftBP <= 0) return;
 
-      // Update fan status als TikTok het meestuurt
-      if (data.isFanClubMember === true || data.userBadges?.some((b: any) => b.type === 'fanclub')) {
-        await updateFanStatus(user, true);
-      } else if (data.isFanClubMember === false) {
-        await updateFanStatus(user, false);
-      }
+    // Update fan status
+    const isFan = data.isFanClubMember === true;
+    await updateFanStatus(user, isFan);
 
-      const { oldBP, isFan } = await ensureUserAndGetData(user, nick);
+    const { isFan: currentFan } = await getUserData(user, nick);
+    await addBP(user, giftBP, 'GIFT', nick, currentFan);
+    console.log(`→ ${data.giftName} (${diamonds} diamonds)`);
+  });
 
-      if (event === 'gift') {
-        const giftBP = (data.diamondCount || 0) * 0.5;
-        if (giftBP > 0) {
-          await addBP(user, giftBP, 'GIFT', nick, isFan);
-          console.log(`→ ${data.giftName} (${data.diamondCount} diamonds)`);
-        }
-      }
-      if (event === 'like') {
-        const likes = data.likeCount || 1;
-        const current = pendingLikes.get(user) || 0;
-        const total = current + likes;
-        const fullHundreds = Math.floor(total / 100);
-        if (fullHundreds > 0) {
-          await addBP(user, fullHundreds, 'LIKE', nick, isFan);
-          console.log(`→ +${likes} likes → ${fullHundreds}x100 (totaal: ${total})`);
-          pendingLikes.set(user, total % 100);
-        } else {
-          pendingLikes.set(user, total);
-        }
-      }
-      if (event === 'follow') {
-        if (hasFollowed.has(user)) return;
-        hasFollowed.add(user);
-        await addBP(user, 5, 'FOLLOW', nick, isFan);
-        console.log(`→ eerste follow in deze stream`);
-      }
-      if (event === 'share') {
-        await addBP(user, 5, 'SHARE', nick, isFan);
-        console.log(`→ stream gedeeld`);
-      }
-    });
+  tiktokLiveConnection.on('like', async (data: any) => {
+    const user = data.uniqueId;
+    const nick = data.nickname;
+    const likes = data.likeCount || 1;
+
+    const isFan = data.isFanClubMember === true;
+    await updateFanStatus(user, isFan);
+
+    const current = pendingLikes.get(user) || 0;
+    const total = current + likes;
+    pendingLikes.set(user, total);
+
+    const fullHundreds = Math.floor(total / 100);
+    if (fullHundreds > 0) {
+      const { isFan: currentFan } = await getUserData(user, nick);
+      await addBP(user, fullHundreds, 'LIKE', nick, currentFan);
+      console.log(`→ +${likes} likes → ${fullHundreds}x100 (totaal: ${total})`);
+      pendingLikes.set(user, total % 100);
+    }
+  });
+
+  tiktokLiveConnection.on('follow', async (data: any) => {
+    const user = data.uniqueId;
+    const nick = data.nickname;
+    if (hasFollowed.has(user)) return;
+    hasFollowed.add(user);
+
+    const isFan = data.isFanClubMember === true;
+    await updateFanStatus(user, isFan);
+
+    const { isFan: currentFan } = await getUserData(user, nick);
+    await addBP(user, 5, 'FOLLOW', nick, currentFan);
+    console.log(`→ eerste follow in deze stream`);
+  });
+
+  tiktokLiveConnection.on('share', async (data: any) => {
+    const user = data.uniqueId;
+    const nick = data.nickname;
+
+    const isFan = data.isFanClubMember === true;
+    await updateFanStatus(user, isFan);
+
+    const { isFan: currentFan } = await getUserData(user, nick);
+    await addBP(user, 5, 'SHARE', nick, currentFan);
+    console.log(`→ stream gedeeld`);
   });
 
   tiktokLiveConnection.on('connected', () => {
