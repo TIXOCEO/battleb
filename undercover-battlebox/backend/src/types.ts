@@ -4,7 +4,7 @@ export type User = {
   username: string;
   tiktok_id: string;
   bp_daily: number;
-  bp_total: number;
+  bp_total: number; // ← nu DOUBLE PRECISION
   streak: number;
   queue_position?: number;
   priority: number;
