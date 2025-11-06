@@ -183,27 +183,35 @@ async function startTikTokLive(username: string) {
       }
     }
 
-    // WACHTRIJ COMMANDS – ALLEEN VOOR FANS
-    if (!isFan) {
-      console.log(`[NO FAN] ${displayName} probeerde wachtrij zonder Heart Me`);
+    // === WACHTRIJ COMMANDS – ALLEEN VOOR FANS ===
+    const isQueueCommand = msg === '!join' || 
+                          msg.startsWith('!boost rij ') || 
+                          msg === '!leave';
+
+    if (isQueueCommand && !isFan) {
+      console.log(`[NO FAN] ${displayName} probeerde !join/!boost/!leave zonder Heart Me`);
       return;
     }
 
     if (msg === '!join') {
       console.log(`!join ontvangen van ${displayName} [FAN]`);
-      try { await addToQueue(userId.toString(), displayName); emitQueue(); } catch (e: any) { console.log('Join error:', e.message); }
+      try { await addToQueue(userId.toString(), displayName); emitQueue(); } 
+      catch (e: any) { console.log('Join error:', e.message); }
     } else if (msg.startsWith('!boost rij ')) {
       const spots = parseInt(msg.split(' ')[2] || '0');
       if (spots >= 1 && spots <= 5) {
         console.log(`!boost rij ${spots} van ${displayName} [FAN]`);
-        try { await boostQueue(userId.toString(), spots); emitQueue(); } catch (e: any) { console.log('Boost error:', e.message); }
+        try { await boostQueue(userId.toString(), spots); emitQueue(); } 
+        catch (e: any) { console.log('Boost error:', e.message); }
       }
     } else if (msg === '!leave') {
       console.log(`!leave ontvangen van ${displayName} [FAN]`);
-      try { const refund = await leaveQueue(userId.toString()); if (refund > 0) console.log(`${displayName} kreeg ${refund} BP terug`); emitQueue(); }
-      catch (e: any) { console.log('Leave error:', e.message); }
+      try { 
+        const refund = await leaveQueue(userId.toString()); 
+        if (refund > 0) console.log(`${displayName} kreeg ${refund} BP terug`); 
+        emitQueue(); 
+      } catch (e: any) { console.log('Leave error:', e.message); }
     }
-  });
 
   // === GIFT ===
   tiktokLiveConnection.on('gift', async (data: any) => {
