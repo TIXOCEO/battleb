@@ -2,7 +2,6 @@
 import pool from './db';
 import { User } from './types';
 
-// EIGEN TYPE VOOR FRONTEND (geen User object!)
 export type QueueEntry = {
   position: number;
   user: {
@@ -88,7 +87,6 @@ export async function getQueue(): Promise<QueueEntry[]> {
   }));
 }
 
-// Helper functies
 async function getUser(tiktok_id: string): Promise<User | null> {
   const res = await pool.query('SELECT * FROM users WHERE tiktok_id = $1', [tiktok_id]);
   return res.rows[0] || null;
@@ -96,7 +94,7 @@ async function getUser(tiktok_id: string): Promise<User | null> {
 
 async function createUser(tiktok_id: string, username: string): Promise<User> {
   const res = await pool.query(
-    'INSERT INTO users (tiktok_id, username, badges, blocks) VALUES ($1, $2, $3, $4) RETURNING *',
+    'INSERT INTO users (tiktok_id, username, badges, blocks, bp_total) VALUES ($1, $2, $3, $4, 0) RETURNING *',
     [tiktok_id, username, [], '{}']
   );
   return res.rows[0];
