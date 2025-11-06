@@ -35,22 +35,28 @@ async function emitQueue() {
 const hasFollowed = new Set<string>();
 const pendingLikes = new Map<string, number>(); // user → likes in deze stream
 
-// === HELPER: Zorg dat user bestaat + haal oude BP op ===
+// === HELPER: Zorg dat user bestaat + haal oude BP op (100% crash-vrij) ===
 async function ensureUserAndGetOldBP(tiktok_id: string, username: string, badges: string[]) {
-  const check = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [tiktok_id]);
-  let oldBP = 0;
+  // Probeer eerst te updaten (bestaande user)
+  const updateRes = await pool.query(
+    `UPDATE users SET username = $2, badges = $3 WHERE tiktok_id = $1 RETURNING bp_total`,
+    [tiktok_id, username, badges]
+  );
 
-  if (check.rows.length === 0) {
-    console.log(`[NEW USER] @${username}`);
-    await pool.query(
-      `INSERT INTO users (tiktok_id, username, badges, bp_total) VALUES ($1, $2, $3, 0)`,
-      [tiktok_id, username, badges]
-    );
-  } else {
-    oldBP = parseFloat(check.rows[0].bp_total) || 0;
+  if (updateRes.rowCount > 0) {
+    return parseFloat(updateRes.rows[0].bp_total) || 0;
   }
 
-  return oldBP;
+  // Nieuwe user → insert met ON CONFLICT
+  await pool.query(
+    `INSERT INTO users (tiktok_id, username, badges, bp_total) 
+     VALUES ($1, $2, $3, 0)
+     ON CONFLICT (tiktok_id) DO NOTHING`,
+    [tiktok_id, username, badges]
+  );
+
+  console.log(`[NEW USER] @${username}`);
+  return 0;
 }
 
 // === HELPER: Voeg BP toe + log oude → nieuwe ===
