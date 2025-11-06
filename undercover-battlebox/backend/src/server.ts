@@ -214,8 +214,8 @@ async function startTikTokLive(username: string) {
       console.log(`[ADMIN] VIP verwijderd van ${rawUsername}`);
       return;
     }
-  );
-
+});
+  
   // === GIFT ===
   tiktokLiveConnection.on('gift', async (data: any) => {
     const userIdRaw = data.userId || data.uniqueId || '0';
