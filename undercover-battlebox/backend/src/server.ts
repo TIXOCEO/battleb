@@ -4,6 +4,7 @@ import http from 'http';
 import { Server } from 'socket.io';
 import { WebcastPushConnection } from 'tiktok-live-connector';
 import { initDB } from './db';
+import pool from './db'; // ← TOEGEVOEGD
 import { addToQueue, boostQueue, leaveQueue, getQueue } from './queue';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -61,7 +62,7 @@ async function startTikTokLive(username: string) {
     // === BADGE DETECTIE ===
     const badges: string[] = [];
     if (data.isSuperFan === true) badges.push('superfan');
-    if (data.isFanClubMember === true) badges.push('fanclub'); // ← CORRECT
+    if (data.isFanClubMember === true) badges.push('fanclub');
     if (data.isVip === true) badges.push('vip');
 
     try {
@@ -118,7 +119,7 @@ async function startTikTokLive(username: string) {
     }
   });
 
-  // === GIFTS (OPTIONEEL – LATER BP) ===
+  // === GIFTS ===
   tiktokLiveConnection.on('gift', (data: any) => {
     console.log('Gift ontvangen:', data.nickname, data.giftName, data.diamondCount);
   });
