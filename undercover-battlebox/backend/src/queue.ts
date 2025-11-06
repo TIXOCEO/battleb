@@ -1,7 +1,8 @@
 // backend/src/queue.ts
 import pool from './db';
-import { User, QueueEntry } from './types';
+import { User } from './types';
 
+// EIGEN TYPE VOOR FRONTEND (geen User object!)
 export type QueueEntry = {
   position: number;
   user: {
@@ -28,7 +29,7 @@ export async function addToQueue(tiktok_id: string, username: string): Promise<v
 
 export async function boostQueue(tiktok_id: string, spots: number): Promise<void> {
   if (spots < 1 || spots > 5) throw new Error('Boost 1-5 plekken');
- 
+
   const cost = spots * 200;
   const userRes = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [tiktok_id]);
   if (!userRes.rows[0] || userRes.rows[0].bp_total < cost) {
