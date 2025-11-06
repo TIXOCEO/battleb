@@ -70,10 +70,10 @@ export async function getQueue(): Promise<QueueEntry[]> {
     FROM queue q
     JOIN users u ON q.user_tiktok_id = u.tiktok_id
     ORDER BY 
-      (q.boost_spots) +
-      (CASE WHEN u.badges @> '["superfan"]'::jsonb THEN 10 ELSE 0 END) +
-      (CASE WHEN u.badges @> '["fanclub"]'::jsonb THEN 5 ELSE 0 END) +
-      (CASE WHEN u.badges @> '["vip"]'::jsonb THEN 10 ELSE 0 END) DESC,
+      q.boost_spots +
+      (CASE WHEN 'superfan' = ANY(u.badges) THEN 10 ELSE 0 END) +
+      (CASE WHEN 'fanclub' = ANY(u.badges) THEN 5 ELSE 0 END) +
+      (CASE WHEN 'vip' = ANY(u.badges) THEN 10 ELSE 0 END) DESC,
       q.joined_at ASC
   `);
 
