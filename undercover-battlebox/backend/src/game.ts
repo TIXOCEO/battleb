@@ -15,7 +15,7 @@ async function emitArena() {
     const data = arenaCache.get(userIdStr);
     return data ? {
       userId: userIdStr,
-      display_name: data.displayName,
+      display_name: data.display_name,  // ← GEFIXT
       username: data.username,
       inArena: true
     } : null;
