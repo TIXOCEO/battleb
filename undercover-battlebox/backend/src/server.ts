@@ -43,84 +43,59 @@ if (!EULER_API_KEY) {
   process.exit(1);
 }
 
-// === NATIVE WEBSOCKET (EULER STREAM) ===
+// === WEBSOCKET ===
 const wsUrl = `wss://ws.eulerstream.com?uniqueId=${TIKTOK_USERNAME}&apiKey=${EULER_API_KEY}`;
 let ws: WebSocket;
 
-const currentGuests = new Set<string>(); // Houdt bij wie er nu co-host is
-
-interface UserData {
-  isFan: boolean;
-  isVip: boolean;
-}
-
-async function getUserData(tiktok_id: bigint, display_name: string, username: string): Promise<UserData> {
-  const usernameWithAt = '@' + username.toLowerCase();
-  const query = `
-    INSERT INTO users (tiktok_id, display_name, username, bp_total, is_fan, fan_expires_at, is_vip, vip_expires_at)
-    VALUES ($1, $2, $3, 0, false, NULL, false, NULL)
-    ON CONFLICT (tiktok_id)
-    DO UPDATE SET display_name = EXCLUDED.display_name, username = EXCLUDED.username
-    RETURNING bp_total, is_fan, fan_expires_at, is_vip, vip_expires_at;
-  `;
-  const res = await pool.query(query, [tiktok_id, display_name, usernameWithAt]);
-  const row = res.rows[0];
-  const isFan = row.is_fan && row.fan_expires_at && new Date(row.fan_expires_at) > new Date();
-  const isVip = row.is_vip && row.vip_expires_at && new Date(row.vip_expires_at) > new Date();
-  return { isFan, isVip };
-}
+// Houd bij wie er nu co-host is
+const currentGuests = new Set<string>();
 
 function connectWebSocket() {
   ws = new WebSocket(wsUrl);
 
   ws.on('open', () => {
     console.log('='.repeat(80));
-    console.log('EULER STREAM WEBSOCKET VERBONDEN – MULTI-GUEST TRACKING ACTIEF');
+    console.log('EULER WEBSOCKET VERBONDEN – ALLEEN MULTI-GUEST EVENTS');
     console.log('='.repeat(80));
   });
 
   ws.on('message', (data: WebSocket.Data) => {
     const raw = data.toString();
-    console.log('RAW WS →', raw.slice(0, 500));
 
     let events: any[] = [];
 
     try {
       const payload = JSON.parse(raw);
-
       if (Array.isArray(payload.messages)) events = payload.messages;
       else if (Array.isArray(payload.data)) events = payload.data;
       else if (Array.isArray(payload.events)) events = payload.events;
       else if (payload.type) events = [payload];
-
-      console.log(`GEPARSED ${events.length} EVENT(S)`);
     } catch (e) {
-      console.error('JSON parse fout →', e);
       return;
     }
 
     events.forEach((msg: any) => {
       const type = msg.type as string;
 
-      // === ALLEEN MULTI-GUEST EVENTS ===
+      // === ALLEEN MULTI-GUEST ===
       if (type === 'WebcastLinkMicMethodMessage') {
         const method = msg.data?.common?.method;
         const user = msg.data?.user;
-
         if (!method || !user) return;
 
         const userId = (user.userId?.toString() ?? user.uniqueId ?? '??') as string;
         const displayName = user.nickname ?? 'Onbekend';
         const username = user.uniqueId ?? '';
 
-        console.log(`[MULTI-GUEST] ${method} → ${displayName} (@${username})`);
+        console.log(`\n[MULTI-GUEST] ${method}`);
+        console.log(`→ ${displayName} (@${username})\n`);
 
-        // --- ACCEPT / JOIN ---
+        // --- ACCEPT ---
         if (method.includes('permit_join') || method === 'join_linkmic') {
           console.log(`[GUEST ACCEPTED] ${displayName} is nu co-host!`);
           arenaJoin(userId, displayName, username, 'co-host');
           currentGuests.add(userId);
-          console.log(`[GUESTS ONLINE] ${currentGuests.size}/8`);
+          console.log(`[GUESTS ONLINE] ${currentGuests.size}/8\n`);
         }
 
         // --- LEAVE ---
@@ -128,7 +103,7 @@ function connectWebSocket() {
           console.log(`[GUEST LEFT] ${displayName} heeft de co-host verlaten`);
           arenaLeave(userId);
           currentGuests.delete(userId);
-          console.log(`[GUESTS ONLINE] ${currentGuests.size}/8`);
+          console.log(`[GUESTS ONLINE] ${currentGuests.size}/8\n`);
         }
 
         // --- KICK ---
@@ -136,34 +111,25 @@ function connectWebSocket() {
           console.log(`[GUEST KICKED] ${displayName} is verwijderd`);
           arenaLeave(userId);
           currentGuests.delete(userId);
-          console.log(`[GUESTS ONLINE] ${currentGuests.size}/8`);
+          console.log(`[GUESTS ONLINE] ${currentGuests.size}/8\n`);
         }
 
         // --- INVITE ---
         if (method.includes('invite')) {
-          console.log(`[GUEST INVITED] ${displayName} is uitgenodigd`);
+          console.log(`[GUEST INVITED] ${displayName} is uitgenodigd\n`);
         }
-
-        return;
       }
 
-      // === LAYOUT CHANGE (extra bewijs van guest) ===
+      // === LAYOUT CHANGE (extra hint) ===
       if (type === 'WebcastLinkLayerMessage') {
-        const layout = msg.data?.layout;
-        if (layout) {
-          console.log(`[LAYOUT CHANGE] ${layout} → waarschijnlijk nieuwe co-host`);
-        }
-        return;
+        console.log(`[LAYOUT CHANGE] → waarschijnlijk nieuwe co-host\n`);
       }
-
-      // === ALLES ANDERE WORDT GENEGEERD ===
-      // console.log(`[IGNORED] ${type}`);
     });
   });
 
-  ws.on('close', (code: number, reason: string) => {
+  ws.on('close', (code: number) => {
     console.log(`WebSocket gesloten (code ${code}) – herconnect over 5 sec...`);
-    currentGuests.clear(); // Reset bij reconnect
+    currentGuests.clear();
     setTimeout(connectWebSocket, 5000);
   });
 
