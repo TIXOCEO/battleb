@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package TikTok;
+
+message WebcastGiftMessage {
+  Common common = 1;
+  int64 giftId = 2;
+  int64 repeatCount = 3;
+  User user = 4; // Sender
+  int64 repeatEnd = 5;
+  string groupId = 6;
+  GiftDetails giftDetails = 7;
+  string monitorExtra = 8;
+  GiftExtra giftExtra = 9;
+}
+
+message GiftExtra {
+  string timestamp = 1;
+  string receiverUserId = 2; // Dit is de target user (gast of host)
+}
+
+message Common {
+  string method = 1;
+  string msgId = 2;
+  string roomId = 3;
+  string createTime = 4;
+}
+
+message GiftDetails {
+  Image giftImage = 1;
+  string giftName = 2;
+  string describe = 3;
+  int32 giftType = 4;
+  int32 diamondCount = 5;
+}
+
+message User {
+  string userId = 1;
+  string uniqueId = 2;
+  string nickname = 3;
+  Image profilePicture = 4;
+}
+
+message Image {
+  repeated string urls = 1;
+  string uri = 2;
+  int32 height = 3;
+  int32 width = 4;
+}
