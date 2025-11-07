@@ -1,6 +1,6 @@
 // backend/src/game.ts
-import { Server } from 'socket.io';
-import type { WebcastPushConnection } from 'tiktok-live-connector';
+import { Server } from "socket.io";
+import type { WebcastPushConnection } from "tiktok-live-connector";
 
 export interface ArenaParticipant {
   id: string;
@@ -8,17 +8,6 @@ export interface ArenaParticipant {
   username: string;
 }
 
-/**
- * GameEngine – op dit moment vooral verantwoordelijk voor:
- * - het bijhouden van multi-guest deelnemers ("arena")
- * - loggen wanneer iemand binnenkomt / vertrekt
- * - realtime updates naar dashboard/overlay via Socket.IO
- *
- * LET OP:
- * - We hangen nu aan het 'member' event van tiktok-live-connector.
- *   In jouw tests kun je checken of dit inderdaad de multi-guests zijn
- *   (anders kunnen we het eenvoudig aanpassen naar het juiste event/type).
- */
 export class GameEngine {
   private io: Server;
   private connection: WebcastPushConnection;
@@ -27,74 +16,84 @@ export class GameEngine {
   constructor(io: Server, connection: WebcastPushConnection) {
     this.io = io;
     this.connection = connection;
-
-    this.registerArenaListeners();
+    this.registerListeners();
   }
 
-  private registerArenaListeners() {
-    // Volgens tiktok-live-connector stuurt 'member' join/leave info.
-    // data.action === 1 → join, data.action === 2 → leave (typische mapping).
-    this.connection.on('member', (data: any) => {
-      const action = data?.action;
-      if (action === 1) {
-        this.handleJoin(data);
-      } else if (action === 2) {
-        this.handleLeave(data);
-      } else {
-        // Onbekend actie-type, alleen debuggen – geen crash
-        // console.log('[BB DEBUG] Onbekende member-action:', data);
+  private registerListeners() {
+    // TikTok multi-guest updates (linkMic)
+    this.connection.on("linkMicArmies", (data: any) => {
+      try {
+        const guests = this.parseGuests(data);
+        this.syncParticipants(guests);
+      } catch (err) {
+        console.error("[BB] Fout bij verwerken linkMicArmies:", err);
       }
+    });
+
+    this.connection.on("connected", () => {
+      console.log("[BB] GameEngine actief – wacht op multi-guest updates...");
     });
   }
 
-  private handleJoin(data: any) {
-    const id = String(data.userId || data.uniqueId || '0');
-    const display_name: string = data.nickname || 'Onbekend';
-    const username: string =
-      data.uniqueId ||
-      (display_name || 'onbekend')
-        .toLowerCase()
-        .replace(/[^a-z0-9_]/g, '');
+  /** Haal gasten uit linkMicArmies payload */
+  private parseGuests(data: any): ArenaParticipant[] {
+    const armies = data?.armies || data?.participants || [];
+    const guests: ArenaParticipant[] = [];
 
-    if (this.participants.has(id)) {
-      // Al bekend, niets doen
-      return;
+    for (const entry of armies) {
+      const user = entry.user || entry;
+      if (!user?.userId) continue;
+
+      guests.push({
+        id: String(user.userId),
+        display_name: user.nickname || "Onbekend",
+        username:
+          user.uniqueId ||
+          (user.nickname || "")
+            .toLowerCase()
+            .replace(/[^a-z0-9_]/g, ""),
+      });
     }
 
-    const participant: ArenaParticipant = { id, display_name, username };
-    this.participants.set(id, participant);
-
-    // ✅ Gevraagde log: [BB] tag + tekst
-    console.log(`${display_name} [BB] komt de arena binnen.`);
-
-    // Realtime voor dashboard/overlay
-    this.io.emit('arena:join', participant);
-    this.emitArenaUpdate();
+    return guests;
   }
 
-  private handleLeave(data: any) {
-    const id = String(data.userId || data.uniqueId || '0');
-    const display_name: string = data.nickname || 'Onbekend';
+  /** Synchroniseer huidige gasten met nieuwe lijst */
+  private syncParticipants(newGuests: ArenaParticipant[]) {
+    const newIds = new Set(newGuests.map((g) => g.id));
+    const currentIds = new Set(this.participants.keys());
 
-    const existed = this.participants.delete(id);
-    if (!existed) {
-      return;
+    // Nieuwe binnenkomers
+    for (const g of newGuests) {
+      if (!this.participants.has(g.id)) {
+        this.participants.set(g.id, g);
+        console.log(`${g.display_name} [BB] komt de arena binnen.`);
+        this.io.emit("arena:join", g);
+      }
     }
 
-    // ✅ Gevraagde log: [BB] tag + tekst
-    console.log(`${display_name} [BB] verlaat de arena.`);
+    // Weggegaan
+    for (const oldId of currentIds) {
+      if (!newIds.has(oldId)) {
+        const old = this.participants.get(oldId);
+        if (old) {
+          console.log(`${old.display_name} [BB] verlaat de arena.`);
+          this.io.emit("arena:leave", { id: old.id, display_name: old.display_name });
+          this.participants.delete(oldId);
+        }
+      }
+    }
 
-    this.io.emit('arena:leave', { id, display_name });
+    // Altijd de volledige lijst uitsturen voor dashboard
     this.emitArenaUpdate();
   }
 
   private emitArenaUpdate() {
     const list = Array.from(this.participants.values());
-    this.io.emit('arena:update', list);
+    this.io.emit("arena:update", list);
   }
 
-  // Handig voor debug of later game-logica
-  public getActiveParticipants(): ArenaParticipant[] {
+  getActiveParticipants() {
     return Array.from(this.participants.values());
   }
 }
