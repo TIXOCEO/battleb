@@ -55,7 +55,7 @@ function connectWebSocket() {
 
   ws.on('open', () => {
     console.log('='.repeat(80));
-    console.log('EULER WEBSOCKET VERBONDEN – ALLEEN MULTI-GUEST EVENTS');
+    console.log('EULER WEBSOCKET VERBONDEN – ALLEEN ECHTE CO-HOST EVENTS');
     console.log('='.repeat(80));
   });
 
@@ -77,53 +77,50 @@ function connectWebSocket() {
     events.forEach((msg: any) => {
       const type = msg.type as string;
 
-      // === ALLEEN MULTI-GUEST ===
+      // === ALLEEN ECHTE CO-HOST EVENTS ===
       if (type === 'WebcastLinkMicMethodMessage') {
         const method = msg.data?.common?.method;
         const user = msg.data?.user;
+
         if (!method || !user) return;
 
         const userId = (user.userId?.toString() ?? user.uniqueId ?? '??') as string;
         const displayName = user.nickname ?? 'Onbekend';
         const username = user.uniqueId ?? '';
 
-        console.log(`\n[MULTI-GUEST] ${method}`);
-        console.log(`→ ${displayName} (@${username})\n`);
-
-        // --- ACCEPT ---
+        // --- LOG ALLEEN BELANGRIJKE ACTIES ---
         if (method.includes('permit_join') || method === 'join_linkmic') {
-          console.log(`[GUEST ACCEPTED] ${displayName} is nu co-host!`);
+          console.log(`\n[GUEST ACCEPTED] ${displayName} (@${username}) is nu co-host!`);
           arenaJoin(userId, displayName, username, 'co-host');
           currentGuests.add(userId);
           console.log(`[GUESTS ONLINE] ${currentGuests.size}/8\n`);
         }
 
-        // --- LEAVE ---
-        if (method.includes('leave_linkmic') || method === 'leave') {
-          console.log(`[GUEST LEFT] ${displayName} heeft de co-host verlaten`);
+        else if (method.includes('leave_linkmic') || method.includes('leave')) {
+          console.log(`\n[GUEST LEFT] ${displayName} (@${username}) heeft de co-host verlaten`);
           arenaLeave(userId);
           currentGuests.delete(userId);
           console.log(`[GUESTS ONLINE] ${currentGuests.size}/8\n`);
         }
 
-        // --- KICK ---
-        if (method.includes('kick_out')) {
-          console.log(`[GUEST KICKED] ${displayName} is verwijderd`);
+        else if (method.includes('kick_out')) {
+          console.log(`\n[GUEST KICKED] ${displayName} (@${username}) is verwijderd`);
           arenaLeave(userId);
           currentGuests.delete(userId);
           console.log(`[GUESTS ONLINE] ${currentGuests.size}/8\n`);
         }
 
-        // --- INVITE ---
-        if (method.includes('invite')) {
-          console.log(`[GUEST INVITED] ${displayName} is uitgenodigd\n`);
+        else if (method.includes('invite')) {
+          console.log(`\n[GUEST INVITED] ${displayName} (@${username}) is uitgenodigd\n`);
+        }
+
+        // Debug: toon alle methodes (optioneel, verwijder later)
+        else {
+          console.log(`[DEBUG METHOD] ${method} → ${displayName}`);
         }
       }
 
-      // === LAYOUT CHANGE (extra hint) ===
-      if (type === 'WebcastLinkLayerMessage') {
-        console.log(`[LAYOUT CHANGE] → waarschijnlijk nieuwe co-host\n`);
-      }
+      // === ALLES ANDERE WORDT GENEGEERD (geen layout, geen like, geen chat) ===
     });
   });
 
