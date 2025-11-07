@@ -3,6 +3,7 @@ import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
 import { WebcastPushConnection } from 'tiktok-live-connector';
+import * as protobuf from 'protobufjs';
 import { initDB } from './db';
 import pool from './db';
 import { addToQueue, leaveQueue, getQueue } from './queue';
@@ -38,22 +39,25 @@ io.on('connection', (socket) => {
 
 const ADMIN_ID = process.env.ADMIN_TIKTOK_ID?.trim();
 
-// VEILIGE CONNECTIE MET RETRY
-async function connectWithRetry(username: string, retries = 6): Promise<WebcastPushConnection> {
-  for (let i = 0; i < retries; i++) {
-    try {
-      const conn = new WebcastPushConnection(username);
-      await conn.connect();
-      console.info(`Verbonden met @${username} (poging ${i + 1})`);
-      return conn;
-    } catch (err: any) {
-      console.error(`Connectie mislukt (poging ${i + 1}/${retries}):`, err.message || err);
-      if (i < retries - 1) await new Promise(r => setTimeout(r, 7000));
-    }
+// ─────────────────────────────────────────────────────────────────────────────
+// 1. PROTOBUF SCHEMA VOOR GIFTS (receiverUserId)
+// ─────────────────────────────────────────────────────────────────────────────
+let WebcastGiftMessage: any;
+let hostId = '';
+
+async function loadProtobufSchema() {
+  try {
+    const root = await protobuf.load('src/tiktok.proto');
+    WebcastGiftMessage = root.lookupType('TikTok.WebcastGiftMessage');
+    console.log('Protobuf schema geladen: tiktok.proto');
+  } catch (err) {
+    console.error('Fout bij laden protobuf schema:', err);
   }
-  throw new Error('Definitief geen verbinding met TikTok Live');
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 2. USER DATA FUNCTIE (voor fan/vip)
+// ─────────────────────────────────────────────────────────────────────────────
 async function getUserData(tiktok_id: bigint, display_name: string, username: string) {
   const usernameWithAt = '@' + username.toLowerCase();
   const query = `
@@ -70,12 +74,70 @@ async function getUserData(tiktok_id: bigint, display_name: string, username: st
   return { isFan, isVip };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 3. CONNECTIE MET RETRY
+// ─────────────────────────────────────────────────────────────────────────────
+async function connectWithRetry(username: string, retries = 6): Promise<WebcastPushConnection> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const conn = new WebcastPushConnection(username);
+      await conn.connect();
+      console.info(`Verbonden met @${username} (poging ${i + 1})`);
+      return conn;
+    } catch (err: any) {
+      console.error(`Connectie mislukt (poging ${i + 1}/${retries}):`, err.message || err);
+      if (i < retries - 1) await new Promise(r => setTimeout(r, 7000));
+    }
+  }
+  throw new Error('Definitief geen verbinding met TikTok Live');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. START TIKTOK LIVE
+// ─────────────────────────────────────────────────────────────────────────────
 async function startTikTokLive(username: string) {
   const conn = await connectWithRetry(username);
   const pendingLikes = new Map<string, number>();
   const hasFollowed = new Set<string>();
 
-  // === ULTI-GUEST 2025 EVENTS ===
+  // ── ROOM INFO (host ID) ──────────────────────────────────────────────────
+  conn.on('connected', (state) => {
+    hostId = state.hostId || state.userId || state.user?.userId || '';
+    console.log('='.repeat(80));
+    console.log('ULTI-GUEST 100% GEDETECTEERD – KLAAR VOOR DE OORLOG');
+    console.log(`ROOM ID: ${state.roomId || 'ONBEKEND'}`);
+    console.log(`Host ID: ${hostId}`);
+    console.log(`Titel: ${state.title || 'Geen titel'}`);
+    console.log(`Live sinds: ${new Date((state.createTime || 0) * 1000).toLocaleString('nl-NL')}`);
+    console.log('='.repeat(80));
+  });
+
+  // ── RAW DATA: PARSE GIFTS MET receiverUserId ─────────────────────────────
+  conn.on('rawData', (messageTypeName, binary) => {
+    if (messageTypeName !== 'WebcastGiftMessage') return;
+
+    try {
+      const message = WebcastGiftMessage.decode(binary);
+      const sender = message.user || {};
+      const senderId = sender.userId?.toString() || '??';
+      const senderName = sender.nickname || 'Onbekend';
+      const senderUsername = sender.uniqueId || senderName.toLowerCase().replace(/[^a-z0-9_]/g, '');
+
+      const receiverId = message.giftExtra?.receiverUserId || hostId;
+      const giftName = message.giftDetails?.giftName || 'Onbekend';
+      const diamonds = message.giftDetails?.diamondCount || 0;
+
+      console.log('\n[GIFT GEDETECTEERD]');
+      console.log(`   Van: ${senderName} (@${senderUsername})`);
+      console.log(`   Aan: ID ${receiverId} ${receiverId === hostId ? '(HOST)' : '(GAST)'} `);
+      console.log(`   Gift: ${giftName} (${diamonds} diamonds)`);
+      console.log('='.repeat(60));
+    } catch (err) {
+      console.error('Fout bij parsen gift:', err);
+    }
+  });
+
+  // ── ULTI-GUEST EVENTS (join/leave) ───────────────────────────────────────
   conn.on('liveRoomGuestEnter', (data: any) => {
     if (!data.user) return;
     const userId = data.user.userId?.toString() || data.userId?.toString();
@@ -110,7 +172,7 @@ async function startTikTokLive(username: string) {
     arenaClear();
   });
 
-  // === CHAT + ADMIN COMMANDS ===
+  // ── CHAT + ADMIN COMMANDS ────────────────────────────────────────────────
   conn.on('chat', async (data: any) => {
     const rawComment = data.comment || '';
     const msg = rawComment.trim();
@@ -192,7 +254,7 @@ async function startTikTokLive(username: string) {
     }
   });
 
-  // === GIFT ===
+  // ── GIFT (alleen fallback, rawData doet het echte werk) ──────────────────
   conn.on('gift', async (data: any) => {
     const userId = BigInt(data.userId || data.uniqueId || '0');
     const display_name = data.nickname || 'Onbekend';
@@ -221,7 +283,7 @@ async function startTikTokLive(username: string) {
     console.log(`${data.giftName} (${diamonds} diamonds) → +${bp} BP`);
   });
 
-  // === LIKE, FOLLOW, SHARE ===
+  // ── LIKE, FOLLOW, SHARE ──────────────────────────────────────────────────
   conn.on('like', async (data: any) => {
     const userId = BigInt(data.userId || data.uniqueId || '0');
     const display_name = data.nickname || 'Onbekend';
@@ -257,33 +319,27 @@ async function startTikTokLive(username: string) {
     await addBP(userId, 5, 'SHARE', display_name, isFan, isVip);
   });
 
-  // === ROOM ID – ALLEEN HIER VEILIG ===
-  conn.on('connected', (state) => {
-    console.log('='.repeat(80));
-    console.log('ULTI-GUEST 100% GEDETECTEERD – KLAAR VOOR DE OORLOG');
-    console.log(`ROOM ID: ${state.roomId || 'ONBEKEND'}`);
-    console.log(`Titel: ${state.title || 'Geen titel'}`);
-    console.log(`Live sinds: ${new Date(state.createTime * 1000).toLocaleString('nl-NL')}`);
-    console.log('='.repeat(80));
-  });
-
   conn.on('error', (err) => {
     console.error('TikTok Live fout:', err);
   });
 }
 
-// === START SERVER ===
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. START SERVER
+// ─────────────────────────────────────────────────────────────────────────────
 const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME?.trim() || 'JOUW_USERNAME';
 
-initDB()
-  .then(() => {
-    server.listen(4000, () => {
-      console.log('BATTLEBOX BACKEND LIVE → http://localhost:4000');
-      console.log('='.repeat(80));
-      startTikTokLive(TIKTOK_USERNAME);
+loadProtobufSchema().then(() => {
+  initDB()
+    .then(() => {
+      server.listen(4000, () => {
+        console.log('BATTLEBOX BACKEND LIVE → http://localhost:4000');
+        console.log('='.repeat(80));
+        startTikTokLive(TIKTOK_USERNAME);
+      });
+    })
+    .catch((err) => {
+      console.error('DB initialisatie mislukt:', err);
+      process.exit(1);
     });
-  })
-  .catch((err) => {
-    console.error('DB initialisatie mislukt:', err);
-    process.exit(1);
-  });
+});
