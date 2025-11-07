@@ -77,6 +77,11 @@ function connectWebSocket() {
     events.forEach((msg: any) => {
       const type = msg.type as string;
 
+      // Debug: Log elke type die 'link' of 'mic' bevat
+      if (type.toLowerCase().includes('link') || type.toLowerCase().includes('mic')) {
+        console.log(`[DEBUG TYPE] ${type}`);
+      }
+
       // === ALLEEN ECHTE CO-HOST EVENTS ===
       if (type === 'WebcastLinkMicMethodMessage') {
         const method = msg.data?.common?.method;
@@ -88,39 +93,41 @@ function connectWebSocket() {
         const displayName = user.nickname ?? 'Onbekend';
         const username = user.uniqueId ?? '';
 
-        // --- LOG ALLEEN BELANGRIJKE ACTIES ---
+        console.log(`\n[MULTI-GUEST] ${method}`);
+        console.log(`→ ${displayName} (@${username})\n`);
+
         if (method.includes('permit_join') || method === 'join_linkmic') {
-          console.log(`\n[GUEST ACCEPTED] ${displayName} (@${username}) is nu co-host!`);
+          console.log(`[GUEST ACCEPTED] ${displayName} is nu co-host!`);
           arenaJoin(userId, displayName, username, 'co-host');
           currentGuests.add(userId);
           console.log(`[GUESTS ONLINE] ${currentGuests.size}/8\n`);
         }
 
-        else if (method.includes('leave_linkmic') || method.includes('leave')) {
-          console.log(`\n[GUEST LEFT] ${displayName} (@${username}) heeft de co-host verlaten`);
+        else if (method.includes('leave_linkmic') || method === 'leave') {
+          console.log(`[GUEST LEFT] ${displayName} heeft de co-host verlaten`);
           arenaLeave(userId);
           currentGuests.delete(userId);
           console.log(`[GUESTS ONLINE] ${currentGuests.size}/8\n`);
         }
 
         else if (method.includes('kick_out')) {
-          console.log(`\n[GUEST KICKED] ${displayName} (@${username}) is verwijderd`);
+          console.log(`[GUEST KICKED] ${displayName} is verwijderd`);
           arenaLeave(userId);
           currentGuests.delete(userId);
           console.log(`[GUESTS ONLINE] ${currentGuests.size}/8\n`);
         }
 
         else if (method.includes('invite')) {
-          console.log(`\n[GUEST INVITED] ${displayName} (@${username}) is uitgenodigd\n`);
+          console.log(`[GUEST INVITED] ${displayName} is uitgenodigd\n`);
         }
 
-        // Debug: toon alle methodes (optioneel, verwijder later)
+        // Andere methodes (debug)
         else {
-          console.log(`[DEBUG METHOD] ${method} → ${displayName}`);
+          console.log(`[DEBUG METHOD] ${method} → ${displayName}\n`);
         }
       }
 
-      // === ALLES ANDERE WORDT GENEGEERD (geen layout, geen like, geen chat) ===
+      // === GEEN LAYOUT CHANGE MEER ===
     });
   });
 
