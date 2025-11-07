@@ -3,7 +3,6 @@ import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
 import { WebcastPushConnection } from 'tiktok-live-connector';
-import * as protobuf from 'protobufjs';
 import { initDB } from './db';
 import pool from './db';
 import { addToQueue, leaveQueue, getQueue } from './queue';
@@ -38,34 +37,10 @@ io.on('connection', (socket) => {
 });
 
 const ADMIN_ID = process.env.ADMIN_TIKTOK_ID?.trim();
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 1. PROTOBUF SCHEMA + GIFT CACHE
-// ─────────────────────────────────────────────────────────────────────────────
-let WebcastGiftMessage: any;
 let hostId = '';
 
-// Cache: msgId → gift data (sender, name, diamonds)
-const giftCache = new Map<string, {
-  senderId: string;
-  senderName: string;
-  senderUsername: string;
-  giftName: string;
-  diamonds: number;
-}>();
-
-async function loadProtobufSchema() {
-  try {
-    const root = await protobuf.load('src/tiktok.proto');
-    WebcastGiftMessage = root.lookupType('TikTok.WebcastGiftMessage');
-    console.log('Protobuf schema geladen: tiktok.proto');
-  } catch (err) {
-    console.error('Fout bij laden protobuf schema:', err);
-  }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// 2. USER DATA FUNCTIE (voor fan/vip)
+// 1. USER DATA FUNCTIE
 // ─────────────────────────────────────────────────────────────────────────────
 async function getUserData(tiktok_id: bigint, display_name: string, username: string) {
   const usernameWithAt = '@' + username.toLowerCase();
@@ -84,7 +59,7 @@ async function getUserData(tiktok_id: bigint, display_name: string, username: st
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 3. CONNECTIE MET RETRY
+// 2. CONNECTIE MET RETRY
 // ─────────────────────────────────────────────────────────────────────────────
 async function connectWithRetry(username: string, retries = 6): Promise<WebcastPushConnection> {
   for (let i = 0; i < retries; i++) {
@@ -102,14 +77,14 @@ async function connectWithRetry(username: string, retries = 6): Promise<WebcastP
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 4. START TIKTOK LIVE
+// 3. START TIKTOK LIVE
 // ─────────────────────────────────────────────────────────────────────────────
 async function startTikTokLive(username: string) {
   const conn = await connectWithRetry(username);
   const pendingLikes = new Map<string, number>();
   const hasFollowed = new Set<string>();
 
-  // ── ROOM INFO (host ID) ──────────────────────────────────────────────────
+  // ── ROOM INFO ───────────────────────────────────────────────────────────
   conn.on('connected', (state) => {
     hostId = state.hostId || state.userId || state.user?.userId || '';
     console.log('='.repeat(80));
@@ -121,11 +96,8 @@ async function startTikTokLive(username: string) {
     console.log('='.repeat(80));
   });
 
-  // ── GIFT EVENT: SLA OP IN CACHE (msgId is key) ───────────────────────────
+  // ── GIFT EVENT: ALLES WAT WE NODIG HEBBEN ───────────────────────────────
   conn.on('gift', async (data: any) => {
-    const msgId = data.common?.msgId || data.msgId || '';
-    if (!msgId) return;
-
     const sender = data.user || {};
     const senderId = sender.userId?.toString() || '??';
     const senderName = sender.nickname || 'Onbekend';
@@ -134,17 +106,16 @@ async function startTikTokLive(username: string) {
     const giftName = data.giftName || 'Onbekend';
     const diamonds = data.diamondCount || 0;
 
-    // Sla op in cache
-    giftCache.set(msgId, {
-      senderId,
-      senderName,
-      senderUsername,
-      giftName,
-      diamonds
-    });
+    // CRUCIAAL: receiverUserId of toUserId
+    const receiverId = data.receiverUserId || data.toUserId || hostId;
+    const isToHost = receiverId === hostId;
 
-    // Cleanup na 2 sec
-    setTimeout(() => giftCache.delete(msgId), 2000);
+    // DEBUG: toon alles
+    console.log('\n[GIFT VOLLEDIG GEDETECTEERD]');
+    console.log(`   Van: ${senderName} (@${senderUsername}) [ID: ${senderId}]`);
+    console.log(`   Aan: ID ${receiverId} ${isToHost ? '(HOST)' : '(GAST)'} `);
+    console.log(`   Gift: ${giftName} (${diamonds} diamonds)`);
+    console.log('='.repeat(60));
 
     // Heart Me → FAN
     if (giftName.toLowerCase().includes('heart me')) {
@@ -161,48 +132,11 @@ async function startTikTokLive(username: string) {
       return;
     }
 
-    // Normale gift → log (BP later via rawData)
-    if (diamonds > 0) {
-      console.log(`[GIFT] ${senderName}`);
-      console.log(`${giftName} (${diamonds} diamonds)`);
-    }
+    // === HIER KOMT LATER DIAMONDS PER RONDE ===
+    // await addDiamondsToArena(receiverId, diamonds);
   });
 
-  // ── RAW DATA: HAAL receiverUserId + MATCH MET CACHE ───────────────────────
-  conn.on('rawData', (messageTypeName, binary) => {
-    if (messageTypeName !== 'WebcastGiftMessage') return;
-
-    try {
-      const message = WebcastGiftMessage.decode(binary);
-      const common = message.common || {};
-      const msgId = common.msgId?.toString() || '';
-
-      const receiverId = message.giftExtra?.receiverUserId || hostId;
-      if (!receiverId) return;
-
-      const cached = giftCache.get(msgId);
-      if (!cached) {
-        console.log(`[GIFT GEDETECTEERD] (geen cache match) → Aan: ID ${receiverId} ${receiverId === hostId ? '(HOST)' : '(GAST)'}`);
-        return;
-      }
-
-      const { senderName, senderUsername, giftName, diamonds } = cached;
-
-      console.log('\n[GIFT VOLLEDIG GEDETECTEERD]');
-      console.log(`   Van: ${senderName} (@${senderUsername})`);
-      console.log(`   Aan: ID ${receiverId} ${receiverId === hostId ? '(HOST)' : '(GAST)'} `);
-      console.log(`   Gift: ${giftName} (${diamonds} diamonds)`);
-      console.log('='.repeat(60));
-
-      // === HIER KOMT LATER DIAMONDS PER RONDE ===
-      // await addDiamondsToArena(receiverId, diamonds);
-
-    } catch (err) {
-      console.error('Fout bij parsen gift rawData:', err);
-    }
-  });
-
-  // ── ULTI-GUEST EVENTS (join/leave) ───────────────────────────────────────
+  // ── ULTI-GUEST EVENTS ───────────────────────────────────────────────────
   conn.on('liveRoomGuestEnter', (data: any) => {
     if (!data.user) return;
     const userId = data.user.userId?.toString() || data.userId?.toString();
@@ -235,10 +169,9 @@ async function startTikTokLive(username: string) {
   conn.on('liveEnd', () => {
     console.log(`[END] Stream beëindigd → arena geleegd`);
     arenaClear();
-    giftCache.clear();
   });
 
-  // ── CHAT + ADMIN COMMANDS ────────────────────────────────────────────────
+  // ── CHAT + ADMIN COMMANDS ───────────────────────────────────────────────
   conn.on('chat', async (data: any) => {
     const rawComment = data.comment || '';
     const msg = rawComment.trim();
@@ -283,7 +216,6 @@ async function startTikTokLive(username: string) {
         await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [giveAmount, targetId]);
         console.log(`[ADMIN] +${giveAmount} BP → ${rawUsername}`);
         break;
-
       case 'verw':
         if (!args[2]) return;
         const takeAmount = parseFloat(args[2]);
@@ -291,13 +223,11 @@ async function startTikTokLive(username: string) {
         await pool.query('UPDATE users SET bp_total = GREATEST(bp_total - $1, 0) WHERE tiktok_id = $2', [takeAmount, targetId]);
         console.log(`[ADMIN] -${takeAmount} BP → ${rawUsername}`);
         break;
-
       case 'voegrij':
         await addToQueue(targetId.toString(), targetDisplay);
         require('./queue').emitQueue();
         console.log(`[ADMIN] ${rawUsername} → wachtrij`);
         break;
-
       case 'verwrij':
         const refund = await leaveQueue(targetId.toString());
         if (refund > 0) {
@@ -307,12 +237,10 @@ async function startTikTokLive(username: string) {
         }
         require('./queue').emitQueue();
         break;
-
       case 'geefvip':
         await pool.query('UPDATE users SET is_vip = true, vip_expires_at = NOW() + INTERVAL \'30 days\' WHERE tiktok_id = $1', [targetId]);
         console.log(`[ADMIN] VIP 30 dagen → ${rawUsername}`);
         break;
-
       case 'verwvip':
         await pool.query('UPDATE users SET is_vip = false, vip_expires_at = NULL WHERE tiktok_id = $1', [targetId]);
         console.log(`[ADMIN] VIP verwijderd → ${rawUsername}`);
@@ -320,7 +248,7 @@ async function startTikTokLive(username: string) {
     }
   });
 
-  // ── LIKE, FOLLOW, SHARE ──────────────────────────────────────────────────
+  // ── LIKE, FOLLOW, SHARE ─────────────────────────────────────────────────
   conn.on('like', async (data: any) => {
     const userId = BigInt(data.userId || data.uniqueId || '0');
     const display_name = data.nickname || 'Onbekend';
@@ -362,21 +290,19 @@ async function startTikTokLive(username: string) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5. START SERVER
+// 4. START SERVER
 // ─────────────────────────────────────────────────────────────────────────────
 const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME?.trim() || 'JOUW_USERNAME';
 
-loadProtobufSchema().then(() => {
-  initDB()
-    .then(() => {
-      server.listen(4000, () => {
-        console.log('BATTLEBOX BACKEND LIVE → http://localhost:4000');
-        console.log('='.repeat(80));
-        startTikTokLive(TIKTOK_USERNAME);
-      });
-    })
-    .catch((err) => {
-      console.error('DB initialisatie mislukt:', err);
-      process.exit(1);
+initDB()
+  .then(() => {
+    server.listen(4000, () => {
+      console.log('BATTLEBOX BACKEND LIVE → http://localhost:4000');
+      console.log('='.repeat(80));
+      startTikTokLive(TIKTOK_USERNAME);
     });
-});
+  })
+  .catch((err) => {
+    console.error('DB initialisatie mislukt:', err);
+    process.exit(1);
+  });
