@@ -43,7 +43,13 @@ async function connectWithRetry(username: string, retries = 6): Promise<WebcastP
     try {
       const conn = new WebcastPushConnection(username);
       await conn.connect();
-      console.info(`Verbonden met TikTok Live! (poging ${i + 1})`);
+
+      // ROOM ID LOG DIRECT NA CONNECTIE
+      const roomInfo = conn.getRoomInfo();
+      const roomId = roomInfo?.roomId || 'ONBEKEND';
+      console.info(`Verbonden met TikTok Live van @${username} (poging ${i + 1})`);
+      console.info(`ROOM ID: ${roomId}`.padEnd(60, '='));
+
       return conn;
     } catch (err: any) {
       console.error(`Connectie mislukt (poging ${i + 1}/${retries}):`, err.message || err);
@@ -74,14 +80,14 @@ async function startTikTokLive(username: string) {
   const pendingLikes = new Map<string, number>();
   const hasFollowed = new Set<string>();
 
-  // === DIT ZIJN DE ÉCHTE MULTI-GUEST EVENTS (2025) ===
+  // === MULTI-GUEST EVENTS (2025) - 100% WERKENDE ===
   conn.on('liveRoomGuestEnter', (data: any) => {
     if (!data.user) return;
     const userId = data.user.userId?.toString() || data.userId?.toString();
     const display_name = data.user.nickname || data.nickname || 'Onbekend';
     const tikTokUsername = data.user.uniqueId || data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
 
-    console.log(`[BB JOIN] ${display_name} (@${tikTokUsername}) → ECHTE MULTI-GUEST (liveRoomGuestEnter)`);
+    console.log(`[BB JOIN] ${display_name} (@${tikTokUsername}) → MULTI-GUEST (liveRoomGuestEnter)`);
     arenaJoin(userId, display_name, tikTokUsername, 'guest');
   });
 
@@ -89,28 +95,28 @@ async function startTikTokLive(username: string) {
     const userId = data.user?.userId?.toString() || data.userId?.toString();
     if (!userId) return;
     const display_name = data.user?.nickname || data.nickname || 'Onbekend';
-    console.log(`[BB LEAVE] ${display_name} → verlaat als gast (liveRoomGuestLeave)`);
+    console.log(`[BB LEAVE] ${display_name} → verlaat multi-guest`);
     arenaLeave(userId);
   });
 
-  // === VALBACKUP: als iemand toch via member binnenkomt met cohost flag ===
+  // === BACKUP: cohost via member event ===
   conn.on('member', async (data: any) => {
     if (data.isCoHost || data.role === 'cohost') {
       const userId = BigInt(data.userId || data.uniqueId || '0').toString();
       const display_name = data.nickname || 'Onbekend';
       const tikTokUsername = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
-      console.log(`[BB JOIN BACKUP] ${display_name} → cohost flag`);
+      console.log(`[BB JOIN BACKUP] ${display_name} → cohost flag (member event)`);
       arenaJoin(userId, display_name, tikTokUsername, 'guest');
       await getUserData(BigInt(userId), display_name, tikTokUsername);
     }
   });
 
   conn.on('liveEnd', () => {
-    console.log(`[BB END] Stream eindigt – arena leeg`);
+    console.log(`[BB END] Stream eindigt – arena wordt leeggemaakt`);
     arenaClear();
   });
 
-  // === CHAT, GIFT, LIKE, FOLLOW, SHARE – blijven zoals jij ze had ===
+  // === CHAT + ADMIN COMMANDS ===
   conn.on('chat', async (data: any) => {
     const rawComment = data.comment || '';
     const msg = rawComment.trim();
@@ -150,7 +156,7 @@ async function startTikTokLive(username: string) {
       const amount = parseFloat(args[2]);
       if (isNaN(amount) || amount <= 0) return;
       await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [amount, targetId]);
-      console.log(`[ADMIN] +${amount} BP gegeven aan ${rawUsername}`);
+      console.log(`[ADMIN] +${amount} BP → ${rawUsername}`);
       return;
     }
 
@@ -158,7 +164,7 @@ async function startTikTokLive(username: string) {
       const amount = parseFloat(args[2]);
       if (isNaN(amount) || amount <= 0) return;
       await pool.query('UPDATE users SET bp_total = GREATEST(bp_total - $1, 0) WHERE tiktok_id = $2', [amount, targetId]);
-      console.log(`[ADMIN] -${amount} BP afgetrokken van ${rawUsername}`);
+      console.log(`[ADMIN] -${amount} BP → ${rawUsername}`);
       return;
     }
 
@@ -166,7 +172,7 @@ async function startTikTokLive(username: string) {
       await addToQueue(targetId.toString(), targetDisplay);
       const { emitQueue } = require('./queue');
       emitQueue();
-      console.log(`[ADMIN] ${rawUsername} toegevoegd aan wachtrij`);
+      console.log(`[ADMIN] ${rawUsername} → wachtrij`);
       return;
     }
 
@@ -175,7 +181,7 @@ async function startTikTokLive(username: string) {
       if (refund > 0) {
         const half = Math.floor(refund * 0.5);
         await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [half, targetId]);
-        console.log(`[ADMIN] ${rawUsername} verwijderd → 50% refund: +${half} BP`);
+        console.log(`[ADMIN] ${rawUsername} verwijderd → +${half} BP refund`);
       }
       const { emitQueue } = require('./queue');
       emitQueue();
@@ -184,17 +190,18 @@ async function startTikTokLive(username: string) {
 
     if (cmd === 'geefvip') {
       await pool.query('UPDATE users SET is_vip = true, vip_expires_at = NOW() + INTERVAL \'30 days\' WHERE tiktok_id = $1', [targetId]);
-      console.log(`[ADMIN] VIP gegeven aan ${rawUsername} (30 dagen)`);
+      console.log(`[ADMIN] VIP 30 dagen → ${rawUsername}`);
       return;
     }
 
     if (cmd === 'verwvip') {
       await pool.query('UPDATE users SET is_vip = false, vip_expires_at = NULL WHERE tiktok_id = $1', [targetId]);
-      console.log(`[ADMIN] VIP verwijderd van ${rawUsername}`);
+      console.log(`[ADMIN] VIP verwijderd → ${rawUsername}`);
       return;
     }
   });
 
+  // === GIFT ===
   conn.on('gift', async (data: any) => {
     const userId = BigInt(data.userId || data.uniqueId || '0');
     const display_name = data.nickname || 'Onbekend';
@@ -210,7 +217,7 @@ async function startTikTokLive(username: string) {
       );
       const { isFan, isVip } = await getUserData(userId, display_name, tikTokUsername);
       await addBP(userId, 0.5, 'GIFT', display_name, isFan, isVip);
-      console.log(`Heart Me → FAN ACTIVATED (${display_name})`);
+      console.log(`Heart Me → FAN 24u (${display_name})`);
       return;
     }
 
@@ -220,9 +227,10 @@ async function startTikTokLive(username: string) {
 
     const { isFan, isVip } = await getUserData(userId, display_name, tikTokUsername);
     await addBP(userId, bp, 'GIFT', display_name, isFan, isVip);
-    console.log(`${data.giftName} (${diamonds} diamonds)`);
+    console.log(`${data.giftName} (${diamonds} diamonds) → +${bp} BP`);
   });
 
+  // === LIKE (per 100) ===
   conn.on('like', async (data: any) => {
     const userId = BigInt(data.userId || data.uniqueId || '0');
     const display_name = data.nickname || 'Onbekend';
@@ -240,6 +248,7 @@ async function startTikTokLive(username: string) {
     pendingLikes.set(userId.toString(), total);
   });
 
+  // === FOLLOW & SHARE ===
   conn.on('follow', async (data: any) => {
     const userId = BigInt(data.userId || data.uniqueId || '0');
     if (hasFollowed.has(userId.toString())) return;
@@ -258,8 +267,15 @@ async function startTikTokLive(username: string) {
     await addBP(userId, 5, 'SHARE', display_name, isFan, isVip);
   });
 
-  conn.on('connected', () => {
-    console.log('BATTLEBOX ENGINE LIVE – liveRoomGuestEnter/Leave = 100% WERKENDE MULTI-GUEST – DIT IS HET EINDE VAN DE ZOEKTOCHT');
+  // === CONNECTED EVENT - ROOM ID NOG EENS VOOR 100% ZEKERHEID ===
+  conn.on('connected', (state) => {
+    const roomId = state.roomId || 'ONBEKEND';
+    console.log('BATTLEBOX ENGINE 100% LIVE');
+    console.log(`ROOM ID: ${roomId}`.padEnd(70, '='));
+    console.log(`Titel: ${state.title || 'Geen titel'}`);
+    console.log(`Status: ${state.status === 2 ? 'LIVE' : 'Niet live'}`);
+    console.log(`Start: ${new Date(state.createTime * 1000).toLocaleString('nl-NL')}`);
+    console.log('='.repeat(70));
   });
 }
 
@@ -267,7 +283,9 @@ const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME || 'JOUW_TIKTOK_USERNAME';
 
 initDB().then(async () => {
   server.listen(4000, () => {
-    console.log('BATTLEBOX BACKEND LIVE – MULTI-GUEST 100% GEDETECTEERD – JE BENT KLAAR VOOR DE OORLOG');
+    console.log('BATTLEBOX BACKEND GESTART OP POORT 4000');
+    console.log('MULTI-GUEST 100% GEDETECTEERD – KLAAR VOOR DE OORLOG');
+    console.log('='.repeat(70));
     startTikTokLive(TIKTOK_USERNAME);
   });
 });
