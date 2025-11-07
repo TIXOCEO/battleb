@@ -17,10 +17,8 @@ app.use(cors());
 const server = http.createServer(app);
 export const io = new Server(server, { cors: { origin: '*' } });
 
-// === INIT GAME ENGINE ===
 initGame(io);
 
-// === ENDPOINTS ===
 app.get('/queue', async (req, res) => {
   const queue = await getQueue();
   res.json(queue);
@@ -80,25 +78,41 @@ async function startTikTokLive(username: string) {
   const pendingLikes = new Map<string, number>();
   const hasFollowed = new Set<string>();
 
-  // === BATTLEBOX ARENA ===
-  conn.on('member', async (data: any) => {
-    const userId = BigInt(data.userId || data.uniqueId || '0').toString();
-    const display_name = data.nickname || 'Onbekend';
-    const tikTokUsername = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
-    arenaJoin(userId, display_name, tikTokUsername);
-    await getUserData(BigInt(userId), display_name, tikTokUsername);
+  // === ECHTE MULTI-GUEST DETECTIE – ALLEEN linkMicArmies ===
+  conn.on('linkMicArmies', (data: any) => {
+    console.log(`[BB DEBUG] linkMicArmies ontvangen → ${data.armies?.length || 0} vechters`);
+    
+    if (data.armies && Array.isArray(data.armies)) {
+      data.armies.forEach((army: any) => {
+        if (army.user?.userId) {
+          const userId = army.user.userId.toString();
+          const display_name = army.user.nickname || 'Onbekend';
+          const tikTokUsername = army.user.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
+          const role = army.host ? 'host' : 'fighter';
+          
+          arenaJoin(userId, display_name, tikTokUsername, role);
+        }
+      });
+    }
   });
 
-  conn.on('roomUser', (data: any) => {
-    const userId = BigInt(data.userId || data.uniqueId || '0').toString();
-    arenaLeave(userId);
+  // === VERWIJDEREN BIJ VERLATEN / KICK ===
+  conn.on('linkMicBattle', (data: any) => {
+    console.log(`[BB DEBUG] linkMicBattle actie: ${data.action} (4/5 = leave/kick)`);
+    
+    if (data.action === 4 || data.action === 5) {
+      const userId = data.userId?.toString() || data.leaver?.userId?.toString();
+      if (userId) {
+        arenaLeave(userId);
+      }
+    }
   });
 
   conn.on('liveEnd', () => {
     arenaClear();
   });
 
-  // === CHAT + ADMIN COMMANDOS ===
+  // === CHAT + ADMIN COMMANDOS (ongewijzigd) ===
   conn.on('chat', async (data: any) => {
     const rawComment = data.comment || '';
     const msg = rawComment.trim();
@@ -184,7 +198,7 @@ async function startTikTokLive(username: string) {
     }
   });
 
-  // === GIFT ===
+  // === GIFT, LIKE, FOLLOW, SHARE (ongewijzigd) ===
   conn.on('gift', async (data: any) => {
     const userId = BigInt(data.userId || data.uniqueId || '0');
     const display_name = data.nickname || 'Onbekend';
@@ -213,7 +227,6 @@ async function startTikTokLive(username: string) {
     console.log(`${data.giftName} (${diamonds} diamonds)`);
   });
 
-  // === LIKE, FOLLOW, SHARE ===
   conn.on('like', async (data: any) => {
     const userId = BigInt(data.userId || data.uniqueId || '0');
     const display_name = data.nickname || 'Onbekend';
@@ -250,7 +263,7 @@ async function startTikTokLive(username: string) {
   });
 
   conn.on('connected', () => {
-    console.log('BATTLEBOX VOLLEDIG ACTIEF – game.ts + server.ts = ONOVERTREFFELIJK');
+    console.log('BATTLEBOX ENGINE LIVE – ALLEEN ECHTE MULTI-GUEST (linkMicArmies) = BB – DEBUGGING ACTIEF');
   });
 }
 
@@ -258,7 +271,7 @@ const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME || 'JOUW_TIKTOK_USERNAME';
 
 initDB().then(async () => {
   server.listen(4000, () => {
-    console.log('BATTLEBOX BACKEND LIVE – ALLES WERKT – ARCHITECTUUR PERFECT');
+    console.log('BATTLEBOX BACKEND LIVE – ALLEEN ECHTE GASTEN TELLEN – KLAAR VOOR DE STRIJD');
     startTikTokLive(TIKTOK_USERNAME);
   });
 });
