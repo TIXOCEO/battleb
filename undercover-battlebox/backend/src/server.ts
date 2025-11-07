@@ -1,4 +1,3 @@
-// backend/src/server.ts
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
@@ -41,7 +40,10 @@ const ADMIN_ID = process.env.ADMIN_TIKTOK_ID?.trim();
 async function connectWithRetry(username: string, retries = 6): Promise<WebcastPushConnection> {
   for (let i = 0; i < retries; i++) {
     try {
-      const conn = new WebcastPushConnection(username);
+      const conn = new WebcastPushConnection(username, {
+        enableWebsocketUpgrade: true,
+        processInitialData: true
+      });
       await conn.connect();
       console.info(`Verbonden met TikTok Live! (poging ${i + 1})`);
       return conn;
@@ -59,9 +61,9 @@ async function activateFanStatus(tiktok_id: bigint, display_name: string, userna
   await pool.query(
     `INSERT INTO users (tiktok_id, display_name, username, bp_total, is_fan, fan_expires_at)
      VALUES ($1, $2, $3, 0, true, NOW() + INTERVAL '24 hours')
-     ON CONFLICT (tiktok_id) 
-     DO UPDATE SET 
-       is_fan = true, 
+     ON CONFLICT (tiktok_id)
+     DO UPDATE SET
+       is_fan = true,
        fan_expires_at = NOW() + INTERVAL '24 hours',
        display_name = EXCLUDED.display_name,
        username = EXCLUDED.username`,
@@ -76,8 +78,8 @@ async function getUserData(tiktok_id: bigint, display_name: string, username: st
   const query = `
     INSERT INTO users (tiktok_id, display_name, username, bp_total, is_fan, fan_expires_at, is_vip, vip_expires_at)
     VALUES ($1, $2, $3, 0, false, NULL, false, NULL)
-    ON CONFLICT (tiktok_id) 
-    DO UPDATE SET 
+    ON CONFLICT (tiktok_id)
+    DO UPDATE SET
       display_name = EXCLUDED.display_name,
       username = EXCLUDED.username
     RETURNING bp_total, is_fan, fan_expires_at, is_vip, vip_expires_at;
@@ -121,7 +123,21 @@ async function deductBP(tiktok_id: bigint, amount: number): Promise<boolean> {
 async function startTikTokLive(username: string) {
   const tiktokLiveConnection = await connectWithRetry(username);
 
-  // ✅ GameEngine initialiseren – hier worden multi-guest deelnemers bijgehouden
+  // === DEBUG: LOG ALLE MOGELIJKE MULTI-GUEST EVENTS ===
+  tiktokLiveConnection.on('linkMicArmies', (data) => {
+    console.log('[DEBUG linkMicArmies]', JSON.stringify(data, null, 2));
+  });
+  tiktokLiveConnection.on('linkMicBattle', (data) => {
+    console.log('[DEBUG linkMicBattle]', JSON.stringify(data, null, 2));
+  });
+  tiktokLiveConnection.on('liveIntro', (data) => {
+    console.log('[DEBUG liveIntro]', JSON.stringify(data, null, 2));
+  });
+  tiktokLiveConnection.on('liveHostMicArmies', (data) => {
+    console.log('[DEBUG liveHostMicArmies]', JSON.stringify(data, null, 2));
+  });
+
+  // ✅ GameEngine initialiseren – houdt echte multi-guest deelnemers bij
   game = new GameEngine(io, tiktokLiveConnection);
 
   const pendingLikes = new Map<string, number>();
@@ -138,7 +154,7 @@ async function startTikTokLive(username: string) {
     const userIdRaw = data.userId || data.uniqueId || '0';
     const userId = BigInt(userIdRaw);
     const display_name = data.nickname || 'Onbekend';
-    const tikTokUsername = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, ''); // fallback
+    const tikTokUsername = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
     const isAdmin = userId.toString() === ADMIN_ID;
 
     console.log(`[CHAT] Raw: "${rawComment}" → "${msgLower}" (user: ${display_name} | @${tikTokUsername})`);
