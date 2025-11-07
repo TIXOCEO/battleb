@@ -47,8 +47,7 @@ if (!EULER_API_KEY) {
 const wsUrl = `wss://ws.eulerstream.com?uniqueId=${TIKTOK_USERNAME}&apiKey=${EULER_API_KEY}`;
 let ws: WebSocket;
 
-const pendingLikes = new Map<string, number>();
-const hasFollowed = new Set<string>();
+const currentGuests = new Set<string>(); // Houdt bij wie er nu co-host is
 
 interface UserData {
   isFan: boolean;
@@ -59,7 +58,7 @@ async function getUserData(tiktok_id: bigint, display_name: string, username: st
   const usernameWithAt = '@' + username.toLowerCase();
   const query = `
     INSERT INTO users (tiktok_id, display_name, username, bp_total, is_fan, fan_expires_at, is_vip, vip_expires_at)
-    VALUES ($1, $2, $3,  SQL
+    VALUES ($1, $2, $3, 0, false, NULL, false, NULL)
     ON CONFLICT (tiktok_id)
     DO UPDATE SET display_name = EXCLUDED.display_name, username = EXCLUDED.username
     RETURNING bp_total, is_fan, fan_expires_at, is_vip, vip_expires_at;
@@ -76,35 +75,23 @@ function connectWebSocket() {
 
   ws.on('open', () => {
     console.log('='.repeat(80));
-    console.log('EULER STREAM WEBSOCKET VERBONDEN – MULTI-GUEST 100% WERKENDE');
+    console.log('EULER STREAM WEBSOCKET VERBONDEN – MULTI-GUEST TRACKING ACTIEF');
     console.log('='.repeat(80));
   });
 
   ws.on('message', (data: WebSocket.Data) => {
     const raw = data.toString();
-    console.log('RAW WS →', raw.slice(0, 500)); // Debug: zie alles
+    console.log('RAW WS →', raw.slice(0, 500));
 
     let events: any[] = [];
 
     try {
       const payload = JSON.parse(raw);
 
-      // 1. payload.messages (oude structuur)
-      if (Array.isArray(payload.messages)) {
-        events = payload.messages;
-      }
-      // 2. payload.data (Euler 2025)
-      else if (Array.isArray(payload.data)) {
-        events = payload.data;
-      }
-      // 3. payload.events
-      else if (Array.isArray(payload.events)) {
-        events = payload.events;
-      }
-      // 4. Enkel object = 1 event
-      else if (payload.type || payload.event) {
-        events = [payload];
-      }
+      if (Array.isArray(payload.messages)) events = payload.messages;
+      else if (Array.isArray(payload.data)) events = payload.data;
+      else if (Array.isArray(payload.events)) events = payload.events;
+      else if (payload.type) events = [payload];
 
       console.log(`GEPARSED ${events.length} EVENT(S)`);
     } catch (e) {
@@ -112,207 +99,71 @@ function connectWebSocket() {
       return;
     }
 
-    // === VERWERK ELK EVENT ===
     events.forEach((msg: any) => {
-      const type = (msg.type || msg.event) as string;
-      console.log(`[EVENT] ${type}`);
+      const type = msg.type as string;
 
-      // -------------------------------------------------
-      // MULTI-GUEST (member)
-      // -------------------------------------------------
-      if (type === 'member') {
-        if (msg.user?.isHost) return;
+      // === ALLEEN MULTI-GUEST EVENTS ===
+      if (type === 'WebcastLinkMicMethodMessage') {
+        const method = msg.data?.common?.method;
+        const user = msg.data?.user;
 
-        const userId = (msg.user?.userId?.toString() ?? msg.user?.uniqueId ?? '??') as string;
-        const display_name = msg.user?.nickname ?? 'Onbekend';
-        const tikTokUsername = msg.user?.uniqueId ?? '';
+        if (!method || !user) return;
 
-        if (msg.action === 'join') {
-          console.log(`[GUEST JOIN] ${display_name} (@${tikTokUsername})`);
-          arenaJoin(userId, display_name, tikTokUsername, 'guest');
+        const userId = (user.userId?.toString() ?? user.uniqueId ?? '??') as string;
+        const displayName = user.nickname ?? 'Onbekend';
+        const username = user.uniqueId ?? '';
+
+        console.log(`[MULTI-GUEST] ${method} → ${displayName} (@${username})`);
+
+        // --- ACCEPT / JOIN ---
+        if (method.includes('permit_join') || method === 'join_linkmic') {
+          console.log(`[GUEST ACCEPTED] ${displayName} is nu co-host!`);
+          arenaJoin(userId, displayName, username, 'co-host');
+          currentGuests.add(userId);
+          console.log(`[GUESTS ONLINE] ${currentGuests.size}/8`);
         }
-        if (msg.action === 'leave') {
-          console.log(`[GUEST LEAVE] ${display_name}`);
+
+        // --- LEAVE ---
+        if (method.includes('leave_linkmic') || method === 'leave') {
+          console.log(`[GUEST LEFT] ${displayName} heeft de co-host verlaten`);
           arenaLeave(userId);
+          currentGuests.delete(userId);
+          console.log(`[GUESTS ONLINE] ${currentGuests.size}/8`);
+        }
+
+        // --- KICK ---
+        if (method.includes('kick_out')) {
+          console.log(`[GUEST KICKED] ${displayName} is verwijderd`);
+          arenaLeave(userId);
+          currentGuests.delete(userId);
+          console.log(`[GUESTS ONLINE] ${currentGuests.size}/8`);
+        }
+
+        // --- INVITE ---
+        if (method.includes('invite')) {
+          console.log(`[GUEST INVITED] ${displayName} is uitgenodigd`);
+        }
+
+        return;
+      }
+
+      // === LAYOUT CHANGE (extra bewijs van guest) ===
+      if (type === 'WebcastLinkLayerMessage') {
+        const layout = msg.data?.layout;
+        if (layout) {
+          console.log(`[LAYOUT CHANGE] ${layout} → waarschijnlijk nieuwe co-host`);
         }
         return;
       }
 
-      // -------------------------------------------------
-      // CHAT + ADMIN COMMANDS
-      // -------------------------------------------------
-      if (type === 'chat') {
-        const rawComment = msg.message || '';
-        const messageText = rawComment.trim();
-        if (!messageText) return;
-
-        const userId = BigInt(msg.user?.userId ?? '0');
-        const display_name = msg.user?.nickname ?? 'Onbekend';
-        const tikTokUsername = msg.user?.uniqueId ?? display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
-        const isAdmin = userId.toString() === ADMIN_ID;
-
-        console.log(`[CHAT] ${display_name}: ${rawComment}`);
-
-        (async () => {
-          const { isFan, isVip } = await getUserData(userId, display_name, tikTokUsername);
-          await addBP(userId, 1, 'CHAT', display_name, isFan, isVip);
-        })();
-
-        if (!isAdmin || !messageText.toLowerCase().startsWith('!adm ')) return;
-
-        const args = messageText.slice(5).trim().split(' ');
-        const cmd = args[0]?.toLowerCase();
-        const rawUsername = args[1];
-        if (!rawUsername?.startsWith('@')) return;
-
-        (async () => {
-          const targetRes = await pool.query(
-            'SELECT tiktok_id, display_name FROM users WHERE LOWER(username) = LOWER($1)',
-            [rawUsername]
-          );
-          if (!targetRes.rows[0]) {
-            console.log(`[ADMIN] Niet gevonden: ${rawUsername}`);
-            return;
-          }
-          const targetId = targetRes.rows[0].tiktok_id;
-          const targetDisplay = targetRes.rows[0].display_name || rawUsername;
-
-          switch (cmd) {
-            case 'geef': {
-              const a = parseFloat(args[2]);
-              if (!isNaN(a) && a > 0) {
-                await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [a, targetId]);
-                console.log(`[ADMIN] +${a} BP → ${rawUsername}`);
-              }
-              break;
-            }
-            case 'verw': {
-              const a = parseFloat(args[2]);
-              if (!isNaN(a) && a > 0) {
-                await pool.query('UPDATE users SET bp_total = GREATEST(bp_total - $1, 0) WHERE tiktok_id = $2', [a, targetId]);
-                console.log(`[ADMIN] -${a} BP → ${rawUsername}`);
-              }
-              break;
-            }
-            case 'voegrij':
-              await addToQueue(targetId.toString(), targetDisplay);
-              require('./queue').emitQueue();
-              console.log(`[ADMIN] ${rawUsername} → wachtrij`);
-              break;
-            case 'verwrij':
-              const refund = await leaveQueue(targetId.toString());
-              if (refund > 0) {
-                const half = Math.floor(refund * 0.5);
-                await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [half, targetId]);
-                console.log(`[ADMIN] ${rawUsername} verwijderd → +${half} BP refund`);
-              }
-              require('./queue').emitQueue();
-              break;
-            case 'geefvip':
-              await pool.query('UPDATE users SET is_vip = true, vip_expires_at = NOW() + INTERVAL \'30 days\' WHERE tiktok_id = $1', [targetId]);
-              console.log(`[ADMIN] VIP 30 dagen → ${rawUsername}`);
-              break;
-            case 'verwvip':
-              await pool.query('UPDATE users SET is_vip = false, vip_expires_at = NULL WHERE tiktok_id = $1', [targetId]);
-              console.log(`[ADMIN] VIP verwijderd → ${rawUsername}`);
-              break;
-          }
-        })();
-        return;
-      }
-
-      // -------------------------------------------------
-      // GIFT
-      // -------------------------------------------------
-      if (type === 'gift') {
-        const userId = BigInt(msg.user?.userId ?? '0');
-        const display_name = msg.user?.nickname ?? 'Onbekend';
-        const tikTokUsername = msg.user?.uniqueId ?? display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
-        const giftName = (msg.gift?.name ?? '').toLowerCase();
-
-        (async () => {
-          if (giftName.includes('heart me')) {
-            await pool.query(
-              `INSERT INTO users (tiktok_id, display_name, username, is_fan, fan_expires_at)
-               VALUES ($1, $2, $3, true, NOW() + INTERVAL '24 hours')
-               ON CONFLICT (tiktok_id) DO UPDATE SET is_fan = true, fan_expires_at = NOW() + INTERVAL '24 hours'`,
-              [userId, display_name, '@' + tikTokUsername]
-            );
-            const { isFan, isVip } = await getUserData(userId, display_name, tikTokUsername);
-            await addBP(userId, 0.5, 'GIFT', display_name, isFan, isVip);
-            console.log(`Heart Me → FAN 24u (${display_name})`);
-            return;
-          }
-          const diamonds = msg.gift?.diamondCount ?? 0;
-          const bp = diamonds * 0.5;
-          if (bp <= 0) return;
-          const { isFan, isVip } = await getUserData(userId, display_name, tikTokUsername);
-          await addBP(userId, bp, 'GIFT', display_name, isFan, isVip);
-          console.log(`${msg.gift?.name ?? 'Gift'} (${diamonds} diamonds) → +${bp} BP`);
-        })();
-        return;
-      }
-
-      // -------------------------------------------------
-      // LIKE (batch)
-      // -------------------------------------------------
-      if (type === 'like') {
-        const userId = BigInt(msg.user?.userId ?? '0');
-        const display_name = msg.user?.nickname ?? 'Onbekend';
-        const tikTokUsername = msg.user?.uniqueId ?? display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
-        const batch = msg.likeCount ?? 1;
-
-        const prev = pendingLikes.get(userId.toString()) ?? 0;
-        const total = prev + batch;
-        const bp = Math.floor(total / 100) - Math.floor(prev / 100);
-        if (bp > 0) {
-          (async () => {
-            const { isFan, isVip } = await getUserData(userId, display_name, tikTokUsername);
-            await addBP(userId, bp, 'LIKE', display_name, isFan, isVip);
-          })();
-        }
-        pendingLikes.set(userId.toString(), total);
-        return;
-      }
-
-      // -------------------------------------------------
-      // FOLLOW & SHARE
-      // -------------------------------------------------
-      if (type === 'follow') {
-        const userId = BigInt(msg.user?.userId ?? '0');
-        if (hasFollowed.has(userId.toString())) return;
-        hasFollowed.add(userId.toString());
-        const display_name = msg.user?.nickname ?? 'Onbekend';
-        const tikTokUsername = msg.user?.uniqueId ?? display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
-        (async () => {
-          const { isFan, isVip } = await getUserData(userId, display_name, tikTokUsername);
-          await addBP(userId, 5, 'FOLLOW', display_name, isFan, isVip);
-        })();
-        return;
-      }
-      if (type === 'share') {
-        const userId = BigInt(msg.user?.userId ?? '0');
-        const display_name = msg.user?.nickname ?? 'Onbekend';
-        const tikTokUsername = msg.user?.uniqueId ?? display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
-        (async () => {
-          const { isFan, isVip } = await getUserData(userId, display_name, tikTokUsername);
-          await addBP(userId, 5, 'SHARE', display_name, isFan, isVip);
-        })();
-        return;
-      }
-
-      // -------------------------------------------------
-      // LIVE END
-      // -------------------------------------------------
-      if (type === 'liveEnd' || type === 'streamEnd') {
-        console.log(`[END] Stream beëindigd → arena geleegd`);
-        arenaClear();
-      }
+      // === ALLES ANDERE WORDT GENEGEERD ===
+      // console.log(`[IGNORED] ${type}`);
     });
   });
 
   ws.on('close', (code: number, reason: string) => {
     console.log(`WebSocket gesloten (code ${code}) – herconnect over 5 sec...`);
+    currentGuests.clear(); // Reset bij reconnect
     setTimeout(connectWebSocket, 5000);
   });
 
