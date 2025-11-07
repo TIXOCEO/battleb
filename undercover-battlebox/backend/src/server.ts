@@ -2,7 +2,7 @@
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
-import WebSocket from 'ws';
+import { WebcastPushConnection } from 'tiktok-live-connector';
 import { initDB } from './db';
 import pool from './db';
 import { addToQueue, leaveQueue, getQueue } from './queue';
@@ -10,20 +10,15 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { initGame, arenaJoin, arenaLeave, arenaClear, addBP, getArena } from './game';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 1. INITIALISATIE: Express + Socket.IO + .env
-// ─────────────────────────────────────────────────────────────────────────────
 dotenv.config();
 
 const app = express();
-app.use(cors()); // Sta verbindingen toe vanaf frontend (bijv. localhost:3000)
+app.use(cors());
 const server = http.createServer(app);
 export const io = new Server(server, { cors: { origin: '*' } });
 
-// Start de battlebox arena (BP, grid, etc.)
 initGame(io);
 
-// API endpoints voor frontend
 app.get('/queue', async (req, res) => {
   const queue = await getQueue();
   res.json(queue);
@@ -33,145 +28,259 @@ app.get('/arena', async (req, res) => {
   res.json(getArena());
 });
 
-// Stuur updates naar alle verbonden dashboards
 io.on('connection', (socket) => {
-  console.log('Dashboard verbonden:', socket.id);
-  require('./queue').emitQueue();
-  require('./game').emitArena();
+  console.log('Dashboard connected:', socket.id);
+  const { emitQueue } = require('./queue');
+  emitQueue();
+  const { emitArena } = require('./game');
+  emitArena();
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 2. CONFIGURATIE: TikTok username + Euler API key
-// ─────────────────────────────────────────────────────────────────────────────
 const ADMIN_ID = process.env.ADMIN_TIKTOK_ID?.trim();
-const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME?.trim()?.replace('@', '') || 'JOUW_USERNAME';
-const EULER_API_KEY = process.env.EULER_API_KEY?.trim();
 
-if (!EULER_API_KEY) {
-  console.error('ERROR: Voeg EULER_API_KEY toe aan je .env!');
-  process.exit(1);
+// VEILIGE CONNECTIE MET RETRY
+async function connectWithRetry(username: string, retries = 6): Promise<WebcastPushConnection> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const conn = new WebcastPushConnection(username);
+      await conn.connect();
+      console.info(`Verbonden met @${username} (poging ${i + 1})`);
+      return conn;
+    } catch (err: any) {
+      console.error(`Connectie mislukt (poging ${i + 1}/${retries}):`, err.message || err);
+      if (i < retries - 1) await new Promise(r => setTimeout(r, 7000));
+    }
+  }
+  throw new Error('Definitief geen verbinding met TikTok Live');
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 3. WEBSOCKET: Verbinding met EulerStream (TikTok Live data)
-// ─────────────────────────────────────────────────────────────────────────────
-const wsUrl = `wss://ws.eulerstream.com?uniqueId=${TIKTOK_USERNAME}&apiKey=${EULER_API_KEY}`;
-let ws: WebSocket;
+async function getUserData(tiktok_id: bigint, display_name: string, username: string) {
+  const usernameWithAt = '@' + username.toLowerCase();
+  const query = `
+    INSERT INTO users (tiktok_id, display_name, username, bp_total, is_fan, fan_expires_at, is_vip, vip_expires_at)
+    VALUES ($1, $2, $3, 0, false, NULL, false, NULL)
+    ON CONFLICT (tiktok_id) 
+    DO UPDATE SET display_name = EXCLUDED.display_name, username = EXCLUDED.username
+    RETURNING bp_total, is_fan, fan_expires_at, is_vip, vip_expires_at;
+  `;
+  const res = await pool.query(query, [tiktok_id, display_name, usernameWithAt]);
+  const row = res.rows[0];
+  const isFan = row.is_fan && row.fan_expires_at && new Date(row.fan_expires_at) > new Date();
+  const isVip = row.is_vip && row.vip_expires_at && new Date(row.vip_expires_at) > new Date();
+  return { isFan, isVip };
+}
 
-// Houd bij wie er momenteel co-host is (max 8)
-const currentGuests = new Set<string>();
+async function startTikTokLive(username: string) {
+  const conn = await connectWithRetry(username);
+  const pendingLikes = new Map<string, number>();
+  const hasFollowed = new Set<string>();
 
-function connectWebSocket() {
-  ws = new WebSocket(wsUrl);
+  // === ULTI-GUEST 2025 EVENTS ===
+  conn.on('liveRoomGuestEnter', (data: any) => {
+    if (!data.user) return;
+    const userId = data.user.userId?.toString() || data.userId?.toString();
+    const display_name = data.user.nickname || data.nickname || 'Onbekend';
+    const tikTokUsername = data.user.uniqueId || data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
 
-  // ── Verbonden met Euler ───────────────────────────────────────────────────
-  ws.on('open', () => {
-    console.log('='.repeat(80));
-    console.log('EULER WEBSOCKET VERBONDEN – ALLEEN CO-HOST EVENTS');
-    console.log('='.repeat(80));
+    console.log(`[JOIN] ${display_name} (@${tikTokUsername}) → ULTI-GUEST`);
+    arenaJoin(userId, display_name, tikTokUsername, 'guest');
   });
 
-  // ── Ontvang berichten van TikTok Live (via Euler) ───────────────────────
-  ws.on('message', (data: WebSocket.Data) => {
-    const raw = data.toString();
+  conn.on('liveRoomGuestLeave', (data: any) => {
+    const userId = data.user?.userId?.toString() || data.userId?.toString();
+    if (!userId) return;
+    const display_name = data.user?.nickname || data.nickname || 'Onbekend';
+    console.log(`[LEAVE] ${display_name} → verlaat arena`);
+    arenaLeave(userId);
+  });
 
-    let events: any[] = [];
+  conn.on('member', async (data: any) => {
+    if (data.isCoHost || data.role === 'cohost') {
+      const userId = BigInt(data.userId || data.uniqueId || '0').toString();
+      const display_name = data.nickname || 'Onbekend';
+      const tikTokUsername = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
+      console.log(`[BACKUP JOIN] ${display_name} → cohost flag`);
+      arenaJoin(userId, display_name, tikTokUsername, 'guest');
+      await getUserData(BigInt(userId), display_name, tikTokUsername);
+    }
+  });
 
-    // Euler stuurt JSON met: messages[], data[], events[] of enkel type
-    try {
-      const payload = JSON.parse(raw);
-      if (Array.isArray(payload.messages)) events = payload.messages;
-      else if (Array.isArray(payload.data)) events = payload.data;
-      else if (Array.isArray(payload.events)) events = payload.events;
-      else if (payload.type) events = [payload];
-    } catch (e) {
-      return; // Geen JSON → negeer
+  conn.on('liveEnd', () => {
+    console.log(`[END] Stream beëindigd → arena geleegd`);
+    arenaClear();
+  });
+
+  // === CHAT + ADMIN COMMANDS ===
+  conn.on('chat', async (data: any) => {
+    const rawComment = data.comment || '';
+    const msg = rawComment.trim();
+    const msgLower = msg.toLowerCase();
+    if (!msg) return;
+
+    const userId = BigInt(data.userId || data.uniqueId || '0');
+    const display_name = data.nickname || 'Onbekend';
+    const tikTokUsername = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
+    const isAdmin = userId.toString() === ADMIN_ID;
+
+    console.log(`[CHAT] ${display_name}: ${rawComment}`);
+
+    const { isFan, isVip } = await getUserData(userId, display_name, tikTokUsername);
+    await addBP(userId, 1, 'CHAT', display_name, isFan, isVip);
+
+    if (!isAdmin || !msgLower.startsWith('!adm ')) return;
+
+    const args = msg.slice(5).trim().split(' ');
+    const cmd = args[0].toLowerCase();
+    const rawUsername = args[1];
+    if (!rawUsername?.startsWith('@')) return;
+
+    const targetRes = await pool.query(
+      'SELECT tiktok_id, display_name FROM users WHERE LOWER(username) = LOWER($1)',
+      [rawUsername]
+    );
+
+    if (!targetRes.rows[0]) {
+      console.log(`[ADMIN] Niet gevonden: ${rawUsername}`);
+      return;
     }
 
-    // ── Loop door alle events ─────────────────────────────────────────────
-    events.forEach((msg: any) => {
-      const type = msg.type as string;
+    const targetId = targetRes.rows[0].tiktok_id;
+    const targetDisplay = targetRes.rows[0].display_name || rawUsername;
 
-      // DEBUG: Toon elk event met 'link' of 'mic' in de naam
-      if (type.toLowerCase().includes('link') || type.toLowerCase().includes('mic')) {
-        console.log(`[DEBUG TYPE] ${type}`);
-      }
+    switch (cmd) {
+      case 'geef':
+        if (!args[2]) return;
+        const giveAmount = parseFloat(args[2]);
+        if (isNaN(giveAmount) || giveAmount <= 0) return;
+        await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [giveAmount, targetId]);
+        console.log(`[ADMIN] +${giveAmount} BP → ${rawUsername}`);
+        break;
 
-      // ── ALLEEN ECHTE CO-HOST EVENTS (WebcastLinkMicMethodMessage) ───────
-      if (type === 'WebcastLinkMicMethodMessage') {
-        const method = msg.data?.common?.method;
-        const user = msg.data?.user;
+      case 'verw':
+        if (!args[2]) return;
+        const takeAmount = parseFloat(args[2]);
+        if (isNaN(takeAmount) || takeAmount <= 0) return;
+        await pool.query('UPDATE users SET bp_total = GREATEST(bp_total - $1, 0) WHERE tiktok_id = $2', [takeAmount, targetId]);
+        console.log(`[ADMIN] -${takeAmount} BP → ${rawUsername}`);
+        break;
 
-        if (!method || !user) return;
+      case 'voegrij':
+        await addToQueue(targetId.toString(), targetDisplay);
+        require('./queue').emitQueue();
+        console.log(`[ADMIN] ${rawUsername} → wachtrij`);
+        break;
 
-        const userId = (user.userId?.toString() ?? user.uniqueId ?? '??') as string;
-        const displayName = user.nickname ?? 'Onbekend';
-        const username = user.uniqueId ?? '';
-
-        // ── LOG: Duidelijk wat er gebeurt ───────────────────────────────
-        console.log(`\n[MULTI-GUEST] ${method}`);
-        console.log(`→ ${displayName} (@${username})\n`);
-
-        // ── 1. Gast accepteert uitnodiging → wordt co-host ─────────────
-        if (method.includes('permit_join') || method === 'join_linkmic') {
-          console.log(`[GUEST ACCEPTED] ${displayName} is nu co-host!`);
-          arenaJoin(userId, displayName, username, 'co-host');
-          currentGuests.add(userId);
-          console.log(`[GUESTS ONLINE] ${currentGuests.size}/8\n`);
+      case 'verwrij':
+        const refund = await leaveQueue(targetId.toString());
+        if (refund > 0) {
+          const half = Math.floor(refund * 0.5);
+          await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [half, targetId]);
+          console.log(`[ADMIN] ${rawUsername} verwijderd → +${half} BP refund`);
         }
+        require('./queue').emitQueue();
+        break;
 
-        // ── 2. Gast verlaat (vrijwillig of timeout) ───────────────────
-        else if (method.includes('leave_linkmic') || method.includes('leave')) {
-          console.log(`[GUEST LEFT] ${displayName} heeft de co-host verlaten`);
-          arenaLeave(userId);
-          currentGuests.delete(userId);
-          console.log(`[GUESTS ONLINE] ${currentGuests.size}/8\n`);
-        }
+      case 'geefvip':
+        await pool.query('UPDATE users SET is_vip = true, vip_expires_at = NOW() + INTERVAL \'30 days\' WHERE tiktok_id = $1', [targetId]);
+        console.log(`[ADMIN] VIP 30 dagen → ${rawUsername}`);
+        break;
 
-        // ── 3. Host kickt gast ───────────────────────────────────────
-        else if (method.includes('kick_out')) {
-          console.log(`[GUEST KICKED] ${displayName} is verwijderd`);
-          arenaLeave(userId);
-          currentGuests.delete(userId);
-          console.log(`[GUESTS ONLINE] ${currentGuests.size}/8\n`);
-        }
-
-        // ── 4. Host nodigt gast uit ───────────────────────────────────
-        else if (method.includes('invite')) {
-          console.log(`[GUEST INVITED] ${displayName} is uitgenodigd\n`);
-        }
-
-        // ── 5. Onbekende methode (debug) ─────────────────────────────
-        else {
-          console.log(`[DEBUG METHOD] ${method} → ${displayName}\n`);
-        }
-      }
-
-      // ── ALLES ANDERE WORDT GENEGEERD (geen layout, geen likes, etc.) ──
-    });
+      case 'verwvip':
+        await pool.query('UPDATE users SET is_vip = false, vip_expires_at = NULL WHERE tiktok_id = $1', [targetId]);
+        console.log(`[ADMIN] VIP verwijderd → ${rawUsername}`);
+        break;
+    }
   });
 
-  // ── Verbinding verbroken → probeer opnieuw na 5 sec ───────────────────
-  ws.on('close', (code: number) => {
-    console.log(`WebSocket gesloten (code ${code}) – herconnect over 5 sec...`);
-    currentGuests.clear(); // Reset gasten bij reconnect
-    setTimeout(connectWebSocket, 5000);
+  // === GIFT ===
+  conn.on('gift', async (data: any) => {
+    const userId = BigInt(data.userId || data.uniqueId || '0');
+    const display_name = data.nickname || 'Onbekend';
+    const tikTokUsername = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
+    const giftName = (data.giftName || '').toLowerCase();
+
+    if (giftName.includes('heart me')) {
+      await pool.query(
+        `INSERT INTO users (tiktok_id, display_name, username, is_fan, fan_expires_at)
+         VALUES ($1, $2, $3, true, NOW() + INTERVAL '24 hours')
+         ON CONFLICT (tiktok_id) DO UPDATE SET is_fan = true, fan_expires_at = NOW() + INTERVAL '24 hours'`,
+        [userId, display_name, '@' + tikTokUsername]
+      );
+      const { isFan, isVip } = await getUserData(userId, display_name, tikTokUsername);
+      await addBP(userId, 0.5, 'GIFT', display_name, isFan, isVip);
+      console.log(`Heart Me → FAN 24u (${display_name})`);
+      return;
+    }
+
+    const diamonds = data.diamondCount || 0;
+    const bp = diamonds * 0.5;
+    if (bp <= 0) return;
+
+    const { isFan, isVip } = await getUserData(userId, display_name, tikTokUsername);
+    await addBP(userId, bp, 'GIFT', display_name, isFan, isVip);
+    console.log(`${data.giftName} (${diamonds} diamonds) → +${bp} BP`);
   });
 
-  ws.on('error', (err: Error) => {
-    console.error('WebSocket fout:', err);
+  // === LIKE, FOLLOW, SHARE ===
+  conn.on('like', async (data: any) => {
+    const userId = BigInt(data.userId || data.uniqueId || '0');
+    const display_name = data.nickname || 'Onbekend';
+    const tikTokUsername = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
+
+    const batch = data.likeCount || 1;
+    const prev = pendingLikes.get(userId.toString()) || 0;
+    const total = prev + batch;
+    const bp = Math.floor(total / 100) - Math.floor(prev / 100);
+
+    if (bp > 0) {
+      const { isFan, isVip } = await getUserData(userId, display_name, tikTokUsername);
+      await addBP(userId, bp, 'LIKE', display_name, isFan, isVip);
+    }
+    pendingLikes.set(userId.toString(), total);
+  });
+
+  conn.on('follow', async (data: any) => {
+    const userId = BigInt(data.userId || data.uniqueId || '0');
+    if (hasFollowed.has(userId.toString())) return;
+    hasFollowed.add(userId.toString());
+    const display_name = data.nickname || 'Onbekend';
+    const tikTokUsername = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
+    const { isFan, isVip } = await getUserData(userId, display_name, tikTokUsername);
+    await addBP(userId, 5, 'FOLLOW', display_name, isFan, isVip);
+  });
+
+  conn.on('share', async (data: any) => {
+    const userId = BigInt(data.userId || data.uniqueId || '0');
+    const display_name = data.nickname || 'Onbekend';
+    const tikTokUsername = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
+    const { isFan, isVip } = await getUserData(userId, display_name, tikTokUsername);
+    await addBP(userId, 5, 'SHARE', display_name, isFan, isVip);
+  });
+
+  // === ROOM ID – ALLEEN HIER VEILIG ===
+  conn.on('connected', (state) => {
+    console.log('='.repeat(80));
+    console.log('ULTI-GUEST 100% GEDETECTEERD – KLAAR VOOR DE OORLOG');
+    console.log(`ROOM ID: ${state.roomId || 'ONBEKEND'}`);
+    console.log(`Titel: ${state.title || 'Geen titel'}`);
+    console.log(`Live sinds: ${new Date(state.createTime * 1000).toLocaleString('nl-NL')}`);
+    console.log('='.repeat(80));
+  });
+
+  conn.on('error', (err) => {
+    console.error('TikTok Live fout:', err);
   });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 4. START SERVER + DATABASE
-// ─────────────────────────────────────────────────────────────────────────────
+// === START SERVER ===
+const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME?.trim() || 'JOUW_USERNAME';
+
 initDB()
   .then(() => {
     server.listen(4000, () => {
       console.log('BATTLEBOX BACKEND LIVE → http://localhost:4000');
       console.log('='.repeat(80));
-      connectWebSocket(); // Start WebSocket na server start
+      startTikTokLive(TIKTOK_USERNAME);
     });
   })
   .catch((err) => {
