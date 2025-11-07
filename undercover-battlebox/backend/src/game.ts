@@ -1,99 +1,89 @@
 // backend/src/game.ts
-import { Server } from "socket.io";
-import type { WebcastPushConnection } from "tiktok-live-connector";
+import pool from './db';
+import { io } from './server';
 
-export interface ArenaParticipant {
-  id: string;
-  display_name: string;
-  username: string;
+let socketServer: any = null;
+export function initGame(server: any) {
+  socketServer = server;
 }
 
-export class GameEngine {
-  private io: Server;
-  private connection: WebcastPushConnection;
-  private participants = new Map<string, ArenaParticipant>();
+const arena = new Set<string>();
+const arenaCache = new Map<string, { display_name: string; username: string }>();
 
-  constructor(io: Server, connection: WebcastPushConnection) {
-    this.io = io;
-    this.connection = connection;
-    this.registerListeners();
-  }
+async function emitArena() {
+  const arenaList = Array.from(arena).map(userIdStr => {
+    const data = arenaCache.get(userIdStr);
+    return data ? {
+      userId: userIdStr,
+      display_name: data.displayName,
+      username: data.username,
+      inArena: true
+    } : null;
+  }).filter(Boolean);
 
-  private registerListeners() {
-    // TikTok multi-guest updates (linkMic)
-    this.connection.on("linkMicArmies", (data: any) => {
-      try {
-        const guests = this.parseGuests(data);
-        this.syncParticipants(guests);
-      } catch (err) {
-        console.error("[BB] Fout bij verwerken linkMicArmies:", err);
-      }
-    });
-
-    this.connection.on("connected", () => {
-      console.log("[BB] GameEngine actief – wacht op multi-guest updates...");
-    });
-  }
-
-  /** Haal gasten uit linkMicArmies payload */
-  private parseGuests(data: any): ArenaParticipant[] {
-    const armies = data?.armies || data?.participants || [];
-    const guests: ArenaParticipant[] = [];
-
-    for (const entry of armies) {
-      const user = entry.user || entry;
-      if (!user?.userId) continue;
-
-      guests.push({
-        id: String(user.userId),
-        display_name: user.nickname || "Onbekend",
-        username:
-          user.uniqueId ||
-          (user.nickname || "")
-            .toLowerCase()
-            .replace(/[^a-z0-9_]/g, ""),
-      });
-    }
-
-    return guests;
-  }
-
-  /** Synchroniseer huidige gasten met nieuwe lijst */
-  private syncParticipants(newGuests: ArenaParticipant[]) {
-    const newIds = new Set(newGuests.map((g) => g.id));
-    const currentIds = new Set(this.participants.keys());
-
-    // Nieuwe binnenkomers
-    for (const g of newGuests) {
-      if (!this.participants.has(g.id)) {
-        this.participants.set(g.id, g);
-        console.log(`${g.display_name} [BB] komt de arena binnen.`);
-        this.io.emit("arena:join", g);
-      }
-    }
-
-    // Weggegaan
-    for (const oldId of currentIds) {
-      if (!newIds.has(oldId)) {
-        const old = this.participants.get(oldId);
-        if (old) {
-          console.log(`${old.display_name} [BB] verlaat de arena.`);
-          this.io.emit("arena:leave", { id: old.id, display_name: old.display_name });
-          this.participants.delete(oldId);
-        }
-      }
-    }
-
-    // Altijd de volledige lijst uitsturen voor dashboard
-    this.emitArenaUpdate();
-  }
-
-  private emitArenaUpdate() {
-    const list = Array.from(this.participants.values());
-    this.io.emit("arena:update", list);
-  }
-
-  getActiveParticipants() {
-    return Array.from(this.participants.values());
+  if (socketServer) {
+    socketServer.emit('arena:update', arenaList);
+    socketServer.emit('arena:count', arenaList.length);
   }
 }
+
+export function getArena() {
+  return Array.from(arena).map(userIdStr => {
+    const data = arenaCache.get(userIdStr);
+    return data ? { ...data, inArena: true } : null;
+  }).filter(Boolean);
+}
+
+export function arenaJoin(userId: string, display_name: string, username: string) {
+  arena.add(userId);
+  arenaCache.set(userId, { display_name, username: '@' + username.toLowerCase() });
+  console.log(`[BB JOIN] ${display_name} (${'@' + username.toLowerCase()}) treedt de BattleBox binnen!`);
+  emitArena();
+}
+
+export function arenaLeave(userId: string) {
+  if (arena.has(userId)) {
+    const data = arenaCache.get(userId);
+    const name = data?.display_name || 'Onbekend';
+    const user = data?.username?.slice(1) || 'onbekend';
+    arena.delete(userId);
+    arenaCache.delete(userId);
+    console.log(`[BB LEAVE] ${name} (@${user}) verlaat de BattleBox!`);
+    emitArena();
+  }
+}
+
+export function arenaClear() {
+  const count = arena.size;
+  arena.clear();
+  arenaCache.clear();
+  console.log(`[BB END] Arena leeg – ${count} vechters verwijderd`);
+  emitArena();
+}
+
+export async function addBP(
+  tiktok_id: bigint,
+  amount: number,
+  action: string,
+  display_name: string,
+  isFan: boolean,
+  isVip: boolean
+) {
+  const oldRes = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [tiktok_id]);
+  const oldBP = parseFloat(oldRes.rows[0]?.bp_total) || 0;
+
+  await pool.query('UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id = $2', [amount, tiktok_id]);
+
+  const newRes = await pool.query('SELECT bp_total FROM users WHERE tiktok_id = $1', [tiktok_id]);
+  const newBP = parseFloat(newRes.rows[0].bp_total) || 0;
+
+  const userIdStr = tiktok_id.toString();
+  const bbTag = arena.has(userIdStr) ? ' [BB]' : '';
+  const fanTag = isFan ? ' [FAN]' : '';
+  const vipTag = isVip ? ' [VIP]' : '';
+
+  console.log(`[${action}]${bbTag} ${display_name}${fanTag}${vipTag}`);
+  console.log(`[BP: +${amount} | ${oldBP.toFixed(1)} → ${newBP.toFixed(1)}]`);
+}
+
+export { emitArena };
