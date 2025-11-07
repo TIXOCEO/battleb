@@ -43,19 +43,24 @@ if (!EULER_API_KEY) {
   process.exit(1);
 }
 
-// === NATIVE WEBSOCKET (DIT IS DE ECHTE 2025 METHODE) ===
+// === NATIVE WEBSOCKET (EULER STREAM) ===
 const wsUrl = `wss://ws.eulerstream.com?uniqueId=${TIKTOK_USERNAME}&apiKey=${EULER_API_KEY}`;
 let ws: WebSocket;
 
 const pendingLikes = new Map<string, number>();
 const hasFollowed = new Set<string>();
 
-async function getUserData(tiktok_id: bigint, display_name: string, username: string) {
+interface UserData {
+  isFan: boolean;
+  isVip: boolean;
+}
+
+async function getUserData(tiktok_id: bigint, display_name: string, username: string): Promise<UserData> {
   const usernameWithAt = '@' + username.toLowerCase();
   const query = `
     INSERT INTO users (tiktok_id, display_name, username, bp_total, is_fan, fan_expires_at, is_vip, vip_expires_at)
     VALUES ($1, $2, $3, 0, false, NULL, false, NULL)
-    ON CONFLICT (tiktok_id) 
+    ON CONFLICT (tiktok_id)
     DO UPDATE SET display_name = EXCLUDED.display_name, username = EXCLUDED.username
     RETURNING bp_total, is_fan, fan_expires_at, is_vip, vip_expires_at;
   `;
@@ -75,22 +80,23 @@ function connectWebSocket() {
     console.log('='.repeat(80));
   });
 
-  ws.on('message', (data) => {
+  ws.on('message', (data: WebSocket.Data) => {
     try {
-      const payload = JSON.parse(data.toString());
+      const payload = JSON.parse(data.toString()) as { messages?: any[] };
       if (!payload.messages) return;
 
       payload.messages.forEach((msg: any) => {
-        const type = msg.type;
+        const type = msg.type as string;
 
         // === MULTI-GUEST JOIN / LEAVE ===
         if (type === 'member') {
-          if (msg.user.isHost) return;
-          const userId = msg.user.userId?.toString() || msg.user.uniqueId;
-          const display_name = msg.user.nickname || 'Onbekend';
-          const tikTokUsername = msg.user.uniqueId;
+          if (msg.user?.isHost) return;
 
-          if (msg.action === 'join') {
+          const userId = (msg.user.userId?.toString() ?? msg.user.uniqueId) as string;
+          const display_name = msg.user.nickname ?? 'Onbekend';
+          const tikTokUsername = msg.user.uniqueId ?? '';
+
+          if (msg.action === ' támogat') {
             console.log(`[JOIN] ${display_name} (@${tikTokUsername}) → ULTI-GUEST`);
             arenaJoin(userId, display_name, tikTokUsername, 'guest');
           }
@@ -120,10 +126,10 @@ function connectWebSocket() {
 
           if (!isAdmin || !messageText.toLowerCase().startsWith('!adm ')) return;
 
-          // === JOUW ADMIN COMMANDS (100% ongewijzigd) ===
           const args = messageText.slice(5).trim().split(' ');
           const cmd = args[0]?.toLowerCase();
           const rawUsername = args[1];
+
           if (!rawUsername?.startsWith('@')) return;
 
           (async () => {
@@ -215,8 +221,8 @@ function connectWebSocket() {
           const userId = BigInt(msg.user.userId || '0');
           const display_name = msg.user.nickname || 'Onbekend';
           const tikTokUsername = msg.user.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
-
           const batch = msg.likeCount || 1;
+
           const prev = pendingLikes.get(userId.toString()) || 0;
           const total = prev + batch;
           const bp = Math.floor(total / 100) - Math.floor(prev / 100);
@@ -235,6 +241,7 @@ function connectWebSocket() {
           const userId = BigInt(msg.user.userId || '0');
           if (hasFollowed.has(userId.toString())) return;
           hasFollowed.add(userId.toString());
+
           const display_name = msg.user.nickname || 'Onbekend';
           const tikTokUsername = msg.user.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
 
@@ -266,12 +273,12 @@ function connectWebSocket() {
     }
   });
 
-  ws.on('close', (code) => {
+  ws.on('close', (code: number, reason: string) => {
     console.log(`WebSocket gesloten (code ${code}) – herconnect over 5 sec...`);
     setTimeout(connectWebSocket, 5000);
   });
 
-  ws.on('error', (err) => {
+  ws.on('error', (err: Error) => {
     console.error('WebSocket error:', err);
   });
 }
