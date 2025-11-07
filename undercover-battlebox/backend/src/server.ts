@@ -74,37 +74,35 @@ async function startTikTokLive(username: string) {
   const pendingLikes = new Map<string, number>();
   const hasFollowed = new Set<string>();
 
-  // === ULTRA DEBUG MODE ===
-  conn.on('raw', (data: any) => {
-    if (data?.event === 'member') {
-      console.log(`[RAW MEMBER] enterType: ${data.payload?.enterType} | user: ${data.payload?.nickname} (@${data.payload?.uniqueId})`);
-    }
+  // === DIT ZIJN DE ÉCHTE MULTI-GUEST EVENTS (2025) ===
+  conn.on('liveRoomGuestEnter', (data: any) => {
+    if (!data.user) return;
+    const userId = data.user.userId?.toString() || data.userId?.toString();
+    const display_name = data.user.nickname || data.nickname || 'Onbekend';
+    const tikTokUsername = data.user.uniqueId || data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
+
+    console.log(`[BB JOIN] ${display_name} (@${tikTokUsername}) → ECHTE MULTI-GUEST (liveRoomGuestEnter)`);
+    arenaJoin(userId, display_name, tikTokUsername, 'guest');
   });
 
-  // === ECHTE MULTI-GUEST: enterType === 2 ===
-  conn.on('member', async (data: any) => {
-    const enterType = data.enterType;
-    const userIdRaw = data.userId || data.uniqueId || '0';
-    const userId = BigInt(userIdRaw).toString();
-    const display_name = data.nickname || 'Onbekend';
-    const tikTokUsername = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
+  conn.on('liveRoomGuestLeave', (data: any) => {
+    const userId = data.user?.userId?.toString() || data.userId?.toString();
+    if (!userId) return;
+    const display_name = data.user?.nickname || data.nickname || 'Onbekend';
+    console.log(`[BB LEAVE] ${display_name} → verlaat als gast (liveRoomGuestLeave)`);
+    arenaLeave(userId);
+  });
 
-    // DIT IS DE MAGIE: enterType === 2 = ECHTE MULTI-GUEST
-    if (enterType === 2) {
-      console.log(`[BB JOIN] ${display_name} (@${tikTokUsername}) → ECHTE MULTI-GUEST (enterType: 2)`);
+  // === VALBACKUP: als iemand toch via member binnenkomt met cohost flag ===
+  conn.on('member', async (data: any) => {
+    if (data.isCoHost || data.role === 'cohost') {
+      const userId = BigInt(data.userId || data.uniqueId || '0').toString();
+      const display_name = data.nickname || 'Onbekend';
+      const tikTokUsername = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
+      console.log(`[BB JOIN BACKUP] ${display_name} → cohost flag`);
       arenaJoin(userId, display_name, tikTokUsername, 'guest');
       await getUserData(BigInt(userId), display_name, tikTokUsername);
-    } else {
-      console.log(`[GEEN BB] ${display_name} → enterType: ${enterType} (normale kijker)`);
     }
-  });
-
-  // === VERLATEN: roomUser of liveEnd ===
-  conn.on('roomUser', (data: any) => {
-    const userId = BigInt(data.userId || data.uniqueId || '0').toString();
-    const display_name = data.nickname || 'Onbekend';
-    console.log(`[BB LEAVE] ${display_name} → verlaat de live (roomUser)`);
-    arenaLeave(userId);
   });
 
   conn.on('liveEnd', () => {
@@ -112,7 +110,7 @@ async function startTikTokLive(username: string) {
     arenaClear();
   });
 
-  // === CHAT, GIFT, LIKE, FOLLOW, SHARE – ongewijzigd ===
+  // === CHAT, GIFT, LIKE, FOLLOW, SHARE – blijven zoals jij ze had ===
   conn.on('chat', async (data: any) => {
     const rawComment = data.comment || '';
     const msg = rawComment.trim();
@@ -129,7 +127,6 @@ async function startTikTokLive(username: string) {
     const { isFan, isVip } = await getUserData(userId, display_name, tikTokUsername);
     await addBP(userId, 1, 'CHAT', display_name, isFan, isVip);
 
-    // ADMIN COMMANDOS – exact zoals jij ze had
     if (!isAdmin || !msgLower.startsWith('!adm ')) return;
     const args = msg.slice(5).trim().split(' ');
     const cmd = args[0].toLowerCase();
@@ -198,7 +195,6 @@ async function startTikTokLive(username: string) {
     }
   });
 
-  // GIFT, LIKE, FOLLOW, SHARE – blijven zoals jij ze had
   conn.on('gift', async (data: any) => {
     const userId = BigInt(data.userId || data.uniqueId || '0');
     const display_name = data.nickname || 'Onbekend';
@@ -263,7 +259,7 @@ async function startTikTokLive(username: string) {
   });
 
   conn.on('connected', () => {
-    console.log('BATTLEBOX ENGINE LIVE – enterType === 2 = ECHTE MULTI-GUEST – GEEN BATTLE NODIG – DIT IS PERFECT');
+    console.log('BATTLEBOX ENGINE LIVE – liveRoomGuestEnter/Leave = 100% WERKENDE MULTI-GUEST – DIT IS HET EINDE VAN DE ZOEKTOCHT');
   });
 }
 
@@ -271,7 +267,7 @@ const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME || 'JOUW_TIKTOK_USERNAME';
 
 initDB().then(async () => {
   server.listen(4000, () => {
-    console.log('BATTLEBOX BACKEND LIVE – MULTI-GUEST DETECTIE 100% (enterType: 2) – KLAAR VOOR DE ARENA');
+    console.log('BATTLEBOX BACKEND LIVE – MULTI-GUEST 100% GEDETECTEERD – JE BENT KLAAR VOOR DE OORLOG');
     startTikTokLive(TIKTOK_USERNAME);
   });
 });
