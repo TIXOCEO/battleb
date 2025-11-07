@@ -18,7 +18,7 @@ async function emitArena() {
       userId: userIdStr,
       display_name: data.display_name,
       username: data.username,
-      role: data.role,
+      role: data.role || 'fighter',
       inArena: true
     } : null;
   }).filter(Boolean);
