@@ -113,11 +113,23 @@ async function startTikTokLive(username: string) {
     }
   }
 
-  conn.on('connected', (state) => {
-    hostId = state.hostId || state.userId || '';
+  conn.on('connected', async (state) => {
+    hostId = state.hostId || state.userId || state.user?.userId || '';
+    
+    if (!hostId) {
+      console.error('HOST ID NIET GEVONDEN!');
+      return;
+    }
+
+    // HOST WORDT NU METEEN IN DB GEZET
+    const hostNickname = state.user?.nickname || state.nickname || 'Host';
+    const hostUniqueId = state.user?.uniqueId || state.uniqueId;
+
+    await getOrUpdateUser(hostId, hostNickname, hostUniqueId);
+
     console.log('='.repeat(80));
-    console.log('BATTLEBOX LIVE – 100% STABIEL – ALLES VIA TIKTOK_ID');
-    console.log(`Host ID: ${hostId}`);
+    console.log('BATTLEBOX LIVE – HOST DIRECT IN DB');
+    console.log(`Host: ${hostNickname} (@${hostUniqueId || 'onbekend'}) [ID: ${hostId}]`);
     console.log('='.repeat(80));
   });
 
@@ -139,7 +151,7 @@ async function startTikTokLive(username: string) {
         '??'
       )?.toString();
 
-      if (senderId === '??') return;
+      if (senderId === '??' || receiverId === '??') return;
 
       const diamonds = data.diamondCount || 0;
       const giftName = data.giftName || 'Onbekend';
@@ -194,7 +206,7 @@ async function startTikTokLive(username: string) {
     }
   });
 
-  // ── CHAT + ADMIN COMMANDS
+  // ── CHAT + ADMIN COMMANDS (ongewijzigd)
   conn.on('chat', async (data: any) => {
     const rawComment = data.comment || '';
     const msg = rawComment.trim();
@@ -282,7 +294,7 @@ async function startTikTokLive(username: string) {
     }
   });
 
-  // ── LIKE, FOLLOW, SHARE, GUEST
+  // ── LIKE, FOLLOW, SHARE, GUEST (ongewijzigd)
   conn.on('like', async (data: any) => {
     const userId = (data.userId || data.uniqueId || '0').toString();
     if (userId === '0') return;
