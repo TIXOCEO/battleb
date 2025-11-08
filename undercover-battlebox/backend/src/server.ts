@@ -73,7 +73,7 @@ async function getUserInfo(userId: string): Promise<UserInfo> {
       const { display_name, username } = res.rows[0];
       const cleanUsername = username.startsWith('@') ? username.slice(1) : username;
       const info = { display_name, username: cleanUsername };
-      userCache.set(userId, info); // cache voor later
+      userCache.set(userId, info);
       return info;
     }
   } catch (err) {
@@ -237,11 +237,10 @@ async function startTikTokLive(username: string) {
     if (!msg) return;
 
     console.log(`[CHAT] ${display_name}: ${rawComment}`);
-
     const { isFan, isVip } = await getUserData(BigInt(userId), display_name, username);
     await addBP(BigInt(userId), 1, 'CHAT', display_name, isFan, isVip);
 
-    // Admin commands (ongewijzigd)
+    // Admin commands
     const msgLower = msg.toLowerCase();
     const isAdmin = userId === ADMIN_ID;
     if (!isAdmin || !msgLower.startsWith('!adm ')) return;
@@ -274,7 +273,7 @@ async function startTikTokLive(username: string) {
     }
   });
 
-  // ── LIKE, FOLLOW, SHARE ─────────────────────────────────────────────────
+  // ── LIKE, FOLLOW, SHARE (GEFIXT) ───────────────────────────────────────
   conn.on('like', async (data: any) => {
     const userId = BigInt(data.userId || data.uniqueId || '0').toString();
     const display_name = data.nickname || 'Onbekend';
@@ -285,7 +284,11 @@ async function startTikTokLive(username: string) {
     const prev = pendingLikes.get(userId) || 0;
     const total = prev + batch;
     const bp = Math.floor(total / 100) - Math.floor(prev / 100);
-    if (bp > 0) await addBP(BigInt(userId), bp, 'LIKE', display_name, ...(await getUserData(BigInt(userId), display_name, username)).isFan, ...(await getUserData(BigInt(userId), display_name, username)).isVip);
+
+    if (bp > 0) {
+      const { isFan, isVip } = await getUserData(BigInt(userId), display_name, username);
+      await addBP(BigInt(userId), bp, 'LIKE', display_name, isFan, isVip);
+    }
     pendingLikes.set(userId, total);
   });
 
@@ -296,7 +299,8 @@ async function startTikTokLive(username: string) {
     const display_name = data.nickname || 'Onbekend';
     const username = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
     cacheUser(userId, display_name, username);
-    await addBP(BigInt(userId), 5, 'FOLLOW', display_name, ...(await getUserData(BigInt(userId), display_name, username)));
+    const { isFan, isVip } = await getUserData(BigInt(userId), display_name, username);
+    await addBP(BigInt(userId), 5, 'FOLLOW', display_name, isFan, isVip);
   });
 
   conn.on('share', async (data: any) => {
@@ -304,7 +308,8 @@ async function startTikTokLive(username: string) {
     const display_name = data.nickname || 'Onbekend';
     const username = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
     cacheUser(userId, display_name, username);
-    await addBP(BigInt(userId), 5, 'SHARE', display_name, ...(await getUserData(BigInt(userId), display_name, username)));
+    const { isFan, isVip } = await getUserData(BigInt(userId), display_name, username);
+    await addBP(BigInt(userId), 5, 'SHARE', display_name, isFan, isVip);
   });
 
   conn.on('liveEnd', () => {
