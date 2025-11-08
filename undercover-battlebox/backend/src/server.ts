@@ -32,26 +32,28 @@ const ADMIN_ID = process.env.ADMIN_TIKTOK_ID?.trim();
 let hostId = '';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GIFT CACHE: msgId → sender info (nooit meer Onbekend!)
+// GIFT CACHE: msgId → sender info (NOOIT meer Onbekend!)
 // ─────────────────────────────────────────────────────────────────────────────
-const giftSenderCache = new Map<string, {
+interface GiftSenderCacheEntry {
   senderId: string;
   display_name: string;
   username: string;
-}>();
+  __timestamp: number;
+}
+const giftSenderCache = new Map<string, GiftSenderCacheEntry>();
 
-// Auto cleanup na 3 seconden
+// Auto cleanup oude entries
 setInterval(() => {
   const now = Date.now();
-  for (const [msgId, data] of giftSenderCache) {
-    if (now - (data as any).__timestamp > 3000) {
+  for (const [msgId, entry] of giftSenderCache.entries()) {
+    if (now - entry.__timestamp > 3000) {
       giftSenderCache.delete(msgId);
     }
   }
 }, 5000);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// USER DATA + DB SYNC
+// GEEF USER IN DB (altijd naam + username)
 // ─────────────────────────────────────────────────────────────────────────────
 async function ensureUserInDB(tiktok_id: bigint, display_name: string, username: string) {
   const usernameWithAt = '@' + username.toLowerCase();
@@ -59,36 +61,40 @@ async function ensureUserInDB(tiktok_id: bigint, display_name: string, username:
     INSERT INTO users (tiktok_id, display_name, username, bp_total)
     VALUES ($1, $2, $3, 0)
     ON CONFLICT (tiktok_id) 
-    DO UPDATE SET display_name = EXCLUDED.display_name, username = EXCLUDED.username
-  `, [tiktok_id, display_name, usernameWithAt]);
+    DO UPDATE SET 
+      display_name = EXCLUDED.display_name,
+      username = EXCLUDED.username
+  `, [tiktok_id, display_name || 'Onbekend', usernameWithAt]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CONNECTIE + EVENTS
+// START TIKTOK LIVE
 // ─────────────────────────────────────────────────────────────────────────────
 async function startTikTokLive(username: string) {
   const conn = new WebcastPushConnection(username);
   const pendingLikes = new Map<string, number>();
   const hasFollowed = new Set<string>();
 
-  // Retry
+  // Retry connectie
   for (let i = 0; i < 6; i++) {
     try {
       await conn.connect();
-      console.info(`Verbonden met @${username}`);
+      console.info(`Verbonden met @${username} (poging ${i + 1})`);
       break;
-    } catch (err) {
-      console.error(`Poging ${i + 1} mislukt...`);
+    } catch (err: any) {
+      console.error(`Connectie mislukt (poging ${i + 1}/6):`, err.message || err);
       if (i === 5) process.exit(1);
       await new Promise(r => setTimeout(r, 7000));
     }
   }
 
   conn.on('connected', (state) => {
-    hostId = state.hostId || '';
+    hostId = state.hostId || state.userId || '';
     console.log('='.repeat(80));
     console.log('ULTI-GUEST 100% GEDETECTEERD – KLAAR VOOR DE OORLOG');
+    console.log(`ROOM ID: ${state.roomId || 'ONBEKEND'}`);
     console.log(`Host ID: ${hostId}`);
+    console.log(`Titel: ${state.title || 'Geen titel'}`);
     console.log('='.repeat(80));
   });
 
@@ -102,7 +108,6 @@ async function startTikTokLive(username: string) {
     const display_name = sender.nickname || 'Onbekend';
     const username = (sender.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, ''));
 
-    // Sla op in cache
     giftSenderCache.set(msgId.toString(), {
       senderId,
       display_name,
@@ -116,23 +121,26 @@ async function startTikTokLive(username: string) {
     }
   });
 
-  // ── STAP 2: rawData → KOPPEL AAN CACHE + PROCES GIFT
+  // ── STAP 2: rawData → KOPPEL MET CACHE + PROCES GIFT
   conn.on('rawData', async (messageTypeName, binary) => {
     if (messageTypeName !== 'WebcastGiftMessage') return;
 
     try {
-      // Je hoeft protobuf niet te laden als je tiktok-live-connector gebruikt
-      // Maar we gebruiken de msgId uit common
-      const message = JSON.parse(binary.toString()); // soms is het JSON!
+      // tiktok-live-connector stuurt soms JSON, soms binary → probeer beide
+      let message: any;
+      try {
+        message = JSON.parse(binary.toString());
+      } catch {
+        return; // negeer echte protobuf binary
+      }
+
       const common = message.common || {};
       const msgId = common.msgId?.toString();
-
       if (!msgId) return;
 
       const receiverId = message.giftExtra?.receiverUserId || hostId;
       if (!receiverId) return;
 
-      // Haal verzender uit cache
       const cached = giftSenderCache.get(msgId);
       if (!cached || cached.senderId === '??') {
         console.log(`[GIFT] Geen verzender info (msgId: ${msgId}) → Aan: ${receiverId === hostId ? 'HOST' : 'GAST'}`);
@@ -144,18 +152,19 @@ async function startTikTokLive(username: string) {
       const diamonds = message.giftDetails?.diamondCount || 0;
       const giftName = message.giftDetails?.giftName || 'Onbekend';
 
-      // Receiver info (co-host of host)
+      // Receiver info ophalen
       const receiverRes = await pool.query(
         'SELECT display_name, username FROM users WHERE tiktok_id = $1',
         [receiverId]
       );
       const receiver = receiverRes.rows[0] || { display_name: 'Onbekend', username: 'onbekend' };
+      const cleanReceiverUsername = receiver.username?.startsWith('@') ? receiver.username.slice(1) : receiver.username;
 
       const isToHost = receiverId === hostId;
 
       console.log('\n[GIFT VOLLEDIG GEDETECTEERD]');
       console.log(`   Van: ${display_name} (@${username}) [ID: ${senderId}]`);
-      console.log(`   Aan: ${receiver.display_name} (@${receiver.username}) [ID: ${receiverId}] ${isToHost ? '(HOST)' : '(GAST)'}`);
+      console.log(`   Aan: ${receiver.display_name} (@${cleanReceiverUsername}) [ID: ${receiverId}] ${isToHost ? '(HOST)' : '(GAST)'}`);
       console.log(`   Gift: ${giftName} (${diamonds} diamonds)`);
       if (isToHost) {
         console.log(`   → STREAMTOTAAL (geen leaderboard)`);
@@ -166,47 +175,62 @@ async function startTikTokLive(username: string) {
       // 20% BP voor verzender
       if (diamonds > 0) {
         const bp = diamonds * 0.2;
-        await addBP(BigInt(senderId), bp, 'GIFT', display_name, false, false);
+        const { rows } = await pool.query(
+          'SELECT is_fan, fan_expires_at, is_vip, vip_expires_at FROM users WHERE tiktok_id = $1',
+          [senderId]
+        );
+        const user = rows[0] || {};
+        const isFan = user.is_fan && user.fan_expires_at && new Date(user.fan_expires_at) > new Date();
+        const isVip = user.is_vip && user.vip_expires_at && new Date(user.vip_expires_at) > new Date();
+
+        await addBP(BigInt(senderId), bp, 'GIFT', display_name, isFan, isVip);
         console.log(`[BP: +${bp.toFixed(1)} | GIFT 20%] → ${display_name}`);
       }
 
-      // Heart Me
+      // Heart Me → FAN 24u
       if (giftName.toLowerCase().includes('heart me')) {
-        await pool.query(
-          `INSERT INTO users (tiktok_id, display_name, username, is_fan, fan_expires_at)
-           VALUES ($1, $2, $3, true, NOW() + INTERVAL '24 hours')
-           ON CONFLICT (tiktok_id) DO UPDATE SET is_fan = true, fan_expires_at = NOW() + INTERVAL '24 hours'`,
-          [BigInt(senderId), display_name, '@' + username]
-        );
-        console.log(`Heart Me → FAN 24u (${display_name})`);
+        await pool.query(`
+          INSERT INTO users (tiktok_id, display_name, username, is_fan, fan_expires_at)
+          VALUES ($1, $2, $3, true, NOW() + INTERVAL '24 hours')
+          ON CONFLICT (tiktok_id) 
+          DO UPDATE SET is_fan = true, fan_expires_at = NOW() + INTERVAL '24 hours'
+        `, [BigInt(senderId), display_name, '@' + username]);
+        console.log(`Heart Me → FAN 24u (${display_name}) [FAN]`);
       }
 
       console.log('='.repeat(80));
-
-      // Cleanup
       giftSenderCache.delete(msgId);
 
     } catch (err) {
-      // Soms is binary geen JSON → negeer
+      // negeer parse errors
     }
   });
 
-  // ── REST VAN EVENTS (chat, like, follow, etc.) blijven hetzelfde
+  // ── CHAT
   conn.on('chat', async (data: any) => {
     const userId = BigInt(data.userId || data.uniqueId || '0');
     const display_name = data.nickname || 'Onbekend';
     const username = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
-    
+
     await ensureUserInDB(userId, display_name, username);
-    await addBP(userId, 1, 'CHAT', display_name, false, false);
-    console.log(`[CHAT] ${display_name}: ${data.comment}`);
+    const { rows } = await pool.query(
+      'SELECT is_fan, fan_expires_at, is_vip, vip_expires_at FROM users WHERE tiktok_id = $1',
+      [userId]
+    );
+    const user = rows[0] || {};
+    const isFan = user.is_fan && user.fan_expires_at && new Date(user.fan_expires_at) > new Date();
+    const isVip = user.is_vip && user.vip_expires_at && new Date(user.vip_expires_at) > new Date();
+
+    await addBP(userId, 1, 'CHAT', display_name, isFan, isVip);
+    console.log(`[CHAT] ${display_name}: ${data.comment || ''}`);
   });
 
+  // ── LIKE
   conn.on('like', async (data: any) => {
     const userId = BigInt(data.userId || data.uniqueId || '0');
     const display_name = data.nickname || 'Onbekend';
     const username = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
-    
+
     await ensureUserInDB(userId, display_name, username);
 
     const batch = data.likeCount || 1;
@@ -214,41 +238,74 @@ async function startTikTokLive(username: string) {
     const total = prev + batch;
     const bp = Math.floor(total / 100) - Math.floor(prev / 100);
 
-    if (bp > 0) await addBP(userId, bp, 'LIKE', display_name, false, false);
+    if (bp > 0) {
+      const { rows } = await pool.query(
+        'SELECT is_fan, fan_expires_at, is_vip, vip_expires_at FROM users WHERE tiktok_id = $1',
+        [userId]
+      );
+      const user = rows[0] || {};
+      const isFan = user.is_fan && user.fan_expires_at && new Date(user.fan_expires_at) > new Date();
+      const isVip = user.is_vip && user.vip_expires_at && new Date(user.vip_expires_at) > new Date();
+
+      await addBP(userId, bp, 'LIKE', display_name, isFan, isVip);
+    }
     pendingLikes.set(userId.toString(), total);
   });
 
+  // ── FOLLOW & SHARE
   conn.on('follow', async (data: any) => {
     const userId = BigInt(data.userId || data.uniqueId || '0');
     if (hasFollowed.has(userId.toString())) return;
     hasFollowed.add(userId.toString());
-    
+
     const display_name = data.nickname || 'Onbekend';
     const username = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
-    
+
     await ensureUserInDB(userId, display_name, username);
     await addBP(userId, 5, 'FOLLOW', display_name, false, false);
   });
 
+  conn.on('share', async (data: any) => {
+    const userId = BigInt(data.userId || data.uniqueId || '0');
+    const display_name = data.nickname || 'Onbekend';
+    const username = data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
+
+    await ensureUserInDB(userId, display_name, username);
+    await addBP(userId, 5, 'SHARE', display_name, false, false);
+  });
+
+  // ── GUEST EVENTS
   conn.on('liveRoomGuestEnter', (data: any) => {
-    const userId = data.user?.userId?.toString() || '0';
-    const display_name = data.user?.nickname || 'Onbekend';
-    const username = data.user?.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
-    
+    if (!data.user) return;
+    const userId = data.user.userId?.toString() || data.userId?.toString();
+    const display_name = data.user.nickname || data.nickname || 'Onbekend';
+    const username = data.user.uniqueId || data.uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
+
     ensureUserInDB(BigInt(userId), display_name, username);
     arenaJoin(userId, display_name, username, 'guest');
     console.log(`[JOIN] ${display_name} (@${username}) → ULTI-GUEST`);
   });
 
+  conn.on('liveRoomGuestLeave', (data: any) => {
+    const userId = data.user?.userId?.toString() || data.userId?.toString();
+    if (!userId) return;
+    arenaLeave(userId);
+    console.log(`[LEAVE] ${data.user?.nickname || 'Onbekend'} → verlaat arena`);
+  });
+
   conn.on('liveEnd', () => {
-    console.log('[END] Stream beëindigd');
+    console.log('[END] Stream beëindigd → arena geleegd');
     arenaClear();
     giftSenderCache.clear();
+  });
+
+  conn.on('error', (err) => {
+    console.error('TikTok Live fout:', err);
   });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// START
+// START SERVER
 // ─────────────────────────────────────────────────────────────────────────────
 const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME?.trim() || 'JOUW_USERNAME';
 
@@ -258,4 +315,7 @@ initDB().then(() => {
     console.log('='.repeat(80));
     startTikTokLive(TIKTOK_USERNAME);
   });
+}).catch(err => {
+  console.error('DB initialisatie mislukt:', err);
+  process.exit(1);
 });
