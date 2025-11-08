@@ -58,12 +58,10 @@ function cacheUser(userId: string, display_name: string, username: string) {
 
 // Haal uit cache OF database
 async function getUserInfo(userId: string): Promise<UserInfo> {
-  // 1. Cache
   if (userCache.has(userId)) {
     return userCache.get(userId)!;
   }
 
-  // 2. Database
   try {
     const res = await pool.query(
       'SELECT display_name, username FROM users WHERE tiktok_id = $1',
@@ -80,7 +78,6 @@ async function getUserInfo(userId: string): Promise<UserInfo> {
     console.error('DB lookup fout:', err);
   }
 
-  // 3. Fallback
   return { display_name: 'Onbekend', username: 'onbekend' };
 }
 
@@ -101,7 +98,6 @@ async function getUserData(tiktok_id: bigint, display_name: string, username: st
   const isFan = row.is_fan && row.fan_expires_at && new Date(row.fan_expires_at) > new Date();
   const isVip = row.is_vip && row.vip_expires_at && new Date(row.vip_expires_at) > new Date();
 
-  // Sync cache
   cacheUser(tiktok_id.toString(), display_name, username);
 
   return { isFan, isVip };
@@ -147,7 +143,6 @@ async function startTikTokLive(username: string) {
 
   // ── GIFT EVENT: VOLLEDIGE LOOKUP ────────────────────────────────────────
   conn.on('gift', async (data: any) => {
-    // SENDER ID (cruciaal!)
     const senderId = data.user?.userId?.toString() ||
                      data.senderUserId?.toString() ||
                      data.userId?.toString() ||
@@ -157,7 +152,6 @@ async function startTikTokLive(username: string) {
     const giftName = data.giftName || 'Onbekend';
     const diamonds = data.diamondCount || 0;
 
-    // Haal verzender + ontvanger op
     const [sender, receiver] = await Promise.all([
       getUserInfo(senderId),
       getUserInfo(receiverId)
@@ -188,9 +182,6 @@ async function startTikTokLive(username: string) {
       console.log(`Heart Me → FAN 24u (${sender.display_name})`);
       return;
     }
-
-    // === HIER KOMT LATER DIAMONDS PER RONDE ===
-    // if (!isToHost) await addDiamondsToArena(receiverId, diamonds);
   });
 
   // ── USER CACHE OPBOUWEN ─────────────────────────────────────────────────
@@ -225,7 +216,7 @@ async function startTikTokLive(username: string) {
     }
   });
 
-  // ── CHAT (cache + DB sync) ──────────────────────────────────────────────
+  // ── CHAT ────────────────────────────────────────────────────────────────
   conn.on('chat', async (data: any) => {
     const userId = BigInt(data.userId || data.uniqueId || '0').toString();
     const display_name = data.nickname || 'Onbekend';
@@ -273,7 +264,7 @@ async function startTikTokLive(username: string) {
     }
   });
 
-  // ── LIKE, FOLLOW, SHARE (GEFIXT) ───────────────────────────────────────
+  // ── LIKE, FOLLOW, SHARE (GEFIXT: GEEN SPREAD OP BOOLEAN) ─────────────────
   conn.on('like', async (data: any) => {
     const userId = BigInt(data.userId || data.uniqueId || '0').toString();
     const display_name = data.nickname || 'Onbekend';
