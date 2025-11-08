@@ -104,9 +104,20 @@ async function startTikTokLive(username: string) {
     console.log('='.repeat(80));
   });
 
-  // ── GIFT EVENT: ALLES WAT WE NODIG HEBBEN IS HIER
+  // ── GIFT EVENT: ULTIEME SENDER DETECTIE (werkt ALTIJD)
   conn.on('gift', async (data: any) => {
-    const senderId = (data.user?.userId || data.senderUserId || data.userId || '??').toString();
+    // DEZE 6 REGELS ZIJN DE MAGIE
+    const senderRaw = data.user || data.sender || {};
+    const senderId = (
+      senderRaw.userId?.toString() ||
+      senderRaw.id?.toString() ||
+      data.senderUserId?.toString() ||
+      data.userId?.toString() ||
+      '??'
+    );
+    const senderDisplay = senderRaw.nickname || senderRaw.displayName || 'Onbekend';
+    const senderUsername = senderRaw.uniqueId || senderDisplay.toLowerCase().replace(/[^a-z0-9_]/g, '');
+
     const receiverId = (data.receiverUserId || data.toUserId || hostId || '??').toString();
     const diamonds = data.diamondCount || 0;
     const giftName = data.giftName || 'Onbekend';
@@ -118,11 +129,7 @@ async function startTikTokLive(username: string) {
 
     // Zorg dat beide users in DB staan
     const [sender, receiver] = await Promise.all([
-      ensureUser(
-        senderId,
-        data.user?.nickname,
-        data.user?.uniqueId
-      ),
+      ensureUser(senderId, senderDisplay, senderUsername),
       ensureUser(
         receiverId,
         data.toUser?.nickname || data.receiverNickname,
