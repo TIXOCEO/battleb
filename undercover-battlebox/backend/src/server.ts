@@ -32,7 +32,7 @@ const ADMIN_ID = process.env.ADMIN_TIKTOK_ID?.trim();
 let hostId = '';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GET + UPDATE USER VIA TIKTOK_ID – ALTIJD STABIEL + AUTO-UPDATE
+// GET + UPDATE USER VIA TIKTOK_ID – MET ON CONFLICT → NOOIT MEER CRASH
 // ─────────────────────────────────────────────────────────────────────────────
 async function getOrUpdateUser(
   tiktok_id: string,
@@ -49,17 +49,20 @@ async function getOrUpdateUser(
 
   const id = BigInt(tiktok_id);
 
+  // EERST PROBEREN OP TE HALEN
   let { rows } = await pool.query(
     'SELECT display_name, username FROM users WHERE tiktok_id = $1',
     [id]
   );
 
+  // BESTAAT AL?
   if (rows[0]) {
     const currentName = rows[0].display_name;
     const currentUsername = rows[0].username;
 
+    // ALLEEN UPDATEN ALS ER EEN NIEUWE NAAM IS
     if (nickname && nickname !== 'Onbekend' && nickname !== currentName) {
-      const cleanUsername = uniqueId || nickname.toLowerCase().replace(/[^a-z0-9_]/g, '');
+      const cleanUsername = (uniqueId || nickname.toLowerCase().replace(/[^a-z0-9_]/g, '')).trim();
       const finalUsername = cleanUsername.startsWith('@') ? cleanUsername : '@' + cleanUsername;
 
       await pool.query(
@@ -75,21 +78,33 @@ async function getOrUpdateUser(
     return { id: tiktok_id, display_name: currentName, username: cleanUsername };
   }
 
+  // NIET IN DB → AANMAKEN MET ON CONFLICT
   const display_name = nickname && nickname !== 'Onbekend' ? nickname : `Onbekend#${tiktok_id.slice(-5)}`;
-  const rawUsername = uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '');
-  const username = rawUsername.startsWith('@') ? rawUsername : '@' + rawUsername;
+  const rawUsername = (uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '')).trim();
+  const finalUsername = rawUsername.startsWith('@') ? rawUsername : '@' + rawUsername;
 
   await pool.query(
     `INSERT INTO users (tiktok_id, display_name, username, bp_total)
-     VALUES ($1, $2, $3, 0)`,
-    [id, display_name, username]
+     VALUES ($1, $2, $3, 0)
+     ON CONFLICT (tiktok_id) DO NOTHING`,
+    [id, display_name, finalUsername]
   );
 
-  console.log(`[NIEUW] ${display_name} (@${rawUsername.slice(1)})`);
+  console.log(`[NIEUW] ${display_name} (@${finalUsername.slice(1)})`);
+
+  // Nog een keer ophalen na insert
+  const { rows: finalRows } = await pool.query(
+    'SELECT display_name, username FROM users WHERE tiktok_id = $1',
+    [id]
+  );
+
+  const user = finalRows[0];
+  const cleanUsername = user.username.startsWith('@') ? user.username.slice(1) : user.username;
+
   return {
     id: tiktok_id,
-    display_name,
-    username: rawUsername.startsWith('@') ? rawUsername.slice(1) : rawUsername
+    display_name: user.display_name,
+    username: cleanUsername
   };
 }
 
@@ -113,11 +128,18 @@ async function startTikTokLive(username: string) {
     }
   }
 
-  conn.on('connected', (state) => {
-    hostId = state.hostId || state.userId || '';
+  conn.on('connected', async (state) => {
+    hostId = state.hostId || state.userId || state.user?.userId || '';
+    if (!hostId) return console.error('HOST ID NIET GEVONDEN!');
+
+    const hostNickname = state.user?.nickname || state.nickname || 'Host';
+    const hostUniqueId = state.user?.uniqueId || state.uniqueId;
+
+    await getOrUpdateUser(hostId, hostNickname, hostUniqueId);
+
     console.log('='.repeat(80));
-    console.log('BATTLEBOX LIVE – 100% STABIEL – ALLES VIA TIKTOK_ID');
-    console.log(`Host ID: ${hostId}`);
+    console.log('BATTLEBOX LIVE – HOST IN DB – VOOR ALTIJD STABIEL');
+    console.log(`Host: ${hostNickname} (@${hostUniqueId || 'onbekend'}) [ID: ${hostId}]`);
     console.log('='.repeat(80));
   });
 
@@ -139,7 +161,7 @@ async function startTikTokLive(username: string) {
         '??'
       )?.toString();
 
-      if (senderId === '??') return;
+      if (senderId === '??' || receiverId === '??') return;
 
       const diamonds = data.diamondCount || 0;
       const giftName = data.giftName || 'Onbekend';
@@ -215,7 +237,6 @@ async function startTikTokLive(username: string) {
 
     await addBP(userId, 1, 'CHAT', user.display_name, isFan, isVip);
 
-    // ADMIN COMMANDS
     const msgLower = msg.toLowerCase();
     const isAdmin = userId.toString() === ADMIN_ID;
     if (!isAdmin || !msgLower.startsWith('!adm ')) return;
