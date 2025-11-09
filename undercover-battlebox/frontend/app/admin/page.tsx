@@ -1,7 +1,7 @@
 // app/admin/layout.tsx
 import type { ReactNode } from "react";
 
-export default function AdminLayout({ children }: { children: ReactNode }) {
+export default function AdminLayout() {
   return (
     <html lang="nl">
       <body className="min-h-screen bg-[#f5f5f7] text-gray-900">
