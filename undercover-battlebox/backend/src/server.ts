@@ -31,6 +31,10 @@ io.on('connection', (socket) => {
 const ADMIN_ID = process.env.ADMIN_TIKTOK_ID?.trim();
 let hostId = '';
 
+// GLOBAAL HOST INFO – ALTIJD CORRECT, ZELFS BIJ GIFTS NAAR HOST
+let HOST_DISPLAY_NAME = 'Host';
+let HOST_USERNAME = 'host';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GET + UPDATE USER VIA TIKTOK_ID – MET ON CONFLICT → NOOIT MEER CRASH
 // ─────────────────────────────────────────────────────────────────────────────
@@ -49,18 +53,15 @@ async function getOrUpdateUser(
 
   const id = BigInt(tiktok_id);
 
-  // EERST PROBEREN OP TE HALEN
   let { rows } = await pool.query(
     'SELECT display_name, username FROM users WHERE tiktok_id = $1',
     [id]
   );
 
-  // BESTAAT AL?
   if (rows[0]) {
     const currentName = rows[0].display_name;
     const currentUsername = rows[0].username;
 
-    // ALLEEN UPDATEN ALS ER EEN NIEUWE NAAM IS
     if (nickname && nickname !== 'Onbekend' && nickname !== currentName) {
       const cleanUsername = (uniqueId || nickname.toLowerCase().replace(/[^a-z0-9_]/g, '')).trim();
       const finalUsername = cleanUsername.startsWith('@') ? cleanUsername : '@' + cleanUsername;
@@ -78,7 +79,6 @@ async function getOrUpdateUser(
     return { id: tiktok_id, display_name: currentName, username: cleanUsername };
   }
 
-  // NIET IN DB → AANMAKEN MET ON CONFLICT
   const display_name = nickname && nickname !== 'Onbekend' ? nickname : `Onbekend#${tiktok_id.slice(-5)}`;
   const rawUsername = (uniqueId || display_name.toLowerCase().replace(/[^a-z0-9_]/g, '')).trim();
   const finalUsername = rawUsername.startsWith('@') ? rawUsername : '@' + rawUsername;
@@ -92,7 +92,6 @@ async function getOrUpdateUser(
 
   console.log(`[NIEUW] ${display_name} (@${finalUsername.slice(1)})`);
 
-  // Nog een keer ophalen na insert
   const { rows: finalRows } = await pool.query(
     'SELECT display_name, username FROM users WHERE tiktok_id = $1',
     [id]
@@ -128,22 +127,27 @@ async function startTikTokLive(username: string) {
     }
   }
 
+  // HOST WORDT DIRECT PERFECT HERKEND
   conn.on('connected', async (state) => {
     hostId = state.hostId || state.userId || state.user?.userId || '';
     if (!hostId) return console.error('HOST ID NIET GEVONDEN!');
 
     const hostNickname = state.user?.nickname || state.nickname || 'Host';
-    const hostUniqueId = state.user?.uniqueId || state.uniqueId;
+    const hostUniqueId = state.user?.uniqueId || state.uniqueId || 'host';
+
+    // GLOBAAL OPSLAAN VOOR GIFTS NAAR HOST
+    HOST_DISPLAY_NAME = hostNickname;
+    HOST_USERNAME = hostUniqueId.startsWith('@') ? hostUniqueId.slice(1) : hostUniqueId;
 
     await getOrUpdateUser(hostId, hostNickname, hostUniqueId);
 
     console.log('='.repeat(80));
-    console.log('BATTLEBOX LIVE – HOST IN DB – VOOR ALTIJD STABIEL');
-    console.log(`Host: ${hostNickname} (@${hostUniqueId || 'onbekend'}) [ID: ${hostId}]`);
+    console.log('BATTLEBOX LIVE – HOST PERFECT HERKEND');
+    console.log(`Host: ${HOST_DISPLAY_NAME} (@${HOST_USERNAME}) [ID: ${hostId}]`);
     console.log('='.repeat(80));
   });
 
-  // ── GIFT
+  // GIFT → HOST WORDT ALTIJD CORRECT GETOOND
   conn.on('gift', async (data: any) => {
     try {
       const senderId = (
@@ -165,6 +169,7 @@ async function startTikTokLive(username: string) {
 
       const diamonds = data.diamondCount || 0;
       const giftName = data.giftName || 'Onbekend';
+      const isToHost = receiverId === hostId;
 
       const [sender, receiver] = await Promise.all([
         getOrUpdateUser(
@@ -172,14 +177,18 @@ async function startTikTokLive(username: string) {
           data.user?.nickname || data.sender?.nickname,
           data.user?.uniqueId || data.sender?.uniqueId
         ),
-        getOrUpdateUser(
-          receiverId,
-          data.toUser?.nickname || data.receiverNickname,
-          data.toUser?.uniqueId
-        )
+        isToHost
+          ? Promise.resolve({
+              id: hostId,
+              display_name: HOST_DISPLAY_NAME,
+              username: HOST_USERNAME
+            })
+          : getOrUpdateUser(
+              receiverId,
+              data.toUser?.nickname || data.receiverNickname,
+              data.toUser?.uniqueId
+            )
       ]);
-
-      const isToHost = receiverId === hostId;
 
       console.log('\n[GIFT] – PERFECT');
       console.log(`   Van: ${sender.display_name} (@${sender.username})`);
