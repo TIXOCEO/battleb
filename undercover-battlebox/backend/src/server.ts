@@ -1,4 +1,4 @@
-// src/server.ts — BATTLEBOX 5-ENGINE – FINAL LEGENDARY EDITION – 11 NOV 2025
+// src/server.ts — BATTLEBOX 5-ENGINE – FINAL ONSTERFELIJK – 11 NOV 2025 00:35 CET
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
@@ -24,6 +24,13 @@ import { addToQueue, getQueue } from './queue';
 
 dotenv.config();
 
+// === CHECK .env ===
+if (!process.env.TIKTOK_USERNAME) {
+  console.error('TIKTOK_USERNAME ontbreekt in .env!');
+  process.exit(1);
+}
+
+// === EXPRESS + SOCKET.IO ===
 const app = express();
 app.use(cors());
 const server = http.createServer(app);
@@ -33,30 +40,22 @@ export const io = new Server(server, { cors: { origin: '*' } });
 app.get('/queue', async (req, res) => res.json(await getQueue()));
 app.get('/arena', async (req, res) => res.json(getArena()));
 
-// SOCKET
+// SOCKET CONNECTIE
 io.on('connection', (socket) => {
   console.log('Dashboard connected:', socket.id);
   emitQueue();
   emitArena();
 });
 
-// EMIT QUEUE
 export function emitQueue() {
   io.emit('queue:update', getQueue());
 }
 
 // GLOBALS
 const ADMIN_ID = process.env.ADMIN_TIKTOK_ID?.trim();
-const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME?.replace('@', '').toLowerCase();
-
-if (!TIKTOK_USERNAME) {
-  console.error('TIKTOK_USERNAME niet gevonden in .env!');
-  process.exit(1);
-}
-
 let conn: any = null;
 
-// START SERVER
+// === START ALLES ===
 initDB().then(async () => {
   server.listen(4000, () => {
     console.log('BATTLEBOX 5-ENGINE BACKEND LIVE → http://localhost:4000');
@@ -65,25 +64,18 @@ initDB().then(async () => {
 
   initGame();
 
-  // VERBIND MET TIKTOK LIVE – SIMPEL & STERK
+  // VERBIND MET TIKTOK LIVE
   const { conn: tikTokConn } = await startConnection(
     process.env.TIKTOK_USERNAME!,
-    () => {
-      console.log('='.repeat(80));
-      console.log('BATTLEBOX LIVE – VERBONDEN MET');
-      console.log(`Live van: @${TIKTOK_USERNAME}`);
-      console.log('Alle gifts aan @' + TIKTOK_USERNAME + ' = TWIST (geen arena)');
-      console.log('Alle andere gifts = ARENA (tellen mee)');
-      console.log('='.repeat(80));
-    }
+    () => {}
   );
 
   conn = tikTokConn;
 
-  // START GIFT ENGINE – GEEN PARAMS, ALLES VIA .env
+  // START GIFT ENGINE – ALLES VIA .env
   initGiftEngine(conn);
 
-  // CHAT + ADMIN COMMANDS
+  // CHAT + ADMIN
   conn.on('chat', async (data: any) => {
     const msg = (data.comment || '').trim();
     if (!msg) return;
@@ -94,13 +86,9 @@ initDB().then(async () => {
     console.log(`[CHAT] ${user.display_name}: ${msg}`);
     await addBP(userId, 1, 'CHAT', user.display_name);
 
-    // ADMIN COMMANDS
-    if (userId.toString() === ADMIN_ID && msg.toLowerCase().startsWith('!adm ')) {
-      const args = msg.slice(5).trim().toLowerCase().split(' ');
-      const cmd = args[0];
-
-      if (cmd === 'voegrij' && args[1]?.startsWith('@')) {
-        const target = args[1].slice(1);
+    if (userId.toString() === ADMIN_ID && msg.toLowerCase().startsWith('!adm voegrij @')) {
+      const target = msg.split('@')[1]?.split(' ')[0];
+      if (target) {
         const res = await pool.query('SELECT tiktok_id FROM users WHERE username ILIKE $1', [`%@${target}`]);
         if (res.rows[0]) {
           await addToQueue(res.rows[0].tiktok_id, target);
@@ -111,7 +99,7 @@ initDB().then(async () => {
     }
   });
 
-  // LIKE / FOLLOW / SHARE → BP
+  // LIKE / FOLLOW / SHARE
   const pendingLikes = new Map<string, number>();
   const hasFollowed = new Set<string>();
 
