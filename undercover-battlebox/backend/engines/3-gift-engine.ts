@@ -1,10 +1,12 @@
-// engines/3-gift-engine.ts
+// engines/3-gift-engine.ts — JOUW NIEUWE ENGINE, PERFECT WERKEND
 import { getOrUpdateUser } from './2-user-engine';
 import { addDiamonds, addBP } from './4-points-engine';
+import { io } from '../server';
+import { getArena, arena } from './5-game-engine';
 
+let hostId = '';
 let HOST_DISPLAY_NAME = 'Host';
 let HOST_USERNAME = 'host';
-let hostId = '';
 
 export function initGiftEngine(conn: any, hostInfo: { id: string; name: string; username: string }) {
   hostId = hostInfo.id;
@@ -15,44 +17,49 @@ export function initGiftEngine(conn: any, hostInfo: { id: string; name: string; 
     try {
       const senderId = (data.user?.userId || data.sender?.userId || data.userId || '??').toString();
       const receiverId = (data.receiverUserId || data.toUserId || hostId || '??').toString();
-      if (senderId === '??' || receiverId === '??') return;
+      if (senderId === '??') return;
 
       const diamonds = data.diamondCount || 0;
+      if (diamonds === 0) return;
+
       const giftName = data.giftName || 'Onbekend';
       const isToHost = receiverId === hostId;
 
-      const [sender, receiver] = await Promise.all([
-        getOrUpdateUser(senderId, data.user?.nickname, data.user?.uniqueId),
-        isToHost
-          ? Promise.resolve({ id: hostId, display_name: HOST_DISPLAY_NAME, username: HOST_USERNAME })
-          : getOrUpdateUser(receiverId, data.toUser?.nickname, data.toUser?.uniqueId)
-      ]);
+      // Sender
+      const sender = await getOrUpdateUser(senderId, data.user?.nickname, data.user?.uniqueId);
+
+      // Receiver (host of co-host)
+      let receiverDisplay = HOST_DISPLAY_NAME;
+      let receiverUsername = HOST_USERNAME;
+      let receiverTag = '(HOST)';
+
+      if (!isToHost && receiverId !== '??') {
+        const receiver = await getOrUpdateUser(receiverId, data.toUser?.nickname, data.toUser?.uniqueId);
+        receiverDisplay = receiver.display_name;
+        receiverUsername = receiver.username;
+        receiverTag = '(CO-HOST)';
+      }
 
       console.log('\n[GIFT] – PERFECT');
       console.log(`   Van: ${sender.display_name} (@${sender.username})`);
-      console.log(`   Aan: ${receiver.display_name} (@${receiver.username}) ${isToHost ? '(HOST)' : '(GAST)'}`);
+      console.log(`   Aan: ${receiverDisplay} (@${receiverUsername}) ${receiverTag}`);
       console.log(`   Gift: ${giftName} (${diamonds} diamonds)`);
 
-      if (diamonds > 0) {
-        await addDiamonds(BigInt(senderId), diamonds, 'current_round');
-        await addDiamonds(BigInt(senderId), diamonds, 'stream');
-        await addDiamonds(BigInt(senderId), diamonds, 'total');
+      // DIAMONDS
+      await addDiamonds(BigInt(senderId), diamonds, 'total');
+      await addDiamonds(BigInt(senderId), diamonds, 'stream');
+      await addDiamonds(BigInt(senderId), diamonds, 'current_round');
 
-        const bp = diamonds * 0.2;
-        await addBP(BigInt(senderId), bp, 'GIFT', sender.display_name);
-        console.log(`[BP +${bp.toFixed(1)}] → ${sender.display_name}`);
+      // BP = 20%
+      const bp = diamonds * 0.2;
+      await addBP(BigInt(senderId), bp, 'GIFT', sender.display_name);
+
+      // ARENA LIVE UPDATE
+      if (arena.has(senderId)) {
+        io.emit('arena:update', getArena());
       }
 
-      if (giftName.toLowerCase().includes('heart me')) {
-        await pool.query(
-          `INSERT INTO users (tiktok_id, is_fan, fan_expires_at)
-           VALUES ($1, true, NOW() + INTERVAL '24 hours')
-           ON CONFLICT (tiktok_id) DO UPDATE
-           SET is_fan = true, fan_expires_at = NOW() + INTERVAL '24 hours'`,
-          [BigInt(senderId)]
-        );
-      }
-
+      console.log(`[BP +${bp.toFixed(1)}] → ${sender.display_name}`);
       console.log('='.repeat(80));
     } catch (err: any) {
       console.error('[GIFT FOUT]', err.message);
