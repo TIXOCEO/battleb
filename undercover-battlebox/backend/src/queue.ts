@@ -99,3 +99,10 @@ async function createUser(tiktok_id: string, username: string): Promise<User> {
   );
   return res.rows[0];
 }
+
+// queue.ts — VOEG DIT TOE ONDERAAN HET BESTAND
+import { io } from './server';
+
+export function emitQueue() {
+  io.emit('queue:update', getQueue());
+}
