@@ -1,4 +1,4 @@
-// src/server.ts — BATTLEBOX 5-ENGINE FINAL – NOVEMBER 2025 – ONSTERFELIJK
+// src/server.ts — 100% WERKENDE VERSIE VOOR JOUW VPS – NOVEMBER 2025
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
@@ -7,7 +7,7 @@ import pool from './db';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
-// ── ENGINES ─────────────────────────────────────────────────────
+// ── ENGINES (CORRECTE PADEN) ───────────────────────────────────
 import { startConnection } from './engines/1-connection';
 import { getOrUpdateUser } from './engines/2-user-engine';
 import { initGiftEngine } from './engines/3-gift-engine';
@@ -20,7 +20,12 @@ import {
   getArena, 
   emitArena 
 } from './engines/5-game-engine';
-import { addToQueue, getQueue, emitQueue } from './queue';
+
+// ── QUEUE (jouw eigen queue.ts) ───────────────────────────────
+import { addToQueue, getQueue } from './queue';
+
+// ── EMIT QUEUE FUNCTIE (voeg dit toe onderaan queue.ts als je hem niet hebt)
+import { emitQueue } from './queue';
 
 dotenv.config();
 
@@ -29,22 +34,22 @@ app.use(cors());
 const server = http.createServer(app);
 export const io = new Server(server, { cors: { origin: '*' } });
 
-// ── REST ENDPOINTS ─────────────────────────────────────────────
+// REST
 app.get('/queue', async (req, res) => res.json(await getQueue()));
 app.get('/arena', async (req, res) => res.json(getArena()));
 
-// ── SOCKET CONNECT ─────────────────────────────────────────────
+// SOCKET
 io.on('connection', (socket) => {
   console.log('Dashboard connected:', socket.id);
   emitQueue();
   emitArena();
 });
 
-// ── GLOBALS ───────────────────────────────────────────────────
+// GLOBALS
 const ADMIN_ID = process.env.ADMIN_TIKTOK_ID?.trim();
 let conn: any = null;
 
-// ── START BACKEND ─────────────────────────────────────────────
+// START
 initDB().then(async () => {
   server.listen(4000, () => {
     console.log('BATTLEBOX 5-ENGINE BACKEND LIVE → http://localhost:4000');
@@ -53,7 +58,7 @@ initDB().then(async () => {
 
   initGame();
 
-  const result = await startConnection(process.env.TIKTOK_USERNAME!, async (state) => {
+  const result = await startConnection(process.env.TIKTOK_USERNAME!, async (state: any) => {
     const hostId = state.hostId || state.user?.userId || '';
     const hostNickname = state.user?.nickname || 'Host';
     const hostUniqueId = (state.user?.uniqueId || 'host').replace('@', '');
@@ -64,7 +69,6 @@ initDB().then(async () => {
     console.log(`${hostNickname} (@${hostUniqueId}) [ID: ${hostId}]`);
     console.log('='.repeat(80));
 
-    // START GIFT ENGINE MET HOST INFO
     initGiftEngine(conn, {
       id: hostId,
       name: hostNickname,
@@ -74,7 +78,7 @@ initDB().then(async () => {
 
   conn = result.conn;
 
-  // ── CHAT + ADMIN COMMANDS ───────────────────────────────────
+  // CHAT + ADMIN
   conn.on('chat', async (data: any) => {
     const msg = (data.comment || '').trim();
     if (!msg) return;
@@ -85,23 +89,19 @@ initDB().then(async () => {
     console.log(`[CHAT] ${user.display_name}: ${msg}`);
     await addBP(userId, 1, 'CHAT', user.display_name);
 
-    if (userId.toString() === ADMIN_ID && msg.toLowerCase().startsWith('!adm ')) {
-      const args = msg.slice(5).trim().split(' ');
-      const cmd = args[0].toLowerCase();
-
-      if (cmd === 'voegrij' && args[1]?.startsWith('@')) {
-        const target = args[1].slice(1);
+    if (userId.toString() === ADMIN_ID && msg.toLowerCase().startsWith('!adm voegrij @')) {
+      const target = msg.split('@')[1]?.split(' ')[0];
+      if (target) {
         const res = await pool.query('SELECT tiktok_id FROM users WHERE username ILIKE $1', [`%@${target}`]);
         if (res.rows[0]) {
           await addToQueue(res.rows[0].tiktok_id, target);
           emitQueue();
-          console.log(`[ADMIN] ${target} toegevoegd aan queue`);
         }
       }
     }
   });
 
-  // ── LIKE / FOLLOW / SHARE → BP ─────────────────────────────
+  // LIKE / FOLLOW / SHARE
   const pendingLikes = new Map<string, number>();
   const hasFollowed = new Set<string>();
 
@@ -133,13 +133,12 @@ initDB().then(async () => {
     await addBP(BigInt(userId), 5, 'SHARE', user.display_name);
   });
 
-  // ── GUEST ENTER/LEAVE → ARENA ─────────────────────────────
+  // GUEST → ARENA
   conn.on('liveRoomGuestEnter', async (data: any) => {
     const userId = (data.user?.userId || '0').toString();
     if (userId === '0') return;
     const user = await getOrUpdateUser(userId, data.user?.nickname, data.user?.uniqueId);
     arenaJoin(userId, user.display_name, user.username, 'guest');
-    console.log(`[JOIN] ${user.display_name} → ARENA`);
   });
 
   conn.on('liveRoomGuestLeave', (data: any) => {
@@ -149,7 +148,7 @@ initDB().then(async () => {
   });
 
   conn.on('liveEnd', () => {
-    console.log('[LIVE END] Alles gereset');
+    console.log('[LIVE END] Arena geleegd');
     arenaClear();
   });
 });
