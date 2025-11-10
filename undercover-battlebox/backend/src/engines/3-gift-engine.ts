@@ -2,7 +2,7 @@
 import { getOrUpdateUser } from './2-user-engine';
 import { addDiamonds, addBP } from './4-points-engine';
 import { io } from '../server';
-import { getArena, arena } from './5-game-engine';
+import { getArena } from './5-game-engine';
 
 let hostId = '';
 let HOST_DISPLAY_NAME = 'Host';
