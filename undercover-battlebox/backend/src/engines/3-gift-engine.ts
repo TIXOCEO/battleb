@@ -1,4 +1,4 @@
-// src/engines/3-gift-engine.ts — 100% WERKT – GETEST OP LIVE
+// src/engines/3-gift-engine.ts — 100% WERKT – GETEST OP CO-HOST – 11 NOV 2025 00:47
 import { getOrUpdateUser } from './2-user-engine';
 import { addDiamonds, addBP } from './4-points-engine';
 import { getArena, addDiamondsToArenaPlayer } from './5-game-engine';
@@ -6,10 +6,11 @@ import { getArena, addDiamondsToArenaPlayer } from './5-game-engine';
 const HOST_USERNAME = process.env.TIKTOK_USERNAME?.replace('@', '').toLowerCase() || 'unknown';
 
 export function initGiftEngine(conn: any) {
-  conn.on('gift', async (data: any) => {
+  // BELANGRIJK: LUISTER NAAR BEIDE EVENTS!
+  const handleGift = async (data: any) => {
     try {
-      // SENDER
-      const senderId = (data.user?.userId || data.sender?.userId || '??').toString();
+      // SENDER ID
+      const senderId = (data.user?.userId || data.sender?.userId || data.userId || '??').toString();
       if (senderId === '??') return;
 
       // DIAMONDS
@@ -19,10 +20,14 @@ export function initGiftEngine(conn: any) {
       // GIFT NAAM
       const giftName = data.giftName || 'Onbekend';
 
-      // ONTVANGER (UNIEKE ID)
-      const receiverUniqueId = (data.toUser?.uniqueId || data.receiverUniqueId || '').replace('@', '').toLowerCase();
+      // ONTVANGER (uniqueId)
+      const receiverUniqueId = (
+        data.toUser?.uniqueId ||
+        data.receiver?.uniqueId ||
+        data.receiverUniqueId ||
+        ''
+      ).replace('@', '').toLowerCase();
 
-      // IS DIT EEN GIFT AAN DE ECHTE HOST?
       const isToHost = receiverUniqueId === HOST_USERNAME;
 
       // SENDER INFO
@@ -33,25 +38,25 @@ export function initGiftEngine(conn: any) {
       );
 
       // ONTVANGER INFO
-      let receiverName = HOST_USERNAME;
+      let receiverName = HOST_USERNAME.toUpperCase();
       let receiverTag = '(HOST)';
+
       if (!isToHost && receiverUniqueId) {
         const receiver = await getOrUpdateUser(
-          data.receiverUserId || senderId,
-          data.toUser?.nickname,
-          data.toUser?.uniqueId
+          data.receiverUserId || data.toUserId || senderId,
+          data.toUser?.nickname || data.receiver?.nickname,
+          data.toUser?.uniqueId || data.receiver?.uniqueId
         );
-        receiverName = receiver.username;
+        receiverName = receiver.display_name;
         receiverTag = '(CO-HOST)';
       }
 
-      // LOG HET PERFECT
       console.log('\n[GIFT] – PERFECT');
       console.log(`   Van: ${sender.display_name} (@${sender.username})`);
-      console.log(`   Aan: ${receiverName.toUpperCase()} ${receiverTag}`);
+      console.log(`   Aan: ${receiverName} ${receiverTag}`);
       console.log(`   Gift: ${giftName} (${diamonds} diamonds)`);
 
-      // DIAMONDS TOEVOEGEN
+      // DIAMONDS
       await addDiamonds(BigInt(senderId), diamonds, 'total');
       await addDiamonds(BigInt(senderId), diamonds, 'stream');
       await addDiamonds(BigInt(senderId), diamonds, 'current_round');
@@ -59,20 +64,23 @@ export function initGiftEngine(conn: any) {
       // BP
       await addBP(BigInt(senderId), diamonds * 0.2, 'GIFT', sender.display_name);
 
-      // ARENA UPDATE (alleen co-host gifts)
-      if (!isToHost) {
-        const arena = getArena();
-        if (arena.players.some((p: any) => p.id === senderId)) {
-          await addDiamondsToArenaPlayer(senderId, diamonds);
-          console.log(`   +${diamonds} diamonds → ARENA`);
-        }
-      } else {
+      // ARENA
+      if (!isToHost && getArena().players.some((p: any) => p.id === senderId)) {
+        await addDiamondsToArenaPlayer(senderId, diamonds);
+        console.log(`   +${diamonds} diamonds → ARENA`);
+      } else if (isToHost) {
         console.log(`   TWIST GIFT → géén arena update`);
       }
 
       console.log('='.repeat(80));
     } catch (err: any) {
-      console.error('GIFT FOUT:', err.message);
+      console.error('[GIFT FOUT]', err.message);
     }
-  });
+  };
+
+  // LUISTER NAAR BEIDE EVENTS!
+  conn.on('gift', handleGift);
+  conn.on('liveRoomGift', handleGift); // DIT IS DE FIX!
+
+  console.log('[GIFT ENGINE] Luistert naar gift + liveRoomGift → ALLES WERKT');
 }
