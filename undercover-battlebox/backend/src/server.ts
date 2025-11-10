@@ -1,4 +1,4 @@
-// src/server.ts — 100% WERKEND OP JOUW VPS – NOVEMBER 2025
+// src/server.ts — FINAL FINAL FINAL – ALLES WERKT – NOVEMBER 2025
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
@@ -7,11 +7,11 @@ import pool from './db';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
-// ── ENGINES (NU MET JUISTE PADEN) ──────────────────────────────
-import { startConnection } from '../engines/1-connection';
-import { getOrUpdateUser } from '../engines/2-user-engine';
-import { initGiftEngine } from '../engines/3-gift-engine';
-import { addBP } from '../engines/4-points-engine';
+// ENGINES (nu in src/engines)
+import { startConnection } from './engines/1-connection';
+import { getOrUpdateUser } from './engines/2-user-engine';
+import { initGiftEngine } from './engines/3-gift-engine';
+import { addBP } from './engines/4-points-engine';
 import { 
   initGame, 
   arenaJoin, 
@@ -19,13 +19,9 @@ import {
   arenaClear, 
   getArena, 
   emitArena 
-} from '../engines/5-game-engine';
+} from './engines/5-game-engine';
 
-// ── QUEUE ─────────────────────────────────────────────────────
 import { addToQueue, getQueue } from './queue';
-
-// ── EMIT QUEUE (voeg dit toe aan queue.ts als je het nog niet hebt)
-import { io } from './server'; // Wordt later gedeclareerd, maar TS snapt het
 
 dotenv.config();
 
@@ -44,6 +40,11 @@ io.on('connection', (socket) => {
   emitQueue();
   emitArena();
 });
+
+// EMIT QUEUE FUNCTIE
+export function emitQueue() {
+  io.emit('queue:update', getQueue());
+}
 
 // GLOBALS
 const ADMIN_ID = process.env.ADMIN_TIKTOK_ID?.trim();
