@@ -2,17 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap');
-
-body {
-  font-family: 'Orbitron', sans-serif;
-}
-
-.animate-pulse-neon {
-  animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { text-shadow: 0 0 10px #ff00ff, 0 0 20px #ff00ff; }
-  50% { text-shadow: 0 0 20px #ff00ff, 0 0 40px #ff00ff, 0 0 60px #ff00ff; }
+html, body {
+  height: 100%;
+  background-color: #f8f8f8;
+  color: #111;
+  font-family: 'Inter', sans-serif;
 }
