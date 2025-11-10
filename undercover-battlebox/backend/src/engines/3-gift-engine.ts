@@ -19,7 +19,7 @@ export function initGiftEngine(conn: any, hostInfo: { id: string }) {
       if (diamonds === 0) return;
 
       const giftName = data.giftName || 'Onbekend';
-      const isToRealHost = receiverId === REAL_HOST_ID;
+      const isToRealHost = receiverId === REAL_HOST_ID || REAL_HOST_ID === 'FORCE_MANUAL';
 
       const sender = await getOrUpdateUser(senderId, data.user?.nickname, data.user?.uniqueId);
 
