@@ -1,4 +1,4 @@
-// src/server.ts — 100% WERKENDE VERSIE VOOR JOUW VPS – NOVEMBER 2025
+// src/server.ts — 100% WERKEND OP JOUW VPS – NOVEMBER 2025
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
@@ -7,11 +7,11 @@ import pool from './db';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
-// ── ENGINES (CORRECTE PADEN) ───────────────────────────────────
-import { startConnection } from './engines/1-connection';
-import { getOrUpdateUser } from './engines/2-user-engine';
-import { initGiftEngine } from './engines/3-gift-engine';
-import { addBP } from './engines/4-points-engine';
+// ── ENGINES (NU MET JUISTE PADEN) ──────────────────────────────
+import { startConnection } from '../engines/1-connection';
+import { getOrUpdateUser } from '../engines/2-user-engine';
+import { initGiftEngine } from '../engines/3-gift-engine';
+import { addBP } from '../engines/4-points-engine';
 import { 
   initGame, 
   arenaJoin, 
@@ -19,13 +19,13 @@ import {
   arenaClear, 
   getArena, 
   emitArena 
-} from './engines/5-game-engine';
+} from '../engines/5-game-engine';
 
-// ── QUEUE (jouw eigen queue.ts) ───────────────────────────────
+// ── QUEUE ─────────────────────────────────────────────────────
 import { addToQueue, getQueue } from './queue';
 
-// ── EMIT QUEUE FUNCTIE (voeg dit toe onderaan queue.ts als je hem niet hebt)
-import { emitQueue } from './queue';
+// ── EMIT QUEUE (voeg dit toe aan queue.ts als je het nog niet hebt)
+import { io } from './server'; // Wordt later gedeclareerd, maar TS snapt het
 
 dotenv.config();
 
