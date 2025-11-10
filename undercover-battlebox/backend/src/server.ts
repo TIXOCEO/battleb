@@ -1,4 +1,4 @@
-// src/server.ts — BATTLEBOX 5-ENGINE – FINAL LEGENDARY EDITION – 10 NOV 2025
+// src/server.ts — BATTLEBOX 5-ENGINE – FINAL LEGENDARY EDITION – 11 NOV 2025
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
@@ -47,11 +47,12 @@ export function emitQueue() {
 
 // GLOBALS
 const ADMIN_ID = process.env.ADMIN_TIKTOK_ID?.trim();
+const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME?.replace('@', '').toLowerCase();
 
-// REAL HOST (de echte streamer)
-let REAL_HOST_ID = '';
-let REAL_HOST_NAME = 'Host';
-let REAL_HOST_USERNAME = 'host';
+if (!TIKTOK_USERNAME) {
+  console.error('TIKTOK_USERNAME niet gevonden in .env!');
+  process.exit(1);
+}
 
 let conn: any = null;
 
@@ -64,29 +65,23 @@ initDB().then(async () => {
 
   initGame();
 
-  // VERBIND MET TIKTOK LIVE
-  const { conn: tikTokConn, getRealHost } = await startConnection(
+  // VERBIND MET TIKTOK LIVE – SIMPEL & STERK
+  const { conn: tikTokConn } = await startConnection(
     process.env.TIKTOK_USERNAME!,
-    async (state: any) => {
-      const host = getRealHost();
-      REAL_HOST_ID = host.id;
-      REAL_HOST_NAME = host.name;
-      REAL_HOST_USERNAME = host.username;
-
-      await getOrUpdateUser(REAL_HOST_ID, REAL_HOST_NAME, REAL_HOST_USERNAME);
-
+    () => {
       console.log('='.repeat(80));
-      console.log('ECHTE HOST GEVONDEN & INGESTELD');
-      console.log(`Host: ${REAL_HOST_NAME} (@${REAL_HOST_USERNAME}) [ID: ${REAL_HOST_ID}]`);
-      console.log('Gifts aan deze host = TWIST READY (geen arena update)');
+      console.log('BATTLEBOX LIVE – VERBONDEN MET');
+      console.log(`Live van: @${TIKTOK_USERNAME}`);
+      console.log('Alle gifts aan @' + TIKTOK_USERNAME + ' = TWIST (geen arena)');
+      console.log('Alle andere gifts = ARENA (tellen mee)');
       console.log('='.repeat(80));
     }
   );
 
   conn = tikTokConn;
 
-  // START GIFT ENGINE MET ECHTE HOST ID
-  initGiftEngine(conn, { id: REAL_HOST_ID });
+  // START GIFT ENGINE – GEEN PARAMS, ALLES VIA .env
+  initGiftEngine(conn);
 
   // CHAT + ADMIN COMMANDS
   conn.on('chat', async (data: any) => {
@@ -111,18 +106,6 @@ initDB().then(async () => {
           await addToQueue(res.rows[0].tiktok_id, target);
           emitQueue();
           console.log(`[ADMIN] ${target} toegevoegd aan queue`);
-        }
-      }
-
-      if (cmd === 'sethost' && args[1]?.startsWith('@')) {
-        const target = args[1].slice(1);
-        const res = await pool.query('SELECT tiktok_id, display_name, username FROM users WHERE username ILIKE $1', [`%@${target}`]);
-        if (res.rows[0]) {
-          REAL_HOST_ID = res.rows[0].tiktok_id;
-          REAL_HOST_NAME = res.rows[0].display_name;
-          REAL_HOST_USERNAME = res.rows[0].username.replace('@', '');
-          console.log(`[ADMIN] HOST GEFORCEERD → ${REAL_HOST_NAME} (@${REAL_HOST_USERNAME}) [ID: ${REAL_HOST_ID}]`);
-          console.log(`   → Gifts aan deze host worden nu als TWIST gezien`);
         }
       }
     }
