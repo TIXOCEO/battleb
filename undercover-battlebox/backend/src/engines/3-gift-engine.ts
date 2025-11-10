@@ -1,4 +1,4 @@
-// src/engines/3-gift-engine.ts — FINAL FINAL FINAL – 100% SCHOON
+// src/engines/3-gift-engine.ts — FINAL FINAL FINAL – 100% SCHOON – NOOIT MEER FOUTEN
 import { getOrUpdateUser } from './2-user-engine';
 import { addDiamonds, addBP } from './4-points-engine';
 import { io } from '../server';
@@ -21,7 +21,6 @@ export function initGiftEngine(conn: any, hostInfo: { id: string }) {
       const giftName = data.giftName || 'Onbekend';
       const isToRealHost = receiverId === REAL_HOST_ID;
 
-      // FIXED: getOrUpdateUserUser → getOrUpdateUser
       const sender = await getOrUpdateUser(senderId, data.user?.nickname, data.user?.uniqueId);
 
       let receiverDisplay = 'Host';
@@ -44,14 +43,14 @@ export function initGiftEngine(conn: any, hostInfo: { id: string }) {
       console.log(`   Aan: ${receiverDisplay} (@${receiverUsername}) ${receiverTag}`);
       console.log(`   Gift: ${giftName} (${diamonds} diamonds)`);
 
-      // DIAMONDS ALTIJD TOEVOEGEN
+      // DIAMONDS ALTIJD TOEVOEGEN – GEEN PIJLTJES MEER
       await addDiamonds(BigInt(senderId), diamonds, 'total');
-      await addDiamonds(BigInt(senderId), diamonds ▼, 'stream');
+      await addDiamonds(BigInt(senderId), diamonds, 'stream');
       await addDiamonds(BigInt(senderId), diamonds, 'current_round');
 
       // BP MET TOTAAL
       const bp = diamonds * 0.2;
-      await addBp(BigInt(senderId), bp, 'GIFT', sender.display_name);
+      await addBP(BigInt(senderId), bp, 'GIFT', sender.display_name);
 
       // ALLEEN CO-HOST GIFTS TELLEN MEE IN ARENA
       if (!isToRealHost) {
