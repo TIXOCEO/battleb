@@ -1,18 +1,28 @@
-// src/engines/3-gift-engine.ts — FINAL – NOOIT MEER UNKNOWN – 11 NOV 2025 01:00 CET
+// src/engines/3-gift-engine.ts — FINAL – NOOIT MEER UNKNOWN – NOOIT MEER ONTBREEKT
 import { getOrUpdateUser } from './2-user-engine';
 import { addDiamonds, addBP } from './4-points-engine';
 import { getArena, addDiamondsToArenaPlayer } from './5-game-engine';
+import dotenv from 'dotenv';
 
-const HOST_USERNAME = (process.env.TIKTOK_USERNAME || '').replace('@', '').toLowerCase().trim();
-if (!HOST_USERNAME) {
-  console.error('TIKTOK_USERNAME ontbreekt in .env → gifts werken niet!');
+// DIT IS DE FIX: LAAD .env EXPLICIET
+dotenv.config();
+
+// NU PAKT HIJ ECHT DE WAARDE
+const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME;
+if (!TIKTOK_USERNAME) {
+  console.error('FATAL: TIKTOK_USERNAME ontbreekt in .env bestand!');
+  console.error('   → Zorg dat je .env bestand in /var/www/undercover-battlebox/backend/.env staat');
+  console.error('   → En dat er staat: TIKTOK_USERNAME=livezone01');
   process.exit(1);
 }
+
+const HOST_USERNAME = TIKTOK_USERNAME.replace('@', '').toLowerCase().trim();
+
+console.log(`[GIFT ENGINE] Host gezet op: @${HOST_USERNAME} → ALLES WERKT`);
 
 export function initGiftEngine(conn: any) {
   const handleGift = async (data: any) => {
     try {
-      // SENDER
       const senderId = (data.user?.userId || data.sender?.userId || data.userId || '??').toString();
       if (senderId === '??') return;
 
@@ -21,29 +31,28 @@ export function initGiftEngine(conn: any) {
 
       const giftName = data.giftName || 'Onbekend';
 
-      // ONTVANGER – ALLE MOGELIJKE VELDEN
+      // ONTVANGER INFO
       const receiverUniqueId = (
         data.toUser?.uniqueId ||
         data.receiver?.uniqueId ||
         data.receiverUniqueId ||
-        data.toUserId ||
         ''
       ).toString().replace('@', '').toLowerCase().trim();
 
-      // FALLBACK: als uniqueId leeg is → gebruik display name of nickname
       const receiverDisplay = (
         data.toUser?.nickname ||
         data.receiver?.nickname ||
         data.toUser?.displayName ||
         'HOST'
-      );
+      ).toLowerCase();
 
-      // IS DIT EEN GIFT AAN DE ECHTE HOST?
-      const isToHost = receiverUniqueId === HOST_USERNAME ||
-                       receiverUniqueId.includes(HOST_USERNAME) ||
-                       receiverDisplay.toLowerCase().includes(HOST_USERNAME);
+      // SMART HOST DETECTIE
+      const isToHost = 
+        receiverUniqueId === HOST_USERNAME ||
+        receiverUniqueId.includes(HOST_USERNAME) ||
+        receiverDisplay.includes(HOST_USERNAME);
 
-      // SENDER INFO
+      // SENDER
       const sender = await getOrUpdateUser(
         senderId,
         data.user?.nickname || data.sender?.nickname,
@@ -64,28 +73,20 @@ export function initGiftEngine(conn: any) {
         receiverTag = '(CO-HOST)';
       }
 
-      // PERFECTE LOG
       console.log('\n[GIFT] – PERFECT');
       console.log(`   Van: ${sender.display_name} (@${sender.username})`);
       console.log(`   Aan: ${receiverName} ${receiverTag}`);
       console.log(`   Gift: ${giftName} (${diamonds} diamonds)`);
 
-      // DIAMONDS
       await addDiamonds(BigInt(senderId), diamonds, 'total');
       await addDiamonds(BigInt(senderId), diamonds, 'stream');
       await addDiamonds(BigInt(senderId), diamonds, 'current_round');
-
-      // BP
       await addBP(BigInt(senderId), diamonds * 0.2, 'GIFT', sender.display_name);
 
-      // ARENA
-      if (!isToHost) {
-        const arena = getArena();
-        if (arena.players.some((p: any) => p.id === senderId)) {
-          await addDiamondsToArenaPlayer(senderId, diamonds);
-          console.log(`   +${diamonds} diamonds → ARENA`);
-        }
-      } else {
+      if (!isToHost && getArena().players.some((p: any) => p.id === senderId)) {
+        await addDiamondsToArenaPlayer(senderId, diamonds);
+        console.log(`   +${diamonds} diamonds → ARENA`);
+      } else if (isToHost) {
         console.log(`   TWIST GIFT → géén arena update`);
       }
 
@@ -98,5 +99,5 @@ export function initGiftEngine(conn: any) {
   conn.on('gift', handleGift);
   conn.on('liveRoomGift', handleGift);
 
-  console.log(`[GIFT ENGINE] Host = @${HOST_USERNAME} → fallback actief → NOOIT MEER UNKNOWN`);
+  console.log(`[GIFT ENGINE] LIVE → luistert naar gifts voor @${HOST_USERNAME}`);
 }
