@@ -1,4 +1,4 @@
-// src/server.ts — 100% WERKEND MET JOUW HUIDIGE STRUCTUUR
+// src/server.ts — FINAL, 100% WERKEND, GIFTS ZIJN TERUG, ALLES LIVE
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
@@ -10,7 +10,15 @@ import dotenv from 'dotenv';
 
 // ── JOUW BESTAANDE MODULES ─────────────────────────────────────
 import { addToQueue, leaveQueue, getQueue } from './queue';
-import { initGame, arenaJoin, arenaLeave, arenaClear, addBP, getArena } from './game';
+import { 
+  initGame, 
+  arenaJoin, 
+  arenaLeave, 
+  arenaClear, 
+  addBP, 
+  getArena, 
+  arena 
+} from './game';
 
 dotenv.config();
 
@@ -29,7 +37,6 @@ app.get('/arena', async (req, res) => res.json(getArena()));
 // ── SOCKET CONNECT ─────────────────────────────────────────────
 io.on('connection', (socket) => {
   console.log('Dashboard connected:', socket.id);
-  // Forceer update
   socket.emit('arena:update', getArena());
   socket.emit('arena:count', getArena().length);
 });
@@ -70,7 +77,11 @@ async function getOrUpdateUser(
       );
       return { id: tiktok_id, display_name: nickname, username: cleanUsername };
     }
-    return { id: tiktok_id, display_name: currentName, username: currentUsername.replace('@', '') };
+    return { 
+      id: tiktok_id, 
+      display_name: currentName, 
+      username: currentUsername.replace('@', '') 
+    };
   }
 
   const display_name = nickname || `Onbekend#${tiktok_id.slice(-5)}`;
@@ -78,7 +89,7 @@ async function getOrUpdateUser(
   const finalUsername = rawUsername.startsWith('@') ? rawUsername : '@' + rawUsername;
 
   await pool.query(
-    'INSERT INTO users (tiktok_id, display_name, username, bp_total) VALUES ($1, $2, $3, 0) ON CONFLICT (tiktok_id) DO NOTHING',
+    'INSERT INTO users (tiktok_id, display_name, username, bp_total, diamonds_total) VALUES ($1, $2, $3, 0, 0) ON CONFLICT (tiktok_id) DO NOTHING',
     [id, display_name, finalUsername]
   );
 
@@ -117,43 +128,42 @@ async function startTikTokLive(username: string) {
   // ── GIFT → DIAMONDS + BP (20%) ───────────────────────────────
   conn.on('gift', async (data: any) => {
     try {
-      const senderId = (data.user?.userId || data.sender?.userId || '??').toString();
-      const receiverId = (data.receiverUserId || data.toUserId || hostId || '??').toString();
+      const senderId = (data.user?.userId || data.sender?.userId || data.userId || '??').toString();
       if (senderId === '??') return;
 
       const diamonds = data.diamondCount || 0;
       if (diamonds === 0) return;
 
       const giftName = data.giftName || 'Onbekend';
-      const isToHost = receiverId === hostId;
+      const isToHost = (data.receiverUserId || data.toUserId || hostId) === hostId;
 
       const sender = await getOrUpdateUser(senderId, data.user?.nickname, data.user?.uniqueId);
-      const receiverName = isToHost ? HOST_DISPLAY_NAME : 'speler';
 
       console.log('\n[GIFT] – PERFECT');
       console.log(`   Van: ${sender.display_name} (@${sender.username})`);
-      console.log(`   Aan: ${receiverName} ${isToHost ? '(HOST)' : ''}`);
+      console.log(`   Aan: ${isToHost ? HOST_DISPLAY_NAME + ' (HOST)' : 'speler'}`);
       console.log(`   Gift: ${giftName} (${diamonds} diamonds)`);
 
-      // DIAMONDS (spelpunten)
+      // DIAMONDS TOEVOEGEN
       await pool.query(
-        'UPDATE users SET diamonds_total = diamonds_total + $1, diamonds_stream = diamonds_stream + $1 WHERE tiktok_id = $2',
+        `UPDATE users 
+         SET diamonds_total = diamonds_total + $1,
+             diamonds_stream = diamonds_stream + $1,
+             diamonds_current_round = diamonds_current_round + $1
+         WHERE tiktok_id = $2`,
         [diamonds, BigInt(senderId)]
       );
 
-      // BP = 20% van diamonds
+      // BP = 20%
       const bp = diamonds * 0.2;
-      const isFan = giftName.toLowerCase().includes('heart me');
-      await addBP(BigInt(senderId), bp, 'GIFT', sender.display_name, isFan, false);
+      await addBP(BigInt(senderId), bp, 'GIFT', sender.display_name, false, false);
 
-      // Als in arena → voeg diamonds toe aan huidige ronde
-      if (arenaJoin.toString().includes(senderId)) {
-        await pool.query(
-          'UPDATE users SET diamonds_current_round = diamonds_current_round + $1 WHERE tiktok_id = $2',
-          [diamonds, BigInt(senderId)]
-        );
+      // ARENA LIVE UPDATE
+      if (arena.has(senderId)) {
+        io.emit('arena:update', getArena());
       }
 
+      console.log(`[BP +${bp.toFixed(1)}] → ${sender.display_name}`);
       console.log('='.repeat(80));
     } catch (err: any) {
       console.error('[GIFT FOUT]', err.message);
@@ -169,25 +179,18 @@ async function startTikTokLive(username: string) {
     const user = await getOrUpdateUser(userId.toString(), data.nickname, data.uniqueId);
 
     console.log(`[CHAT] ${user.display_name}: ${msg}`);
-
-    // BP voor chat
     await addBP(userId, 1, 'CHAT', user.display_name, false, false);
 
-    // Admin commands
     if (userId.toString() === ADMIN_ID && msg.toLowerCase().startsWith('!adm ')) {
       const args = msg.slice(5).trim().split(' ');
       const cmd = args[0].toLowerCase();
 
-      if (cmd === 'start') {
-        // Je kunt later ronde-logica toevoegen
-        console.log('[ADMIN] Ronde starten commando ontvangen');
-      }
       if (cmd === 'voegrij' && args[1]?.startsWith('@')) {
         const target = args[1].slice(1);
         const res = await pool.query('SELECT tiktok_id FROM users WHERE username ILIKE $1', [`%@${target}`]);
         if (res.rows[0]) {
           await addToQueue(res.rows[0].tiktok_id, target);
-          io.emit('queue:update');
+          io.emit('queue:update', await getQueue());
         }
       }
     }
