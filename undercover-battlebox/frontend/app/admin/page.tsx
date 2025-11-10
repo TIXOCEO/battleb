@@ -1,37 +1,124 @@
-// app/admin/layout.tsx
-import type { ReactNode } from "react";
+// app/admin/page.tsx
+"use client";
 
-export default function AdminLayout() {
+import { useArenaAndQueue } from "@/hooks/useArenaAndQueue";
+import type { ArenaPlayer, QueueEntry } from "@/lib/adminTypes";
+import { useState } from "react";
+
+export default function AdminDashboardPage() {
+  const { arena, queue, toggles, setToggles, loading, error } = useArenaAndQueue();
+  const [selectedPlayer, setSelectedPlayer] = useState<ArenaPlayer | null>(null);
+
+  const arenaPlayers: ArenaPlayer[] = arena?.players ?? [];
+  const roundLabel =
+    arena?.type === "quarter"
+      ? "Voorronde"
+      : arena?.type === "semi"
+      ? "Halve finale"
+      : arena?.type === "finale"
+      ? "Finale"
+      : "Geen ronde";
+
   return (
-    <html lang="nl">
-      <body className="min-h-screen bg-[#f5f5f7] text-gray-900">
-        <div className="min-h-screen flex flex-col">
-          {/* Simple topbar */}
-          <header className="h-14 flex items-center justify-between px-4 md:px-6 border-b border-gray-200 bg-white shadow-sm">
-            <div className="flex items-center gap-2">
-              <div className="h-7 w-7 rounded-md bg-[#ff4d4f] flex items-center justify-center text-white text-xs font-bold">
-                UB
-              </div>
-              <div>
-                <div className="text-sm font-semibold">
-                  Undercover BattleBox – Admin
-                </div>
-                <div className="text-[11px] text-gray-500">
-                  Live control panel
-                </div>
-              </div>
-            </div>
-            <span className="text-[11px] text-gray-500">
-              Connected as <strong>Admin</strong>
-            </span>
-          </header>
-
-          <main className="flex-1 p-4 md:p-6">{children}</main>
+    <div className="space-y-4">
+      {/* Fout / status */}
+      {error && (
+        <div className="text-xs text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded-lg">
+          {error}
         </div>
-      </body>
-    </html>
+      )}
+
+      {/* Top toggles */}
+      <TopToggles
+        toggles={toggles}
+        setToggles={setToggles}
+        roundLabel={roundLabel}
+        timeLeft={arena?.timeLeft ?? null}
+      />
+
+      {/* Arena + Queue containers */}
+      <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* ARENA */}
+        <div className="rounded-2xl border border-gray-200 bg-[#fafafa] shadow-sm flex flex-col min-h-[320px] max-h-[620px]">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white rounded-t-2xl">
+            <div>
+              <h2 className="text-base font-semibold text-gray-900">Arena (huidige ronde)</h2>
+              <p className="text-[11px] text-gray-500">
+                {roundLabel} • Max 8 deelnemers
+              </p>
+            </div>
+            {arena && (
+              <div className="text-right">
+                <p className="text-[11px] text-gray-500">Ronde #{arena.round}</p>
+                <p className="text-[11px] text-gray-500">
+                  Tijd over:{" "}
+                  <span className="font-mono">
+                    {formatSeconds(arena.timeLeft)}
+                  </span>
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-3">
+            <ArenaGrid
+              players={arenaPlayers}
+              onSelect={(player) => setSelectedPlayer(player)}
+            />
+          </div>
+        </div>
+
+        {/* QUEUE */}
+        <div className="rounded-2xl border border-gray-200 bg-[#fafafa] shadow-sm flex flex-col min-h-[320px] max-h-[620px]">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white rounded-t-2xl">
+            <div>
+              <h2 className="text-base font-semibold text-gray-900">Wachtrij</h2>
+              <p className="text-[11px] text-gray-500">
+                Live queue • promote / demote / direct naar arena
+              </p>
+            </div>
+            <div className="text-right text-[11px] text-gray-500">
+              <p>{queue.length} spelers</p>
+              <p>
+                Queue:{" "}
+                <span
+                  className={
+                    toggles.queueOpen ? "text-green-600 font-semibold" : "text-red-600 font-semibold"
+                  }
+                >
+                  {toggles.queueOpen ? "OPEN" : "DICHT"}
+                </span>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-3">
+            <QueueList entries={queue} />
+          </div>
+        </div>
+      </section>
+
+      {/* Player detail modal (UI alleen; logica kun je later koppelen) */}
+      {selectedPlayer && (
+        <PlayerDetailModal
+          player={selectedPlayer}
+          onClose={() => setSelectedPlayer(null)}
+        />
+      )}
+
+      {loading && (
+        <div className="text-xs text-gray-500">Laden...</div>
+      )}
+    </div>
   );
 }
+
+function formatSeconds(total: number) {
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+}
+
 
 
 // ---- Top toggles component ----
