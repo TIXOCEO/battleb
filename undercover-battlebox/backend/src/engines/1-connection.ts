@@ -1,7 +1,7 @@
-// src/engines/1-connection.ts — SIMPEL & PERFECT
+// src/engines/1-connection.ts
 import { WebcastPushConnection } from 'tiktok-live-connector';
 
-export async function startConnection(username: string, onConnected: (state: any) => void) {
+export async function startConnection(username: string, onConnected: () => void) {
   const conn = new WebcastPushConnection(username);
 
   for (let i = 0; i < 6; i++) {
@@ -16,14 +16,13 @@ export async function startConnection(username: string, onConnected: (state: any
     }
   }
 
-  conn.on('connected', (state) => {
+  conn.on('connected', () => {
     console.log('='.repeat(80));
-    console.log('BATTLEBOX LIVE – VERBONDEN MET');
-    console.log(`Live van: @${username}`);
-    console.log('Alle gifts aan @' + username + ' = TWIST (geen arena)');
-    console.log('Alle andere gifts = ARENA (tellen mee)');
+    console.log('BATTLEBOX LIVE – VERBONDEN MET @' + username);
+    console.log('Gifts aan @' + username + ' = TWIST (geen arena)');
+    console.log('Alle andere gifts = ARENA');
     console.log('='.repeat(80));
-    onConnected(state);
+    onConnected();
   });
 
   return { conn };
