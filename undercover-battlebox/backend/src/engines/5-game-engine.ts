@@ -1,4 +1,4 @@
-// backend/engines/5-game-engine.ts
+// src/engines/5-game-engine.ts — FINAL VERSION – NOVEMBER 2025
 import { io } from '../server';
 import pool from '../db';
 import { addDiamonds } from './4-points-engine';
@@ -37,15 +37,13 @@ const ROUND_TIMES = {
   finale: 300
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ARENA: JOIN
-// ─────────────────────────────────────────────────────────────────────────────
+// ── ARENA: JOIN ─────────────────────────────────────────────────────
 export function arenaJoin(
   tiktok_id: string,
   display_name: string,
   username: string,
   source: 'queue' | 'guest' | 'admin' = 'queue'
-) {
+): boolean {
   if (arena.players.length >= 8) return false;
   if (arena.players.some(p => p.id === tiktok_id)) return false;
 
@@ -65,10 +63,8 @@ export function arenaJoin(
   return true;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ARENA: LEAVE
-// ─────────────────────────────────────────────────────────────────────────────
-export function arenaLeave(tiktok_id: string) {
+// ── ARENA: LEAVE ────────────────────────────────────────────────────
+export function arenaLeave(tiktok_id: string): void {
   const index = arena.players.findIndex(p => p.id === tiktok_id);
   if (index === -1) return;
 
@@ -78,26 +74,30 @@ export function arenaLeave(tiktok_id: string) {
   emitArena();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ARENA: CLEAR (tussen rondes)
-// ─────────────────────────────────────────────────────────────────────────────
-export function arenaClear() {
+// ── ARENA: CLEAR ────────────────────────────────────────────────────
+export async function arenaClear(): Promise<void> {
   console.log('[ARENA] Geleegd voor nieuwe ronde');
-  arena.players.forEach(p => {
-    // Reset ronde-diamonds
-    pool.query(
+
+  // Reset current_round diamonds voor alle spelers
+  for (const p of arena.players) {
+    await pool.query(
       `UPDATE users SET diamonds_current_round = 0 WHERE tiktok_id = $1`,
       [BigInt(p.id)]
     );
-  });
+  }
+
   arena.players = [];
+  arena.round = 0;
+  arena.type = 'quarter';
+  arena.timeLeft = 0;
+  arena.isRunning = false;
+  arena.roundStartTime = 0;
+
   emitArena();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DIAMONDS TOEVOEGEN AAN SPELER IN ARENA
-// ─────────────────────────────────────────────────────────────────────────────
-export async function addDiamondsToArenaPlayer(tiktok_id: string, diamonds: number) {
+// ── DIAMONDS TOEVOEGEN (vanuit gift-engine) ─────────────────────────
+export async function addDiamondsToArenaPlayer(tiktok_id: string, diamonds: number): Promise<void> {
   const player = arena.players.find(p => p.id === tiktok_id);
   if (!player) return;
 
@@ -106,11 +106,17 @@ export async function addDiamondsToArenaPlayer(tiktok_id: string, diamonds: numb
   emitArena();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// START RONDE
-// ─────────────────────────────────────────────────────────────────────────────
-export function startRound(type: 'quarter' | 'semi' | 'finale') {
-  if (arena.isRunning) return false;
+// ── START RONDE ─────────────────────────────────────────────────────
+export function startRound(type: 'quarter' | 'semi' | 'finale'): boolean {
+  if (arena.isRunning) {
+    console.log('[RONDE] Kan niet starten – er loopt al een ronde!');
+    return false;
+  }
+
+  if (arena.players.length < 2) {
+    console.log('[RONDE] Niet genoeg spelers! Minimaal 2 nodig.');
+    return false;
+  }
 
   arena.round += 1;
   arena.type = type;
@@ -119,9 +125,9 @@ export function startRound(type: 'quarter' | 'semi' | 'finale') {
   arena.roundStartTime = Date.now();
 
   console.log(`\nRONDE ${arena.round} GESTART – ${type.toUpperCase()} – ${arena.timeLeft}s`);
+  console.log(`Spelers: ${arena.players.map(p => p.display_name).join(', ')}`);
   emitArena();
 
-  // Timer
   const timer = setInterval(() => {
     arena.timeLeft -= 1;
     emitArena();
@@ -135,35 +141,48 @@ export function startRound(type: 'quarter' | 'semi' | 'finale') {
   return true;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// EINDE RONDE
-// ─────────────────────────────────────────────────────────────────────────────
-function endRound() {
+// ── EINDE RONDE ─────────────────────────────────────────────────────
+function endRound(): void {
   arena.isRunning = false;
-  console.log(`\nRONDE ${arena.round} EINDE – WINNAAR: ${getWinner()?.display_name || 'Niemand'}`);
 
-  // Top 3 loggen
+  const winner = getWinner();
+  console.log(`\nRONDE ${arena.round} EINDE`);
+  console.log(`WINNAAR: ${winner?.display_name || 'Niemand'} (${winner?.diamonds || 0} diamonds)`);
+
   const sorted = [...arena.players].sort((a, b) => b.diamonds - a.diamonds);
   sorted.slice(0, 3).forEach((p, i) => {
     console.log(`${i + 1}ᵉ: ${p.display_name} – ${p.diamonds} diamonds`);
   });
 
+  // Stuur naar frontend
+  io.emit('roundEnd', {
+    round: arena.round,
+    type: arena.type,
+    winner: winner ? {
+      id: winner.id,
+      display_name: winner.display_name,
+      username: winner.username,
+      diamonds: winner.diamonds
+    } : null,
+    top3: sorted.slice(0, 3).map(p => ({
+      id: p.id,
+      display_name: p.display_name,
+      username: p.username,
+      diamonds: p.diamonds
+    }))
+  });
+
   emitArena();
-  io.emit('roundEnd', { round: arena.round, winner: getWinner(), top3: sorted.slice(0, 3) });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GET WINNAAR
-// ─────────────────────────────────────────────────────────────────────────────
-export function getWinner() {
+// ── GET WINNAAR ─────────────────────────────────────────────────────
+export function getWinner(): Player | null {
   if (arena.players.length === 0) return null;
   return [...arena.players].sort((a, b) => b.diamonds - a.diamonds)[0];
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// EMIT ARENA STATUS
-// ─────────────────────────────────────────────────────────────────────────────
-export function emitArena() {
+// ── EMIT ARENA STATUS ───────────────────────────────────────────────
+export function emitArena(): void {
   const data = {
     round: arena.round,
     type: arena.type,
@@ -182,10 +201,8 @@ export function emitArena() {
   io.emit('updateArena', data);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GET ARENA (voor REST)
-// ─────────────────────────────────────────────────────────────────────────────
-export function getArena() {
+// ── GET ARENA (voor REST API) ───────────────────────────────────────
+export function getArena(): any {
   return {
     round: arena.round,
     type: arena.type,
@@ -202,10 +219,8 @@ export function getArena() {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// INIT (wordt aangeroepen vanuit server.ts)
-// ─────────────────────────────────────────────────────────────────────────────
-export function initGame() {
+// ── INIT ────────────────────────────────────────────────────────────
+export function initGame(): void {
   console.log('[5-GAME-ENGINE] → Geladen en klaar voor oorlog');
   emitArena();
-}
+    }
