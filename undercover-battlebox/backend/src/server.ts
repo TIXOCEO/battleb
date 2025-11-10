@@ -1,4 +1,4 @@
-// src/server.ts — FINAL FINAL FINAL – ALLES WERKT – NOVEMBER 2025
+// src/server.ts — BATTLEBOX 5-ENGINE – GIFTS WERKEN WEER – NOVEMBER 2025
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
@@ -7,7 +7,7 @@ import pool from './db';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
-// ENGINES (nu in src/engines)
+// ENGINES
 import { startConnection } from './engines/1-connection';
 import { getOrUpdateUser } from './engines/2-user-engine';
 import { initGiftEngine } from './engines/3-gift-engine';
@@ -20,7 +20,6 @@ import {
   getArena, 
   emitArena 
 } from './engines/5-game-engine';
-
 import { addToQueue, getQueue } from './queue';
 
 dotenv.config();
@@ -41,14 +40,17 @@ io.on('connection', (socket) => {
   emitArena();
 });
 
-// EMIT QUEUE FUNCTIE
 export function emitQueue() {
   io.emit('queue:update', getQueue());
 }
 
 // GLOBALS
 const ADMIN_ID = process.env.ADMIN_TIKTOK_ID?.trim();
+
 let conn: any = null;
+let hostId = '';
+let HOST_DISPLAY_NAME = 'Host';
+let HOST_USERNAME = 'host';
 
 // START
 initDB().then(async () => {
@@ -59,25 +61,31 @@ initDB().then(async () => {
 
   initGame();
 
-  const result = await startConnection(process.env.TIKTOK_USERNAME!, async (state: any) => {
-    const hostId = state.hostId || state.user?.userId || '';
+  // === DIT IS DE FIX: WACHT TOT conn.connect() KLAAR IS ===
+  const { conn: tikTokConn } = await startConnection(process.env.TIKTOK_USERNAME!, async (state: any) => {
+    hostId = state.hostId || state.user?.userId || '';
     const hostNickname = state.user?.nickname || 'Host';
     const hostUniqueId = (state.user?.uniqueId || 'host').replace('@', '');
 
+    HOST_DISPLAY_NAME = hostNickname;
+    HOST_USERNAME = hostUniqueId;
+
     await getOrUpdateUser(hostId, hostNickname, hostUniqueId);
 
+    console.log('='.repeat(80));
     console.log('HOST PERFECT HERKEND');
     console.log(`${hostNickname} (@${hostUniqueId}) [ID: ${hostId}]`);
     console.log('='.repeat(80));
-
-    initGiftEngine(conn, {
-      id: hostId,
-      name: hostNickname,
-      username: hostUniqueId
-    });
   });
 
-  conn = result.conn;
+  conn = tikTokConn;
+
+  // NU PAS: GIFT ENGINE STARTEN – conn BESTAAT NU ECHT
+  initGiftEngine(conn, {
+    id: hostId,
+    name: HOST_DISPLAY_NAME,
+    username: HOST_USERNAME
+  });
 
   // CHAT + ADMIN
   conn.on('chat', async (data: any) => {
