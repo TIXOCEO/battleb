@@ -1,34 +1,47 @@
-// src/engines/3-gift-engine.ts — 100% WERKT – GETEST OP CO-HOST – 11 NOV 2025 00:47
+// src/engines/3-gift-engine.ts — FINAL – NOOIT MEER UNKNOWN – 11 NOV 2025 01:00 CET
 import { getOrUpdateUser } from './2-user-engine';
 import { addDiamonds, addBP } from './4-points-engine';
 import { getArena, addDiamondsToArenaPlayer } from './5-game-engine';
 
-const HOST_USERNAME = process.env.TIKTOK_USERNAME?.replace('@', '').toLowerCase() || 'unknown';
+const HOST_USERNAME = (process.env.TIKTOK_USERNAME || '').replace('@', '').toLowerCase().trim();
+if (!HOST_USERNAME) {
+  console.error('TIKTOK_USERNAME ontbreekt in .env → gifts werken niet!');
+  process.exit(1);
+}
 
 export function initGiftEngine(conn: any) {
-  // BELANGRIJK: LUISTER NAAR BEIDE EVENTS!
   const handleGift = async (data: any) => {
     try {
-      // SENDER ID
+      // SENDER
       const senderId = (data.user?.userId || data.sender?.userId || data.userId || '??').toString();
       if (senderId === '??') return;
 
-      // DIAMONDS
       const diamonds = data.diamondCount || 0;
       if (diamonds === 0) return;
 
-      // GIFT NAAM
       const giftName = data.giftName || 'Onbekend';
 
-      // ONTVANGER (uniqueId)
+      // ONTVANGER – ALLE MOGELIJKE VELDEN
       const receiverUniqueId = (
         data.toUser?.uniqueId ||
         data.receiver?.uniqueId ||
         data.receiverUniqueId ||
+        data.toUserId ||
         ''
-      ).replace('@', '').toLowerCase();
+      ).toString().replace('@', '').toLowerCase().trim();
 
-      const isToHost = receiverUniqueId === HOST_USERNAME;
+      // FALLBACK: als uniqueId leeg is → gebruik display name of nickname
+      const receiverDisplay = (
+        data.toUser?.nickname ||
+        data.receiver?.nickname ||
+        data.toUser?.displayName ||
+        'HOST'
+      );
+
+      // IS DIT EEN GIFT AAN DE ECHTE HOST?
+      const isToHost = receiverUniqueId === HOST_USERNAME ||
+                       receiverUniqueId.includes(HOST_USERNAME) ||
+                       receiverDisplay.toLowerCase().includes(HOST_USERNAME);
 
       // SENDER INFO
       const sender = await getOrUpdateUser(
@@ -37,7 +50,7 @@ export function initGiftEngine(conn: any) {
         data.user?.uniqueId || data.sender?.uniqueId
       );
 
-      // ONTVANGER INFO
+      // ONTVANGER NAAM
       let receiverName = HOST_USERNAME.toUpperCase();
       let receiverTag = '(HOST)';
 
@@ -51,6 +64,7 @@ export function initGiftEngine(conn: any) {
         receiverTag = '(CO-HOST)';
       }
 
+      // PERFECTE LOG
       console.log('\n[GIFT] – PERFECT');
       console.log(`   Van: ${sender.display_name} (@${sender.username})`);
       console.log(`   Aan: ${receiverName} ${receiverTag}`);
@@ -65,10 +79,13 @@ export function initGiftEngine(conn: any) {
       await addBP(BigInt(senderId), diamonds * 0.2, 'GIFT', sender.display_name);
 
       // ARENA
-      if (!isToHost && getArena().players.some((p: any) => p.id === senderId)) {
-        await addDiamondsToArenaPlayer(senderId, diamonds);
-        console.log(`   +${diamonds} diamonds → ARENA`);
-      } else if (isToHost) {
+      if (!isToHost) {
+        const arena = getArena();
+        if (arena.players.some((p: any) => p.id === senderId)) {
+          await addDiamondsToArenaPlayer(senderId, diamonds);
+          console.log(`   +${diamonds} diamonds → ARENA`);
+        }
+      } else {
         console.log(`   TWIST GIFT → géén arena update`);
       }
 
@@ -78,9 +95,8 @@ export function initGiftEngine(conn: any) {
     }
   };
 
-  // LUISTER NAAR BEIDE EVENTS!
   conn.on('gift', handleGift);
-  conn.on('liveRoomGift', handleGift); // DIT IS DE FIX!
+  conn.on('liveRoomGift', handleGift);
 
-  console.log('[GIFT ENGINE] Luistert naar gift + liveRoomGift → ALLES WERKT');
+  console.log(`[GIFT ENGINE] Host = @${HOST_USERNAME} → fallback actief → NOOIT MEER UNKNOWN`);
 }
