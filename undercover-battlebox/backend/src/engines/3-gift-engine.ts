@@ -1,63 +1,67 @@
-// src/engines/3-gift-engine.ts — FINAL FINAL FINAL – 100% SCHOON
+// src/engines/3-gift-engine.ts
 import { getOrUpdateUser } from './2-user-engine';
 import { addDiamonds, addBP } from './4-points-engine';
 import { io } from '../server';
 import { getArena, addDiamondsToArenaPlayer } from './5-game-engine';
 
-let hostId = '';
-let HOST_DISPLAY_NAME = 'Host';
-let HOST_USERNAME = 'host';
+let REAL_HOST_ID = '';
 
-export function initGiftEngine(conn: any, hostInfo: { id: string; name: string; username: string }) {
-  hostId = hostInfo.id;
-  HOST_DISPLAY_NAME = hostInfo.name;
-  HOST_USERNAME = hostInfo.username;
+export function initGiftEngine(conn: any, hostInfo: { id: string }) {
+  REAL_HOST_ID = hostInfo.id;
 
   conn.on('gift', async (data: any) => {
     try {
       const senderId = (data.user?.userId || data.sender?.userId || data.userId || '??').toString();
-      const receiverId = (data.receiverUserId || data.toUserId || hostId || '??').toString();
+      const receiverId = (data.receiverUserId || data.toUserId || '??').toString();
       if (senderId === '??') return;
 
       const diamonds = data.diamondCount || 0;
       if (diamonds === 0) return;
 
       const giftName = data.giftName || 'Onbekend';
-      const isToHost = receiverId === hostId;
+      const isToRealHost = receiverId === REAL_HOST_ID;
 
-      const sender = await getOrUpdateUser(senderId, data.user?.nickname, data.user?.uniqueId);
+      const sender = await getOrUpdateUserUser(senderId, data.user?.nickname, data.user?.uniqueId);
 
-      let receiverDisplay = HOST_DISPLAY_NAME;
-      let receiverUsername = HOST_USERNAME;
+      let receiverDisplay = 'Host';
+      let receiverUsername = 'host';
       let receiverTag = '(HOST)';
 
-      if (!isToHost && receiverId !== '??') {
+      if (!isToRealHost && receiverId !== '??') {
         const receiver = await getOrUpdateUser(receiverId, data.toUser?.nickname, data.toUser?.uniqueId);
         receiverDisplay = receiver.display_name;
         receiverUsername = receiver.username;
         receiverTag = '(CO-HOST)';
+      } else if (isToRealHost) {
+        const host = await getOrUpdateUser(REAL_HOST_ID);
+        receiverDisplay = host.display_name;
+        receiverUsername = host.username;
       }
 
       console.log('\n[GIFT] – PERFECT');
       console.log(`   Van: ${sender.display_name} (@${sender.username})`);
-      console.log(`   Aan: ${receiverDisplay} (@${receiverUsername}) ${receiverTag}`);
-      console.log(`   Gift: ${giftName} (${diamonds} diamonds)`); // FIXED!
+      console.log(`   Aan: ${receiverDisplay} (${receiverUsername}) ${receiverTag}`);
+      console.log(`   Gift: ${giftName} (${diamonds} diamonds)`);
 
+      // DIAMONDS ALTIJD TOEVOEGEN
       await addDiamonds(BigInt(senderId), diamonds, 'total');
       await addDiamonds(BigInt(senderId), diamonds, 'stream');
       await addDiamonds(BigInt(senderId), diamonds, 'current_round');
 
+      // BP
       const bp = diamonds * 0.2;
       await addBP(BigInt(senderId), bp, 'GIFT', sender.display_name);
 
-      const currentArena = getArena();
-      const isInArena = currentArena.players.some((p: any) => p.id === senderId);
-
-      if (isInArena) {
-        await addDiamondsToArenaPlayer(senderId, diamonds);
+      // ALLEEN CO-HOST GIFTS TELLEN MEE IN ARENA
+      if (!isToRealHost) {
+        const arena = getArena();
+        if (arena.players.some((p: any) => p.id === senderId)) {
+          await addDiamondsToArenaPlayer(senderId, diamonds);
+        }
+      } else {
+        console.log(`   → Gift aan echte host → géén arena update (twist ready)`);
       }
 
-      console.log(`[BP +${bp.toFixed(1)}] → ${sender.display_name}`);
       console.log('='.repeat(80));
     } catch (err: any) {
       console.error('[GIFT FOUT]', err.message);
