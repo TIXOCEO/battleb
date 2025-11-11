@@ -1,4 +1,4 @@
-// src/server.ts — BATTLEBOX 5-ENGINE – ADMIN DASHBOARD 100% LIVE & CLEAN – 11 NOV 2025 02:10 CET
+// src/server.ts — BATTLEBOX 5-ENGINE – ADMIN DASHBOARD LIVE – PERSISTENTE QUEUE & LOGS
 import express from 'express';
 import http from 'http';
 import { Server, Socket } from 'socket.io';
@@ -18,7 +18,7 @@ import {
   arenaLeave,
   arenaClear,
   getArena,
-  emitArena
+  emitArena,
 } from './engines/5-game-engine';
 import { addToQueue, getQueue } from './queue';
 
@@ -31,7 +31,7 @@ if (!process.env.TIKTOK_USERNAME) {
 }
 
 // === ADMIN AUTH TOKEN ===
-const ADMIN_TOKEN = "supergeheim123";
+const ADMIN_TOKEN = 'supergeheim123';
 
 // === EXPRESS + SOCKET.IO ===
 const app = express();
@@ -41,27 +41,40 @@ const server = http.createServer(app);
 
 export const io = new Server(server, {
   cors: { origin: '*' },
-  path: '/socket.io'
+  path: '/socket.io',
 });
+
+// === LOG BUFFER (IN-MEMORY, LAATSTE 500) ===
+type LogEntry = {
+  id: string;
+  timestamp: string;
+  type: string;
+  message: string;
+  [key: string]: any;
+};
+
+const LOG_MAX = 500;
+const logBuffer: LogEntry[] = [];
 
 // === OPEN REST API ===
-app.get('/queue', async (req, res) => {
-  res.json({ open: true, entries: await getQueue() });
+app.get('/queue', async (_req, res) => {
+  const entries = await getQueue();
+  res.json({ open: true, entries });
 });
 
-app.get('/arena', async (req, res) => {
+app.get('/arena', async (_req, res) => {
   res.json(getArena());
 });
 
-app.get('/logs', async (req, res) => {
-  res.json({ logs: [] });
+app.get('/logs', (_req, res) => {
+  res.json({ logs: logBuffer });
 });
 
 // === ADMIN AUTH MIDDLEWARE ===
 const requireAdmin = (req: any, res: any, next: any) => {
   const auth = req.headers.authorization;
   if (auth === `Bearer ${ADMIN_TOKEN}`) return next();
-  res.status(401).json({ success: false, message: "Unauthorized" });
+  res.status(401).json({ success: false, message: 'Unauthorized' });
 };
 
 // === SOCKET.IO AUTH + TYPING FIX ===
@@ -79,20 +92,29 @@ io.use((socket: any, next) => {
 });
 
 // === EMIT HELPERS ===
-export function emitQueue() {
-  io.emit('updateQueue', { open: true, entries: getQueue() });
+export async function emitQueue(): Promise<void> {
+  const entries = await getQueue();
+  io.emit('updateQueue', { open: true, entries });
 }
 
-export function emitLog(log: any) {
-  io.emit('log', {
-    id: Date.now().toString(),
-    timestamp: new Date().toISOString(),
-    ...log
-  });
+export function emitLog(log: Omit<LogEntry, 'id' | 'timestamp'> & { id?: string; timestamp?: string }) {
+  const entry: LogEntry = {
+    id: log.id ?? Date.now().toString(),
+    timestamp: log.timestamp ?? new Date().toISOString(),
+    ...log,
+  };
+
+  // in memory bewaren
+  logBuffer.unshift(entry);
+  if (logBuffer.length > LOG_MAX) {
+    logBuffer.pop();
+  }
+
+  io.emit('log', entry);
 }
 
 // === SOCKET CONNECTION ===
-io.on('connection', (socket: AdminSocket) => {
+io.on('connection', async (socket: AdminSocket) => {
   if (!socket.isAdmin) {
     console.log('Unauthenticated socket attempt');
     return socket.disconnect();
@@ -100,24 +122,27 @@ io.on('connection', (socket: AdminSocket) => {
 
   console.log('ADMIN DASHBOARD VERBONDEN:', socket.id);
 
+  // Stuur direct huidige state + logs
   socket.emit('updateArena', getArena());
-  socket.emit('updateQueue', { open: true, entries: getQueue() });
-  emitLog({ type: "system", message: "Admin dashboard verbonden" });
+  socket.emit('updateQueue', { open: true, entries: await getQueue() });
+  socket.emit('initialLogs', logBuffer);
+
+  emitLog({ type: 'system', message: 'Admin dashboard verbonden' });
 
   // === ADMIN ACTIES ===
   const handleAdminAction = async (action: string, data: any, ack: Function) => {
     try {
       if (!data?.username) {
-        return ack({ success: false, message: "username vereist" });
+        return ack({ success: false, message: 'username vereist' });
       }
 
       const rawInput: string = String(data.username).trim();
       if (!rawInput) {
-        return ack({ success: false, message: "Lege username" });
+        return ack({ success: false, message: 'Lege username' });
       }
 
       // Normaliseer invoer
-      const normalized = rawInput.replace(/^@+/, "");
+      const normalized = rawInput.replace(/^@+/, '');
 
       // Zoek in DB op beide varianten
       const userRes = await pool.query(
@@ -128,7 +153,7 @@ io.on('connection', (socket: AdminSocket) => {
            OR username ILIKE $2
         LIMIT 1
         `,
-        [rawInput, `@${normalized}`]
+        [rawInput, `@${normalized}`],
       );
 
       if (!userRes.rows[0]) {
@@ -142,35 +167,35 @@ io.on('connection', (socket: AdminSocket) => {
       const tid = tiktok_id.toString();
 
       switch (action) {
-        case "addToArena":
-          arenaJoin(tid, username, display_name, "admin");
+        case 'addToArena':
+          arenaJoin(tid, display_name, username, 'admin');
           emitArena();
-          emitLog({ type: "join", message: `${username} toegevoegd aan arena` });
+          emitLog({ type: 'join', message: `@${username} toegevoegd aan arena` });
           break;
 
-        case "addToQueue":
+        case 'addToQueue':
           await addToQueue(tid, username);
-          emitQueue();
-          emitLog({ type: "join", message: `${username} toegevoegd aan wachtrij` });
+          await emitQueue();
+          emitLog({ type: 'join', message: `@${username} toegevoegd aan wachtrij` });
           break;
 
-        case "eliminate":
+        case 'eliminate':
           arenaLeave(tid);
           emitArena();
-          emitLog({ type: "elim", message: `${username} geëlimineerd` });
+          emitLog({ type: 'elim', message: `@${username} geëlimineerd` });
           break;
 
         default:
           return ack({
             success: false,
-            message: "Actie nog niet via socket – gebruik !adm in chat",
+            message: 'Actie nog niet via socket – gebruik !adm in chat',
           });
       }
 
-      ack({ success: true, message: "Actie uitgevoerd" });
+      ack({ success: true, message: 'Actie uitgevoerd' });
     } catch (err: any) {
-      console.error("Admin action error:", err);
-      ack({ success: false, message: err.message || "Server error" });
+      console.error('Admin action error:', err);
+      ack({ success: false, message: err.message || 'Server error' });
     }
   };
 
@@ -180,22 +205,22 @@ io.on('connection', (socket: AdminSocket) => {
 });
 
 // === ADMIN REST ENDPOINTS (placeholder) ===
-app.post('/api/admin/:action', requireAdmin, async (req, res) => {
-  res.json({ success: true, message: "REST endpoint klaar – gebruik socket voor live" });
+app.post('/api/admin/:action', requireAdmin, async (_req, res) => {
+  res.json({ success: true, message: 'REST endpoint klaar – gebruik socket voor live' });
 });
 
 // === TEST ENDPOINTS ===
-app.post('/admin/test/add-random-player', requireAdmin, (req, res) => {
+app.post('/admin/test/add-random-player', requireAdmin, (_req, res) => {
   const fakeId = Date.now().toString();
   const name = `test_${fakeId.slice(-4)}`;
   arenaJoin(fakeId, name, `TestPlayer${fakeId.slice(-4)}`, 'admin');
   emitArena();
-  emitLog({ type: "test", message: `Random speler ${name} toegevoegd` });
+  emitLog({ type: 'test', message: `Random speler ${name} toegevoegd` });
   res.json({ success: true });
 });
 
-app.post('/admin/test/log', requireAdmin, (req, res) => {
-  emitLog({ type: "gift", message: "TEST: 500 diamonds van @admin" });
+app.post('/admin/test/log', requireAdmin, (_req, res) => {
+  emitLog({ type: 'gift', message: 'TEST: 500 diamonds van @admin' });
   res.json({ success: true });
 });
 
@@ -214,7 +239,7 @@ initDB().then(async () => {
 
   const { conn: tikTokConn } = await startConnection(
     process.env.TIKTOK_USERNAME!,
-    () => {}
+    () => {},
   );
 
   conn = tikTokConn;
@@ -237,7 +262,7 @@ initDB().then(async () => {
         const res = await pool.query('SELECT tiktok_id FROM users WHERE username ILIKE $1', [`%@${target}`]);
         if (res.rows[0]) {
           await addToQueue(res.rows[0].tiktok_id, target);
-          emitQueue();
+          await emitQueue();
           console.log(`[ADMIN] ${target} toegevoegd aan queue`);
         }
       }
