@@ -1,17 +1,12 @@
-// src/engines/3-gift-engine.ts — BATTLEBOX FINAL LIVE ENGINE — 12 NOV 2025
-import dotenv from "dotenv";
+// src/engines/3-gift-engine.ts — FIXED: WRITES TO giver_* COLUMNS
+import pool from "../db";
 import { getOrUpdateUser } from "./2-user-engine";
 import { addDiamonds, addBP } from "./4-points-engine";
-import {
-  getArena,
-  addDiamondsToArenaPlayer,
-} from "./5-game-engine";
-import pool from "../db";
-import { emitLog } from "../server";
+import { getArena, addDiamondsToArenaPlayer } from "./5-game-engine";
+import dotenv from "dotenv";
 
 dotenv.config();
 
-// === HOST INSTELLINGEN ===
 const HOST_USERNAME = (process.env.TIKTOK_USERNAME || "")
   .replace("@", "")
   .toLowerCase()
@@ -22,56 +17,40 @@ if (!HOST_USERNAME) {
   process.exit(1);
 }
 
-// === GIFT DEDUPLICATIE ===
 const seenGiftMsgIds = new Set<string>();
-
-// === TWIST GIFTS (speciale invloed) ===
-const TWIST_GIFTS = [
-  "lion",
-  "money gun",
-  "whale",
-  "corona",
-  "jet",
-  "gold mine",
-];
-
-// === BOOSTER GIFTS (kleine bonus) ===
-const BOOSTER_GIFTS = ["rose", "heart", "hand heart", "tiktok", "unicorn"];
 
 export function initGiftEngine(conn: any) {
   conn.on("liveRoomGift", async (data: any) => {
+    const msgId = data.msgId || data.giftId || data.id;
+    if (!msgId) return;
+    if (seenGiftMsgIds.has(msgId)) return;
+    seenGiftMsgIds.add(msgId);
+    setTimeout(() => seenGiftMsgIds.delete(msgId), 15000);
+
     try {
-      // DEDUPLICATIE
-      const msgId = data.msgId || data.giftId || data.id;
-      if (!msgId) return;
-      if (seenGiftMsgIds.has(msgId)) return;
-      seenGiftMsgIds.add(msgId);
-      setTimeout(() => seenGiftMsgIds.delete(msgId), 15000);
+      const senderId = (
+        data.user?.userId ||
+        data.sender?.userId ||
+        data.userId ||
+        "0"
+      ).toString();
+      if (senderId === "0") return;
 
-      // AFZENDER
-      const senderId = (data.user?.userId || data.sender?.userId)?.toString();
-      if (!senderId) return;
-
-      const sender = await getOrUpdateUser(
-        senderId,
-        data.user?.nickname || data.sender?.nickname,
-        data.user?.uniqueId || data.sender?.uniqueId
-      );
-
-      const giftName = (data.giftName || "Onbekend").trim();
       const diamonds = data.diamondCount || 0;
-      if (!diamonds) return;
+      if (diamonds === 0) return;
 
-      // ONTVANGER
-      const receiverUniqueId =
-        (data.toUser?.uniqueId ||
-          data.receiver?.uniqueId ||
-          data.receiverUniqueId ||
-          "")
-          .toString()
-          .replace("@", "")
-          .toLowerCase()
-          .trim();
+      const giftName = data.giftName || "Onbekend";
+
+      const receiverUniqueId = (
+        data.toUser?.uniqueId ||
+        data.receiver?.uniqueId ||
+        data.receiverUniqueId ||
+        ""
+      )
+        .toString()
+        .replace("@", "")
+        .toLowerCase()
+        .trim();
 
       const receiverDisplay =
         data.toUser?.nickname ||
@@ -84,10 +63,17 @@ export function initGiftEngine(conn: any) {
         receiverUniqueId.includes(HOST_USERNAME) ||
         receiverDisplay.toLowerCase().includes(HOST_USERNAME);
 
-      // ONTVANGER USER (optioneel)
-      let receiverName = HOST_USERNAME.toUpperCase();
-      let receiverRole = "HOST";
-      let receiverId = "0";
+      // === SENDER ===
+      const sender = await getOrUpdateUser(
+        senderId,
+        data.user?.nickname || data.sender?.nickname,
+        data.user?.uniqueId || data.sender?.uniqueId
+      );
+
+      let receiverName = "Undercover BattleBox";
+      let receiverRole = "host";
+      let receiverId = 0;
+      let receiverUsername = HOST_USERNAME;
 
       if (!isToHost && receiverUniqueId) {
         const receiver = await getOrUpdateUser(
@@ -95,42 +81,36 @@ export function initGiftEngine(conn: any) {
           data.toUser?.nickname || data.receiver?.nickname,
           data.toUser?.uniqueId || data.receiver?.uniqueId
         );
+        receiverId = Number(receiver.tiktok_id);
         receiverName = receiver.display_name;
-        receiverId = receiver.tiktok_id;
-        receiverRole = "COHOST";
+        receiverUsername = receiver.username;
+        receiverRole = "cohost";
       }
 
-      // TWIST / BOOSTER HERKENNING
-      const lowerGift = giftName.toLowerCase();
-      const isTwist = TWIST_GIFTS.some((g) => lowerGift.includes(g));
-      const isBooster = BOOSTER_GIFTS.some((g) => lowerGift.includes(g));
-
-      // LOG NAAR CONSOLE
-      console.log("\n🎁 GIFT DETECTED");
+      // === LOGGING ===
+      console.log(`\n🎁 GIFT DETECTED`);
       console.log(`   Van: ${sender.display_name} (@${sender.username})`);
-      console.log(`   Aan: ${receiverName} (${receiverRole})`);
+      console.log(`   Aan: ${receiverName} (${receiverRole.toUpperCase()})`);
       console.log(`   Gift: ${giftName} (${diamonds}💎)`);
-      if (isTwist) console.log("   ⚡ TWIST GIFT GEDTECTEERD!");
-      if (isBooster) console.log("   🔸 BOOSTER GIFT GEDTECTEERD!");
-      console.log("=".repeat(80));
 
-      // UPDATE POINTS & DIAMONDS
+      // === POINTS ===
       await addDiamonds(BigInt(senderId), diamonds, "total");
       await addDiamonds(BigInt(senderId), diamonds, "stream");
       await addDiamonds(BigInt(senderId), diamonds, "current_round");
+      await addBP(BigInt(senderId), diamonds * 0.2, "GIFT", sender.display_name);
 
-      const bpAmount = isBooster ? diamonds * 0.4 : diamonds * 0.2;
-      await addBP(BigInt(senderId), bpAmount, "GIFT", sender.display_name);
-
-      // ARENA UPDATE (alleen als niet host)
+      // === ARENA BONUS ===
       if (!isToHost) {
         const arena = getArena();
         if (arena.players.some((p: any) => p.id === senderId)) {
           await addDiamondsToArenaPlayer(senderId, diamonds);
+          console.log(`   +${diamonds}💎 toegevoegd aan ARENA`);
         }
+      } else {
+        console.log(`   ⚡ TWIST GIFT → géén arena update`);
       }
 
-      // SAVE IN DATABASE
+      // === DATABASE SAVE ===
       await pool.query(
         `
         INSERT INTO gifts (
@@ -141,32 +121,27 @@ export function initGiftEngine(conn: any) {
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
         `,
         [
-          senderId,
+          BigInt(senderId),
           sender.username,
           sender.display_name,
           receiverId,
-          receiverUniqueId || HOST_USERNAME,
+          receiverUsername,
           receiverName,
           receiverRole,
           giftName,
           diamonds,
-          bpAmount,
+          diamonds * 0.2,
         ]
       );
 
-      // LOG NAAR DASHBOARD
-      emitLog({
-        type: isTwist ? "twist" : isBooster ? "booster" : "gift",
-        message: `🎁 ${sender.display_name} → ${receiverName} | ${giftName} (${diamonds}💎, +${bpAmount.toFixed(
-          1
-        )} BP) [${receiverRole}]`,
-      });
+      console.log("💾 Gift opgeslagen in database");
+      console.log("=".repeat(80));
     } catch (err: any) {
-      console.error("[GIFT ENGINE FOUT]", err.message);
+      console.error("❌  GiftEngine error:", err.message);
     }
   });
 
   console.log(
-    `[GIFT ENGINE] Actief → @${HOST_USERNAME} • Alleen liveRoomGift • Twist & Booster herkend`
+    `[GIFT ENGINE] ACTIEF voor @${HOST_USERNAME} → Alleen liveRoomGift wordt verwerkt`
   );
 }
