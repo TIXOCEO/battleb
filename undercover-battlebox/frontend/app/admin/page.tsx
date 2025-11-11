@@ -36,10 +36,11 @@ export default function AdminDashboardPage() {
     };
   }, []);
 
-  const emitAdmin = (event: string) => {
-    if (!username.trim()) return;
+  const emitAdmin = (event: string, target?: string) => {
     const socket = getAdminSocket();
-    const u = username.startsWith("@") ? username : `@${username}`;
+    const uname = target || username;
+    if (!uname.trim()) return;
+    const u = uname.startsWith("@") ? uname : `@${uname}`;
     setStatus(`Bezig met ${event}...`);
     socket.emit(event, { username: u }, (res: AdminAckResponse) => {
       setStatus(res.success ? "✅ Succesvol uitgevoerd" : `❌ ${res.message}`);
@@ -149,6 +150,14 @@ export default function AdminDashboardPage() {
                   <div className="text-xs text-gray-600">
                     Ronde: {p.diamonds} 💎
                   </div>
+                  {p.status === "alive" && (
+                    <button
+                      onClick={() => emitAdmin("admin:eliminate", p.username)}
+                      className="mt-2 px-2 py-1 text-[11px] rounded-full border border-red-200 text-red-600 bg-red-50 hover:bg-red-100"
+                    >
+                      Elimineer
+                    </button>
+                  )}
                 </div>
               ))
             ) : (
@@ -187,21 +196,48 @@ export default function AdminDashboardPage() {
           </div>
 
           {queue.length ? (
-            queue.map((q) => (
+            queue.map((q, idx) => (
               <div
                 key={q.tiktok_id}
-                className="rounded-lg border border-gray-200 bg-gray-50 p-2 mb-2 text-sm flex justify-between items-center"
+                className="rounded-lg border border-gray-200 bg-gray-50 p-2 mb-2 text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between"
               >
                 <div>
                   <div className="font-semibold text-gray-900">
-                    @{q.username}{" "}
+                    #{idx + 1} @{q.username}{" "}
                     <span className="text-xs text-gray-500">
                       ({q.display_name})
                     </span>
                   </div>
                   <div className="text-xs text-gray-500">
-                    {q.reason} {q.priorityDelta !== 0 && `(+${q.priorityDelta})`}
+                    {q.reason}{" "}
+                    {q.priorityDelta !== 0 && `(+${q.priorityDelta})`}
                   </div>
+                </div>
+                <div className="flex gap-1 mt-2 sm:mt-0 justify-end">
+                  <button
+                    onClick={() => emitAdmin("admin:promoteQueue", q.username)}
+                    className="px-2 py-1 rounded-full border border-gray-200 bg-white hover:bg-gray-100"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    onClick={() => emitAdmin("admin:demoteQueue", q.username)}
+                    className="px-2 py-1 rounded-full border border-gray-200 bg-white hover:bg-gray-100"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    onClick={() => emitAdmin("admin:addToArena", q.username)}
+                    className="px-2 py-1 rounded-full border border-[#ff4d4f] text-[#ff4d4f] bg-white hover:bg-[#ff4d4f]/10"
+                  >
+                    → Arena
+                  </button>
+                  <button
+                    onClick={() => emitAdmin("admin:removeFromQueue", q.username)}
+                    className="px-2 py-1 rounded-full border border-red-200 text-red-600 bg-red-50 hover:bg-red-100"
+                  >
+                    ✕
+                  </button>
                 </div>
               </div>
             ))
