@@ -17,22 +17,70 @@ export default function AdminDashboardPage() {
   const [username, setUsername] = useState("");
   const [status, setStatus] = useState<string | null>(null);
 
+  // Bij eerste render: eventueel logs uit localStorage herstellen
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const saved = window.localStorage.getItem("ub_admin_logs");
+      if (saved) {
+        const parsed = JSON.parse(saved) as LogEntry[];
+        setLogs(parsed);
+      }
+    } catch {
+      // boeit niet
+    }
+  }, []);
+
+  // Logs ook opslaan in localStorage (max 200)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        "ub_admin_logs",
+        JSON.stringify(logs.slice(0, 200))
+      );
+    } catch {
+      // ignore
+    }
+  }, [logs]);
+
   useEffect(() => {
     const socket = getAdminSocket();
 
+    // Huidige arena state
     socket.on("updateArena", (data: ArenaState) => setArena(data));
-    socket.on("updateQueue", (data: any) => {
-      setQueue(data.entries ?? []);
-      setQueueOpen(data.open ?? true);
-    });
-    socket.on("log", (data: LogEntry) =>
-      setLogs((prev) => [data, ...prev].slice(0, 200))
+
+    // Huidige queue state
+    socket.on(
+      "updateQueue",
+      (data: { open: boolean; entries: QueueEntry[] }) => {
+        setQueue(data.entries ?? []);
+        setQueueOpen(data.open ?? true);
+      }
     );
+
+    // Losse log-entry
+    socket.on("log", (data: LogEntry) => {
+      setLogs((prev) => [data, ...prev].slice(0, 200));
+    });
+
+    // Volledige log-history bij (re)connect
+    socket.on("initialLogs", (data: LogEntry[]) => {
+      setLogs(data.slice(0, 200));
+    });
+
+    // Optioneel: debug errors
+    socket.on("connect_error", (err: any) => {
+      console.error("❌ Socket connectie-fout:", err?.message || err);
+      setStatus("❌ Socket verbinding verbroken");
+    });
 
     return () => {
       socket.off("updateArena");
       socket.off("updateQueue");
       socket.off("log");
+      socket.off("initialLogs");
+      socket.off("connect_error");
     };
   }, []);
 
@@ -196,14 +244,14 @@ export default function AdminDashboardPage() {
           </div>
 
           {queue.length ? (
-            queue.map((q, idx) => (
+            queue.map((q) => (
               <div
                 key={q.tiktok_id}
                 className="rounded-lg border border-gray-200 bg-gray-50 p-2 mb-2 text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between"
               >
                 <div>
                   <div className="font-semibold text-gray-900">
-                    #{idx + 1} @{q.username}{" "}
+                    #{q.position} @{q.username}{" "}
                     <span className="text-xs text-gray-500">
                       ({q.display_name})
                     </span>
@@ -215,13 +263,17 @@ export default function AdminDashboardPage() {
                 </div>
                 <div className="flex gap-1 mt-2 sm:mt-0 justify-end">
                   <button
-                    onClick={() => emitAdmin("admin:promoteQueue", q.username)}
+                    onClick={() =>
+                      emitAdmin("admin:promoteQueue", q.username)
+                    }
                     className="px-2 py-1 rounded-full border border-gray-200 bg-white hover:bg-gray-100"
                   >
                     ↑
                   </button>
                   <button
-                    onClick={() => emitAdmin("admin:demoteQueue", q.username)}
+                    onClick={() =>
+                      emitAdmin("admin:demoteQueue", q.username)
+                    }
                     className="px-2 py-1 rounded-full border border-gray-200 bg-white hover:bg-gray-100"
                   >
                     ↓
@@ -233,7 +285,9 @@ export default function AdminDashboardPage() {
                     → Arena
                   </button>
                   <button
-                    onClick={() => emitAdmin("admin:removeFromQueue", q.username)}
+                    onClick={() =>
+                      emitAdmin("admin:removeFromQueue", q.username)
+                    }
                     className="px-2 py-1 rounded-full border border-red-200 text-red-600 bg-red-50 hover:bg-red-100"
                   >
                     ✕
@@ -264,6 +318,8 @@ export default function AdminDashboardPage() {
                     ? "bg-red-50 text-red-700"
                     : log.type === "join"
                     ? "bg-green-50 text-green-700"
+                    : log.type === "system"
+                    ? "bg-blue-50 text-blue-700"
                     : "bg-gray-50 text-gray-700"
                 }`}
               >
