@@ -1,4 +1,4 @@
-// src/server.ts — BATTLEBOX 5-ENGINE – FINAL ONSTERFELIJK – 11 NOV 2025 00:35 CET
+// src/server.ts — BATTLEBOX 5-ENGINE – ADMIN DASHBOARD LIVE – 11 NOV 2025 01:36 CET
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
@@ -20,62 +20,212 @@ import {
   getArena, 
   emitArena 
 } from './engines/5-game-engine';
-import { addToQueue, getQueue } from './queue';
+import { 
+  addToQueue, 
+  getQueue, 
+  removeFromQueue, 
+  promoteInQueue, 
+  demoteInQueue 
+} from './queue';
 
 dotenv.config();
 
-// === CHECK .env ===
+// === FATAL .env CHECKS ===
 if (!process.env.TIKTOK_USERNAME) {
-  console.error('TIKTOK_USERNAME ontbreekt in .env!');
+  console.error('FATAL: TIKTOK_USERNAME ontbreekt in .env!');
   process.exit(1);
 }
+
+// === ADMIN AUTH TOKEN ===
+const ADMIN_TOKEN = "supergeheim123";
 
 // === EXPRESS + SOCKET.IO ===
 const app = express();
 app.use(cors());
+app.use(express.json());
 const server = http.createServer(app);
-export const io = new Server(server, { cors: { origin: '*' } });
 
-// REST API
-app.get('/queue', async (req, res) => res.json(await getQueue()));
-app.get('/arena', async (req, res) => res.json(getArena()));
-
-// SOCKET CONNECTIE
-io.on('connection', (socket) => {
-  console.log('Dashboard connected:', socket.id);
-  emitQueue();
-  emitArena();
+export const io = new Server(server, { 
+  cors: { origin: '*' },
+  path: '/socket.io'
 });
 
+// === OPEN REST API ===
+app.get('/queue', async (req, res) => {
+  res.json({ open: true, entries: await getQueue() });
+});
+
+app.get('/arena', async (req, res) => {
+  res.json(getArena());
+});
+
+app.get('/logs', async (req, res) => {
+  res.json({ logs: [] }); // placeholder – later vullen
+});
+
+// === ADMIN AUTH MIDDLEWARE ===
+const requireAdmin = (req: any, res: any, next: any) => {
+  const auth = req.headers.authorization;
+  if (auth === `Bearer ${ADMIN_TOKEN}`) return next();
+  res.status(401).json({ success: false, message: "Unauthorized" });
+};
+
+// === SOCKET.IO AUTH ===
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (token === ADMIN_TOKEN) {
+    socket.isAdmin = true;
+    return next();
+  }
+  return next(new Error('Authentication error'));
+});
+
+// === EMIT HELPERS ===
 export function emitQueue() {
-  io.emit('queue:update', getQueue());
+  io.emit('updateQueue', { open: true, entries: getQueue() });
 }
 
-// GLOBALS
+export function emitLog(log: any) {
+  io.emit('log', { 
+    id: Date.now().toString(), 
+    timestamp: new Date().toISOString(),
+    ...log 
+  });
+}
+
+// === SOCKET CONNECTION ===
+io.on('connection', (socket) => {
+  if (!socket.isAdmin) {
+    console.log('Unauthenticated socket attempt');
+    return socket.disconnect();
+  }
+
+  console.log('ADMIN DASHBOARD VERBONDEN:', socket.id);
+
+  // Init data
+  socket.emit('updateArena', getArena());
+  socket.emit('updateQueue', { open: true, entries: getQueue() });
+  emitLog({ type: "system", message: "Admin dashboard verbonden" });
+
+  // === ADMIN ACTIES ===
+  const handleAdminAction = async (action: string, data: any, ack: Function) => {
+    try {
+      if (!data?.username) {
+        return ack({ success: false, message: "username vereist" });
+      }
+
+      const username = data.username.replace('@', '').toLowerCase();
+      const userRes = await pool.query(
+        'SELECT tiktok_id, display_name, username FROM users WHERE username ILIKE $1',
+        [username]
+      );
+
+      if (!userRes.rows[0]) {
+        return ack({ success: false, message: `Gebruiker @${username} niet gevonden` });
+      }
+
+      const { tiktok_id, display_name } = userRes.rows[0];
+      const tid = tiktok_id.toString();
+
+      switch (action) {
+        case 'addToArena':
+          arenaJoin(tid, username, display_name, 'admin');
+          emitArena();
+          emitLog({ type: "join", message: `@${username} toegevoegd aan arena` });
+          break;
+
+        case 'addToQueue':
+          await addToQueue(tid, username);
+          emitQueue();
+          emitLog({ type: "join", message: `@${username} toegevoegd aan wachtrij` });
+          break;
+
+        case 'eliminate':
+          arenaLeave(tid);
+          emitArena();
+          emitLog({ type: "elim", message: `@${username} geëlimineerd` });
+          break;
+
+        case 'promoteQueue':
+          await promoteInQueue(tid);
+          emitQueue();
+          break;
+
+        case 'demoteQueue':
+          await demoteInQueue(tid);
+          emitQueue();
+          break;
+
+        case 'removeFromQueue':
+          await removeFromQueue(tid);
+          emitQueue();
+          emitLog({ type: "remove", message: `@${username} verwijderd uit wachtrij` });
+          break;
+
+        default:
+          return ack({ success: false, message: "Onbekende actie" });
+      }
+
+      ack({ success: true, message: "Actie uitgevoerd" });
+    } catch (err: any) {
+      console.error('Admin action error:', err);
+      ack({ success: false, message: err.message || "Server error" });
+    }
+  };
+
+  // Register all admin events
+  socket.on('admin:addToArena', (d, ack) => handleAdminAction('addToArena', d, ack));
+  socket.on('admin:addToQueue', (d, ack) => handleAdminAction('addToQueue', d, ack));
+  socket.on('admin:eliminate', (d, ack) => handleAdminAction('eliminate', d, ack));
+  socket.on('admin:promoteQueue', (d, ack) => handleAdminAction('promoteQueue', d, ack));
+  socket.on('admin:demoteQueue', (d, ack) => handleAdminAction('demoteQueue', d, ack));
+  socket.on('admin:removeFromQueue', (d, ack) => handleAdminAction('removeFromQueue', d, ack));
+});
+
+// === ADMIN REST ENDPOINTS ===
+app.post('/api/admin/:action', requireAdmin, async (req, res) => {
+  // Je kunt hier dezelfde handleAdminAction logica hergebruiken
+  res.json({ success: true, message: "REST endpoint werkt – gebruik socket voor live updates" });
+});
+
+// === TEST ENDPOINTS ===
+app.post('/admin/test/add-random-player', requireAdmin, (req, res) => {
+  const fakeId = Date.now().toString();
+  const name = `test_${fakeId.slice(-4)}`;
+  arenaJoin(fakeId, name, `TestPlayer${fakeId.slice(-4)}`, 'test');
+  emitArena();
+  emitLog({ type: "test", message: `Random speler ${name} toegevoegd` });
+  res.json({ success: true });
+});
+
+app.post('/admin/test/log', requireAdmin, (req, res) => {
+  emitLog({ type: "gift", message: "TEST: 500 diamonds van @admin" });
+  res.json({ success: true });
+});
+
+// === GLOBALS ===
 const ADMIN_ID = process.env.ADMIN_TIKTOK_ID?.trim();
 let conn: any = null;
 
-// === START ALLES ===
+// === START SERVER ===
 initDB().then(async () => {
   server.listen(4000, () => {
-    console.log('BATTLEBOX 5-ENGINE BACKEND LIVE → http://localhost:4000');
+    console.log('BATTLEBOX 5-ENGINE + ADMIN DASHBOARD LIVE → http://localhost:4000');
     console.log('='.repeat(80));
   });
 
   initGame();
 
-  // VERBIND MET TIKTOK LIVE
+  // TikTok Live Connection
   const { conn: tikTokConn } = await startConnection(
     process.env.TIKTOK_USERNAME!,
     () => {}
   );
 
   conn = tikTokConn;
-
-  // START GIFT ENGINE – ALLES VIA .env
   initGiftEngine(conn);
 
-  // CHAT + ADMIN
+  // === CHAT + ADMIN COMMANDS ===
   conn.on('chat', async (data: any) => {
     const msg = (data.comment || '').trim();
     if (!msg) return;
@@ -99,7 +249,7 @@ initDB().then(async () => {
     }
   });
 
-  // LIKE / FOLLOW / SHARE
+  // === LIKE / FOLLOW / SHARE ===
   const pendingLikes = new Map<string, number>();
   const hasFollowed = new Set<string>();
 
@@ -131,23 +281,26 @@ initDB().then(async () => {
     await addBP(BigInt(userId), 5, 'SHARE', user.display_name);
   });
 
-  // GUEST → ARENA
+  // === GUEST IN/UIT ARENA ===
   conn.on('liveRoomGuestEnter', async (data: any) => {
     const userId = (data.user?.userId || '0').toString();
     if (userId === '0') return;
     const user = await getOrUpdateUser(userId, data.user?.nickname, data.user?.uniqueId);
     arenaJoin(userId, user.display_name, user.username, 'guest');
     console.log(`[JOIN] ${user.display_name} → ARENA`);
+    emitArena();
   });
 
   conn.on('liveRoomGuestLeave', (data: any) => {
     const userId = (data.user?.userId || '0').toString();
     if (userId === '0') return;
     arenaLeave(userId);
+    emitArena();
   });
 
   conn.on('liveEnd', () => {
     console.log('[LIVE END] Alles gereset');
     arenaClear();
+    emitArena();
   });
 });
