@@ -1,4 +1,4 @@
-// src/engines/3-gift-engine.ts — STREAK-SAFE GIFT ENGINE (11 NOV 2025)
+// src/engines/3-gift-engine.ts — STREAK-SAFE GIFT ENGINE (11/12 NOV 2025)
 // - Alleen 'gift' event
 // - Streak gifts (giftType === 1) → alleen laatste event met repeatEnd === true
 // - diamonds = diamondCount * repeatCount voor streaks
@@ -84,13 +84,13 @@ export function initGiftEngine(conn: any) {
         creditedDiamonds = rawDiamondCount * repeatCount;
 
         console.log(
-          `✅ STREAK FINISHED: ${giftName} x${repeatCount} → ${creditedDiamonds}💎 (raw=${rawDiamondCount})`
+          `✅  STREAK FINISHED: ${giftName} x${repeatCount} → ${creditedDiamonds}💎 (raw=${rawDiamondCount})`
         );
       } else {
         // Niet-streak gifts: elk event is 1 gift → direct scoren
         creditedDiamonds = rawDiamondCount;
         console.log(
-          `✅ SINGLE GIFT: ${giftName} → ${creditedDiamonds}💎 (giftType=${giftType})`
+          `✅  SINGLE GIFT: ${giftName} → ${creditedDiamonds}💎 (giftType=${giftType})`
         );
       }
 
@@ -166,13 +166,10 @@ export function initGiftEngine(conn: any) {
       await addDiamonds(BigInt(senderId), creditedDiamonds, "stream");
       await addDiamonds(BigInt(senderId), creditedDiamonds, "current_round");
 
-      // LET OP: hier gebruik je nu creditedDiamonds, niet rawDiamondCount
-      const bpGain = creditedDiamonds * 0.2; // ratio kun je later 0.5 maken
+      const bpGain = creditedDiamonds * 0.2; // ratio later tweakbaar naar 0.5
       await addBP(BigInt(senderId), bpGain, "GIFT", sender.display_name);
 
-      console.log(
-        `[BP +${bpGain.toFixed(1)}] (GIFT) → ${sender.display_name}`
-      );
+      // (Geen extra BP-log hier, addBP logt zelf al met → newBP)
 
       // === 7. ARENA-BONUS (alleen als gift NIET naar host gaat) ===
       if (!isToHost) {
