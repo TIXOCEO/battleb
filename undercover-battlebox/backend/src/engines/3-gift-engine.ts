@@ -1,4 +1,4 @@
-// src/engines/3-gift-engine.ts — STREAK-SAFE GIFT HANDLER – 12 NOV 2025
+// src/engines/3-gift-engine.ts — SIMPLE, STREAK-SAFE DEDUP (TIME-BASED) – 12 NOV 2025
 import pool from "../db";
 import { getOrUpdateUser } from "./2-user-engine";
 import { addDiamonds, addBP } from "./4-points-engine";
@@ -17,11 +17,16 @@ if (!HOST_USERNAME) {
   process.exit(1);
 }
 
-// Tracks last repeatCount per (senderId + giftId)
-const lastGiftCounts = new Map<string, number>();
+// Bewaar heel kort recente gifts om echte dubbele events te negeren
+// key = senderId:giftId:repeat:diamonds
+const recentGiftEvents = new Map<string, number>();
+// Hoe lang we een event als "mogelijk duplicaat" zien (ms)
+const DEDUP_WINDOW_MS = 500;
 
 export function initGiftEngine(conn: any) {
   const handleGiftEvent = async (data: any, source: string) => {
+    const now = Date.now();
+
     const senderId = (
       data.user?.userId ||
       data.sender?.userId ||
@@ -33,27 +38,26 @@ export function initGiftEngine(conn: any) {
     const giftId = data.giftId || data.gift?.id || "unknown";
     const giftName = data.giftName || data.gift?.name || "Onbekend";
     const repeatCount = data.repeatCount || 1;
-    const diamondCount = data.diamondCount || 0;
+    const diamonds = data.diamondCount || 0;
 
-    // === SMART DEDUP ===
-    const key = `${senderId}:${giftId}`;
-    const prevCount = lastGiftCounts.get(key) || 0;
-
-    if (repeatCount <= prevCount) {
-      // same repeatCount or lower => duplicate event
-      console.log(
-        `⚠️  Duplicate gift ignored: ${giftName} (repeat ${repeatCount}/${prevCount})`
-      );
+    if (diamonds === 0) {
+      // sommige test-events kunnen 0 zijn, die negeren we
       return;
     }
 
-    // update latest count
-    lastGiftCounts.set(key, repeatCount);
+    // === Eenvoudige, streak-veilige dedup ===
+    const key = `${senderId}:${giftId}:${repeatCount}:${diamonds}`;
+    const lastSeen = recentGiftEvents.get(key);
+    if (lastSeen && now - lastSeen < DEDUP_WINDOW_MS) {
+      console.log(
+        `⚠️  Duplicate gift binnen ${DEDUP_WINDOW_MS}ms genegeerd → ${giftName} (repeat ${repeatCount}, ${diamonds}💎)`
+      );
+      return;
+    }
+    recentGiftEvents.set(key, now);
 
     try {
-      const diamonds = diamondCount || 1;
-      if (diamonds === 0) return;
-
+      // === ONTVANGER BEREKENEN ===
       const receiverUniqueId = (
         data.toUser?.uniqueId ||
         data.receiver?.uniqueId ||
@@ -76,12 +80,14 @@ export function initGiftEngine(conn: any) {
         receiverUniqueId.includes(HOST_USERNAME) ||
         receiverDisplay.toLowerCase().includes(HOST_USERNAME);
 
+      // === SENDER OPHALEN/MAKEN ===
       const sender = await getOrUpdateUser(
         senderId,
         data.user?.nickname || data.sender?.nickname,
         data.user?.uniqueId || data.sender?.uniqueId
       );
 
+      // === ONTVANGER DATA ===
       let receiverName = HOST_USERNAME.toUpperCase();
       let receiverRole = "host";
       let receiverId = 0;
@@ -99,6 +105,7 @@ export function initGiftEngine(conn: any) {
         receiverRole = "cohost";
       }
 
+      // === LOGGING ===
       console.log(`\n🎁 GIFT (${source}) DETECTED`);
       console.log(`   Van: ${sender.display_name} (@${sender.username})`);
       console.log(`   Aan: ${receiverName} (${receiverRole.toUpperCase()})`);
@@ -154,10 +161,11 @@ export function initGiftEngine(conn: any) {
     }
   };
 
+  // Beide eventtypes aan laten, maar dedup op fingerprint + tijd
   conn.on("gift", (data: any) => handleGiftEvent(data, "gift"));
   conn.on("liveRoomGift", (data: any) => handleGiftEvent(data, "liveRoomGift"));
 
   console.log(
-    `[GIFT ENGINE] ACTIEF → Host: @${HOST_USERNAME} – streak-safe dedup (giftId + repeatCount)`
+    `[GIFT ENGINE] ACTIEF → Host: @${HOST_USERNAME} – time-based dedup (${DEDUP_WINDOW_MS}ms) + streak support`
   );
 }
