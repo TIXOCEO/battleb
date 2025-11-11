@@ -1,4 +1,9 @@
-// src/engines/3-gift-engine.ts — SIMPLE, STREAK-SAFE DEDUP (TIME-BASED) – 12 NOV 2025
+// src/engines/3-gift-engine.ts — STREAK-SAFE GIFT ENGINE (11 NOV 2025)
+// - Alleen 'gift' event
+// - Streak gifts (giftType === 1) → alleen laatste event met repeatEnd === true
+// - diamonds = diamondCount * repeatCount voor streaks
+// - Schrijft naar giver_*/receiver_* kolommen in gifts-tabel
+
 import pool from "../db";
 import { getOrUpdateUser } from "./2-user-engine";
 import { addDiamonds, addBP } from "./4-points-engine";
@@ -7,6 +12,7 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+// Host uit .env (zoals jouw connector al doet)
 const HOST_USERNAME = (process.env.TIKTOK_USERNAME || "")
   .replace("@", "")
   .toLowerCase()
@@ -17,47 +23,95 @@ if (!HOST_USERNAME) {
   process.exit(1);
 }
 
-// Bewaar heel kort recente gifts om echte dubbele events te negeren
-// key = senderId:giftId:repeat:diamonds
-const recentGiftEvents = new Map<string, number>();
-// Hoe lang we een event als "mogelijk duplicaat" zien (ms)
-const DEDUP_WINDOW_MS = 500;
+// Optioneel: simpele msgId-dedup voor zeldzame dubbele final-events
+const processedMsgIds = new Set<string>();
+setInterval(() => processedMsgIds.clear(), 60_000); // elke minuut schoonvegen
 
 export function initGiftEngine(conn: any) {
-  const handleGiftEvent = async (data: any, source: string) => {
-    const now = Date.now();
+  // Alleen het 'gift' event gebruiken
+  conn.on("gift", async (data: any) => {
+    const msgId = String(data.msgId ?? data.id ?? data.logId ?? "");
+    const giftName: string = data.giftName || "Onbekend";
 
-    const senderId = (
-      data.user?.userId ||
-      data.sender?.userId ||
-      data.userId ||
-      "0"
-    ).toString();
-    if (senderId === "0") return;
+    // Debug: ruwe gift binnen
+    console.log(
+      `\n[EVENT] GIFT ontvangen → msgId: ${msgId || "geen-id"} (${giftName})`
+    );
 
-    const giftId = data.giftId || data.gift?.id || "unknown";
-    const giftName = data.giftName || data.gift?.name || "Onbekend";
-    const repeatCount = data.repeatCount || 1;
-    const diamonds = data.diamondCount || 0;
-
-    if (diamonds === 0) {
-      // sommige test-events kunnen 0 zijn, die negeren we
-      return;
+    // Optionele extra-dedup, alleen voor safety
+    if (msgId) {
+      if (processedMsgIds.has(msgId)) {
+        console.log(
+          `⚠️  Duplicate FINAL gift genegeerd (msgId=${msgId}, gift=${giftName})`
+        );
+        return;
+      }
     }
-
-    // === Eenvoudige, streak-veilige dedup ===
-    const key = `${senderId}:${giftId}:${repeatCount}:${diamonds}`;
-    const lastSeen = recentGiftEvents.get(key);
-    if (lastSeen && now - lastSeen < DEDUP_WINDOW_MS) {
-      console.log(
-        `⚠️  Duplicate gift binnen ${DEDUP_WINDOW_MS}ms genegeerd → ${giftName} (repeat ${repeatCount}, ${diamonds}💎)`
-      );
-      return;
-    }
-    recentGiftEvents.set(key, now);
 
     try {
-      // === ONTVANGER BEREKENEN ===
+      // === 1. BASISVELDEN UIT EVENT ===
+      const senderId = (
+        data.user?.userId ||
+        data.sender?.userId ||
+        data.userId ||
+        "0"
+      ).toString();
+      if (senderId === "0") return;
+
+      const giftType: number = Number(data.giftType ?? 0); // 1 = streak
+      const repeatEnd: boolean = Boolean(data.repeatEnd);
+      const repeatCount: number = Number(data.repeatCount ?? 1);
+      const rawDiamondCount: number = Number(data.diamondCount ?? 0);
+
+      if (!rawDiamondCount || rawDiamondCount <= 0) {
+        console.log("↪️  Gift zonder diamondCount → genegeerd");
+        return;
+      }
+
+      // === 2. STREAK-LOGICA (giftType === 1) ===
+      let creditedDiamonds = 0;
+
+      if (giftType === 1) {
+        if (!repeatEnd) {
+          // Dit is een tussen-event in een streak → niet scoren
+          console.log(
+            `↪️  Streak bezig: ${giftName} x${repeatCount} (giftType=1, repeatEnd=false) → geen punten`
+          );
+          return;
+        }
+
+        // Laatste event van de streak → gebruik final repeatCount
+        creditedDiamonds = rawDiamondCount * repeatCount;
+
+        console.log(
+          `✅ STREAK FINISHED: ${giftName} x${repeatCount} → ${creditedDiamonds}💎 (raw=${rawDiamondCount})`
+        );
+      } else {
+        // Niet-streak gifts: elk event is 1 gift → direct scoren
+        creditedDiamonds = rawDiamondCount;
+        console.log(
+          `✅ SINGLE GIFT: ${giftName} → ${creditedDiamonds}💎 (giftType=${giftType})`
+        );
+      }
+
+      if (!creditedDiamonds || creditedDiamonds <= 0) {
+        console.log("↪️  creditedDiamonds = 0 → geen update");
+        return;
+      }
+
+      // msgId vanaf hier markeren als verwerkt
+      if (msgId) {
+        processedMsgIds.add(msgId);
+      }
+
+      // === 3. SENDER OPHALEN / AANMAKEN ===
+      const sender = await getOrUpdateUser(
+        senderId,
+        data.user?.nickname || data.sender?.nickname,
+        data.user?.uniqueId || data.sender?.uniqueId
+      );
+
+      // === 4. ONTVANGER BEPALEN (HOST vs CO-HOST) ===
       const receiverUniqueId = (
         data.toUser?.uniqueId ||
         data.receiver?.uniqueId ||
@@ -69,28 +123,20 @@ export function initGiftEngine(conn: any) {
         .toLowerCase()
         .trim();
 
-      const receiverDisplay =
+      const receiverDisplayRaw: string =
         data.toUser?.nickname ||
         data.receiver?.nickname ||
         data.toUser?.displayName ||
-        "HOST";
+        "";
 
       const isToHost =
         receiverUniqueId === HOST_USERNAME ||
         receiverUniqueId.includes(HOST_USERNAME) ||
-        receiverDisplay.toLowerCase().includes(HOST_USERNAME);
+        receiverDisplayRaw.toLowerCase().includes(HOST_USERNAME);
 
-      // === SENDER OPHALEN/MAKEN ===
-      const sender = await getOrUpdateUser(
-        senderId,
-        data.user?.nickname || data.sender?.nickname,
-        data.user?.uniqueId || data.sender?.uniqueId
-      );
-
-      // === ONTVANGER DATA ===
       let receiverName = HOST_USERNAME.toUpperCase();
       let receiverRole = "host";
-      let receiverId = 0;
+      let receiverId: number | null = null;
       let receiverUsername = HOST_USERNAME;
 
       if (!isToHost && receiverUniqueId) {
@@ -99,38 +145,49 @@ export function initGiftEngine(conn: any) {
           data.toUser?.nickname || data.receiver?.nickname,
           data.toUser?.uniqueId || data.receiver?.uniqueId
         );
-        receiverId = Number(receiver.id || 0);
+        receiverId = Number(receiver.id);
         receiverName = receiver.display_name;
         receiverUsername = receiver.username;
         receiverRole = "cohost";
       }
 
-      // === LOGGING ===
-      console.log(`\n🎁 GIFT (${source}) DETECTED`);
+      // === 5. LOGGING ===
+      console.log(`🎁 GIFT (gift) DETECTED`);
       console.log(`   Van: ${sender.display_name} (@${sender.username})`);
-      console.log(`   Aan: ${receiverName} (${receiverRole.toUpperCase()})`);
       console.log(
-        `   Gift: ${giftName} (${diamonds}💎, repeat ${repeatCount})`
+        `   Aan: ${receiverName} (${receiverRole.toUpperCase()}) [host=@${HOST_USERNAME}]`
+      );
+      console.log(
+        `   Gift: ${giftName} (${creditedDiamonds}💎, raw=${rawDiamondCount}, repeat=${repeatCount}, type=${giftType}, end=${repeatEnd})`
       );
 
-      // === POINTS ===
-      await addDiamonds(BigInt(senderId), diamonds, "total");
-      await addDiamonds(BigInt(senderId), diamonds, "stream");
-      await addDiamonds(BigInt(senderId), diamonds, "current_round");
-      await addBP(BigInt(senderId), diamonds * 0.2, "GIFT", sender.display_name);
+      // === 6. PUNTEN & BP ===
+      await addDiamonds(BigInt(senderId), creditedDiamonds, "total");
+      await addDiamonds(BigInt(senderId), creditedDiamonds, "stream");
+      await addDiamonds(BigInt(senderId), creditedDiamonds, "current_round");
 
-      // === ARENA BONUS ===
+      // LET OP: hier gebruik je nu creditedDiamonds, niet rawDiamondCount
+      const bpGain = creditedDiamonds * 0.2; // ratio kun je later 0.5 maken
+      await addBP(BigInt(senderId), bpGain, "GIFT", sender.display_name);
+
+      console.log(
+        `[BP +${bpGain.toFixed(1)}] (GIFT) → ${sender.display_name}`
+      );
+
+      // === 7. ARENA-BONUS (alleen als gift NIET naar host gaat) ===
       if (!isToHost) {
         const arena = getArena();
         if (arena.players.some((p: any) => p.id === senderId)) {
-          await addDiamondsToArenaPlayer(senderId, diamonds);
-          console.log(`   +${diamonds}💎 toegevoegd aan ARENA`);
+          await addDiamondsToArenaPlayer(senderId, creditedDiamonds);
+          console.log(
+            `   +${creditedDiamonds}💎 toegevoegd aan ARENA voor ${sender.display_name}`
+          );
         }
       } else {
-        console.log(`   ⚡ TWIST GIFT → géén arena update`);
+        console.log(`   ⚡ TWIST GIFT naar host → géén arena-update`);
       }
 
-      // === DATABASE SAVE ===
+      // === 8. DATABASE SAVE ===
       await pool.query(
         `
         INSERT INTO gifts (
@@ -149,23 +206,19 @@ export function initGiftEngine(conn: any) {
           receiverName,
           receiverRole,
           giftName,
-          diamonds,
-          diamonds * 0.2,
+          creditedDiamonds,
+          bpGain,
         ]
       );
 
       console.log("💾 Gift opgeslagen in database");
       console.log("=".repeat(80));
     } catch (err: any) {
-      console.error("❌  GiftEngine error:", err.message);
+      console.error("❌  GiftEngine error:", err?.message || err);
     }
-  };
-
-  // Beide eventtypes aan laten, maar dedup op fingerprint + tijd
-  conn.on("gift", (data: any) => handleGiftEvent(data, "gift"));
-  conn.on("liveRoomGift", (data: any) => handleGiftEvent(data, "liveRoomGift"));
+  });
 
   console.log(
-    `[GIFT ENGINE] ACTIEF → Host: @${HOST_USERNAME} – time-based dedup (${DEDUP_WINDOW_MS}ms) + streak support`
+    `[GIFT ENGINE] ACTIEF → Host: @${HOST_USERNAME} (uit .env) – Alleen 'gift' event, streak-safe`
   );
 }
