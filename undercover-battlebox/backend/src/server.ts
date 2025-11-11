@@ -111,7 +111,7 @@ io.on('connection', (socket: AdminSocket) => {
         return ack({ success: false, message: "username vereist" });
       }
 
-      const username = data.username.replace('@', '').toLowerCase();
+      const username = data.username.trim();
       const userRes = await pool.query(
         'SELECT tiktok_id, display_name, username FROM users WHERE username ILIKE $1',
         [username]
