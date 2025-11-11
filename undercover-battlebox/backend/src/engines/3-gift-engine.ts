@@ -1,4 +1,4 @@
-// src/engines/3-gift-engine.ts — NOOIT MEER 2x GG — 11 NOV 2025 02:15 CET
+// src/engines/3-gift-engine.ts — ALLE GIFTS UNIEK — HOST OF CO-HOST — 11 NOV 2025 10:25 CET
 import { getOrUpdateUser } from './2-user-engine';
 import { addDiamonds, addBP } from './4-points-engine';
 import { getArena, addDiamondsToArenaPlayer } from './5-game-engine';
@@ -11,25 +11,50 @@ if (!HOST_USERNAME) {
   process.exit(1);
 }
 
-// DIT IS DE MAGIE: ALLE GEZIENE GIFTS OPSLAAN
-const seenGiftIds = new Set<string>();
+// DIT IS DE ULTIEME KEY: ALLES UNIEK
+const seenGiftKeys = new Map<string, number>(); // key → timestamp
+
+function generateGiftKey(data: any): string {
+  const senderId = (data.user?.userId || data.sender?.userId || '??').toString();
+  const diamonds = data.diamondCount || 0;
+  const giftName = data.giftName || '';
+  const eventType = data.__event || 'unknown'; // 'gift' of 'liveRoomGift'
+
+  // ONTVANGER
+  const receiverUniqueId = (
+    data.toUser?.uniqueId ||
+    data.receiver?.uniqueId ||
+    data.receiverUniqueId ||
+    ''
+  ).toString().replace('@', '').toLowerCase().trim();
+
+  const isToHost = 
+    receiverUniqueId === HOST_USERNAME ||
+    receiverUniqueId.includes(HOST_USERNAME);
+
+  // PRIORITEIT: msgId (als die er is)
+  const msgId = data.msgId || data.giftId || data.id;
+  if (msgId) return `msgid:${msgId}`;
+
+  // ANDERS: sender + receiver + gift + event + seconde
+  const second = Math.floor(Date.now() / 1000);
+  return `${eventType}:${senderId}:${receiverUniqueId}:${giftName}:${diamonds}:${second}`;
+}
 
 export function initGiftEngine(conn: any) {
   const handleGift = async (data: any) => {
-    // DE UNIEKE ID VAN DE GIFT
-    const msgId = data.msgId || data.giftId || data.id || `${data.user?.userId}-${Date.now()}`;
-    
-    // ALS WE HEM AL HEBBEN GEZIEN → IGNORE
-    if (seenGiftIds.has(msgId)) {
-      console.log(`[GIFT] Duplicaat genegeerd → msgId: ${msgId}`);
+    const key = generateGiftKey(data);
+    const now = Date.now();
+
+    // ALS WE HEM RECENT HEBBEN GEZIEN → IGNORE
+    const lastSeen = seenGiftKeys.get(key);
+    if (lastSeen && now - lastSeen < 3000) { // 3 seconden
+      console.log(`[GIFT] Duplicaat genegeerd → ${key}`);
       return;
     }
-    
-    // ANDERS: SLA OP EN VERWERK
-    seenGiftIds.add(msgId);
-    
-    // Leeg na 10 seconden (veiligheid)
-    setTimeout(() => seenGiftIds.delete(msgId), 10000);
+
+    seenGiftKeys.set(key, now);
+    setTimeout(() => seenGiftKeys.delete(key), 5000);
 
     try {
       const senderId = (data.user?.userId || data.sender?.userId || data.userId || '??').toString();
@@ -40,7 +65,6 @@ export function initGiftEngine(conn: any) {
 
       const giftName = data.giftName || 'Onbekend';
 
-      // ONTVANGER
       const receiverUniqueId = (
         data.toUser?.uniqueId ||
         data.receiver?.uniqueId ||
@@ -84,7 +108,6 @@ export function initGiftEngine(conn: any) {
       console.log(`   Aan: ${receiverName} ${receiverTag}`);
       console.log(`   Gift: ${giftName} (${diamonds} diamonds)`);
 
-      // ALLEEN 1X TOEVOEGEN
       await addDiamonds(BigInt(senderId), diamonds, 'total');
       await addDiamonds(BigInt(senderId), diamonds, 'stream');
       await addDiamonds(BigInt(senderId), diamonds, 'current_round');
@@ -107,8 +130,14 @@ export function initGiftEngine(conn: any) {
   };
 
   // LUISTER NAAR BEIDE, MAAR VERWERK SLECHTS 1X
-  conn.on('gift', handleGift);
-  conn.on('liveRoomGift', handleGift);
+  conn.on('gift', (data: any) => {
+    data.__event = 'gift';
+    handleGift(data);
+  });
+  conn.on('liveRoomGift', (data: any) => {
+    data.__event = 'liveRoomGift';
+    handleGift(data);
+  });
 
-  console.log(`[GIFT ENGINE] LIVE → @${HOST_USERNAME} → DUPLICATEN ONMOGELIJK`);
+  console.log(`[GIFT ENGINE] LIVE → @${HOST_USERNAME} → ALLE GIFTS UNIEK`);
 }
