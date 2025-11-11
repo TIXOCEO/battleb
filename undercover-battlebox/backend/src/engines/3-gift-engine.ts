@@ -1,4 +1,4 @@
-// src/engines/3-gift-engine.ts — ALLE GIFTS UNIEK — HOST OF CO-HOST — 11 NOV 2025 10:25 CET
+// src/engines/3-gift-engine.ts — NOOIT MEER DUBBELE GIFTS — 11 NOV 2025 10:35 CET
 import { getOrUpdateUser } from './2-user-engine';
 import { addDiamonds, addBP } from './4-points-engine';
 import { getArena, addDiamondsToArenaPlayer } from './5-game-engine';
@@ -11,16 +11,14 @@ if (!HOST_USERNAME) {
   process.exit(1);
 }
 
-// DIT IS DE ULTIEME KEY: ALLES UNIEK
-const seenGiftKeys = new Map<string, number>(); // key → timestamp
+// UNIEKE GIFT TRACKING: sender + gift + receiver + time window
+const processedGifts = new Map<string, number>();
 
-function generateGiftKey(data: any): string {
+function createGiftFingerprint(data: any, eventType: 'gift' | 'liveRoomGift'): string {
   const senderId = (data.user?.userId || data.sender?.userId || '??').toString();
   const diamonds = data.diamondCount || 0;
-  const giftName = data.giftName || '';
-  const eventType = data.__event || 'unknown'; // 'gift' of 'liveRoomGift'
-
-  // ONTVANGER
+  const giftName = data.giftName || 'unknown';
+  
   const receiverUniqueId = (
     data.toUser?.uniqueId ||
     data.receiver?.uniqueId ||
@@ -28,33 +26,25 @@ function generateGiftKey(data: any): string {
     ''
   ).toString().replace('@', '').toLowerCase().trim();
 
-  const isToHost = 
-    receiverUniqueId === HOST_USERNAME ||
-    receiverUniqueId.includes(HOST_USERNAME);
+  const timestamp = Math.floor(Date.now() / 1000); // per seconde
 
-  // PRIORITEIT: msgId (als die er is)
-  const msgId = data.msgId || data.giftId || data.id;
-  if (msgId) return `msgid:${msgId}`;
-
-  // ANDERS: sender + receiver + gift + event + seconde
-  const second = Math.floor(Date.now() / 1000);
-  return `${eventType}:${senderId}:${receiverUniqueId}:${giftName}:${diamonds}:${second}`;
+  return `${eventType}|${senderId}|${receiverUniqueId}|${giftName}|${diamonds}|${timestamp}`;
 }
 
 export function initGiftEngine(conn: any) {
-  const handleGift = async (data: any) => {
-    const key = generateGiftKey(data);
+  const handleGift = async (data: any, eventType: 'gift' | 'liveRoomGift') => {
+    const fingerprint = createGiftFingerprint(data, eventType);
     const now = Date.now();
 
-    // ALS WE HEM RECENT HEBBEN GEZIEN → IGNORE
-    const lastSeen = seenGiftKeys.get(key);
-    if (lastSeen && now - lastSeen < 3000) { // 3 seconden
-      console.log(`[GIFT] Duplicaat genegeerd → ${key}`);
+    // CHECK OF WE DEZE COMBINATIE AL HEBBEN GEZIEN BINNEN 3 SECONDEN
+    const lastSeen = processedGifts.get(fingerprint);
+    if (lastSeen && now - lastSeen < 3000) {
+      console.log(`[GIFT] DUPLICATED IGNORED → ${fingerprint}`);
       return;
     }
 
-    seenGiftKeys.set(key, now);
-    setTimeout(() => seenGiftKeys.delete(key), 5000);
+    processedGifts.set(fingerprint, now);
+    setTimeout(() => processedGifts.delete(fingerprint), 5000);
 
     try {
       const senderId = (data.user?.userId || data.sender?.userId || data.userId || '??').toString();
@@ -108,6 +98,7 @@ export function initGiftEngine(conn: any) {
       console.log(`   Aan: ${receiverName} ${receiverTag}`);
       console.log(`   Gift: ${giftName} (${diamonds} diamonds)`);
 
+      // ALLEEN 1X TOEVOEGEN
       await addDiamonds(BigInt(senderId), diamonds, 'total');
       await addDiamonds(BigInt(senderId), diamonds, 'stream');
       await addDiamonds(BigInt(senderId), diamonds, 'current_round');
@@ -129,15 +120,9 @@ export function initGiftEngine(conn: any) {
     }
   };
 
-  // LUISTER NAAR BEIDE, MAAR VERWERK SLECHTS 1X
-  conn.on('gift', (data: any) => {
-    data.__event = 'gift';
-    handleGift(data);
-  });
-  conn.on('liveRoomGift', (data: any) => {
-    data.__event = 'liveRoomGift';
-    handleGift(data);
-  });
+  // LUISTER NAAR BEIDE EVENTS
+  conn.on('gift', (data: any) => handleGift(data, 'gift'));
+  conn.on('liveRoomGift', (data: any) => handleGift(data, 'liveRoomGift'));
 
-  console.log(`[GIFT ENGINE] LIVE → @${HOST_USERNAME} → ALLE GIFTS UNIEK`);
+  console.log(`[GIFT ENGINE] LIVE → @${HOST_USERNAME} → DUPLICATEN ONMOGELIJK`);
 }
