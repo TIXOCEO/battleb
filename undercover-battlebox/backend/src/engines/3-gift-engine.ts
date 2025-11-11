@@ -1,4 +1,4 @@
-// src/engines/3-gift-engine.ts — DEBUG MODE: LOG EVENT SOURCES – 11 NOV 2025
+// src/engines/3-gift-engine.ts — STREAK-SAFE GIFT HANDLER – 12 NOV 2025
 import pool from "../db";
 import { getOrUpdateUser } from "./2-user-engine";
 import { addDiamonds, addBP } from "./4-points-engine";
@@ -17,39 +17,42 @@ if (!HOST_USERNAME) {
   process.exit(1);
 }
 
-const seenGiftMsgIds = new Set<string>();
+// Tracks last repeatCount per (senderId + giftId)
+const lastGiftCounts = new Map<string, number>();
 
 export function initGiftEngine(conn: any) {
   const handleGiftEvent = async (data: any, source: string) => {
-    const msgId = data.msgId || data.giftId || data.id;
+    const senderId = (
+      data.user?.userId ||
+      data.sender?.userId ||
+      data.userId ||
+      "0"
+    ).toString();
+    if (senderId === "0") return;
 
-    // === EXTRA DEBUG LOGGING ===
-    console.log(
-      `[EVENT] ${source.toUpperCase()} ontvangen → msgId: ${msgId || "geen"}`
-    );
-    if (msgId && seenGiftMsgIds.has(msgId)) {
-      console.log(`⚠️  Dubbel event genegeerd (${source}) voor msgId ${msgId}`);
+    const giftId = data.giftId || data.gift?.id || "unknown";
+    const giftName = data.giftName || data.gift?.name || "Onbekend";
+    const repeatCount = data.repeatCount || 1;
+    const diamondCount = data.diamondCount || 0;
+
+    // === SMART DEDUP ===
+    const key = `${senderId}:${giftId}`;
+    const prevCount = lastGiftCounts.get(key) || 0;
+
+    if (repeatCount <= prevCount) {
+      // same repeatCount or lower => duplicate event
+      console.log(
+        `⚠️  Duplicate gift ignored: ${giftName} (repeat ${repeatCount}/${prevCount})`
+      );
       return;
     }
 
-    if (msgId) {
-      seenGiftMsgIds.add(msgId);
-      setTimeout(() => seenGiftMsgIds.delete(msgId), 15000);
-    }
+    // update latest count
+    lastGiftCounts.set(key, repeatCount);
 
     try {
-      const senderId = (
-        data.user?.userId ||
-        data.sender?.userId ||
-        data.userId ||
-        "0"
-      ).toString();
-      if (senderId === "0") return;
-
-      const diamonds = data.diamondCount || data.repeatCount || 0;
+      const diamonds = diamondCount || 1;
       if (diamonds === 0) return;
-
-      const giftName = data.giftName || data.gift?.name || "Onbekend";
 
       const receiverUniqueId = (
         data.toUser?.uniqueId ||
@@ -99,13 +102,17 @@ export function initGiftEngine(conn: any) {
       console.log(`\n🎁 GIFT (${source}) DETECTED`);
       console.log(`   Van: ${sender.display_name} (@${sender.username})`);
       console.log(`   Aan: ${receiverName} (${receiverRole.toUpperCase()})`);
-      console.log(`   Gift: ${giftName} (${diamonds}💎)`);
+      console.log(
+        `   Gift: ${giftName} (${diamonds}💎, repeat ${repeatCount})`
+      );
 
+      // === POINTS ===
       await addDiamonds(BigInt(senderId), diamonds, "total");
       await addDiamonds(BigInt(senderId), diamonds, "stream");
       await addDiamonds(BigInt(senderId), diamonds, "current_round");
       await addBP(BigInt(senderId), diamonds * 0.2, "GIFT", sender.display_name);
 
+      // === ARENA BONUS ===
       if (!isToHost) {
         const arena = getArena();
         if (arena.players.some((p: any) => p.id === senderId)) {
@@ -116,6 +123,7 @@ export function initGiftEngine(conn: any) {
         console.log(`   ⚡ TWIST GIFT → géén arena update`);
       }
 
+      // === DATABASE SAVE ===
       await pool.query(
         `
         INSERT INTO gifts (
@@ -150,6 +158,6 @@ export function initGiftEngine(conn: any) {
   conn.on("liveRoomGift", (data: any) => handleGiftEvent(data, "liveRoomGift"));
 
   console.log(
-    `[GIFT ENGINE] ACTIEF → Host: @${HOST_USERNAME} – debug logging AAN (gift + liveRoomGift)`
+    `[GIFT ENGINE] ACTIEF → Host: @${HOST_USERNAME} – streak-safe dedup (giftId + repeatCount)`
   );
 }
