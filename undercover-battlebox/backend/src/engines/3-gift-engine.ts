@@ -1,4 +1,4 @@
-// src/engines/3-gift-engine.ts — NOOIT MEER DUBBELE GIFTS — 11 NOV 2025 10:35 CET
+// src/engines/3-gift-engine.ts — FINAL – ALLEEN LIVEROOMGIFT – NOOIT MEER DUBBEL – 11 NOV 2025 11:10 CET
 import { getOrUpdateUser } from './2-user-engine';
 import { addDiamonds, addBP } from './4-points-engine';
 import { getArena, addDiamondsToArenaPlayer } from './5-game-engine';
@@ -7,46 +7,34 @@ dotenv.config();
 
 const HOST_USERNAME = (process.env.TIKTOK_USERNAME || '').replace('@', '').toLowerCase().trim();
 if (!HOST_USERNAME) {
-  console.error('FATAL: TIKTOK_USERNAME ontbreekt!');
+  console.error('FATAL: TIKTOK_USERNAME ontbreekt in .env!');
   process.exit(1);
 }
 
-// UNIEKE GIFT TRACKING: sender + gift + receiver + time window
-const processedGifts = new Map<string, number>();
-
-function createGiftFingerprint(data: any, eventType: 'gift' | 'liveRoomGift'): string {
-  const senderId = (data.user?.userId || data.sender?.userId || '??').toString();
-  const diamonds = data.diamondCount || 0;
-  const giftName = data.giftName || 'unknown';
-  
-  const receiverUniqueId = (
-    data.toUser?.uniqueId ||
-    data.receiver?.uniqueId ||
-    data.receiverUniqueId ||
-    ''
-  ).toString().replace('@', '').toLowerCase().trim();
-
-  const timestamp = Math.floor(Date.now() / 1000); // per seconde
-
-  return `${eventType}|${senderId}|${receiverUniqueId}|${giftName}|${diamonds}|${timestamp}`;
-}
+// Deduplicatie via msgId – ALLEEN VOOR liveRoomGift
+const seenGiftMsgIds = new Set<string>();
 
 export function initGiftEngine(conn: any) {
-  const handleGift = async (data: any, eventType: 'gift' | 'liveRoomGift') => {
-    const fingerprint = createGiftFingerprint(data, eventType);
-    const now = Date.now();
-
-    // CHECK OF WE DEZE COMBINATIE AL HEBBEN GEZIEN BINNEN 3 SECONDEN
-    const lastSeen = processedGifts.get(fingerprint);
-    if (lastSeen && now - lastSeen < 3000) {
-      console.log(`[GIFT] DUPLICATED IGNORED → ${fingerprint}`);
+  // ALLEEN liveRoomGift VERWERKEN – gift EVENT WORDT GEHEEL GENEGEERD
+  conn.on('liveRoomGift', async (data: any) => {
+    // UNIEKE ID VAN DE GIFT
+    const msgId = data.msgId || data.giftId || data.id;
+    if (!msgId) {
+      console.warn('[GIFT] Geen msgId → genegeerd');
       return;
     }
 
-    processedGifts.set(fingerprint, now);
-    setTimeout(() => processedGifts.delete(fingerprint), 5000);
+    // DUBBEL CHECK
+    if (seenGiftMsgIds.has(msgId)) {
+      console.log(`[GIFT] Duplicaat genegeerd → msgId: ${msgId}`);
+      return;
+    }
+
+    seenGiftMsgIds.add(msgId);
+    setTimeout(() => seenGiftMsgIds.delete(msgId), 15000); // 15 sec veiligheid
 
     try {
+      // SENDER
       const senderId = (data.user?.userId || data.sender?.userId || data.userId || '??').toString();
       if (senderId === '??') return;
 
@@ -55,6 +43,7 @@ export function initGiftEngine(conn: any) {
 
       const giftName = data.giftName || 'Onbekend';
 
+      // ONTVANGER
       const receiverUniqueId = (
         data.toUser?.uniqueId ||
         data.receiver?.uniqueId ||
@@ -74,6 +63,7 @@ export function initGiftEngine(conn: any) {
         receiverUniqueId.includes(HOST_USERNAME) ||
         receiverDisplay.includes(HOST_USERNAME);
 
+      // GEBRUIKERS OPHALEN
       const sender = await getOrUpdateUser(
         senderId,
         data.user?.nickname || data.sender?.nickname,
@@ -93,17 +83,19 @@ export function initGiftEngine(conn: any) {
         receiverTag = '(CO-HOST)';
       }
 
+      // LOG
       console.log('\n[GIFT] – PERFECT');
       console.log(`   Van: ${sender.display_name} (@${sender.username})`);
       console.log(`   Aan: ${receiverName} ${receiverTag}`);
       console.log(`   Gift: ${giftName} (${diamonds} diamonds)`);
 
-      // ALLEEN 1X TOEVOEGEN
+      // DIAMONDS & BP
       await addDiamonds(BigInt(senderId), diamonds, 'total');
       await addDiamonds(BigInt(senderId), diamonds, 'stream');
       await addDiamonds(BigInt(senderId), diamonds, 'current_round');
       await addBP(BigInt(senderId), diamonds * 0.2, 'GIFT', sender.display_name);
 
+      // ARENA
       if (!isToHost) {
         const arena = getArena();
         if (arena.players.some((p: any) => p.id === senderId)) {
@@ -118,11 +110,11 @@ export function initGiftEngine(conn: any) {
     } catch (err: any) {
       console.error('[GIFT FOUT]', err.message);
     }
-  };
+  });
 
-  // LUISTER NAAR BEIDE EVENTS
-  conn.on('gift', (data: any) => handleGift(data, 'gift'));
-  conn.on('liveRoomGift', (data: any) => handleGift(data, 'liveRoomGift'));
+  // GIFT EVENT WORDT GEHEEL GENEGEERD
+  // → TikTok stuurt dit alleen voor bepaalde gebruikers (A/B test)
+  // → liveRoomGift is altijd betrouwbaar
 
-  console.log(`[GIFT ENGINE] LIVE → @${HOST_USERNAME} → DUPLICATEN ONMOGELIJK`);
+  console.log(`[GIFT ENGINE] LIVE → @${HOST_USERNAME} → ALLEEN liveRoomGift → NOOIT DUBBEL`);
 }
