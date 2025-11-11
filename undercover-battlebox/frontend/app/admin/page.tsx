@@ -1,4 +1,5 @@
 "use client";
+
 import React, { useEffect, useState } from "react";
 import { getAdminSocket } from "@/lib/socketClient";
 import type {
@@ -16,8 +17,10 @@ export default function AdminDashboardPage() {
   const [username, setUsername] = useState("");
   const [status, setStatus] = useState<string | null>(null);
 
+  // ✅ Socket setup + cleanup
   useEffect(() => {
     const socket = getAdminSocket();
+
     socket.on("updateArena", setArena);
     socket.on("updateQueue", (d) => {
       setQueue(d.entries ?? []);
@@ -25,9 +28,20 @@ export default function AdminDashboardPage() {
     });
     socket.on("log", (l) => setLogs((p) => [l, ...p].slice(0, 200)));
     socket.on("initialLogs", (d) => setLogs(d.slice(0, 200)));
-    return () => socket.removeAllListeners();
+
+    socket.on("connect_error", (err: any) => {
+      console.error("❌ Socket connectie-fout:", err?.message || err);
+      setStatus("❌ Socket verbinding verbroken");
+    });
+
+    // ✅ Teruggeven van cleanup functie, niet socket zelf
+    return () => {
+      socket.removeAllListeners();
+      socket.disconnect();
+    };
   }, []);
 
+  // Helper om acties uit te voeren vanuit UI
   const emitAdmin = (event: string, target?: string) => {
     const socket = getAdminSocket();
     const uname = target || username;
@@ -35,19 +49,23 @@ export default function AdminDashboardPage() {
     const u = uname.startsWith("@") ? uname : `@${uname}`;
     setStatus(`Bezig met ${event}...`);
     socket.emit(event, { username: u }, (res: AdminAckResponse) =>
-      setStatus(res.success ? "✅ Succesvol" : `❌ ${res.message}`)
+      setStatus(res.success ? "✅ Succesvol uitgevoerd" : `❌ ${res.message}`)
     );
   };
 
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
+      {/* HEADER */}
       <header className="flex items-center justify-between mb-6">
-        <div className="text-2xl font-bold text-[#ff4d4f]">Undercover BattleBox</div>
+        <div className="text-2xl font-bold text-[#ff4d4f]">
+          Undercover BattleBox
+        </div>
         <span className="text-sm text-green-600 font-semibold">
-          Admin verbonden
+          Verbonden als Admin
         </span>
       </header>
 
+      {/* ADMIN INPUT */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6 flex flex-col md:flex-row gap-3 items-start md:items-end">
         <div className="flex-1">
           <label className="text-xs text-gray-600 font-semibold mb-1 block">
@@ -58,7 +76,7 @@ export default function AdminDashboardPage() {
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             placeholder="@gebruikersnaam"
-            className="w-full border rounded-lg px-3 py-2 text-sm"
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#ff4d4f]/70"
           />
         </div>
         <div className="flex flex-wrap gap-2 text-xs">
@@ -83,17 +101,23 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
+      {/* STATUS MELDING */}
       {status && (
         <div className="mb-4 text-sm text-center bg-amber-50 border border-amber-200 text-amber-800 rounded-xl py-2">
           {status}
         </div>
       )}
 
+      {/* ARENA + QUEUE */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* ARENA */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-1">Arena</h2>
           <p className="text-sm text-gray-500 mb-4">
-            Ronde #{arena?.round ?? 0} • {arena?.type} • Max 8
+            {arena
+              ? `Ronde #${arena.round} • ${arena.type}`
+              : "Geen ronde actief"}{" "}
+            • Max 8 deelnemers
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -101,11 +125,21 @@ export default function AdminDashboardPage() {
               ? arena.players.map((p, i) => (
                   <div
                     key={p.id}
-                    className="rounded-lg p-3 border bg-gray-50 shadow-sm"
+                    className={`rounded-lg p-3 border text-sm shadow-sm ${
+                      p.status === "alive"
+                        ? "bg-gray-50 border-gray-200"
+                        : "bg-red-50 border-red-200"
+                    }`}
                   >
-                    <div className="flex justify-between">
+                    <div className="flex justify-between items-center">
                       <span className="font-bold text-gray-700">#{i + 1}</span>
-                      <span className="text-xs bg-red-50 text-gray-700 px-2 py-0.5 rounded-full">
+                      <span
+                        className={`text-[10px] px-2 py-0.5 rounded-full ${
+                          p.status === "alive"
+                            ? "bg-[#ff4d4f] text-white"
+                            : "bg-gray-300 text-gray-700"
+                        }`}
+                      >
                         {p.status}
                       </span>
                     </div>
@@ -117,8 +151,10 @@ export default function AdminDashboardPage() {
                     </div>
                     {p.status === "alive" && (
                       <button
-                        onClick={() => emitAdmin("admin:eliminate", p.username)}
-                        className="mt-2 text-[11px] rounded-full border px-2 py-1 border-red-200 text-red-600 bg-red-50 hover:bg-red-100"
+                        onClick={() =>
+                          emitAdmin("admin:eliminate", p.username)
+                        }
+                        className="mt-2 px-2 py-1 text-[11px] rounded-full border border-red-200 text-red-600 bg-red-50 hover:bg-red-100"
                       >
                         Elimineer
                       </button>
@@ -136,11 +172,14 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
+        {/* QUEUE */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-1">Wachtrij</h2>
           <p className="text-sm text-gray-500 mb-3">
-            {queue.length} speler(s) • Queue:{" "}
-            <span className={queueOpen ? "text-green-600" : "text-red-600"}>
+            {queue.length} speler{queue.length !== 1 && "s"} • Queue:{" "}
+            <span
+              className={queueOpen ? "text-green-600" : "text-red-600 font-bold"}
+            >
               {queueOpen ? "OPEN" : "DICHT"}
             </span>
           </p>
@@ -149,23 +188,28 @@ export default function AdminDashboardPage() {
             queue.map((q) => (
               <div
                 key={q.tiktok_id}
-                className="rounded-lg border bg-gray-50 p-2 mb-2 text-sm flex justify-between"
+                className="rounded-lg border border-gray-200 bg-gray-50 p-2 mb-2 text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between"
               >
                 <div>
                   <div className="font-semibold text-gray-900">
                     {q.display_name} (@{q.username.replace(/^@+/, "")})
                   </div>
+                  <div className="text-xs text-gray-500">
+                    #{q.position ?? "-"} {q.reason ?? ""}
+                  </div>
                 </div>
-                <div className="flex gap-1">
+                <div className="flex gap-1 mt-2 sm:mt-0 justify-end">
                   <button
                     onClick={() => emitAdmin("admin:addToArena", q.username)}
-                    className="px-2 py-1 rounded-full border border-[#ff4d4f] text-[#ff4d4f]"
+                    className="px-2 py-1 rounded-full border border-[#ff4d4f] text-[#ff4d4f] hover:bg-[#ff4d4f]/10"
                   >
                     → Arena
                   </button>
                   <button
-                    onClick={() => emitAdmin("admin:removeFromQueue", q.username)}
-                    className="px-2 py-1 rounded-full border border-red-200 text-red-600 bg-red-50"
+                    onClick={() =>
+                      emitAdmin("admin:removeFromQueue", q.username)
+                    }
+                    className="px-2 py-1 rounded-full border border-red-200 text-red-600 bg-red-50 hover:bg-red-100"
                   >
                     ✕
                   </button>
@@ -180,20 +224,23 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
+      {/* LOG FEED */}
       <section className="mt-6 bg-white rounded-2xl shadow p-4">
-        <h2 className="text-lg font-semibold mb-2">Log Feed</h2>
-        <div className="max-h-[400px] overflow-y-auto border rounded-lg text-sm">
+        <h2 className="text-lg font-semibold text-gray-900 mb-2">Log Feed</h2>
+        <div className="overflow-y-auto max-h-[400px] border border-gray-200 rounded-lg bg-gray-50 text-sm">
           {logs.length ? (
             logs.map((log) => (
               <div
                 key={log.id}
-                className={`px-3 py-1 border-b ${
+                className={`px-3 py-1 border-b last:border-0 ${
                   log.type === "gift"
                     ? "bg-pink-50 text-pink-800"
                     : log.type === "elim"
                     ? "bg-red-50 text-red-700"
                     : log.type === "join"
                     ? "bg-green-50 text-green-700"
+                    : log.type === "system"
+                    ? "bg-blue-50 text-blue-700"
                     : "bg-gray-50 text-gray-700"
                 }`}
               >
