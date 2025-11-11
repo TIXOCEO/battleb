@@ -1,4 +1,4 @@
-// src/engines/3-gift-engine.ts — DUAL EVENT SUPPORT (gift + liveRoomGift) – FIXED ID HANDLING – 11 NOV 2025
+// src/engines/3-gift-engine.ts — DEBUG MODE: LOG EVENT SOURCES – 11 NOV 2025
 import pool from "../db";
 import { getOrUpdateUser } from "./2-user-engine";
 import { addDiamonds, addBP } from "./4-points-engine";
@@ -22,13 +22,22 @@ const seenGiftMsgIds = new Set<string>();
 export function initGiftEngine(conn: any) {
   const handleGiftEvent = async (data: any, source: string) => {
     const msgId = data.msgId || data.giftId || data.id;
-    if (!msgId) return;
-    if (seenGiftMsgIds.has(msgId)) return;
-    seenGiftMsgIds.add(msgId);
-    setTimeout(() => seenGiftMsgIds.delete(msgId), 15000);
+
+    // === EXTRA DEBUG LOGGING ===
+    console.log(
+      `[EVENT] ${source.toUpperCase()} ontvangen → msgId: ${msgId || "geen"}`
+    );
+    if (msgId && seenGiftMsgIds.has(msgId)) {
+      console.log(`⚠️  Dubbel event genegeerd (${source}) voor msgId ${msgId}`);
+      return;
+    }
+
+    if (msgId) {
+      seenGiftMsgIds.add(msgId);
+      setTimeout(() => seenGiftMsgIds.delete(msgId), 15000);
+    }
 
     try {
-      // === SENDER ===
       const senderId = (
         data.user?.userId ||
         data.sender?.userId ||
@@ -37,13 +46,11 @@ export function initGiftEngine(conn: any) {
       ).toString();
       if (senderId === "0") return;
 
-      // === GIFT DATA ===
       const diamonds = data.diamondCount || data.repeatCount || 0;
       if (diamonds === 0) return;
 
       const giftName = data.giftName || data.gift?.name || "Onbekend";
 
-      // === RECEIVER ===
       const receiverUniqueId = (
         data.toUser?.uniqueId ||
         data.receiver?.uniqueId ||
@@ -66,7 +73,6 @@ export function initGiftEngine(conn: any) {
         receiverUniqueId.includes(HOST_USERNAME) ||
         receiverDisplay.toLowerCase().includes(HOST_USERNAME);
 
-      // === DB FETCH ===
       const sender = await getOrUpdateUser(
         senderId,
         data.user?.nickname || data.sender?.nickname,
@@ -90,19 +96,16 @@ export function initGiftEngine(conn: any) {
         receiverRole = "cohost";
       }
 
-      // === LOGGING ===
       console.log(`\n🎁 GIFT (${source}) DETECTED`);
       console.log(`   Van: ${sender.display_name} (@${sender.username})`);
       console.log(`   Aan: ${receiverName} (${receiverRole.toUpperCase()})`);
       console.log(`   Gift: ${giftName} (${diamonds}💎)`);
 
-      // === POINTS ===
       await addDiamonds(BigInt(senderId), diamonds, "total");
       await addDiamonds(BigInt(senderId), diamonds, "stream");
       await addDiamonds(BigInt(senderId), diamonds, "current_round");
       await addBP(BigInt(senderId), diamonds * 0.2, "GIFT", sender.display_name);
 
-      // === ARENA BONUS ===
       if (!isToHost) {
         const arena = getArena();
         if (arena.players.some((p: any) => p.id === senderId)) {
@@ -113,7 +116,6 @@ export function initGiftEngine(conn: any) {
         console.log(`   ⚡ TWIST GIFT → géén arena update`);
       }
 
-      // === DATABASE SAVE ===
       await pool.query(
         `
         INSERT INTO gifts (
@@ -144,11 +146,10 @@ export function initGiftEngine(conn: any) {
     }
   };
 
-  // === EVENT-LISTENERS ===
   conn.on("gift", (data: any) => handleGiftEvent(data, "gift"));
   conn.on("liveRoomGift", (data: any) => handleGiftEvent(data, "liveRoomGift"));
 
   console.log(
-    `[GIFT ENGINE] ACTIEF → Host: @${HOST_USERNAME} – luistert naar gift + liveRoomGift`
+    `[GIFT ENGINE] ACTIEF → Host: @${HOST_USERNAME} – debug logging AAN (gift + liveRoomGift)`
   );
 }
