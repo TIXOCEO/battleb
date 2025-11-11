@@ -50,7 +50,7 @@ export function initGiftEngine(conn: any) {
 
       // Arena boost effect
       if (booster?.arenaBoost) {
-        arenaJoin(userId, user.username, user.display_name, "booster");
+        arenaJoin(userId, user.username, user.display_name, "admin");
         emitArena();
         emitLog({
           type: "booster",
