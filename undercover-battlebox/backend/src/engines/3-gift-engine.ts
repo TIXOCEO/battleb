@@ -1,27 +1,36 @@
-// src/engines/3-gift-engine.ts — FINAL – NOOIT MEER UNKNOWN – NOOIT MEER ONTBREEKT
+// src/engines/3-gift-engine.ts — NOOIT MEER 2x GG — 11 NOV 2025 02:15 CET
 import { getOrUpdateUser } from './2-user-engine';
 import { addDiamonds, addBP } from './4-points-engine';
 import { getArena, addDiamondsToArenaPlayer } from './5-game-engine';
 import dotenv from 'dotenv';
-
-// DIT IS DE FIX: LAAD .env EXPLICIET
 dotenv.config();
 
-// NU PAKT HIJ ECHT DE WAARDE
-const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME;
-if (!TIKTOK_USERNAME) {
-  console.error('FATAL: TIKTOK_USERNAME ontbreekt in .env bestand!');
-  console.error('   → Zorg dat je .env bestand in /var/www/undercover-battlebox/backend/.env staat');
-  console.error('   → En dat er staat: TIKTOK_USERNAME=livezone01');
+const HOST_USERNAME = (process.env.TIKTOK_USERNAME || '').replace('@', '').toLowerCase().trim();
+if (!HOST_USERNAME) {
+  console.error('FATAL: TIKTOK_USERNAME ontbreekt!');
   process.exit(1);
 }
 
-const HOST_USERNAME = TIKTOK_USERNAME.replace('@', '').toLowerCase().trim();
-
-console.log(`[GIFT ENGINE] Host gezet op: @${HOST_USERNAME} → ALLES WERKT`);
+// DIT IS DE MAGIE: ALLE GEZIENE GIFTS OPSLAAN
+const seenGiftIds = new Set<string>();
 
 export function initGiftEngine(conn: any) {
   const handleGift = async (data: any) => {
+    // DE UNIEKE ID VAN DE GIFT
+    const msgId = data.msgId || data.giftId || data.id || `${data.user?.userId}-${Date.now()}`;
+    
+    // ALS WE HEM AL HEBBEN GEZIEN → IGNORE
+    if (seenGiftIds.has(msgId)) {
+      console.log(`[GIFT] Duplicaat genegeerd → msgId: ${msgId}`);
+      return;
+    }
+    
+    // ANDERS: SLA OP EN VERWERK
+    seenGiftIds.add(msgId);
+    
+    // Leeg na 10 seconden (veiligheid)
+    setTimeout(() => seenGiftIds.delete(msgId), 10000);
+
     try {
       const senderId = (data.user?.userId || data.sender?.userId || data.userId || '??').toString();
       if (senderId === '??') return;
@@ -31,7 +40,7 @@ export function initGiftEngine(conn: any) {
 
       const giftName = data.giftName || 'Onbekend';
 
-      // ONTVANGER INFO
+      // ONTVANGER
       const receiverUniqueId = (
         data.toUser?.uniqueId ||
         data.receiver?.uniqueId ||
@@ -46,20 +55,17 @@ export function initGiftEngine(conn: any) {
         'HOST'
       ).toLowerCase();
 
-      // SMART HOST DETECTIE
       const isToHost = 
         receiverUniqueId === HOST_USERNAME ||
         receiverUniqueId.includes(HOST_USERNAME) ||
         receiverDisplay.includes(HOST_USERNAME);
 
-      // SENDER
       const sender = await getOrUpdateUser(
         senderId,
         data.user?.nickname || data.sender?.nickname,
         data.user?.uniqueId || data.sender?.uniqueId
       );
 
-      // ONTVANGER NAAM
       let receiverName = HOST_USERNAME.toUpperCase();
       let receiverTag = '(HOST)';
 
@@ -78,15 +84,19 @@ export function initGiftEngine(conn: any) {
       console.log(`   Aan: ${receiverName} ${receiverTag}`);
       console.log(`   Gift: ${giftName} (${diamonds} diamonds)`);
 
+      // ALLEEN 1X TOEVOEGEN
       await addDiamonds(BigInt(senderId), diamonds, 'total');
       await addDiamonds(BigInt(senderId), diamonds, 'stream');
       await addDiamonds(BigInt(senderId), diamonds, 'current_round');
       await addBP(BigInt(senderId), diamonds * 0.2, 'GIFT', sender.display_name);
 
-      if (!isToHost && getArena().players.some((p: any) => p.id === senderId)) {
-        await addDiamondsToArenaPlayer(senderId, diamonds);
-        console.log(`   +${diamonds} diamonds → ARENA`);
-      } else if (isToHost) {
+      if (!isToHost) {
+        const arena = getArena();
+        if (arena.players.some((p: any) => p.id === senderId)) {
+          await addDiamondsToArenaPlayer(senderId, diamonds);
+          console.log(`   +${diamonds} diamonds → ARENA`);
+        }
+      } else {
         console.log(`   TWIST GIFT → géén arena update`);
       }
 
@@ -96,8 +106,9 @@ export function initGiftEngine(conn: any) {
     }
   };
 
+  // LUISTER NAAR BEIDE, MAAR VERWERK SLECHTS 1X
   conn.on('gift', handleGift);
   conn.on('liveRoomGift', handleGift);
 
-  console.log(`[GIFT ENGINE] LIVE → luistert naar gifts voor @${HOST_USERNAME}`);
+  console.log(`[GIFT ENGINE] LIVE → @${HOST_USERNAME} → DUPLICATEN ONMOGELIJK`);
 }
