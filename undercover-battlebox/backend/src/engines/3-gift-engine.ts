@@ -82,7 +82,7 @@ export function initGiftEngine(conn: any) {
           data.toUser?.nickname || data.receiver?.nickname,
           data.toUser?.uniqueId || data.receiver?.uniqueId
         );
-        receiverId = Number(receiver.tiktok_id);
+        receiverId = Number(receiver.id);
         receiverName = receiver.display_name;
         receiverUsername = receiver.username;
         receiverRole = "cohost";
