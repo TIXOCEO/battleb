@@ -1,4 +1,4 @@
-// src/engines/3-gift-engine.ts — DUAL EVENT SUPPORT (gift + liveRoomGift) – 11 NOV 2025
+// src/engines/3-gift-engine.ts — DUAL EVENT SUPPORT (gift + liveRoomGift) – FIXED ID HANDLING – 11 NOV 2025
 import pool from "../db";
 import { getOrUpdateUser } from "./2-user-engine";
 import { addDiamonds, addBP } from "./4-points-engine";
@@ -28,6 +28,7 @@ export function initGiftEngine(conn: any) {
     setTimeout(() => seenGiftMsgIds.delete(msgId), 15000);
 
     try {
+      // === SENDER ===
       const senderId = (
         data.user?.userId ||
         data.sender?.userId ||
@@ -36,11 +37,13 @@ export function initGiftEngine(conn: any) {
       ).toString();
       if (senderId === "0") return;
 
+      // === GIFT DATA ===
       const diamonds = data.diamondCount || data.repeatCount || 0;
       if (diamonds === 0) return;
 
       const giftName = data.giftName || data.gift?.name || "Onbekend";
 
+      // === RECEIVER ===
       const receiverUniqueId = (
         data.toUser?.uniqueId ||
         data.receiver?.uniqueId ||
@@ -63,6 +66,7 @@ export function initGiftEngine(conn: any) {
         receiverUniqueId.includes(HOST_USERNAME) ||
         receiverDisplay.toLowerCase().includes(HOST_USERNAME);
 
+      // === DB FETCH ===
       const sender = await getOrUpdateUser(
         senderId,
         data.user?.nickname || data.sender?.nickname,
@@ -80,7 +84,7 @@ export function initGiftEngine(conn: any) {
           data.toUser?.nickname || data.receiver?.nickname,
           data.toUser?.uniqueId || data.receiver?.uniqueId
         );
-        receiverId = Number(receiver.id || receiver.tiktok_id || 0);
+        receiverId = Number(receiver.id || 0);
         receiverName = receiver.display_name;
         receiverUsername = receiver.username;
         receiverRole = "cohost";
@@ -140,7 +144,7 @@ export function initGiftEngine(conn: any) {
     }
   };
 
-  // Luister naar beide events
+  // === EVENT-LISTENERS ===
   conn.on("gift", (data: any) => handleGiftEvent(data, "gift"));
   conn.on("liveRoomGift", (data: any) => handleGiftEvent(data, "liveRoomGift"));
 
