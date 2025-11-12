@@ -4,6 +4,7 @@ import express from "express";
 import http from "http";
 import { Server, Socket } from "socket.io";
 import { initDB } from "./db";
+import { BATTLEBOX_VERSION } from "./version";
 import pool from "./db";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -261,6 +262,7 @@ io.on("connection", async (socket: AdminSocket) => {
   }
 
   console.log("ADMIN DASHBOARD VERBONDEN:", socket.id);
+  console.log(`🚀 Undercover BattleBox Engine v${BATTLEBOX_VERSION} gestart`);
 
   socket.emit("updateArena", getArena());
   socket.emit("updateQueue", { open: true, entries: await getQueue() });
