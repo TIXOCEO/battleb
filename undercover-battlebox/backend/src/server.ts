@@ -139,8 +139,7 @@ export function emitLog(
 }
 
 // ── STATS & LEADERBOARD ───────────────────────────────────────
-// Zorgt dat er ALTIJD een geldige game_id is: herstelt laatste of creëert eerste.
-export async function broadcastStats(): Promise<void> {
+export async function broadcastStats({ allowAutoCreate = true } = {}): Promise<void> {
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS games (
@@ -151,9 +150,11 @@ export async function broadcastStats(): Promise<void> {
       )
     `);
 
-    // Fallback: als we geen currentGameId hebben, pak de laatste of maak er één
-    if (!currentGameId) {
-      const last = await pool.query(`SELECT id FROM games ORDER BY id DESC LIMIT 1`);
+    // Fallback: alleen aanmaken als dat mag
+    if (!currentGameId && allowAutoCreate) {
+      const last = await pool.query(
+        `SELECT id FROM games WHERE status = 'running' ORDER BY id DESC LIMIT 1`
+      );
       if (last.rows[0]) {
         currentGameId = Number(last.rows[0].id);
         console.log(`[STATS] Herstelde laatste game-id: #${currentGameId}`);
@@ -166,7 +167,11 @@ export async function broadcastStats(): Promise<void> {
       }
     }
 
-    // Statistieken verzamelen
+    if (!currentGameId) {
+      io.emit("gameSession", { active: false, gameId: null });
+      return;
+    }
+
     const statsRes = await pool.query(
       `
       SELECT
@@ -186,32 +191,7 @@ export async function broadcastStats(): Promise<void> {
       totalHostDiamonds: Number(s.total_host_diamonds || 0),
     };
 
-    const lbRes = await pool.query(
-      `
-      SELECT
-        receiver_id,
-        receiver_username,
-        receiver_display_name,
-        COALESCE(SUM(diamonds), 0) AS total_diamonds
-      FROM gifts
-      WHERE game_id = $1
-        AND receiver_role IN ('speler','cohost')
-      GROUP BY receiver_id, receiver_username, receiver_display_name
-      ORDER BY total_diamonds DESC
-      LIMIT 50
-      `,
-      [currentGameId]
-    );
-
-    const leaderboard: LeaderboardEntry[] = lbRes.rows.map((row: any) => ({
-      user_id: row.receiver_id ? String(row.receiver_id) : "",
-      display_name: row.receiver_display_name,
-      username: (row.receiver_username || "").replace(/^@+/, ""),
-      total_diamonds: Number(row.total_diamonds || 0),
-    }));
-
     io.emit("streamStats", stats);
-    io.emit("streamLeaderboard", leaderboard);
   } catch (err: any) {
     console.error("broadcastStats error:", err?.message || err);
   }
@@ -246,20 +226,25 @@ async function startNewGame(): Promise<{ id: number; startedAt: string }> {
 
 async function stopCurrentGame(): Promise<void> {
   if (!currentGameId) return;
-
   const gameId = currentGameId;
+
   await pool.query(
     `UPDATE games SET status = 'ended', ended_at = NOW() WHERE id = $1`,
     [gameId]
   );
-  currentGameId = null;
 
   emitLog({ type: "system", message: `Spel beëindigd (Game #${gameId})` });
 
   const session: GameSessionState = { active: false, gameId };
   io.emit("gameSession", session);
 
-  await broadcastStats();
+  // Reset gameId in geheugen
+  currentGameId = null;
+
+  // Herbereken stats zonder nieuw spel te starten
+  await broadcastStats({ allowAutoCreate: false });
+
+  console.log(`[GAME] Game #${gameId} beëindigd en currentGameId op null gezet`);
 }
 
 // ── UTIL ──────────────────────────────────────────────────────
@@ -282,7 +267,7 @@ io.on("connection", async (socket: AdminSocket) => {
   socket.emit("initialLogs", logBuffer);
   socket.emit("gameSession", { active: currentGameId !== null, gameId: currentGameId } as GameSessionState);
   socket.emit("settings", getArenaSettings());
-  await broadcastStats();
+  await broadcastStats({ allowAutoCreate: false });
 
   emitLog({ type: "system", message: "Admin dashboard verbonden" });
 
@@ -390,11 +375,6 @@ io.on("connection", async (socket: AdminSocket) => {
   socket.on("admin:removeFromQueue", (d, ack) => handleAdminAction("removeFromQueue", d, ack));
 });
 
-// ── ADMIN REST ENDPOINT (placeholder) ─────────────────────────
-app.post("/api/admin/:action", requireAdmin, async (_req, res) =>
-  res.json({ success: true, message: "REST endpoint klaar" })
-);
-
 // ── STARTUP ───────────────────────────────────────────────────
 const ADMIN_ID = process.env.ADMIN_TIKTOK_ID?.trim();
 let conn: any = null;
@@ -416,8 +396,7 @@ initDB().then(async () => {
   // Probeer lopend spel te hervatten
   try {
     const gameRes = await pool.query(
-      `SELECT id, started_at FROM games WHERE status = 'running'
-       ORDER BY started_at DESC LIMIT 1`
+      `SELECT id FROM games WHERE status = 'running' ORDER BY started_at DESC LIMIT 1`
     );
     if (gameRes.rows[0]) {
       currentGameId = Number(gameRes.rows[0].id);
@@ -427,7 +406,7 @@ initDB().then(async () => {
     console.warn("[GAME] Kon games-tabel niet lezen:", err?.message || err);
   }
 
-  await broadcastStats();
+  await broadcastStats({ allowAutoCreate: false });
 
   const { conn: tikTokConn } = await startConnection(process.env.TIKTOK_USERNAME!, () => {});
   conn = tikTokConn;
