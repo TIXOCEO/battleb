@@ -1,6 +1,7 @@
 // src/version.ts
-import { createRequire } from "module";
-const require = createRequire(import.meta.url);
-const { version } = require("../package.json");
+// ✅ Compatibel met CommonJS én ESM builds
 
-export const BATTLEBOX_VERSION = version;
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const pkg = require("../package.json");
+
+export const BATTLEBOX_VERSION: string = pkg.version || "dev";
