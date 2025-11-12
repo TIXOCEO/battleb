@@ -19,9 +19,9 @@ interface Player {
 }
 
 interface ArenaSettings {
-  roundDurationPre: number; // seconden (voorrondes)
-  roundDurationFinal: number; // seconden (finale)
-  graceSeconds: number; // seconden
+  roundDurationPre: number;
+  roundDurationFinal: number;
+  graceSeconds: number;
 }
 
 interface Arena {
@@ -29,21 +29,24 @@ interface Arena {
   round: number;
   type: RoundType;
   status: ArenaStatus;
-  timeLeft: number; // seconden
-  isRunning: boolean; // legacy compat
-  roundStartTime: number; // ms epoch
-  roundCutoff: number; // ms epoch → einde 00:00
-  graceEnd: number; // ms epoch → einde grace
+  timeLeft: number;
+  isRunning: boolean;
+  roundStartTime: number;
+  roundCutoff: number;
+  graceEnd: number;
   settings: ArenaSettings;
   lastSortedAt: number;
 }
 
-// === State ===
+// === Default settings ===
+
 const DEFAULT_SETTINGS: ArenaSettings = {
   roundDurationPre: 180,
   roundDurationFinal: 300,
   graceSeconds: 5,
 };
+
+// === Internal arena state ===
 
 const arena: Arena = {
   players: [],
@@ -59,28 +62,34 @@ const arena: Arena = {
   lastSortedAt: Date.now(),
 };
 
-// === Settings persistence ===
+// ===============================================================
+// SETTINGS DB
+// ===============================================================
+
 async function loadArenaSettingsFromDB(): Promise<void> {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS settings (
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL
-    )
+    );
   `);
 
   const { rows } = await pool.query(
-    `SELECT key, value FROM settings WHERE key IN ('roundDurationPre','roundDurationFinal','graceSeconds')`
+    `SELECT key, value
+     FROM settings
+     WHERE key IN ('roundDurationPre','roundDurationFinal','graceSeconds')`
   );
 
   const map = new Map(rows.map((r: any) => [r.key, r.value]));
-  const pre = Number(map.get("roundDurationPre") ?? DEFAULT_SETTINGS.roundDurationPre);
-  const fin = Number(map.get("roundDurationFinal") ?? DEFAULT_SETTINGS.roundDurationFinal);
-  const gr = Number(map.get("graceSeconds") ?? DEFAULT_SETTINGS.graceSeconds);
+
+  const pre  = Number(map.get("roundDurationPre")  ?? DEFAULT_SETTINGS.roundDurationPre);
+  const fin  = Number(map.get("roundDurationFinal") ?? DEFAULT_SETTINGS.roundDurationFinal);
+  const grace = Number(map.get("graceSeconds")     ?? DEFAULT_SETTINGS.graceSeconds);
 
   arena.settings = {
-    roundDurationPre: Number.isFinite(pre) && pre > 0 ? pre : DEFAULT_SETTINGS.roundDurationPre,
+    roundDurationPre: Number.isFinite(pre)  && pre > 0 ? pre : DEFAULT_SETTINGS.roundDurationPre,
     roundDurationFinal: Number.isFinite(fin) && fin > 0 ? fin : DEFAULT_SETTINGS.roundDurationFinal,
-    graceSeconds: Number.isFinite(gr) && gr >= 0 ? gr : DEFAULT_SETTINGS.graceSeconds,
+    graceSeconds: Number.isFinite(grace) && grace >= 0 ? grace : DEFAULT_SETTINGS.graceSeconds,
   };
 }
 
@@ -94,17 +103,19 @@ async function saveArenaSettingsToDB(s: Partial<ArenaSettings>): Promise<void> {
     ["graceSeconds", merged.graceSeconds],
   ];
 
-  for (const [k, v] of pairs) {
+  for (const [key, value] of pairs) {
     await pool.query(
-      `INSERT INTO settings(key, value) VALUES ($1,$2)
+      `INSERT INTO settings(key, value)
+       VALUES ($1,$2)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-      [k, String(v)]
+      [key, String(value)]
     );
   }
+
   emitArena();
 }
 
-// === Public settings API (server gebruikt deze) ===
+// Public API
 export async function updateArenaSettings(s: Partial<ArenaSettings>) {
   await saveArenaSettingsToDB(s);
 }
@@ -112,10 +123,15 @@ export function getArenaSettings(): ArenaSettings {
   return { ...arena.settings };
 }
 
-// === Arena helpers ===
+// ===============================================================
+// PLAYER MANAGEMENT
+// ===============================================================
+
 function sortPlayers(): void {
-  // Hoogste diamonds bovenaan, bij gelijk die eerder joined is boven
-  arena.players.sort((a, b) => b.diamonds - a.diamonds || a.joined_at - b.joined_at);
+  // sort per diamonds → tie-breaker = join timestamp
+  arena.players.sort(
+    (a, b) => b.diamonds - a.diamonds || a.joined_at - b.joined_at
+  );
   arena.lastSortedAt = Date.now();
 }
 
@@ -128,7 +144,7 @@ export function arenaJoin(
   if (arena.players.length >= 8) return false;
   if (arena.players.some((p) => p.id === tiktok_id)) return false;
 
-  const player: Player = {
+  const p: Player = {
     id: tiktok_id,
     display_name,
     username,
@@ -138,7 +154,7 @@ export function arenaJoin(
     joined_at: Date.now(),
   };
 
-  arena.players.push(player);
+  arena.players.push(p);
   sortPlayers();
   emitArena();
   return true;
@@ -159,6 +175,7 @@ export async function arenaClear(): Promise<void> {
       [BigInt(p.id)]
     );
   }
+
   arena.players = [];
   arena.round = 0;
   arena.type = "quarter";
@@ -168,24 +185,30 @@ export async function arenaClear(): Promise<void> {
   arena.roundStartTime = 0;
   arena.roundCutoff = 0;
   arena.graceEnd = 0;
+
   sortPlayers();
   emitArena();
 }
 
-// Diamonds naar ONTVANGER (gift-engine roept dit aan)
 export async function addDiamondsToArenaPlayer(
   tiktok_id: string,
-  d: number
+  amount: number
 ): Promise<void> {
   const p = arena.players.find((pp) => pp.id === tiktok_id);
   if (!p) return;
-  p.diamonds += d;
-  await addDiamonds(BigInt(tiktok_id), d, "current_round");
+
+  p.diamonds += amount;
+
+  await addDiamonds(BigInt(tiktok_id), amount, "current_round");
+
   sortPlayers();
   emitArena();
 }
 
-// Rondebesturing
+// ===============================================================
+// ROUND MANAGEMENT
+// ===============================================================
+
 let roundTick: NodeJS.Timeout | null = null;
 
 function getDurationForType(type: RoundType): number {
@@ -201,45 +224,57 @@ export function startRound(type: RoundType): boolean {
   arena.round += 1;
   arena.type = type;
 
-  const total = getDurationForType(type);
-  arena.timeLeft = total;
+  const totalSecs = getDurationForType(type);
+
+  arena.timeLeft = totalSecs;
   arena.isRunning = true;
   arena.status = "active";
   arena.roundStartTime = Date.now();
-  arena.roundCutoff = arena.roundStartTime + total * 1000;
+  arena.roundCutoff = arena.roundStartTime + totalSecs * 1000;
   arena.graceEnd = arena.roundCutoff + arena.settings.graceSeconds * 1000;
 
-  // Ronde-diamonds visuals resetten
+  // Reset ronde-diamonds
   for (const p of arena.players) p.diamonds = 0;
 
   sortPlayers();
   emitArena();
-  io.emit("round:start", { round: arena.round, type: arena.type, duration: total });
+
+  io.emit("round:start", {
+    round: arena.round,
+    type: arena.type,
+    duration: totalSecs,
+  });
 
   if (roundTick) clearInterval(roundTick);
+
   roundTick = setInterval(() => {
     const now = Date.now();
 
+    // ACTIVE → countdown
     if (arena.status === "active") {
       const left = Math.max(0, Math.ceil((arena.roundCutoff - now) / 1000));
       arena.timeLeft = left;
 
       if (left <= 0) {
-        // 00:00 exact → stop punten, ga naar grace
+        // naar grace
         arena.status = "grace";
         arena.isRunning = false;
         arena.timeLeft = 0;
+
         emitArena();
         io.emit("round:grace", {
           round: arena.round,
           grace: arena.settings.graceSeconds,
         });
+
       } else {
         emitArena();
       }
+
       return;
     }
 
+    // GRACE → einde?
     if (arena.status === "grace") {
       if (now >= arena.graceEnd) {
         endRound();
@@ -249,12 +284,12 @@ export function startRound(type: RoundType): boolean {
       return;
     }
 
+    // END/IDLE → cleanup interval
     if (arena.status === "ended" || arena.status === "idle") {
-      if (roundTick) {
-        clearInterval(roundTick);
-        roundTick = null;
-      }
+      if (roundTick) clearInterval(roundTick);
+      roundTick = null;
     }
+
   }, 1000);
 
   return true;
@@ -269,6 +304,7 @@ export function endRound(): void {
   emitArena();
 
   const sorted = [...arena.players];
+
   const top3 = sorted.slice(0, 3).map((p) => ({
     id: p.id,
     display_name: p.display_name,
@@ -282,15 +318,17 @@ export function endRound(): void {
     top3,
   });
 
-  if (roundTick) {
-    clearInterval(roundTick);
-    roundTick = null;
-  }
+  if (roundTick) clearInterval(roundTick);
+  roundTick = null;
 }
 
-// === Snapshot export ===
+// ===============================================================
+// SNAPSHOT
+// ===============================================================
+
 export function getArena() {
   sortPlayers();
+
   return {
     players: arena.players.map((p) => ({
       id: p.id,
@@ -316,6 +354,10 @@ export function getArena() {
 export function emitArena() {
   io.emit("updateArena", getArena());
 }
+
+// ===============================================================
+// INIT GAME
+// ===============================================================
 
 export async function initGame() {
   await loadArenaSettingsFromDB();
