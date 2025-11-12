@@ -26,6 +26,7 @@ export function initGiftEngine(conn: any) {
     const giftName = data.giftName || "Onbekend";
 
     if (msgId && processedMsgIds.has(msgId)) return;
+
     try {
       const senderId = (
         data.user?.userId || data.sender?.userId || data.userId || "0"
@@ -43,6 +44,7 @@ export function initGiftEngine(conn: any) {
         if (!repeatEnd) return;
         creditedDiamonds = rawDiamondCount * repeatCount;
       } else creditedDiamonds = rawDiamondCount;
+
       if (msgId) processedMsgIds.add(msgId);
 
       const sender = await getOrUpdateUser(
@@ -64,8 +66,7 @@ export function initGiftEngine(conn: any) {
           .trim() || HOST_USERNAME;
 
       const isToHost = receiverUniqueId === HOST_USERNAME;
-      let receiverName = HOST_USERNAME.toUpperCase();
-      let receiverRole = "host";
+      const receiverName = isToHost ? HOST_USERNAME.toUpperCase() : "COHOST";
 
       await addDiamonds(BigInt(senderId), creditedDiamonds, "total");
       await addDiamonds(BigInt(senderId), creditedDiamonds, "stream");
@@ -76,8 +77,9 @@ export function initGiftEngine(conn: any) {
 
       if (!isToHost) {
         const arena = getArena();
-        if (arena.players.some((p: any) => p.id === senderId))
+        if (arena.players.some((p: any) => p.id === senderId)) {
           await addDiamondsToArenaPlayer(senderId, creditedDiamonds);
+        }
       }
 
       await pool.query(
@@ -95,14 +97,16 @@ export function initGiftEngine(conn: any) {
         ]
       );
 
+      // 🎁 Log zichtbaar in dashboard
       emitLog({
         type: "gift",
-        message: `${sender.display_name} (@${sender.username.replace(
-          /^@+/,
-          ""
-        )}) stuurde ${giftName} (${creditedDiamonds}💎${
+        message: `${sender.display_name} (@${sender.username}) → ${receiverName}: ${giftName} (${creditedDiamonds}💎${
           repeatCount > 1 ? `, streak x${repeatCount}` : ""
         })`,
+        giver_display_name: sender.display_name,
+        giver_username: sender.username,
+        receiver_display_name: receiverName,
+        diamonds: creditedDiamonds,
       });
     } catch (err: any) {
       console.error("GiftEngine error:", err?.message || err);
