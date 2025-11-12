@@ -1,11 +1,5 @@
 // src/engines/3-gift-engine.ts
-// STREAK-SAFE GIFT ENGINE + ARENA OP ONTVANGER + GAME STATS
-// - Alleen 'gift' event
-// - Streak gifts (giftType === 1) → alleen laatste event met repeatEnd === true
-// - diamonds = diamondCount * repeatCount voor streaks
-// - Schrijft naar giver_*/receiver_* + game_id in gifts
-// - Arena-diamonds gaan naar ONTVANGER als het een speler is
-// - emitLog → mooi leesbaar in Admin dashboard
+// GIFT ENGINE – streak-safe, ontvanger-gebaseerde arena-score, game stats, cutoff/grace
 
 import pool from "../db";
 import { getOrUpdateUser } from "./2-user-engine";
@@ -33,7 +27,6 @@ if (!HOST_USERNAME) {
   process.exit(1);
 }
 
-// Eenvoudige dedup op msgId (voor veiligheid)
 const processedMsgIds = new Set<string>();
 setInterval(() => processedMsgIds.clear(), 60_000);
 
@@ -45,7 +38,6 @@ export function initGiftEngine(conn: any) {
     if (msgId && processedMsgIds.has(msgId)) return;
 
     try {
-      // === 1. SENDER (GIFTVERSTUURDER) ===
       const senderId = (
         data.user?.userId ||
         data.sender?.userId ||
@@ -58,26 +50,38 @@ export function initGiftEngine(conn: any) {
       const repeatEnd = Boolean(data.repeatEnd);
       const repeatCount = Number(data.repeatCount ?? 1);
       const rawDiamondCount = Number(data.diamondCount ?? 0);
-      if (rawDiamondCount <= 0) return;
+      if (!rawDiamondCount || rawDiamondCount <= 0) return;
 
-      // === 2. STREAK-LOGICA ===
+      // Ronde cutoff/grace controle
+      const arena = getArena();
+      const now = Date.now();
+      const inActive = arena.status === "active" && now <= arena.roundCutoff;
+      const inGrace = arena.status === "grace" && now <= arena.graceEnd;
+
+      // Alleen geldig tijdens active (<= cutoff) of grace (<= graceEnd)
+      if (!(inActive || inGrace)) {
+        emitLog({
+          type: "system",
+          message: `[GIFT IGNORE] Buiten ronde: ${giftName} door onbekend`,
+        });
+        return;
+      }
+
+      // Streak-logica
       let creditedDiamonds = 0;
-
       if (giftType === 1) {
-        // Streak gift
         if (!repeatEnd) {
-          // tussen-events negeren
           return;
         }
         creditedDiamonds = rawDiamondCount * repeatCount;
       } else {
-        // normale gift
         creditedDiamonds = rawDiamondCount;
       }
-
       if (creditedDiamonds <= 0) return;
+
       if (msgId) processedMsgIds.add(msgId);
 
+      // Sender
       const sender = await getOrUpdateUser(
         senderId,
         data.user?.nickname || data.sender?.nickname,
@@ -85,7 +89,7 @@ export function initGiftEngine(conn: any) {
       );
       const senderUsernameClean = sender.username.replace(/^@+/, "");
 
-      // === 3. ONTVANGER (HOST of SPELER) ===
+      // Receiver (host of speler)
       const receiverUniqueIdRaw =
         data.toUser?.uniqueId ||
         data.receiver?.uniqueId ||
@@ -104,10 +108,6 @@ export function initGiftEngine(conn: any) {
         data.toUser?.displayName ||
         "";
 
-      const receiverNickname =
-        receiverNicknameRaw || HOST_USERNAME.toUpperCase();
-
-      // userId van de ontvanger (indien aanwezig)
       const receiverUserIdRaw =
         data.receiverUserId ||
         data.toUserId ||
@@ -118,7 +118,7 @@ export function initGiftEngine(conn: any) {
       const isToHost =
         !receiverUserIdRaw ||
         receiverUniqueId === HOST_USERNAME ||
-        receiverNickname.toLowerCase().includes(HOST_USERNAME);
+        (receiverNicknameRaw || "").toLowerCase().includes(HOST_USERNAME);
 
       let receiverId: string | null = null;
       let receiverDisplayName: string;
@@ -126,15 +126,14 @@ export function initGiftEngine(conn: any) {
       let receiverRole: "host" | "speler";
 
       if (isToHost) {
-        // Gift naar host (twists etc.)
-        receiverDisplayName = receiverNickname || HOST_USERNAME.toUpperCase();
+        receiverDisplayName = receiverNicknameRaw || HOST_USERNAME.toUpperCase();
         receiverUsername = HOST_USERNAME;
         receiverRole = "host";
       } else {
         const receiverUserId = String(receiverUserIdRaw);
         const receiver = await getOrUpdateUser(
           receiverUserId,
-          receiverNickname,
+          receiverNicknameRaw,
           receiverUniqueId
         );
         receiverId = receiver.id;
@@ -143,9 +142,7 @@ export function initGiftEngine(conn: any) {
         receiverRole = "speler";
       }
 
-      // === 4. PUNTEN VOOR DE GIFTVERSTUURDER (BP, diamonds als "gifter") ===
-      // Deze diamonds worden nog steeds bij de SENDER geteld in users.diamonds_*,
-      // maar de ARENA-score & game-stats gaan naar de ONTVANGER.
+      // Teller voor SENDER (BP & diamonds voor profiel/totalen)
       await addDiamonds(BigInt(senderId), creditedDiamonds, "total");
       await addDiamonds(BigInt(senderId), creditedDiamonds, "stream");
       await addDiamonds(BigInt(senderId), creditedDiamonds, "current_round");
@@ -153,17 +150,16 @@ export function initGiftEngine(conn: any) {
       const bpGain = creditedDiamonds * 0.2;
       await addBP(BigInt(senderId), bpGain, "GIFT", sender.display_name);
 
-      // === 5. ARENA SCORE (OP BASIS VAN ONTVANGER) ===
+      // Arena-score: naar ONTVANGER indien speler en in arena
       if (!isToHost && receiverId) {
-        const arena = getArena();
-        if (arena.players.some((p: any) => p.id === receiverId)) {
+        const arena2 = getArena();
+        if (arena2.players.some((p: any) => p.id === receiverId)) {
           await addDiamondsToArenaPlayer(receiverId, creditedDiamonds);
         }
       }
 
-      // === 6. DATABASE SAVE (GIFT LOG) ===
-      const currentGameId = getCurrentGameId(); // kan null zijn als geen spel actief
-
+      // DB save
+      const currentGameId = getCurrentGameId();
       await pool.query(
         `
         INSERT INTO gifts (
@@ -188,7 +184,7 @@ export function initGiftEngine(conn: any) {
         ]
       );
 
-      // === 7. LOG NAAR ADMIN DASHBOARD ===
+      // Log
       const receiverLabel = isToHost
         ? `${receiverDisplayName} (@${HOST_USERNAME}) [HOST]`
         : `${receiverDisplayName} (@${receiverUsername}) [SPELER]`;
@@ -207,7 +203,6 @@ export function initGiftEngine(conn: any) {
         game_id: currentGameId,
       });
 
-      // === 8. STATS & LEADERBOARD VERNIEUWEN ===
       await broadcastStats();
     } catch (err: any) {
       console.error("GiftEngine error:", err?.message || err);
