@@ -2,21 +2,32 @@
 
 export type ArenaPlayerStatus = "alive" | "eliminated" | "shielded" | "danger";
 
-export type ArenaPlayer = {
-  id: string; // tiktok_id als string
+export interface ArenaPlayer {
+  id: string;
   display_name: string;
   username: string;
-  diamonds: number; // huidige ronde
+  diamonds: number;
   boosters: string[];
-  status: ArenaPlayerStatus;
-};
+  status: "alive" | "eliminated";
+}
 
-export type ArenaState = {
+export interface ArenaState {
+  players: ArenaPlayer[];
   round: number;
   type: "quarter" | "semi" | "finale";
-  timeLeft: number; // seconden
-  players: ArenaPlayer[];
-};
+  status: "idle" | "active" | "grace" | "ended";
+  timeLeft: number;
+  isRunning: boolean;
+  roundStartTime: number;
+  roundCutoff: number;
+  graceEnd: number;
+  settings: {
+    roundDurationPre: number;
+    roundDurationFinal: number;
+    graceSeconds: number;
+  };
+  lastSortedAt: number;
+}
 
 export type QueueEntry = {
   position: number;
