@@ -1,5 +1,11 @@
 import pool from "../db";
 
+/**
+ * Kern-API om user te vinden/aan te maken en te upgraden.
+ * - Maakt UNKNOWN placeholder als we echt niets weten (Onbekend#xxxxx)
+ * - Upgradet zodra er een echte nickname/uniqueId binnenkomt
+ * - Zet last_seen_at bij elke call
+ */
 export async function getOrUpdateUser(
   tiktok_id: string,
   nickname?: string,
@@ -11,69 +17,132 @@ export async function getOrUpdateUser(
 
   const id = BigInt(tiktok_id);
 
-  // Probeer bestaande gebruiker te vinden
+  // Huidige staat ophalen
   const existing = await pool.query(
     "SELECT display_name, username FROM users WHERE tiktok_id = $1 LIMIT 1",
     [id]
   );
 
-  // Functie om naam en username te schonen
-  const cleanName = (name?: string) =>
-    name && name !== "Onbekend" ? name.trim() : null;
-  const cleanUsername = (uid?: string, name?: string) => {
+  // Helpers
+  const cleanName = (name?: string | null) => {
+    const v = typeof name === "string" ? name.trim() : "";
+    return v && v.toLowerCase() !== "onbekend" ? v : null;
+  };
+
+  const normalizeHandle = (uid?: string | null, fallbackName?: string | null) => {
     const base =
-      uid ||
-      name?.toLowerCase().replace(/[^a-z0-9_]/g, "") ||
+      (uid || "")
+        .toString()
+        .trim()
+        .replace(/^@+/, "") ||
+      (fallbackName || "")
+        .toString()
+        .toLowerCase()
+        .replace(/[^a-z0-9_]/g, "") ||
       `onbekend${tiktok_id.slice(-5)}`;
-    const normalized = base.startsWith("@") ? base : `@${base}`;
-    return normalized;
+    return base.startsWith("@") ? base : `@${base}`;
   };
 
   const newDisplay = cleanName(nickname);
-  const newUsername = cleanUsername(uniqueId, nickname);
+  const newUsernameFull = normalizeHandle(uniqueId, nickname);
+  const newUsernameClean = newUsernameFull.replace(/^@+/, "");
 
-  // === UPDATE bestaand record ===
+  // Bestond al?
   if (existing.rows[0]) {
-    const { display_name, username } = existing.rows[0];
-
-    // Als gebruiker Onbekend#... is en we nu echte data hebben → upgrade
-    const needsUpgrade =
-      display_name.startsWith("Onbekend#") ||
-      username.startsWith("@onbekend") ||
-      (newDisplay && newDisplay !== display_name);
-
-    if (needsUpgrade && newDisplay) {
-      await pool.query(
-        `UPDATE users SET display_name = $1, username = $2 WHERE tiktok_id = $3`,
-        [newDisplay, newUsername, id]
-      );
-      console.log(
-        `[UPDATE] ${display_name} → ${newDisplay} (${newUsername})`
-      );
-      return { id: tiktok_id, display_name: newDisplay, username: newUsername.replace(/^@/, "") };
-    }
-
-    // Anders huidige data behouden
-    return {
-      id: tiktok_id,
-      display_name,
-      username: username.replace(/^@/, ""),
+    const { display_name, username } = existing.rows[0] as {
+      display_name: string;
+      username: string;
     };
+
+    // Upgrade criteria: als we een Unknown stap kunnen verbeteren
+    const unknownLike =
+      (display_name || "").startsWith("Onbekend#") ||
+      (username || "").toLowerCase().startsWith("@onbekend");
+
+    const needUpgrade =
+      unknownLike || (!!newDisplay && newDisplay !== display_name);
+
+    if (needUpgrade && newDisplay) {
+      await pool.query(
+        `
+        UPDATE users
+           SET display_name   = $1,
+               username       = $2,
+               last_seen_at   = NOW()
+         WHERE tiktok_id     = $3
+        `,
+        [newDisplay, newUsernameFull, id]
+      );
+      return {
+        id: tiktok_id,
+        display_name: newDisplay,
+        username: newUsernameClean,
+      };
+    } else {
+      // Geen upgrade maar wel heartbeat
+      await pool.query(
+        `UPDATE users SET last_seen_at = NOW() WHERE tiktok_id = $1`,
+        [id]
+      );
+      return {
+        id: tiktok_id,
+        display_name: display_name || `Onbekend#${tiktok_id.slice(-5)}`,
+        username: (username || "@onbekend").replace(/^@+/, ""),
+      };
+    }
   }
 
-  // === NIEUWE gebruiker aanmaken ===
-  const finalDisplay =
-    newDisplay || `Onbekend#${tiktok_id.slice(-5)}`;
-  const finalUsername = newUsername;
+  // Nieuw record
+  const finalDisplay = newDisplay || `Onbekend#${tiktok_id.slice(-5)}`;
+  const finalUsername = newUsernameFull;
 
   await pool.query(
-    `INSERT INTO users (tiktok_id, display_name, username, diamonds_total, bp_total)
-     VALUES ($1,$2,$3,0,0)
-     ON CONFLICT (tiktok_id) DO NOTHING`,
+    `
+    INSERT INTO users (tiktok_id, display_name, username, diamonds_total, bp_total, last_seen_at)
+    VALUES ($1,$2,$3,0,0, NOW())
+    ON CONFLICT (tiktok_id) DO NOTHING
+    `,
     [id, finalDisplay, finalUsername]
   );
 
-  console.log(`[NIEUW] ${finalDisplay} (${finalUsername})`);
+  return {
+    id: tiktok_id,
+    display_name: finalDisplay,
+    username: finalUsername.replace(/^@+/, ""),
+  };
+}
 
-  return { id: tiktok_id, display_name: finalDisplay, username: finalUsername.replace(/^@/, "") };
+/**
+ * Probeer zoveel mogelijk uit willekeurige event payloads te halen
+ * en de gebruiker te updaten/aan te maken. (Gebruikt door 1-connection.)
+ *
+ * Ondersteunt o.a. vormen:
+ * - { userId, nickname, uniqueId }
+ * - { user: { userId, nickname, uniqueId } }
+ * - { sender: { userId, nickname, uniqueId } }
+ * - { toUser / receiver: { userId, nickname, uniqueId } }
+ */
+export async function upsertIdentityFromLooseEvent(loose: any): Promise<void> {
+  if (!loose) return;
+
+  const user =
+    loose?.user ||
+    loose?.sender ||
+    loose?.toUser ||
+    loose?.receiver ||
+    loose;
+
+  const uid =
+    (user?.userId ?? user?.id ?? user?.uid ?? user?.secUid ?? null) &&
+    String(user?.userId ?? user?.id ?? user?.uid);
+
+  const nickname: string | undefined =
+    user?.nickname ?? user?.displayName ?? undefined;
+
+  const uniqueId: string | undefined = user?.uniqueId ?? user?.unique_id ?? undefined;
+
+  if (!uid) return;
+
+  // Laat getOrUpdate het werk doen + heartbeat
+  await getOrUpdateUser(uid, nickname, uniqueId);
 }
