@@ -1,5 +1,6 @@
 // src/engines/3-gift-engine.ts
-// GIFT ENGINE – verbeterde host-detectie + gifts naar host ALTIJD tellen bij actief spel
+// GIFT ENGINE – streak-safe, improved host-detection, always count host gifts
+// Version: 0.6.1
 
 import pool from "../db";
 import { getOrUpdateUser } from "./2-user-engine";
@@ -10,36 +11,59 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const HOST_USERNAME = (process.env.TIKTOK_USERNAME || "")
+// =========================================================
+// HOST CONFIG — critical
+// =========================================================
+
+const RAW_HOST = (process.env.TIKTOK_USERNAME || "")
   .replace("@", "")
-  .toLowerCase()
   .trim();
+
+const HOST_USERNAME = RAW_HOST.toLowerCase();
+
+// =========================================================
+// SAFETY: No host set = fatal error.
+// =========================================================
 
 if (!HOST_USERNAME) {
   console.error("FATAL: TIKTOK_USERNAME ontbreekt in .env!");
   process.exit(1);
 }
 
-const processedMsgIds = new Set<string>();
-setInterval(() => processedMsgIds.clear(), 60000);
+// =========================================================
+// MESSAGE DEDUP
+// =========================================================
 
-// Unicode- & emoji-safe naam normalisatie
-function normalize(str: any): string {
+const processedMsgIds = new Set<string>();
+
+setInterval(() => processedMsgIds.clear(), 60_000);
+
+// =========================================================
+// NORMALIZER — cleans usernames for reliable comparison
+// =========================================================
+
+function normalize(str: string | null | undefined): string {
   return (str || "")
     .toLowerCase()
-    .trim()
+    .replace("@", "")
     .replace(/\s+/g, "")
-    .replace(/[^\p{L}\p{N}_@]/gu, "");
+    .replace(/[^\p{L}\p{N}_]/gu, ""); // strip emoji + symbols
 }
+
+// =========================================================
+// INIT GIFT ENGINE
+// =========================================================
 
 export function initGiftEngine(conn: any) {
   conn.on("gift", async (data: any) => {
     const msgId = String(data.msgId ?? data.id ?? data.logId ?? "");
-    const giftName: string = data.giftName || "Onbekend";
 
     if (msgId && processedMsgIds.has(msgId)) return;
 
     try {
+      // ---------------------------------------------------------------------
+      // 1. Extract sender
+      // ---------------------------------------------------------------------
       const senderId = (
         data.user?.userId ||
         data.sender?.userId ||
@@ -49,25 +73,30 @@ export function initGiftEngine(conn: any) {
 
       if (senderId === "0") return;
 
-      const giftType = Number(data.giftType ?? 0);
-      const repeatEnd = Boolean(data.repeatEnd);
-      const repeatCount = Number(data.repeatCount ?? 1);
-      const rawDiamondCount = Number(data.diamondCount ?? 0);
+      const rawDiamonds = Number(data.diamondCount || 0);
+      if (rawDiamonds <= 0) return;
 
-      if (!rawDiamondCount || rawDiamondCount <= 0) return;
+      // Streak handling
+      const giftType = Number(data.giftType || 0);
+      const repeatEnd = Boolean(data.repeatEnd);
+      const repeatCount = Number(data.repeatCount || 1);
 
       let creditedDiamonds = 0;
-
       if (giftType === 1) {
-        if (!repeatEnd) return; // streak loopt door
-        creditedDiamonds = rawDiamondCount * repeatCount;
+        if (!repeatEnd) return;
+        creditedDiamonds = rawDiamonds * repeatCount;
       } else {
-        creditedDiamonds = rawDiamondCount;
+        creditedDiamonds = rawDiamonds;
       }
 
-      if (msgId) processedMsgIds.add(msgId);
+      if (creditedDiamonds <= 0) return;
 
-      // === SENDER ===
+      processedMsgIds.add(msgId);
+
+      // ---------------------------------------------------------------------
+      // 2. SENDER USER
+      // ---------------------------------------------------------------------
+
       const sender = await getOrUpdateUser(
         senderId,
         data.user?.nickname || data.sender?.nickname,
@@ -76,61 +105,74 @@ export function initGiftEngine(conn: any) {
 
       const senderUsernameClean = sender.username.replace(/^@+/, "");
 
-      // === RECEIVER DETECTIE ===
-      const rUid = normalize(
+      // ---------------------------------------------------------------------
+      // 3. RECEIVER ANALYSIS
+      // ---------------------------------------------------------------------
+
+      const recUniqueIdRaw =
         data.toUser?.uniqueId ||
         data.receiver?.uniqueId ||
-        data.receiverUniqueId
-      );
+        data.receiverUniqueId ||
+        "";
 
-      const rNick = normalize(
+      const recNicknameRaw =
         data.toUser?.nickname ||
         data.receiver?.nickname ||
-        data.toUser?.displayName
-      );
+        data.toUser?.displayName ||
+        "";
 
-      const hostNorm = normalize(HOST_USERNAME);
-
-      const isToHost =
-        rUid === hostNorm ||
-        rNick === hostNorm ||
-        rNick.includes(hostNorm);
-
-      const receiverUserIdRaw =
+      const recUserIdRaw =
         data.receiverUserId ||
         data.toUserId ||
         data.toUser?.userId ||
         data.receiver?.userId ||
         null;
 
+      const nHost = normalize(HOST_USERNAME);
+      const nUnique = normalize(recUniqueIdRaw);
+      const nNick = normalize(recNicknameRaw);
+
+      const isToHost =
+        nUnique === nHost ||
+        nNick === nHost ||
+        nNick.includes(nHost);
+
+      // DEBUG LOGGING AROUND HOST DETECT
+      console.log("— HOST DEBUG —");
+      console.log("Configured Host:", HOST_USERNAME);
+      console.log("Normalized Host:", nHost);
+      console.log("Gift receiver unique:", recUniqueIdRaw, "→", nUnique);
+      console.log("Gift receiver nick:", recNicknameRaw, "→", nNick);
+      console.log("isToHost =", isToHost);
+      console.log("———————");
+
       let receiverId: string | null = null;
-      let receiverDisplayName: string;
-      let receiverUsername: string;
-      let receiverRole: "host" | "speler";
+      let receiverDisplay = "";
+      let receiverUsername = "";
+      let receiverRole: "host" | "speler" = "host";
 
       if (isToHost) {
-        receiverDisplayName =
-          data.toUser?.nickname ||
-          data.receiver?.nickname ||
-          HOST_USERNAME.toUpperCase();
-
+        receiverDisplay = recNicknameRaw || HOST_USERNAME;
         receiverUsername = HOST_USERNAME;
         receiverRole = "host";
       } else {
-        const receiverUserId = String(receiverUserIdRaw);
-        const receiver = await getOrUpdateUser(
-          receiverUserId,
-          data.toUser?.nickname || data.receiver?.nickname,
-          data.toUser?.uniqueId || data.receiver?.uniqueId
+        // REAL PLAYER
+        const receiverUser = await getOrUpdateUser(
+          String(recUserIdRaw),
+          recNicknameRaw,
+          recUniqueIdRaw
         );
-
-        receiverId = receiver.id;
-        receiverDisplayName = receiver.display_name;
-        receiverUsername = receiver.username.replace(/^@+/, "");
+        receiverId = receiverUser.id;
+        receiverDisplay = receiverUser.display_name;
+        receiverUsername = receiverUser.username.replace(/^@/, "");
         receiverRole = "speler";
       }
 
-      // === RONDE CHECK ===
+      // ---------------------------------------------------------------------
+      // 4. CHECK GAME STATE
+      // ---------------------------------------------------------------------
+
+      const gameId = getCurrentGameId(); // returns null if no active game
       const arena = getArena();
       const now = Date.now();
 
@@ -138,43 +180,62 @@ export function initGiftEngine(conn: any) {
       const inGrace = arena.status === "grace" && now <= arena.graceEnd;
       const isInRound = inActive || inGrace;
 
-      const currentGameId = getCurrentGameId();
+      // ---------------------------------------------------------------------
+      // 5. GIFT HANDLING RULES
+      // ---------------------------------------------------------------------
 
-      // === GIFTS LOGICA ===
-
-      // Speler → speler buiten ronde = negeren
+      // A. Speler → speler buiten ronde = IGNORE
       if (!isToHost && !isInRound) {
         emitLog({
           type: "system",
-          message: `[GIFT IGNORE] Buiten ronde: ${giftName} → ${receiverDisplayName}`,
+          message: `[GIFT IGNORE] Buiten ronde: ${data.giftName} → ${receiverDisplay}`,
         });
         return;
       }
 
-      // Host gifts → ALTIJD tellen als er een actief spel is
-      if (isToHost && currentGameId) {
+      // B. Host gifts → ONLY if game active
+      if (isToHost) {
+        if (!gameId) {
+          emitLog({
+            type: "system",
+            message: `[GIFT IGNORE] Geen actief spel → host gift genegeerd`,
+          });
+          return;
+        }
+
         emitLog({
           type: "system",
-          message: `[GIFT HOST] ${sender.display_name} → ${receiverDisplayName} (${giftName}, ${creditedDiamonds}💎)`,
+          message: `[HOST GIFT] ${sender.display_name} → ${receiverDisplay} (${creditedDiamonds}💎)`,
         });
       }
 
-      // === DIAMONDS BIJWERKEN ===
+      // ---------------------------------------------------------------------
+      // 6. UPDATE POINTS
+      // ---------------------------------------------------------------------
+
       await addDiamonds(BigInt(senderId), creditedDiamonds, "total");
       await addDiamonds(BigInt(senderId), creditedDiamonds, "stream");
       await addDiamonds(BigInt(senderId), creditedDiamonds, "current_round");
 
       const bpGain = creditedDiamonds * 0.2;
-      await addBP(BigInt(senderId), bpGain, "GIFT", sender.display_name);
+      await addBP(
+        BigInt(senderId),
+        bpGain,
+        "GIFT",
+        sender.display_name
+      );
 
-      // Arena-score voor spelers
+      // Arena diamonds only for players in round
       if (!isToHost && receiverId && isInRound) {
         if (arena.players.some((p: any) => p.id === receiverId)) {
           await addDiamondsToArenaPlayer(receiverId, creditedDiamonds);
         }
       }
 
-      // === SAVE DATABASE ===
+      // ---------------------------------------------------------------------
+      // 7. SAVE TO DB
+      // ---------------------------------------------------------------------
+
       await pool.query(
         `
         INSERT INTO gifts (
@@ -190,30 +251,40 @@ export function initGiftEngine(conn: any) {
           sender.display_name,
           receiverId ? BigInt(receiverId) : null,
           receiverUsername,
-          receiverDisplayName,
+          receiverDisplay,
           receiverRole,
-          giftName,
+          data.giftName || "Onbekend",
           creditedDiamonds,
           bpGain,
-          currentGameId,
+          gameId,
         ]
       );
 
-      // === LOG NAAR DASHBOARD ===
+      // ---------------------------------------------------------------------
+      // 8. LOG TO ADMIN
+      // ---------------------------------------------------------------------
+
       const receiverLabel = isToHost
-        ? `${receiverDisplayName} (@${HOST_USERNAME}) [HOST]`
-        : `${receiverDisplayName} (@${receiverUsername}) [SPELER]`;
+        ? `${receiverDisplay} (@${HOST_USERNAME}) [HOST]`
+        : `${receiverDisplay} (@${receiverUsername}) [SPELER]`;
 
       emitLog({
         type: "gift",
-        message: `${sender.display_name} (@${senderUsernameClean}) → ${receiverLabel}: ${giftName} (${creditedDiamonds}💎${
+        message: `${sender.display_name} (@${senderUsernameClean}) → ${receiverLabel}: ${data.giftName} (${creditedDiamonds}💎${
           repeatCount > 1 ? `, streak x${repeatCount}` : ""
         })`,
+        giver_display_name: sender.display_name,
+        giver_username: senderUsernameClean,
+        receiver_display_name: receiverDisplay,
+        receiver_username: receiverUsername,
+        receiver_role: receiverRole,
+        diamonds: creditedDiamonds,
+        game_id: gameId,
       });
 
       await broadcastStats();
     } catch (err: any) {
-      console.error("GiftEngine error:", err);
+      console.error("GiftEngine error:", err?.message || err);
     }
   });
 
