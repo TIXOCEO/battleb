@@ -1,4 +1,4 @@
-// src/server.ts — BATTLEBOX 5-ENGINE – ADMIN DASHBOARD LIVE – QUEUE, LOGS, GAMES & STATS
+// src/server.ts — BATTLEBOX ENGINE – GAME MANAGEMENT, ADMIN DASHBOARD, STATS
 
 import express from "express";
 import http from "http";
@@ -46,7 +46,9 @@ export const io = new Server(server, {
   path: "/socket.io",
 });
 
-// ── Types ─────────────────────────────────────────────────────
+// ────────────────────────────────────────────────
+// TYPES
+// ────────────────────────────────────────────────
 type LogEntry = {
   id: string;
   timestamp: string;
@@ -75,49 +77,20 @@ type GameSessionState = {
   endedAt?: string | null;
 };
 
+// ────────────────────────────────────────────────
+// GLOBAL STATE
+// ────────────────────────────────────────────────
 const LOG_MAX = 500;
 const logBuffer: LogEntry[] = [];
-
-// Huidige game ID in geheugen
 let currentGameId: number | null = null;
 
-// ── Helpers voor gift-engine ──────────────────────────────────
+// ────────────────────────────────────────────────
+// HELPERS
+// ────────────────────────────────────────────────
 export function getCurrentGameId(): number | null {
   return currentGameId;
 }
 
-// ── API ───────────────────────────────────────────────────────
-app.get("/queue", async (_req, res) => {
-  const entries = await getQueue();
-  res.json({ open: true, entries });
-});
-
-app.get("/arena", async (_req, res) => res.json(getArena()));
-app.get("/logs", (_req, res) => res.json({ logs: logBuffer }));
-app.get("/settings", (_req, res) => res.json(getArenaSettings()));
-
-// ── ADMIN AUTH MIDDLEWARE ─────────────────────────────────────
-const requireAdmin = (req: any, res: any, next: any) => {
-  const auth = req.headers.authorization;
-  if (auth === `Bearer ${ADMIN_TOKEN}`) return next();
-  res.status(401).json({ success: false, message: "Unauthorized" });
-};
-
-// ── SOCKET AUTH ───────────────────────────────────────────────
-interface AdminSocket extends Socket {
-  isAdmin?: boolean;
-}
-
-io.use((socket: any, next) => {
-  const token = socket.handshake.auth?.token;
-  if (token === ADMIN_TOKEN) {
-    socket.isAdmin = true;
-    return next();
-  }
-  return next(new Error("Authentication error"));
-});
-
-// ── Emit helpers ──────────────────────────────────────────────
 export async function emitQueue() {
   const entries = await getQueue();
   io.emit("updateQueue", { open: true, entries });
@@ -138,7 +111,9 @@ export function emitLog(
   io.emit("log", entry);
 }
 
-// ── STATS & LEADERBOARD ───────────────────────────────────────
+// ────────────────────────────────────────────────
+// STATS & LEADERBOARD
+// ────────────────────────────────────────────────
 export async function broadcastStats({ allowAutoCreate = true } = {}): Promise<void> {
   try {
     await pool.query(`
@@ -150,7 +125,7 @@ export async function broadcastStats({ allowAutoCreate = true } = {}): Promise<v
       )
     `);
 
-    // Fallback: alleen aanmaken als dat mag
+    // Alleen nieuwe game starten als dat expliciet mag
     if (!currentGameId && allowAutoCreate) {
       const last = await pool.query(
         `SELECT id FROM games WHERE status = 'running' ORDER BY id DESC LIMIT 1`
@@ -167,11 +142,13 @@ export async function broadcastStats({ allowAutoCreate = true } = {}): Promise<v
       }
     }
 
+    // Geen actief spel → push leeg state
     if (!currentGameId) {
       io.emit("gameSession", { active: false, gameId: null });
       return;
     }
 
+    // Stats ophalen
     const statsRes = await pool.query(
       `
       SELECT
@@ -197,17 +174,10 @@ export async function broadcastStats({ allowAutoCreate = true } = {}): Promise<v
   }
 }
 
-// ── GAME SESSION HELPERS ──────────────────────────────────────
+// ────────────────────────────────────────────────
+// GAME SESSION HANDLERS
+// ────────────────────────────────────────────────
 async function startNewGame(): Promise<{ id: number; startedAt: string }> {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS games (
-      id SERIAL PRIMARY KEY,
-      status TEXT NOT NULL DEFAULT 'running',
-      started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      ended_at   TIMESTAMPTZ
-    )
-  `);
-
   const res = await pool.query(
     `INSERT INTO games (status) VALUES ('running') RETURNING id, started_at`
   );
@@ -234,30 +204,36 @@ async function stopCurrentGame(): Promise<void> {
   );
 
   emitLog({ type: "system", message: `Spel beëindigd (Game #${gameId})` });
+  io.emit("gameSession", { active: false, gameId });
 
-  const session: GameSessionState = { active: false, gameId };
-  io.emit("gameSession", session);
-
-  // Reset gameId in geheugen
   currentGameId = null;
-
-  // Herbereken stats zonder nieuw spel te starten
   await broadcastStats({ allowAutoCreate: false });
 
   console.log(`[GAME] Game #${gameId} beëindigd en currentGameId op null gezet`);
 }
 
-// ── UTIL ──────────────────────────────────────────────────────
+// ────────────────────────────────────────────────
+// SOCKET CONNECTION (ADMIN)
+// ────────────────────────────────────────────────
+interface AdminSocket extends Socket {
+  isAdmin?: boolean;
+}
+
+io.use((socket: any, next) => {
+  const token = socket.handshake.auth?.token;
+  if (token === ADMIN_TOKEN) {
+    socket.isAdmin = true;
+    return next();
+  }
+  return next(new Error("Authentication error"));
+});
+
 function cleanUsername(username: string): string {
   return username.replace(/^@+/, "");
 }
 
-// ── SOCKET CONNECTION ─────────────────────────────────────────
 io.on("connection", async (socket: AdminSocket) => {
-  if (!socket.isAdmin) {
-    console.log("Unauthenticated socket attempt");
-    return socket.disconnect();
-  }
+  if (!socket.isAdmin) return socket.disconnect();
 
   console.log("ADMIN DASHBOARD VERBONDEN:", socket.id);
   console.log(`🚀 Undercover BattleBox Engine v${BATTLEBOX_VERSION} gestart`);
@@ -273,7 +249,6 @@ io.on("connection", async (socket: AdminSocket) => {
 
   const handleAdminAction = async (action: string, data: any, ack: Function) => {
     try {
-      // Round controls
       if (action === "startGame") {
         if (currentGameId) return ack({ success: false, message: `Er draait al een spel (Game #${currentGameId})` });
         await startNewGame();
@@ -284,16 +259,19 @@ io.on("connection", async (socket: AdminSocket) => {
         await stopCurrentGame();
         return ack({ success: true, message: "Spel beëindigd" });
       }
+
       if (action === "startRound") {
         const type = (data?.type || "quarter") as "quarter" | "semi" | "finale";
         const ok = startRound(type);
         if (!ok) return ack({ success: false, message: "Kon ronde niet starten (al actief/grace of te weinig spelers)" });
         return ack({ success: true, message: `Ronde gestart (${type})` });
       }
+
       if (action === "endRound") {
         endRound();
         return ack({ success: true, message: "Ronde beëindigd" });
       }
+
       if (action === "updateSettings") {
         const patch = {
           roundDurationPre: Number(data?.roundDurationPre),
@@ -305,11 +283,9 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true, message: "Instellingen opgeslagen" });
       }
 
-      // Vanaf hier: username vereist
+      // Gebruikersacties
       if (!data?.username) return ack({ success: false, message: "username vereist" });
       const rawInput = String(data.username).trim();
-      if (!rawInput) return ack({ success: false, message: "Lege username" });
-
       const normalized = rawInput.replace(/^@+/, "");
       const userRes = await pool.query(
         `SELECT tiktok_id, display_name, username
@@ -332,27 +308,21 @@ io.on("connection", async (socket: AdminSocket) => {
           emitArena();
           emitLog({ type: "join", message: `${display_name} (@${unameClean}) → arena` });
           break;
-
         case "addToQueue":
           await addToQueue(tid, username);
           await emitQueue();
           emitLog({ type: "join", message: `${display_name} (@${unameClean}) → wachtrij` });
           break;
-
         case "eliminate":
           arenaLeave(tid);
           emitArena();
           emitLog({ type: "elim", message: `${display_name} (@${unameClean}) geëlimineerd` });
           break;
-
         case "removeFromQueue":
           await pool.query("DELETE FROM queue WHERE user_tiktok_id = $1", [tid]);
           await emitQueue();
           emitLog({ type: "elim", message: `${display_name} (@${unameClean}) verwijderd uit wachtrij` });
           break;
-
-        default:
-          return ack({ success: false, message: "Onbekende actie" });
       }
 
       ack({ success: true, message: "Actie uitgevoerd" });
@@ -362,38 +332,26 @@ io.on("connection", async (socket: AdminSocket) => {
     }
   };
 
-  // Socket routes
+  // socket routes
   socket.on("admin:startGame", (d, ack) => handleAdminAction("startGame", d, ack));
   socket.on("admin:stopGame", (d, ack) => handleAdminAction("stopGame", d, ack));
   socket.on("admin:startRound", (d, ack) => handleAdminAction("startRound", d, ack));
   socket.on("admin:endRound", (d, ack) => handleAdminAction("endRound", d, ack));
   socket.on("admin:updateSettings", (d, ack) => handleAdminAction("updateSettings", d, ack));
-
   socket.on("admin:addToArena", (d, ack) => handleAdminAction("addToArena", d, ack));
   socket.on("admin:addToQueue", (d, ack) => handleAdminAction("addToQueue", d, ack));
   socket.on("admin:eliminate", (d, ack) => handleAdminAction("eliminate", d, ack));
   socket.on("admin:removeFromQueue", (d, ack) => handleAdminAction("removeFromQueue", d, ack));
 });
 
-// ── STARTUP ───────────────────────────────────────────────────
-const ADMIN_ID = process.env.ADMIN_TIKTOK_ID?.trim();
-let conn: any = null;
-
+// ────────────────────────────────────────────────
+// STARTUP
+// ────────────────────────────────────────────────
 initDB().then(async () => {
   server.listen(4000, () => console.log("BATTLEBOX LIVE → http://localhost:4000"));
 
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS games (
-      id SERIAL PRIMARY KEY,
-      status TEXT NOT NULL DEFAULT 'running',
-      started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      ended_at   TIMESTAMPTZ
-    )
-  `);
-
   initGame();
 
-  // Probeer lopend spel te hervatten
   try {
     const gameRes = await pool.query(
       `SELECT id FROM games WHERE status = 'running' ORDER BY started_at DESC LIMIT 1`
@@ -409,6 +367,5 @@ initDB().then(async () => {
   await broadcastStats({ allowAutoCreate: false });
 
   const { conn: tikTokConn } = await startConnection(process.env.TIKTOK_USERNAME!, () => {});
-  conn = tikTokConn;
-  initGiftEngine(conn);
+  initGiftEngine(tikTokConn);
 });
