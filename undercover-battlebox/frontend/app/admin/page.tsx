@@ -9,6 +9,26 @@ import type {
   AdminAckResponse,
 } from "@/lib/adminTypes";
 
+type StreamStats = {
+  totalPlayers: number;
+  totalPlayerDiamonds: number;
+  totalHostDiamonds: number;
+};
+
+type LeaderboardEntry = {
+  user_id: string;
+  display_name: string;
+  username: string;
+  total_diamonds: number;
+};
+
+type GameSessionState = {
+  active: boolean;
+  gameId: number | null;
+  startedAt?: string | null;
+  endedAt?: string | null;
+};
+
 export default function AdminDashboardPage() {
   const [arena, setArena] = useState<ArenaState | null>(null);
   const [queue, setQueue] = useState<QueueEntry[]>([]);
@@ -17,24 +37,43 @@ export default function AdminDashboardPage() {
   const [username, setUsername] = useState("");
   const [status, setStatus] = useState<string | null>(null);
 
+  const [streamStats, setStreamStats] = useState<StreamStats | null>(null);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [gameSession, setGameSession] = useState<GameSessionState>({
+    active: false,
+    gameId: null,
+  });
+
   // ✅ Socket setup + cleanup
   useEffect(() => {
     const socket = getAdminSocket();
 
     socket.on("updateArena", setArena);
-    socket.on("updateQueue", (d) => {
+    socket.on("updateQueue", (d: any) => {
       setQueue(d.entries ?? []);
       setQueueOpen(d.open ?? true);
     });
-    socket.on("log", (l) => setLogs((p) => [l, ...p].slice(0, 200)));
-    socket.on("initialLogs", (d) => setLogs(d.slice(0, 200)));
+    socket.on("log", (l: LogEntry) =>
+      setLogs((p) => [l, ...p].slice(0, 200))
+    );
+    socket.on("initialLogs", (d: LogEntry[]) =>
+      setLogs(d.slice(0, 200))
+    );
+
+    socket.on("streamStats", (s: StreamStats) => setStreamStats(s));
+    socket.on(
+      "streamLeaderboard",
+      (entries: LeaderboardEntry[]) => setLeaderboard(entries)
+    );
+    socket.on("gameSession", (session: GameSessionState) =>
+      setGameSession(session)
+    );
 
     socket.on("connect_error", (err: any) => {
       console.error("❌ Socket connectie-fout:", err?.message || err);
       setStatus("❌ Socket verbinding verbroken");
     });
 
-    // ✅ Teruggeven van cleanup functie, niet socket zelf
     return () => {
       socket.removeAllListeners();
       socket.disconnect();
@@ -53,19 +92,41 @@ export default function AdminDashboardPage() {
     );
   };
 
+  const fmtNumber = (n: number) =>
+    n.toLocaleString("nl-NL", { maximumFractionDigits: 0 });
+
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
       {/* HEADER */}
-      <header className="flex items-center justify-between mb-6">
-        <div className="text-2xl font-bold text-[#ff4d4f]">
-          Undercover BattleBox
+      <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-6">
+        <div className="flex items-center gap-2">
+          <div className="text-2xl font-bold text-[#ff4d4f]">UB</div>
+          <div>
+            <div className="text-lg md:text-xl font-semibold">
+              Undercover BattleBox – Admin
+            </div>
+            <div className="text-xs text-gray-500">
+              Verbonden als{" "}
+              <span className="font-semibold text-green-600">Admin</span>
+            </div>
+          </div>
         </div>
-        <span className="text-sm text-green-600 font-semibold">
-          Verbonden als Admin
-        </span>
+        <div className="flex items-center gap-2 text-xs">
+          <span
+            className={`px-3 py-1 rounded-full ${
+              gameSession.active
+                ? "bg-green-100 text-green-700"
+                : "bg-gray-200 text-gray-700"
+            }`}
+          >
+            {gameSession.active
+              ? `Spel actief (Game #${gameSession.gameId ?? "?"})`
+              : "Geen spel actief"}
+          </span>
+        </div>
       </header>
 
-      {/* ADMIN INPUT */}
+      {/* ADMIN INPUT + GAME CONTROLS */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6 flex flex-col md:flex-row gap-3 items-start md:items-end">
         <div className="flex-1">
           <label className="text-xs text-gray-600 font-semibold mb-1 block">
@@ -97,6 +158,20 @@ export default function AdminDashboardPage() {
             className="px-3 py-1.5 bg-red-600 text-white rounded-full"
           >
             Elimineer
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs ml-auto">
+          <button
+            onClick={() => emitAdmin("admin:startGame")}
+            className="px-3 py-1.5 bg-green-600 text-white rounded-full"
+          >
+            Start spel
+          </button>
+          <button
+            onClick={() => emitAdmin("admin:stopGame")}
+            className="px-3 py-1.5 bg-yellow-500 text-white rounded-full"
+          >
+            Stop spel
           </button>
         </div>
       </section>
@@ -147,7 +222,7 @@ export default function AdminDashboardPage() {
                       {p.display_name} (@{p.username.replace(/^@+/, "")})
                     </div>
                     <div className="text-xs text-gray-600">
-                      {p.diamonds} 💎
+                      Ronde: {fmtNumber(p.diamonds)} 💎
                     </div>
                     {p.status === "alive" && (
                       <button
@@ -178,7 +253,11 @@ export default function AdminDashboardPage() {
           <p className="text-sm text-gray-500 mb-3">
             {queue.length} speler{queue.length !== 1 && "s"} • Queue:{" "}
             <span
-              className={queueOpen ? "text-green-600" : "text-red-600 font-bold"}
+              className={
+                queueOpen
+                  ? "text-green-600 font-semibold"
+                  : "text-red-600 font-semibold"
+              }
             >
               {queueOpen ? "OPEN" : "DICHT"}
             </span>
@@ -224,6 +303,86 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
+      {/* STREAM LEADERBOARD + STATS */}
+      <section className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+        {/* LEADERBOARD */}
+        <div className="bg-white rounded-2xl shadow p-4">
+          <h2 className="text-xl font-semibold mb-2">Stream leaderboard</h2>
+          <p className="text-xs text-gray-500 mb-3">
+            Diamonds per speler (alleen ontvangers, exclusief host) binnen
+            huidig spel.
+          </p>
+          <div className="max-h-72 overflow-y-auto text-sm">
+            {leaderboard.length ? (
+              leaderboard.map((e, idx) => (
+                <div
+                  key={`${e.user_id}-${idx}`}
+                  className="flex items-center justify-between border-b last:border-0 border-gray-100 py-1"
+                >
+                  <div>
+                    <span className="font-mono text-xs text-gray-500 mr-2">
+                      #{idx + 1}
+                    </span>
+                    <span className="font-semibold text-gray-900">
+                      {e.display_name} (@{e.username})
+                    </span>
+                  </div>
+                  <div className="font-semibold text-gray-800">
+                    {fmtNumber(e.total_diamonds)} 💎
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="text-sm text-gray-500 italic">
+                Nog geen spelers in leaderboard.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* STATS */}
+        <div className="bg-white rounded-2xl shadow p-4">
+          <h2 className="text-xl font-semibold mb-2">Stream stats</h2>
+          <p className="text-xs text-gray-500 mb-3">
+            Per spel (Game) – gebaseerd op gifts in huidige sessie.
+          </p>
+          <div className="space-y-1 text-sm">
+            <div className="flex justify-between">
+              <span className="text-gray-600">Game ID</span>
+              <span className="font-semibold text-gray-900">
+                {gameSession.active
+                  ? gameSession.gameId ?? "-"
+                  : gameSession.gameId ?? "–"}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600">Aantal spelers</span>
+              <span className="font-semibold text-gray-900">
+                {streamStats ? fmtNumber(streamStats.totalPlayers) : "0"}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600">Totaal speler diamonds</span>
+              <span className="font-semibold text-gray-900">
+                {streamStats
+                  ? fmtNumber(streamStats.totalPlayerDiamonds)
+                  : "0"}{" "}
+                💎
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600">Totaal host diamonds</span>
+              <span className="font-semibold text-gray-900">
+                {streamStats
+                  ? fmtNumber(streamStats.totalHostDiamonds)
+                  : "0"}{" "}
+                💎
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* LOG FEED */}
       <section className="mt-6 bg-white rounded-2xl shadow p-4">
         <h2 className="text-lg font-semibold text-gray-900 mb-2">Log Feed</h2>
@@ -261,4 +420,4 @@ export default function AdminDashboardPage() {
       </section>
     </main>
   );
-}
+              }
