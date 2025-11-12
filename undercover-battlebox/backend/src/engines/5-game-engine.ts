@@ -1,3 +1,6 @@
+// src/engines/5-game-engine.ts
+// ARENA ENGINE – spelers in/uit arena, diamonds per ronde
+
 import { io } from "../server";
 import pool from "../db";
 import { addDiamonds } from "./4-points-engine";
@@ -30,14 +33,16 @@ const arena: Arena = {
   roundStartTime: 0,
 };
 
+// ── ARENA JOIN ────────────────────────────────────────────────
 export function arenaJoin(
   tiktok_id: string,
   display_name: string,
   username: string,
   source: "queue" | "guest" | "admin" = "queue"
-) {
+): boolean {
   if (arena.players.length >= 8) return false;
   if (arena.players.some((p) => p.id === tiktok_id)) return false;
+
   const player: Player = {
     id: tiktok_id,
     display_name,
@@ -47,39 +52,53 @@ export function arenaJoin(
     status: "alive",
     joined_at: Date.now(),
   };
+
   arena.players.push(player);
   emitArena();
   return true;
 }
 
-export function arenaLeave(tiktok_id: string) {
+// ── ARENA LEAVE ───────────────────────────────────────────────
+export function arenaLeave(tiktok_id: string): void {
   const i = arena.players.findIndex((p) => p.id === tiktok_id);
   if (i === -1) return;
   arena.players.splice(i, 1);
   emitArena();
 }
 
-export async function arenaClear() {
-  for (const p of arena.players)
+// ── ARENA CLEAR ───────────────────────────────────────────────
+export async function arenaClear(): Promise<void> {
+  for (const p of arena.players) {
     await pool.query(
       `UPDATE users SET diamonds_current_round = 0 WHERE tiktok_id = $1`,
       [BigInt(p.id)]
     );
+  }
+
   arena.players = [];
   arena.round = 0;
   arena.type = "quarter";
+  arena.timeLeft = 0;
   arena.isRunning = false;
+  arena.roundStartTime = 0;
+
   emitArena();
 }
 
-export async function addDiamondsToArenaPlayer(tid: string, d: number) {
-  const p = arena.players.find((p) => p.id === tid);
+// ── DIAMONDS VOOR SPELER IN ARENA (VANUIT GIFT-ENGINE) ────────
+export async function addDiamondsToArenaPlayer(
+  tiktok_id: string,
+  diamonds: number
+): Promise<void> {
+  const p = arena.players.find((p) => p.id === tiktok_id);
   if (!p) return;
-  p.diamonds += d;
-  await addDiamonds(BigInt(tid), d, "current_round");
+
+  p.diamonds += diamonds;
+  await addDiamonds(BigInt(tiktok_id), diamonds, "current_round");
   emitArena();
 }
 
+// ── GET ARENA (VOOR API / SOCKET) ─────────────────────────────
 export function getArena() {
   return {
     ...arena,
@@ -94,10 +113,12 @@ export function getArena() {
   };
 }
 
+// ── EMIT ARENA NAAR ALLE ADMINS ───────────────────────────────
 export function emitArena() {
   io.emit("updateArena", getArena());
 }
 
+// ── INIT ──────────────────────────────────────────────────────
 export function initGame() {
   console.log("[5-GAME-ENGINE] Ready");
   emitArena();
