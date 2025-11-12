@@ -418,6 +418,9 @@ export default function AdminDashboardPage() {
           )}
         </div>
       </section>
+      <footer className="mt-4 text-xs text-gray-400 text-center">
+  BattleBox Engine v{process.env.NEXT_PUBLIC_BATTLEBOX_VERSION || "dev"}
+</footer>
     </main>
   );
               }
