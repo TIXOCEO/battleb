@@ -139,19 +139,9 @@ export function emitLog(
 }
 
 // ── STATS & LEADERBOARD ───────────────────────────────────────
+// Zorgt dat er ALTIJD een geldige game_id is: herstelt laatste of creëert eerste.
 export async function broadcastStats(): Promise<void> {
   try {
-    if (!currentGameId) {
-      const emptyStats: StreamStats = {
-        totalPlayers: 0,
-        totalPlayerDiamonds: 0,
-        totalHostDiamonds: 0,
-      };
-      io.emit("streamStats", emptyStats);
-      io.emit("streamLeaderboard", [] as LeaderboardEntry[]);
-      return;
-    }
-
     await pool.query(`
       CREATE TABLE IF NOT EXISTS games (
         id SERIAL PRIMARY KEY,
@@ -161,6 +151,22 @@ export async function broadcastStats(): Promise<void> {
       )
     `);
 
+    // Fallback: als we geen currentGameId hebben, pak de laatste of maak er één
+    if (!currentGameId) {
+      const last = await pool.query(`SELECT id FROM games ORDER BY id DESC LIMIT 1`);
+      if (last.rows[0]) {
+        currentGameId = Number(last.rows[0].id);
+        console.log(`[STATS] Herstelde laatste game-id: #${currentGameId}`);
+      } else {
+        const init = await pool.query(
+          `INSERT INTO games (status) VALUES ('running') RETURNING id`
+        );
+        currentGameId = Number(init.rows[0].id);
+        console.log(`[STATS] Eerste game gestart (#${currentGameId})`);
+      }
+    }
+
+    // Statistieken verzamelen
     const statsRes = await pool.query(
       `
       SELECT
