@@ -1,0 +1,19 @@
+{
+  "name": "www",
+  "version": "0.5.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "version": "node tools/sync-version.js && git add frontend/.env.local"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.1.0",
+    "node-cron": "^4.2.1",
+    "socket.io": "^4.8.1",
+    "sqlite3": "^5.1.7",
+    "tiktok-live-connector": "^2.1.0"
+  }
+}
