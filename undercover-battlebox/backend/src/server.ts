@@ -1,10 +1,9 @@
-// src/server.ts — Undercover BattleBox Engine — v0.7.0 FINAL
-// - Stabiel game-session systeem
-// - Foutloze start/stop van games
-// - Geen revival van ended games
-// - Correcte fallback (alleen running games)
-// - Compatibel met gift-engine v0.7.0
-// - Minder unknowns door verbeterde identity-updates
+// backend/src/server.ts — BattleBox Engine v1.0 SETTINGS-DRIVEN
+// - Host komt uit database (settings)
+// - Admin kan host live aanpassen
+// - Arena settings komen ook uit database
+// - Game session systeem gestroomlijnd
+// - Gift-engine kan dynamisch host opvragen via database
 
 import express from "express";
 import http from "http";
@@ -12,7 +11,8 @@ import { Server, Socket } from "socket.io";
 import cors from "cors";
 import dotenv from "dotenv";
 
-import pool from "./db";
+import pool, { getSetting, setSetting, getAllSettings } from "./db";
+
 import { initDB } from "./db";
 import { BATTLEBOX_VERSION } from "./version";
 
@@ -39,13 +39,8 @@ import { getQueue, addToQueue } from "./queue";
 dotenv.config();
 
 // ─────────────────────────────────────────
-// Host check
+// Admin token
 // ─────────────────────────────────────────
-if (!process.env.TIKTOK_USERNAME) {
-  console.error("FATAL: TIKTOK_USERNAME ontbreekt in .env!");
-  process.exit(1);
-}
-
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "supersecret123";
 
 // ─────────────────────────────────────────
@@ -65,7 +60,6 @@ export const io = new Server(server, {
 // ─────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────
-
 type LogEntry = {
   id: string;
   timestamp: string;
@@ -98,7 +92,7 @@ type GameSessionState = {
 // State
 // ─────────────────────────────────────────
 
-let currentGameId: number | null = null; // CRITICAL FOR GIFT ENGINE
+let currentGameId: number | null = null;
 
 const LOG_MAX = 500;
 const logBuffer: LogEntry[] = [];
@@ -134,7 +128,7 @@ export function emitLog(
 }
 
 // ─────────────────────────────────────────
-// Stats / leaderboard
+// Stats + Leaderboard
 // ─────────────────────────────────────────
 
 export async function broadcastStats() {
@@ -148,8 +142,7 @@ export async function broadcastStats() {
       )
     `);
 
-    if (!currentGameId)
-      return; // Geen actief spel → geen stats tonen
+    if (!currentGameId) return;
 
     const statsRes = await pool.query(
       `
@@ -202,10 +195,9 @@ export async function broadcastStats() {
 }
 
 // ─────────────────────────────────────────
-// Game Session Engine v0.7.0
+// Game Session Engine
 // ─────────────────────────────────────────
 
-// *** LAAD ACTIEVE GAME (NIET ended) ***
 async function loadActiveGame() {
   const res = await pool.query(`
     SELECT id FROM games
@@ -218,11 +210,10 @@ async function loadActiveGame() {
     console.log(`[GAME] Actieve game geladen → #${currentGameId}`);
   } else {
     currentGameId = null;
-    console.log("[GAME] Geen actieve game → klaar om te starten");
+    console.log("[GAME] Geen actieve game");
   }
 }
 
-// *** START NEW GAME ***
 async function startNewGame() {
   const res = await pool.query(
     `INSERT INTO games (status)
@@ -237,7 +228,6 @@ async function startNewGame() {
     message: `Nieuw spel gestart (Game #${currentGameId})`,
   });
 
-  // Reset arena bij nieuw spel
   await arenaClear();
 
   io.emit("gameSession", {
@@ -249,29 +239,27 @@ async function startNewGame() {
   await broadcastStats();
 }
 
-// *** STOP GAME ***
 async function stopCurrentGame() {
   if (!currentGameId) return;
 
-  const gameId = currentGameId;
+  const id = currentGameId;
 
   await pool.query(
-    `UPDATE games
-     SET status = 'ended', ended_at = NOW()
-     WHERE id = $1`,
-    [gameId]
+    `UPDATE games SET status='ended', ended_at=NOW()
+     WHERE id=$1`,
+    [id]
   );
 
-  currentGameId = null; // CRITICAL FIX
+  currentGameId = null;
 
   emitLog({
     type: "system",
-    message: `Spel beëindigd (Game #${gameId})`,
+    message: `Spel beëindigd (Game #${id})`,
   });
 
   io.emit("gameSession", {
     active: false,
-    gameId,
+    gameId: id,
     endedAt: new Date().toISOString(),
   });
 
@@ -310,7 +298,8 @@ io.on("connection", async (socket: AdminSocket) => {
 
   socket.emit("settings", getArenaSettings());
 
-  await broadcastStats();
+  const allSettings = await getAllSettings();
+  socket.emit("settings:all", allSettings);
 
   emitLog({ type: "system", message: "Admin dashboard verbonden" });
 
@@ -319,6 +308,7 @@ io.on("connection", async (socket: AdminSocket) => {
       if (action === "startGame") {
         if (currentGameId)
           return ack({ success: false, message: "Er draait al een spel" });
+
         await startNewGame();
         return ack({ success: true });
       }
@@ -326,6 +316,7 @@ io.on("connection", async (socket: AdminSocket) => {
       if (action === "stopGame") {
         if (!currentGameId)
           return ack({ success: false, message: "Geen actief spel" });
+
         await stopCurrentGame();
         return ack({ success: true });
       }
@@ -334,6 +325,7 @@ io.on("connection", async (socket: AdminSocket) => {
         const ok = startRound(data?.type || "quarter");
         if (!ok)
           return ack({ success: false, message: "Kon ronde niet starten" });
+
         return ack({ success: true });
       }
 
@@ -350,6 +342,27 @@ io.on("connection", async (socket: AdminSocket) => {
         });
 
         io.emit("settings", getArenaSettings());
+        return ack({ success: true });
+      }
+
+      // NEW: Admin update host
+      if (action === "setHost") {
+        const clean = (data?.host || "")
+          .trim()
+          .replace("@", "")
+          .toLowerCase();
+
+        if (!clean)
+          return ack({ success: false, message: "Host mag niet leeg zijn" });
+
+        await setSetting("host_username", clean);
+
+        io.emit("settings:all", await getAllSettings());
+        emitLog({
+          type: "system",
+          message: `Host gewijzigd naar @${clean}`,
+        });
+
         return ack({ success: true });
       }
 
@@ -442,6 +455,8 @@ io.on("connection", async (socket: AdminSocket) => {
     handle("updateSettings", d, ack)
   );
 
+  socket.on("admin:setHost", (d, ack) => handle("setHost", d, ack));
+
   socket.on("admin:addToArena", (d, ack) => handle("addToArena", d, ack));
   socket.on("admin:addToQueue", (d, ack) => handle("addToQueue", d, ack));
   socket.on("admin:eliminate", (d, ack) => handle("eliminate", d, ack));
@@ -451,34 +466,21 @@ io.on("connection", async (socket: AdminSocket) => {
 });
 
 // ─────────────────────────────────────────
-// REST
-// ─────────────────────────────────────────
-
-app.post("/api/admin/:action", (_req, res) =>
-  res.json({ success: true })
-);
-
-// ─────────────────────────────────────────
 // STARTUP
 // ─────────────────────────────────────────
 
 initDB().then(async () => {
   server.listen(4000, () => {
-  console.log("BATTLEBOX LIVE → http://0.0.0.0:4000");
-});
+    console.log("BATTLEBOX LIVE → http://0.0.0.0:4000");
+  });
 
-  // INIT arena
   initGame();
-
-  // CRITICAL: alleen actieve games laden
   await loadActiveGame();
-
   await broadcastStats();
 
-  const { conn } = await startConnection(
-    process.env.TIKTOK_USERNAME!,
-    () => {}
-  );
+  const host = await getSetting("host_username");
+  console.log("ACTIVE HOST =", host);
 
+  const { conn } = await startConnection(host || "", () => {});
   initGiftEngine(conn);
 });
