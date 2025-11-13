@@ -23,36 +23,36 @@ export default function SettingsPage() {
   useEffect(() => {
     const socket = getAdminSocket();
 
-    // Huidige settings + host ophalen via ack
+    // Complete settings + host ophalen
     socket.emit("admin:getSettings", {}, (res: any) => {
       if (res.success) {
         setSettings(res.settings);
-        setHostUsername(res.host);
+        setHostUsername(res.host || "");
       }
     });
 
-    // Settings live updates
+    // LIVE updates
     socket.on("settings", (s: ArenaSettings) => setSettings(s));
+    socket.on("host", (h: string) => setHostUsername(h || ""));
 
     return () => {
-      socket.removeAllListeners();
+      socket.off("settings");
+      socket.off("host");
     };
   }, []);
 
-  // Opslaan HOST
+  // HOST OPSLAAN
   const updateHost = () => {
-    if (!hostUsername.trim()) return;
+    const username = hostUsername.trim().replace(/^@/, "");
+    if (!username) return;
 
     const socket = getAdminSocket();
-    socket.emit(
-      "admin:setHost",
-      { username: hostUsername.trim().replace(/^@/, "") },
-      (res: AdminAckResponse) =>
-        setStatus(res.success ? "✔ Host opgeslagen" : `❌ ${res.message}`)
-    );
+    socket.emit("admin:setHost", { username }, (res: AdminAckResponse) => {
+      setStatus(res.success ? "✔ Host opgeslagen" : `❌ ${res.message}`);
+    });
   };
 
-  // Opslaan TIMERS
+  // TIMERS OPSLAAN
   const updateTimers = () => {
     const socket = getAdminSocket();
     socket.emit(
@@ -72,26 +72,28 @@ export default function SettingsPage() {
   };
 
   return (
-    <main className="max-w-3xl mx-auto p-4 md:p-6">
+    <div className="max-w-3xl mx-auto p-4 md:p-6">
       <h1 className="text-2xl font-bold mb-4">⚙ Admin Settings</h1>
 
-      {/* STATUS MELDING */}
       {status && (
         <div className="mb-4 p-2 text-center text-sm bg-blue-50 border border-blue-200 text-blue-700 rounded-xl">
           {status}
         </div>
       )}
 
-      {/* HOST INSTELLING */}
+      {/* HOST BLOCK */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
         <h2 className="text-lg font-semibold mb-2">Host instellingen</h2>
+
         <p className="text-sm text-gray-600 mb-3">
-          De host is de gebruiker naar wie de gifts worden herkend als “host gifts”.
+          Huidige host:{" "}
+          <span className="font-bold text-[#ff4d4f]">
+            @{hostUsername || "niet ingesteld"}
+          </span>
         </p>
 
-        <label className="text-xs text-gray-600">
-          TikTok username (zonder @)
-        </label>
+        <label className="text-xs text-gray-600">Nieuwe TikTok username</label>
+
         <input
           type="text"
           value={hostUsername}
@@ -107,7 +109,7 @@ export default function SettingsPage() {
         </button>
       </section>
 
-      {/* TIMER INSTELLINGEN */}
+      {/* GAME TIMER BLOCK */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
         <h2 className="text-lg font-semibold mb-2">Game instellingen</h2>
 
@@ -168,6 +170,6 @@ export default function SettingsPage() {
           Instellingen opslaan
         </button>
       </section>
-    </main>
+    </div>
   );
 }
