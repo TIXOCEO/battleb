@@ -23,7 +23,7 @@ export default function SettingsPage() {
   useEffect(() => {
     const socket = getAdminSocket();
 
-    // Ontvang huidige settings
+    // Huidige settings + host ophalen via ack
     socket.emit("admin:getSettings", {}, (res: any) => {
       if (res.success) {
         setSettings(res.settings);
@@ -31,13 +31,18 @@ export default function SettingsPage() {
       }
     });
 
+    // Settings live updates
     socket.on("settings", (s: ArenaSettings) => setSettings(s));
 
-    return () => socket.disconnect();
+    return () => {
+      socket.removeAllListeners();
+    };
   }, []);
 
+  // Opslaan HOST
   const updateHost = () => {
     if (!hostUsername.trim()) return;
+
     const socket = getAdminSocket();
     socket.emit(
       "admin:setHost",
@@ -47,6 +52,7 @@ export default function SettingsPage() {
     );
   };
 
+  // Opslaan TIMERS
   const updateTimers = () => {
     const socket = getAdminSocket();
     socket.emit(
@@ -57,7 +63,11 @@ export default function SettingsPage() {
         graceSeconds: settings.graceSeconds,
       },
       (res: AdminAckResponse) =>
-        setStatus(res.success ? "✔ Timer-instellingen opgeslagen" : `❌ ${res.message}`)
+        setStatus(
+          res.success
+            ? "✔ Timer-instellingen opgeslagen"
+            : `❌ ${res.message}`
+        )
     );
   };
 
@@ -65,7 +75,7 @@ export default function SettingsPage() {
     <main className="max-w-3xl mx-auto p-4 md:p-6">
       <h1 className="text-2xl font-bold mb-4">⚙ Admin Settings</h1>
 
-      {/* STATUS BALK */}
+      {/* STATUS MELDING */}
       {status && (
         <div className="mb-4 p-2 text-center text-sm bg-blue-50 border border-blue-200 text-blue-700 rounded-xl">
           {status}
@@ -76,10 +86,12 @@ export default function SettingsPage() {
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
         <h2 className="text-lg font-semibold mb-2">Host instellingen</h2>
         <p className="text-sm text-gray-600 mb-3">
-          De host is de gebruiker naar wie de gifts worden herkend als "host gifts".
+          De host is de gebruiker naar wie de gifts worden herkend als “host gifts”.
         </p>
 
-        <label className="text-xs text-gray-600">TikTok username (zonder @)</label>
+        <label className="text-xs text-gray-600">
+          TikTok username (zonder @)
+        </label>
         <input
           type="text"
           value={hostUsername}
@@ -107,11 +119,15 @@ export default function SettingsPage() {
               min={30}
               value={settings.roundDurationPre}
               onChange={(e) =>
-                setSettings({ ...settings, roundDurationPre: Number(e.target.value) })
+                setSettings({
+                  ...settings,
+                  roundDurationPre: Number(e.target.value),
+                })
               }
               className="w-full border border-gray-300 rounded-lg px-2 py-1 text-sm"
             />
           </div>
+
           <div>
             <label className="text-xs text-gray-600">Finale (sec)</label>
             <input
@@ -119,11 +135,15 @@ export default function SettingsPage() {
               min={60}
               value={settings.roundDurationFinal}
               onChange={(e) =>
-                setSettings({ ...settings, roundDurationFinal: Number(e.target.value) })
+                setSettings({
+                  ...settings,
+                  roundDurationFinal: Number(e.target.value),
+                })
               }
               className="w-full border border-gray-300 rounded-lg px-2 py-1 text-sm"
             />
           </div>
+
           <div>
             <label className="text-xs text-gray-600">Grace (sec)</label>
             <input
@@ -131,7 +151,10 @@ export default function SettingsPage() {
               min={0}
               value={settings.graceSeconds}
               onChange={(e) =>
-                setSettings({ ...settings, graceSeconds: Number(e.target.value) })
+                setSettings({
+                  ...settings,
+                  graceSeconds: Number(e.target.value),
+                })
               }
               className="w-full border border-gray-300 rounded-lg px-2 py-1 text-sm"
             />
