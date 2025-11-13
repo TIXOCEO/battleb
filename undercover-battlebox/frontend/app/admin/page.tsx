@@ -1,4 +1,3 @@
-// app/admin/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -36,8 +35,10 @@ export default function AdminDashboardPage() {
   const [queueOpen, setQueueOpen] = useState(true);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [username, setUsername] = useState("");
+
   const [status, setStatus] = useState<string | null>(null);
 
+  // 🔥 persistente states
   const [streamStats, setStreamStats] = useState<StreamStats | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [gameSession, setGameSession] = useState<GameSessionState>({
@@ -45,14 +46,15 @@ export default function AdminDashboardPage() {
     gameId: null,
   });
 
-  // SOCKET INIT
+  // ───────────────────────────────────────────────
+  // SOCKET INIT (blijft actief over hele admin-app)
+  // ───────────────────────────────────────────────
   useEffect(() => {
     const socket = getAdminSocket();
 
-    // Handlers als named functies zodat we ze in cleanup met .off() kunnen verwijderen
-    const handleUpdateArena = (data: ArenaState) => setArena(data);
-
-    const handleUpdateQueue = (d: any) => {
+    // Handlers (named!)
+    const handleArena = (data: ArenaState) => setArena(data);
+    const handleQueue = (d: any) => {
       setQueue(d.entries ?? []);
       setQueueOpen(d.open ?? true);
     };
@@ -63,8 +65,7 @@ export default function AdminDashboardPage() {
     const handleInitialLogs = (d: LogEntry[]) =>
       setLogs(d.slice(0, 200));
 
-    const handleStreamStats = (s: StreamStats) => setStreamStats(s);
-
+    const handleStats = (s: StreamStats) => setStreamStats(s);
     const handleLeaderboard = (entries: LeaderboardEntry[]) =>
       setLeaderboard(entries);
 
@@ -72,8 +73,8 @@ export default function AdminDashboardPage() {
       setGameSession(session);
 
     const handleConnectError = (err: any) => {
-      console.error("❌ Socket connectie-fout:", err?.message || err);
-      setStatus("❌ Socket verbinding verbroken");
+      console.error("❌ Socket connectiefout:", err?.message);
+      setStatus("❌ Socket verbinding weggevallen");
     };
 
     const handleRoundStart = (d: any) =>
@@ -84,12 +85,12 @@ export default function AdminDashboardPage() {
 
     const handleRoundEnd = () => setStatus("⛔ Ronde beëindigd");
 
-    // Registreren
-    socket.on("updateArena", handleUpdateArena);
-    socket.on("updateQueue", handleUpdateQueue);
+    // REGISTREREN
+    socket.on("updateArena", handleArena);
+    socket.on("updateQueue", handleQueue);
     socket.on("log", handleLog);
     socket.on("initialLogs", handleInitialLogs);
-    socket.on("streamStats", handleStreamStats);
+    socket.on("streamStats", handleStats);
     socket.on("streamLeaderboard", handleLeaderboard);
     socket.on("gameSession", handleGameSession);
     socket.on("connect_error", handleConnectError);
@@ -97,13 +98,13 @@ export default function AdminDashboardPage() {
     socket.on("round:grace", handleRoundGrace);
     socket.on("round:end", handleRoundEnd);
 
-    // ❗ NIET disconnecten, alleen eigen listeners afmelden
+    // CLEANUP (alleen eigen handlers ongeldig maken)
     return () => {
-      socket.off("updateArena", handleUpdateArena);
-      socket.off("updateQueue", handleUpdateQueue);
+      socket.off("updateArena", handleArena);
+      socket.off("updateQueue", handleQueue);
       socket.off("log", handleLog);
       socket.off("initialLogs", handleInitialLogs);
-      socket.off("streamStats", handleStreamStats);
+      socket.off("streamStats", handleStats);
       socket.off("streamLeaderboard", handleLeaderboard);
       socket.off("gameSession", handleGameSession);
       socket.off("connect_error", handleConnectError);
@@ -113,7 +114,9 @@ export default function AdminDashboardPage() {
     };
   }, []);
 
-  // HELPERS
+  // ───────────────────────────────────────────────
+  // EMITTER HELPERS
+  // ───────────────────────────────────────────────
   const emitAdmin = (event: string, payload?: any) => {
     const socket = getAdminSocket();
     setStatus(`Bezig met ${event}...`);
@@ -140,6 +143,9 @@ export default function AdminDashboardPage() {
 
   const sortedPlayers = useMemo(() => arena?.players ?? [], [arena]);
 
+  // ───────────────────────────────────────────────
+  // RENDER
+  // ───────────────────────────────────────────────
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
       {/* HEADER */}
@@ -147,12 +153,9 @@ export default function AdminDashboardPage() {
         <div className="flex items-center gap-2">
           <div className="text-2xl font-bold text-[#ff4d4f]">UB</div>
           <div>
-            <div className="text-xl font-semibold">
-              Undercover BattleBox – Admin
-            </div>
+            <div className="text-xl font-semibold">Undercover BattleBox – Admin</div>
             <div className="text-xs text-gray-500">
-              Verbonden als{" "}
-              <span className="font-semibold text-green-600">Admin</span>
+              Verbonden als <span className="font-semibold text-green-600">Admin</span>
             </div>
           </div>
         </div>
@@ -224,7 +227,7 @@ export default function AdminDashboardPage() {
             </div>
           </div>
 
-          {/* Ronde status */}
+          {/* Status ronde */}
           <div className="mt-3 text-sm">
             <div className="text-gray-600">Ronde status:</div>
 
@@ -565,4 +568,4 @@ export default function AdminDashboardPage() {
       </footer>
     </main>
   );
-      }
+}
