@@ -1,41 +1,53 @@
-// src/lib/socketClient.ts — v1.2 stable singleton
-
+// src/lib/socketClient.ts
 import { io, Socket } from "socket.io-client";
+import type { ArenaState, QueueEntry, LogEntry } from "./adminTypes";
 
-// ⚙️ BACKEND URL
+// 🔗 Altijd jouw backend-IP gebruiken
 const BACKEND_URL = "http://178.251.232.12:4000";
 
 // Admin token
 const ADMIN_TOKEN = process.env.NEXT_PUBLIC_ADMIN_TOKEN || "supergeheim123";
 
-// SINGLETON
-let adminSocket: Socket | null = null;
+let socket: Socket | null = null;
+
+// Types voor inkomende socket events (optioneel)
+export type SocketEvents = {
+  updateArena: (data: ArenaState) => void;
+  updateQueue: (data: { open: boolean; entries: QueueEntry[] }) => void;
+  log: (data: LogEntry) => void;
+  roundStart: (data: { round: number; type: string }) => void;
+  roundEnd: (data: { round: number; type: string }) => void;
+};
 
 export function getAdminSocket(): Socket {
-  if (!adminSocket) {
-    console.log(`⚙️ Verbinden met backend: ${BACKEND_URL}`);
+  if (!socket) {
+    console.log(`⚙️ Socket verbinden met: ${BACKEND_URL}`);
 
-    adminSocket = io(BACKEND_URL, {
+    socket = io(BACKEND_URL, {
+      // Belangrijk: eerst polling → daarna upgrade naar websocket
       transports: ["polling", "websocket"],
       path: "/socket.io",
-      auth: { token: ADMIN_TOKEN },
+      auth: { token: ADMIN_TOKEN, role: "admin" },
       reconnection: true,
-      reconnectionAttempts: 50,
+      reconnectionAttempts: 20,
       reconnectionDelay: 1500,
     });
 
-    adminSocket.on("connect", () => {
-      console.log(`✅ Admin socket connected → ${adminSocket!.id}`);
+    socket.on("connect", () => {
+      console.log(`✅ Verbonden met backend: ${BACKEND_URL}`);
     });
 
-    adminSocket.on("disconnect", (reason) => {
-      console.warn("⚠️ Admin socket disconnected:", reason);
+    socket.on("disconnect", (reason) => {
+      console.warn(`⚠️ Verbinding verbroken (${reason})`);
     });
 
-    adminSocket.on("connect_error", (err: any) => {
-      console.error("❌ Admin socket connect error:", err?.message || err);
+    socket.on("connect_error", (err) => {
+      console.error(
+        `❌ Socket connectie-fout (${BACKEND_URL}):`,
+        err.message
+      );
     });
   }
 
-  return adminSocket;
+  return socket;
 }
