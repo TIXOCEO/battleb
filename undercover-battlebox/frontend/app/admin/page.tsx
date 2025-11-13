@@ -1,3 +1,4 @@
+// app/admin/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -38,7 +39,6 @@ export default function AdminDashboardPage() {
 
   const [status, setStatus] = useState<string | null>(null);
 
-  // 🔥 persistente states
   const [streamStats, setStreamStats] = useState<StreamStats | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [gameSession, setGameSession] = useState<GameSessionState>({
@@ -47,13 +47,13 @@ export default function AdminDashboardPage() {
   });
 
   // ───────────────────────────────────────────────
-  // SOCKET INIT (blijft actief over hele admin-app)
+  // SOCKET LISTENERS (blijven hangen, snapshot apart)
   // ───────────────────────────────────────────────
   useEffect(() => {
     const socket = getAdminSocket();
 
-    // Handlers (named!)
     const handleArena = (data: ArenaState) => setArena(data);
+
     const handleQueue = (d: any) => {
       setQueue(d.entries ?? []);
       setQueueOpen(d.open ?? true);
@@ -66,6 +66,7 @@ export default function AdminDashboardPage() {
       setLogs(d.slice(0, 200));
 
     const handleStats = (s: StreamStats) => setStreamStats(s);
+
     const handleLeaderboard = (entries: LeaderboardEntry[]) =>
       setLeaderboard(entries);
 
@@ -85,7 +86,7 @@ export default function AdminDashboardPage() {
 
     const handleRoundEnd = () => setStatus("⛔ Ronde beëindigd");
 
-    // REGISTREREN
+    // Registreren
     socket.on("updateArena", handleArena);
     socket.on("updateQueue", handleQueue);
     socket.on("log", handleLog);
@@ -98,26 +99,7 @@ export default function AdminDashboardPage() {
     socket.on("round:grace", handleRoundGrace);
     socket.on("round:end", handleRoundEnd);
 
-// SNAPSHOT LOAD BIJ ENTER OP DASHBOARD
-useEffect(() => {
-  const socket = getAdminSocket();
-
-  socket.emit("admin:getInitialSnapshot", {}, (snap: any) => {
-    if (!snap) return;
-
-    if (snap.arena) setArena(snap.arena);
-    if (snap.queue) {
-      setQueue(snap.queue.entries ?? []);
-      setQueueOpen(snap.queue.open ?? true);
-    }
-    if (snap.logs) setLogs(snap.logs.slice(0, 200));
-    if (snap.stats) setStreamStats(snap.stats);
-    if (snap.gameSession) setGameSession(snap.gameSession);
-    if (snap.leaderboard) setLeaderboard(snap.leaderboard);
-  });
-}, []);
-    
-    // CLEANUP (alleen eigen handlers ongeldig maken)
+    // Cleanup: alleen eigen handlers weghalen
     return () => {
       socket.off("updateArena", handleArena);
       socket.off("updateQueue", handleQueue);
@@ -131,6 +113,25 @@ useEffect(() => {
       socket.off("round:grace", handleRoundGrace);
       socket.off("round:end", handleRoundEnd);
     };
+  }, []);
+
+  // 🔄 Snapshot binnenhalen bij binnenkomen op dashboard
+  useEffect(() => {
+    const socket = getAdminSocket();
+
+    socket.emit("admin:getInitialSnapshot", {}, (snap: any) => {
+      if (!snap) return;
+
+      if (snap.arena) setArena(snap.arena);
+      if (snap.queue) {
+        setQueue(snap.queue.entries ?? []);
+        setQueueOpen(snap.queue.open ?? true);
+      }
+      if (snap.logs) setLogs(snap.logs.slice(0, 200));
+      if (snap.stats) setStreamStats(snap.stats);
+      if (snap.gameSession) setGameSession(snap.gameSession);
+      if (snap.leaderboard) setLeaderboard(snap.leaderboard);
+    });
   }, []);
 
   // ───────────────────────────────────────────────
@@ -174,7 +175,8 @@ useEffect(() => {
           <div>
             <div className="text-xl font-semibold">Undercover BattleBox – Admin</div>
             <div className="text-xs text-gray-500">
-              Verbonden als <span className="font-semibold text-green-600">Admin</span>
+              Verbonden als{" "}
+              <span className="font-semibold text-green-600">Admin</span>
             </div>
           </div>
         </div>
