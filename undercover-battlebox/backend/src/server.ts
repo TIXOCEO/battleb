@@ -1,9 +1,4 @@
-// backend/src/server.ts — BattleBox Engine v1.0 SETTINGS-DRIVEN
-// - Host komt uit database (settings)
-// - Admin kan host live aanpassen
-// - Arena settings komen ook uit database
-// - Game session systeem gestroomlijnd
-// - Gift-engine kan dynamisch host opvragen via database
+// src/server.ts — Undercover BattleBox Engine — v1.1 Settings-Enabled
 
 import express from "express";
 import http from "http";
@@ -11,15 +6,13 @@ import { Server, Socket } from "socket.io";
 import cors from "cors";
 import dotenv from "dotenv";
 
-import pool, { getSetting, setSetting, getAllSettings } from "./db";
-
+import pool from "./db";
 import { initDB } from "./db";
+
 import { BATTLEBOX_VERSION } from "./version";
 
 import { startConnection } from "./engines/1-connection";
-import { getOrUpdateUser } from "./engines/2-user-engine";
 import { initGiftEngine } from "./engines/3-gift-engine";
-import { addBP } from "./engines/4-points-engine";
 
 import {
   initGame,
@@ -39,12 +32,12 @@ import { getQueue, addToQueue } from "./queue";
 dotenv.config();
 
 // ─────────────────────────────────────────
-// Admin token
+// ADMIN TOKEN
 // ─────────────────────────────────────────
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "supersecret123";
 
 // ─────────────────────────────────────────
-// Express / Socket.io
+// Express + Socket.IO
 // ─────────────────────────────────────────
 const app = express();
 app.use(cors());
@@ -60,12 +53,12 @@ export const io = new Server(server, {
 // ─────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────
+
 type LogEntry = {
   id: string;
   timestamp: string;
   type: string;
   message: string;
-  [key: string]: any;
 };
 
 type StreamStats = {
@@ -89,36 +82,24 @@ type GameSessionState = {
 };
 
 // ─────────────────────────────────────────
-// State
+// Global state
 // ─────────────────────────────────────────
 
 let currentGameId: number | null = null;
 
-const LOG_MAX = 500;
-const logBuffer: LogEntry[] = [];
-
-export function getCurrentGameId(): number | null {
+export function getCurrentGameId() {
   return currentGameId;
 }
 
-// ─────────────────────────────────────────
-// Emit helpers
-// ─────────────────────────────────────────
+const LOG_MAX = 500;
+const logBuffer: LogEntry[] = [];
 
-export async function emitQueue() {
-  const entries = await getQueue();
-  io.emit("updateQueue", { open: true, entries });
-}
-
-export function emitLog(
-  log: Partial<LogEntry> & { message?: string; type?: string }
-) {
+export function emitLog(log: Partial<LogEntry>) {
   const entry: LogEntry = {
     id: log.id ?? Date.now().toString(),
     timestamp: log.timestamp ?? new Date().toISOString(),
     type: log.type ?? "system",
-    message: log.message ?? "(geen bericht)",
-    ...log,
+    message: log.message ?? "",
   };
 
   logBuffer.unshift(entry);
@@ -127,25 +108,17 @@ export function emitLog(
   io.emit("log", entry);
 }
 
-// ─────────────────────────────────────────
-// Stats + Leaderboard
-// ─────────────────────────────────────────
+export async function emitQueue() {
+  const entries = await getQueue();
+  io.emit("updateQueue", { open: true, entries });
+}
 
+// STREAM STATS + LEADERBOARD
 export async function broadcastStats() {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS games (
-        id SERIAL PRIMARY KEY,
-        status TEXT NOT NULL DEFAULT 'running',
-        started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        ended_at TIMESTAMPTZ
-      )
-    `);
+  if (!currentGameId) return;
 
-    if (!currentGameId) return;
-
-    const statsRes = await pool.query(
-      `
+  const statsRes = await pool.query(
+    `
       SELECT
         COUNT(DISTINCT CASE WHEN receiver_role IN ('speler','cohost')
           THEN receiver_id END) AS total_players,
@@ -155,20 +128,20 @@ export async function broadcastStats() {
           THEN diamonds ELSE 0 END), 0) AS total_host_diamonds
       FROM gifts
       WHERE game_id = $1
-      `,
-      [currentGameId]
-    );
+    `,
+    [currentGameId]
+  );
 
-    const row = statsRes.rows[0] || {};
+  const row = statsRes.rows[0] || {};
 
-    const stats: StreamStats = {
-      totalPlayers: Number(row.total_players || 0),
-      totalPlayerDiamonds: Number(row.total_player_diamonds || 0),
-      totalHostDiamonds: Number(row.total_host_diamonds || 0),
-    };
+  const stats: StreamStats = {
+    totalPlayers: Number(row.total_players || 0),
+    totalPlayerDiamonds: Number(row.total_player_diamonds || 0),
+    totalHostDiamonds: Number(row.total_host_diamonds || 0),
+  };
 
-    const lbRes = await pool.query(
-      `
+  const lbRes = await pool.query(
+    `
       SELECT receiver_id, receiver_username, receiver_display_name,
              COALESCE(SUM(diamonds), 0) AS total_diamonds
       FROM gifts
@@ -176,32 +149,29 @@ export async function broadcastStats() {
       GROUP BY receiver_id, receiver_username, receiver_display_name
       ORDER BY total_diamonds DESC
       LIMIT 50
-      `,
-      [currentGameId]
-    );
+    `,
+    [currentGameId]
+  );
 
-    const leaderboard = lbRes.rows.map((r: any) => ({
-      user_id: r.receiver_id ? String(r.receiver_id) : "",
-      display_name: r.receiver_display_name,
-      username: (r.receiver_username || "").replace(/^@/, ""),
-      total_diamonds: Number(r.total_diamonds || 0),
-    }));
+  const leaderboard = lbRes.rows.map((r: any) => ({
+    user_id: r.receiver_id ? String(r.receiver_id) : "",
+    display_name: r.receiver_display_name,
+    username: (r.receiver_username || "").replace(/^@/, ""),
+    total_diamonds: Number(r.total_diamonds || 0),
+  }));
 
-    io.emit("streamStats", stats);
-    io.emit("streamLeaderboard", leaderboard);
-  } catch (e: any) {
-    console.error("broadcastStats error:", e?.message);
-  }
+  io.emit("streamStats", stats);
+  io.emit("streamLeaderboard", leaderboard);
 }
 
 // ─────────────────────────────────────────
-// Game Session Engine
+// Game session logic
 // ─────────────────────────────────────────
 
 async function loadActiveGame() {
   const res = await pool.query(`
     SELECT id FROM games
-    WHERE status = 'running'
+    WHERE status='running'
     ORDER BY id DESC LIMIT 1
   `);
 
@@ -210,26 +180,22 @@ async function loadActiveGame() {
     console.log(`[GAME] Actieve game geladen → #${currentGameId}`);
   } else {
     currentGameId = null;
-    console.log("[GAME] Geen actieve game");
+    console.log("[GAME] Geen actieve game beschikbaar");
   }
 }
 
 async function startNewGame() {
-  const res = await pool.query(
-    `INSERT INTO games (status)
-     VALUES ('running')
-     RETURNING id, started_at`
-  );
+  const res = await pool.query(`
+    INSERT INTO games (status)
+    VALUES ('running')
+    RETURNING id, started_at
+  `);
 
   currentGameId = Number(res.rows[0].id);
 
-  emitLog({
-    type: "system",
-    message: `Nieuw spel gestart (Game #${currentGameId})`,
-  });
+  emitLog({ type: "system", message: `Nieuw spel gestart (Game #${currentGameId})` });
 
   await arenaClear();
-
   io.emit("gameSession", {
     active: true,
     gameId: currentGameId,
@@ -242,32 +208,29 @@ async function startNewGame() {
 async function stopCurrentGame() {
   if (!currentGameId) return;
 
-  const id = currentGameId;
-
   await pool.query(
-    `UPDATE games SET status='ended', ended_at=NOW()
-     WHERE id=$1`,
-    [id]
+    `UPDATE games SET status='ended', ended_at=NOW() WHERE id=$1`,
+    [currentGameId]
   );
-
-  currentGameId = null;
 
   emitLog({
     type: "system",
-    message: `Spel beëindigd (Game #${id})`,
+    message: `Spel beëindigd (Game #${currentGameId})`,
   });
 
   io.emit("gameSession", {
     active: false,
-    gameId: id,
+    gameId: currentGameId,
     endedAt: new Date().toISOString(),
   });
+
+  currentGameId = null;
 
   await broadcastStats();
 }
 
 // ─────────────────────────────────────────
-// SOCKETS
+// ADMIN SOCKET
 // ─────────────────────────────────────────
 
 interface AdminSocket extends Socket {
@@ -279,36 +242,33 @@ io.use((socket: any, next) => {
     socket.isAdmin = true;
     return next();
   }
-  return next(new Error("Unauthorized"));
+  next(new Error("Unauthorized"));
 });
 
 io.on("connection", async (socket: AdminSocket) => {
   if (!socket.isAdmin) return socket.disconnect();
 
-  console.log("ADMIN DASHBOARD VERBONDEN:", socket.id);
+  console.log("ADMIN DASHBOARD CONNECT:", socket.id);
 
   socket.emit("updateArena", getArena());
   socket.emit("updateQueue", { open: true, entries: await getQueue() });
   socket.emit("initialLogs", logBuffer);
-
   socket.emit("gameSession", {
     active: currentGameId !== null,
     gameId: currentGameId,
   });
 
+  // 🔥 NIEUW: settings naar client
   socket.emit("settings", getArenaSettings());
-
-  const allSettings = await getAllSettings();
-  socket.emit("settings:all", allSettings);
 
   emitLog({ type: "system", message: "Admin dashboard verbonden" });
 
+  // ACTION HANDLER
   const handle = async (action: string, data: any, ack: Function) => {
     try {
       if (action === "startGame") {
         if (currentGameId)
           return ack({ success: false, message: "Er draait al een spel" });
-
         await startNewGame();
         return ack({ success: true });
       }
@@ -316,17 +276,13 @@ io.on("connection", async (socket: AdminSocket) => {
       if (action === "stopGame") {
         if (!currentGameId)
           return ack({ success: false, message: "Geen actief spel" });
-
         await stopCurrentGame();
         return ack({ success: true });
       }
 
       if (action === "startRound") {
         const ok = startRound(data?.type || "quarter");
-        if (!ok)
-          return ack({ success: false, message: "Kon ronde niet starten" });
-
-        return ack({ success: true });
+        return ack(ok ? { success: true } : { success: false, message: "Ronde kon niet starten" });
       }
 
       if (action === "endRound") {
@@ -345,84 +301,44 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // NEW: Admin update host
-      if (action === "setHost") {
-        const clean = (data?.host || "")
-          .trim()
-          .replace("@", "")
-          .toLowerCase();
-
-        if (!clean)
-          return ack({ success: false, message: "Host mag niet leeg zijn" });
-
-        await setSetting("host_username", clean);
-
-        io.emit("settings:all", await getAllSettings());
-        emitLog({
-          type: "system",
-          message: `Host gewijzigd naar @${clean}`,
-        });
-
-        return ack({ success: true });
-      }
-
-      // USER ACTIES
+      // USER-acties
       if (!data?.username)
-        return ack({
-          success: false,
-          message: "username vereist",
-        });
+        return ack({ success: false, message: "username vereist" });
 
       const raw = data.username.trim().replace(/^@/, "");
 
       const userRes = await pool.query(
-        `
-        SELECT tiktok_id, display_name, username
-        FROM users
-        WHERE username ILIKE $1 OR username ILIKE $2
-        LIMIT 1
-        `,
+        `SELECT tiktok_id, display_name, username
+         FROM users WHERE username ILIKE $1 OR username ILIKE $2 LIMIT 1`,
         [raw, `@${raw}`]
       );
 
       if (!userRes.rows[0])
-        return ack({
-          success: false,
-          message: `Gebruiker ${raw} niet gevonden`,
-        });
+        return ack({ success: false, message: `Gebruiker ${raw} niet gevonden` });
 
       const { tiktok_id, display_name, username } = userRes.rows[0];
 
       switch (action) {
         case "addToArena":
-          arenaJoin(String(tiktok_id), display_name, username, "admin");
+          arenaJoin(String(tiktok_id), display_name, username);
           await pool.query("DELETE FROM queue WHERE user_tiktok_id=$1", [
             tiktok_id,
           ]);
           await emitQueue();
           emitArena();
-          emitLog({
-            type: "join",
-            message: `${display_name} → arena`,
-          });
+          emitLog({ type: "join", message: `${display_name} → arena` });
           break;
 
         case "addToQueue":
           await addToQueue(String(tiktok_id), username);
           await emitQueue();
-          emitLog({
-            type: "join",
-            message: `${display_name} → wachtrij`,
-          });
+          emitLog({ type: "join", message: `${display_name} → wachtrij` });
           break;
 
         case "eliminate":
           arenaLeave(String(tiktok_id));
           emitArena();
-          emitLog({
-            type: "elim",
-            message: `${display_name} geëlimineerd`,
-          });
+          emitLog({ type: "elim", message: `${display_name} geëlimineerd` });
           break;
 
         case "removeFromQueue":
@@ -451,18 +367,19 @@ io.on("connection", async (socket: AdminSocket) => {
   socket.on("admin:stopGame", (d, ack) => handle("stopGame", d, ack));
   socket.on("admin:startRound", (d, ack) => handle("startRound", d, ack));
   socket.on("admin:endRound", (d, ack) => handle("endRound", d, ack));
-  socket.on("admin:updateSettings", (d, ack) =>
-    handle("updateSettings", d, ack)
-  );
-
-  socket.on("admin:setHost", (d, ack) => handle("setHost", d, ack));
-
+  socket.on("admin:updateSettings", (d, ack) => handle("updateSettings", d, ack));
   socket.on("admin:addToArena", (d, ack) => handle("addToArena", d, ack));
   socket.on("admin:addToQueue", (d, ack) => handle("addToQueue", d, ack));
   socket.on("admin:eliminate", (d, ack) => handle("eliminate", d, ack));
-  socket.on("admin:removeFromQueue", (d, ack) =>
-    handle("removeFromQueue", d, ack)
-  );
+  socket.on("admin:removeFromQueue", (d, ack) => handle("removeFromQueue", d, ack));
+});
+
+// ─────────────────────────────────────────
+// REST ENDPOINT (placeholder)
+// ─────────────────────────────────────────
+
+app.post("/api/admin/:action", (_req, res) => {
+  res.json({ success: true });
 });
 
 // ─────────────────────────────────────────
@@ -478,9 +395,10 @@ initDB().then(async () => {
   await loadActiveGame();
   await broadcastStats();
 
-  const host = await getSetting("host_username");
-  console.log("ACTIVE HOST =", host);
+  const { conn } = await startConnection(
+    process.env.TIKTOK_USERNAME!,
+    () => {}
+  );
 
-  const { conn } = await startConnection(host || "", () => {});
   initGiftEngine(conn);
 });
