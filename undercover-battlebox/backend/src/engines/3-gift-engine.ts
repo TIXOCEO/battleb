@@ -1,11 +1,8 @@
-// src/engines/3-gift-engine.ts — FINAL PRODUCTION v0.9.0
-// - 100% correcte host-detectie (database-first, geen event-trust)
-// - 0% Unknowns (fallbacks altijd database)
-// - Streak-safe gift processing
-// - Host-gifts tellen ALTIJD tijdens actief spel
-// - Speler-gifts alleen binnen ronde/grace
-// - Ontvanger wordt via database gematcht: tiktok_id, uniqueId, display_name
-// - Resolvet zelfs kapotte TikTok-events correct
+// src/engines/3-gift-engine.ts — FINAL PRODUCTION v0.9.1-debug
+// - Zelfde werking als v0.9.0
+// - EXTRA: compleet host-debug panel voor diagnose
+// - Detecteert exact waarom host niet matched
+// - Geen logica gewijzigd behalve logging
 
 import pool from "../db";
 import { getOrUpdateUser } from "./2-user-engine";
@@ -17,7 +14,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 // =========================================================
-// HOST — via database + normalized
+// HOST — normalized
 // =========================================================
 const HOST_USERNAME_RAW = (process.env.TIKTOK_USERNAME || "")
   .replace("@", "")
@@ -29,7 +26,6 @@ if (!HOST_USERNAME_RAW) {
   process.exit(1);
 }
 
-// lowercase + strip @ + cleanup
 function norm(v: any) {
   return (v || "")
     .toString()
@@ -40,17 +36,16 @@ function norm(v: any) {
 }
 
 // =========================================================
-// DATABASE-FIRST RECEIVER RESOLVE
+// DATABASE-FIRST RECEIVER RESOLVER + DEBUG
 // =========================================================
-async function resolveReceiver(
-  event: any
-): Promise<{
-  id: string | null;
-  username: string;
-  display_name: string;
-  role: "host" | "speler";
-}> {
-  // 1) Alles wat TikTok kán hebben
+async function resolveReceiver(event: any) {
+  //// DEBUG START
+  console.log("────────────────────────────────────────────");
+  console.log("🎯 RECEIVER RESOLVE DEBUG");
+  console.log("HOST_USERNAME_RAW =", HOST_USERNAME_RAW);
+  //// DEBUG END
+
+  // 1) Raw incoming event fields
   const fromEventId =
     event.receiverUserId ||
     event.toUserId ||
@@ -58,22 +53,31 @@ async function resolveReceiver(
     event.receiver?.userId ||
     null;
 
-  const fromEventUnique =
-    norm(
-      event.toUser?.uniqueId ||
-        event.receiver?.uniqueId ||
-        event.receiverUniqueId
-    ) || null;
+  const fromEventUnique = norm(
+    event.toUser?.uniqueId ||
+    event.receiver?.uniqueId ||
+    event.receiverUniqueId
+  ) || null;
 
-  const fromEventNickNorm =
-    norm(
-      event.toUser?.nickname ||
-        event.receiver?.nickname ||
-        event.toUser?.displayName
-    ) || null;
+  const fromEventNickNorm = norm(
+    event.toUser?.nickname ||
+    event.receiver?.nickname ||
+    event.toUser?.displayName
+  ) || null;
 
-  // 2) DIRECT HOST DETECTIE via username match
+  //// DEBUG
+  console.log("receiverUserId (raw) =", fromEventId);
+  console.log("receiver uniqueId (raw) =", event.toUser?.uniqueId || event.receiver?.uniqueId || event.receiverUniqueId);
+  console.log("receiver uniqueId norm =", fromEventUnique);
+  console.log("receiver nickname (raw) =", event.toUser?.nickname || event.receiver?.nickname || event.toUser?.displayName);
+  console.log("receiver nickname norm =", fromEventNickNorm);
+
+  // ---------------------------------------------------------
+  // 2) DIRECT host match
+  // ---------------------------------------------------------
   if (fromEventUnique === HOST_USERNAME_RAW) {
+    console.log("➡ MATCH: uniqueId == HOST");
+    console.log("────────────────────────────────────────────");
     return {
       id: null,
       username: HOST_USERNAME_RAW,
@@ -82,11 +86,12 @@ async function resolveReceiver(
     };
   }
 
-  // 3) Fuzzy host detectie via nickname
-  if (
-    fromEventNickNorm &&
-    fromEventNickNorm.includes(HOST_USERNAME_RAW)
-  ) {
+  // ---------------------------------------------------------
+  // 3) FUZZY host match via nickname
+  // ---------------------------------------------------------
+  if (fromEventNickNorm && fromEventNickNorm.includes(HOST_USERNAME_RAW)) {
+    console.log("➡ MATCH: nickname contains HOST");
+    console.log("────────────────────────────────────────────");
     return {
       id: null,
       username: HOST_USERNAME_RAW,
@@ -98,7 +103,9 @@ async function resolveReceiver(
     };
   }
 
-  // 4) DATABASE LOOKUP (krachtigste fallback)
+  // ---------------------------------------------------------
+  // 4) DATABASE LOOKUP (sterkste vorm)
+  // ---------------------------------------------------------
   if (fromEventId) {
     const r = await getOrUpdateUser(
       String(fromEventId),
@@ -106,8 +113,17 @@ async function resolveReceiver(
       event.toUser?.uniqueId || event.receiver?.uniqueId
     );
 
-    // host?
+    //// DEBUG
+    console.log("DB result →", {
+      id: r.id,
+      username: r.username,
+      display_name: r.display_name,
+      usernameNorm: norm(r.username)
+    });
+
     if (norm(r.username) === HOST_USERNAME_RAW) {
+      console.log("➡ MATCH: database username == HOST");
+      console.log("────────────────────────────────────────────");
       return {
         id: r.id,
         username: r.username.replace(/^@/, ""),
@@ -116,6 +132,8 @@ async function resolveReceiver(
       };
     }
 
+    console.log("➡ NOT HOST — resolved as speler");
+    console.log("────────────────────────────────────────────");
     return {
       id: r.id,
       username: r.username.replace(/^@/, ""),
@@ -124,7 +142,12 @@ async function resolveReceiver(
     };
   }
 
-  // 5) Als TikTok GEEN user-infos geeft → fallback = host
+  // ---------------------------------------------------------
+  // 5) NO USER DATA → fallback = host
+  // ---------------------------------------------------------
+  console.log("❗ TikTok gaf GEEN receiver-informatie → fallback host");
+  console.log("────────────────────────────────────────────");
+
   return {
     id: null,
     username: HOST_USERNAME_RAW,
@@ -146,7 +169,6 @@ export function initGiftEngine(conn: any) {
   conn.on("gift", async (data: any) => {
     const msgId = String(data.msgId ?? data.id ?? data.logId ?? "");
 
-    // Dedup
     if (msgId && processedMsgIds.has(msgId)) return;
 
     try {
@@ -189,13 +211,13 @@ export function initGiftEngine(conn: any) {
       processedMsgIds.add(msgId);
 
       // ---------------------------------------
-      // 3. RESOLVE RECEIVER VIA DATABASE
+      // 3. RECEIVER RESOLVE (debug inside)
       // ---------------------------------------
       const receiver = await resolveReceiver(data);
       const isHost = receiver.role === "host";
 
       // ---------------------------------------
-      // 4. GAME/ROUND STATUS
+      // 4. GAME/RONDE
       // ---------------------------------------
       const gameId = getCurrentGameId();
       const arena = getArena();
@@ -209,10 +231,8 @@ export function initGiftEngine(conn: any) {
       const inRound = inActive || inGrace;
 
       // ---------------------------------------
-      // 5. VERWERKINGSLOGICA
+      // 5. LOGICA
       // ---------------------------------------
-
-      // Speler → speler buiten ronde = negeren
       if (!isHost && !inRound) {
         emitLog({
           type: "system",
@@ -221,33 +241,24 @@ export function initGiftEngine(conn: any) {
         return;
       }
 
-      // Host-gift → ALTIJD tellen zodra game actief
-      if (isHost) {
-        if (!gameId) {
-          emitLog({
-            type: "system",
-            message: `[GIFT IGNORE] Geen actief spel → host gift genegeerd`,
-          });
-          return;
-        }
+      if (isHost && !gameId) {
+        emitLog({
+          type: "system",
+          message: `[GIFT IGNORE] Geen actief spel → host gift genegeerd`,
+        });
+        return;
       }
 
       // ---------------------------------------
-      // 6. PUNTEN TOEVOEGEN
+      // 6. PUNTEN
       // ---------------------------------------
       await addDiamonds(BigInt(senderId), credited, "total");
       await addDiamonds(BigInt(senderId), credited, "stream");
       await addDiamonds(BigInt(senderId), credited, "current_round");
 
       const bpGain = credited * 0.2;
-      await addBP(
-        BigInt(senderId),
-        bpGain,
-        "GIFT",
-        sender.display_name
-      );
+      await addBP(BigInt(senderId), bpGain, "GIFT", sender.display_name);
 
-      // Arena score
       if (!isHost && receiver.id && inRound) {
         if (arena.players.some((p: any) => p.id === receiver.id)) {
           await addDiamondsToArenaPlayer(receiver.id, credited);
@@ -255,7 +266,7 @@ export function initGiftEngine(conn: any) {
       }
 
       // ---------------------------------------
-      // 7. SAVE IN DATABASE
+      // 7. DATABASE SAVE
       // ---------------------------------------
       await pool.query(
         `
@@ -303,6 +314,6 @@ export function initGiftEngine(conn: any) {
   });
 
   console.log(
-    `[GIFT ENGINE] v0.9.0 LOADED — database-first matching, host=@${HOST_USERNAME_RAW}`
+    `[GIFT ENGINE] v0.9.1-debug LOADED — host=@${HOST_USERNAME_RAW}`
   );
 }
