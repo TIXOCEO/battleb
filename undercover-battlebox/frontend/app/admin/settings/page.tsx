@@ -1,3 +1,4 @@
+// app/admin/settings/page.tsx
 "use client";
 
 import React, { useEffect, useState } from "react";
@@ -24,23 +25,34 @@ export default function SettingsPage() {
   useEffect(() => {
     const socket = getAdminSocket();
 
+    // Handlers apart zodat we ze in cleanup weer kunnen afmelden
+    const handleSettings = (s: ArenaSettings) => setSettings(s);
+
+    const handleHost = (h: string) => {
+      setCurrentHost(h || "");
+      setHostUsername(h || "");
+    };
+
     // Huidige settings + host binnenhalen
     socket.emit("admin:getSettings", {}, (res: any) => {
-      if (res.success) {
-        setSettings(res.settings);
-        setHostUsername(res.host || "");
-        setCurrentHost(res.host || "");
+      if (res?.success) {
+        if (res.settings) setSettings(res.settings);
+        if (typeof res.host === "string") {
+          setHostUsername(res.host || "");
+          setCurrentHost(res.host || "");
+        }
+      } else if (res?.message) {
+        setStatus(`❌ ${res.message}`);
       }
     });
 
-    socket.on("settings", (s: ArenaSettings) => setSettings(s));
-    socket.on("host", (h: string) => {
-      setCurrentHost(h);
-      setHostUsername(h);
-    });
+    socket.on("settings", handleSettings);
+    socket.on("host", handleHost);
 
+    // ❗ GEEN removeAllListeners en GEEN disconnect
     return () => {
-      socket.removeAllListeners();
+      socket.off("settings", handleSettings);
+      socket.off("host", handleHost);
     };
   }, []);
 
@@ -52,8 +64,9 @@ export default function SettingsPage() {
     socket.emit(
       "admin:setHost",
       { username: hostUsername.trim().replace(/^@/, "") },
-      (res: AdminAckResponse) =>
-        setStatus(res.success ? "✔ Host opgeslagen" : `❌ ${res.message}`)
+      (res: AdminAckResponse) => {
+        setStatus(res.success ? "✔ Host opgeslagen" : `❌ ${res.message}`);
+      }
     );
   };
 
@@ -124,10 +137,10 @@ export default function SettingsPage() {
               min={30}
               value={settings.roundDurationPre}
               onChange={(e) =>
-                setSettings({
-                  ...settings,
+                setSettings((prev) => ({
+                  ...prev,
                   roundDurationPre: Number(e.target.value),
-                })
+                }))
               }
               className="w-full border border-gray-300 rounded-lg px-2 py-1 text-sm"
             />
@@ -140,10 +153,10 @@ export default function SettingsPage() {
               min={60}
               value={settings.roundDurationFinal}
               onChange={(e) =>
-                setSettings({
-                  ...settings,
+                setSettings((prev) => ({
+                  ...prev,
                   roundDurationFinal: Number(e.target.value),
-                })
+                }))
               }
               className="w-full border border-gray-300 rounded-lg px-2 py-1 text-sm"
             />
@@ -156,10 +169,10 @@ export default function SettingsPage() {
               min={0}
               value={settings.graceSeconds}
               onChange={(e) =>
-                setSettings({
-                  ...settings,
+                setSettings((prev) => ({
+                  ...prev,
                   graceSeconds: Number(e.target.value),
-                })
+                }))
               }
               className="w-full border border-gray-300 rounded-lg px-2 py-1 text-sm"
             />
