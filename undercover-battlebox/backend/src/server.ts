@@ -463,9 +463,9 @@ app.post("/api/admin/:action", (_req, res) =>
 // ─────────────────────────────────────────
 
 initDB().then(async () => {
-  server.listen(4000, "0.0.0.0", () =>
-  console.log("BATTLEBOX LIVE → http://0.0.0.0:4000")
-);
+  server.listen(4000, () => {
+  console.log("BATTLEBOX LIVE → http://0.0.0.0:4000");
+});
 
   // INIT arena
   initGame();
