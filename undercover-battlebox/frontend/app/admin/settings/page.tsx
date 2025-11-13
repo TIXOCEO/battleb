@@ -13,78 +13,90 @@ type ArenaSettings = {
 export default function SettingsPage() {
   const [hostUsername, setHostUsername] = useState("");
   const [currentHost, setCurrentHost] = useState("");
-  const [status, setStatus] = useState<string | null>(null);
-
   const [settings, setSettings] = useState<ArenaSettings>({
     roundDurationPre: 180,
     roundDurationFinal: 300,
     graceSeconds: 5,
   });
 
+  const [status, setStatus] = useState<string | null>(null);
+
   useEffect(() => {
     const socket = getAdminSocket();
 
-    // Huidige settings + host ophalen via ACK
+    // Huidige settings + host binnenhalen
     socket.emit("admin:getSettings", {}, (res: any) => {
       if (res.success) {
         setSettings(res.settings);
-        setHostUsername(res.host);
-        setCurrentHost(res.host);
+        setHostUsername(res.host || "");
+        setCurrentHost(res.host || "");
       }
     });
 
-    // Host live update
-    socket.on("host", (h: string) => setCurrentHost(h));
-
-    // Settings live update
     socket.on("settings", (s: ArenaSettings) => setSettings(s));
+    socket.on("host", (h: string) => {
+      setCurrentHost(h);
+      setHostUsername(h);
+    });
 
     return () => {
       socket.removeAllListeners();
     };
   }, []);
 
-  // Opslaan host
+  // Opslaan HOST
   const updateHost = () => {
-    const clean = hostUsername.trim().replace(/^@/, "");
-
-    if (!clean) return;
+    if (!hostUsername.trim()) return;
 
     const socket = getAdminSocket();
     socket.emit(
       "admin:setHost",
-      { username: clean },
+      { username: hostUsername.trim().replace(/^@/, "") },
       (res: AdminAckResponse) =>
         setStatus(res.success ? "✔ Host opgeslagen" : `❌ ${res.message}`)
     );
   };
 
+  // Opslaan TIMERS
+  const updateTimers = () => {
+    const socket = getAdminSocket();
+    socket.emit(
+      "admin:updateSettings",
+      {
+        roundDurationPre: settings.roundDurationPre,
+        roundDurationFinal: settings.roundDurationFinal,
+        graceSeconds: settings.graceSeconds,
+      },
+      (res: AdminAckResponse) =>
+        setStatus(
+          res.success
+            ? "✔ Timer-instellingen opgeslagen"
+            : `❌ ${res.message}`
+        )
+    );
+  };
+
   return (
     <div className="max-w-3xl mx-auto">
+      <h1 className="text-2xl font-bold mb-4">⚙ Admin Settings</h1>
 
-      {/* STATUS */}
+      {/* STATUS MELDING */}
       {status && (
-        <div className="mb-4 p-2 px-3 text-center text-sm bg-blue-50 border border-blue-200 text-blue-700 rounded-xl">
+        <div className="mb-4 p-2 text-center text-sm bg-blue-50 border border-blue-200 text-blue-700 rounded-xl">
           {status}
         </div>
       )}
 
-      {/* HUIDIGE HOST BADGE */}
-      <div className="mb-4">
-        <span className="text-xs font-semibold text-gray-500">Huidige host:</span>
-        <div className="mt-1 inline-block px-3 py-1 rounded-full bg-gray-200 text-gray-900 text-sm font-semibold">
-          @{currentHost || "geen host ingesteld"}
-        </div>
-      </div>
-
-      {/* HOST INSTELLING */}
+      {/* HUIDIGE HOST INFO */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
-        <h1 className="text-xl font-bold mb-2">Host instellingen</h1>
-        <p className="text-sm text-gray-600 mb-3">
-          De host is de gebruiker naar wie de gifts worden herkend als “host gifts”.
-        </p>
+        <div className="text-xs text-gray-500 mb-1">Huidige host</div>
+        <div className="text-lg font-semibold mb-3">
+          {currentHost ? `@${currentHost}` : "— geen host ingesteld —"}
+        </div>
 
-        <label className="text-xs text-gray-600">TikTok username (zonder @)</label>
+        <label className="text-xs text-gray-600">
+          Nieuwe TikTok host username (zonder @)
+        </label>
         <input
           type="text"
           value={hostUsername}
@@ -96,18 +108,71 @@ export default function SettingsPage() {
           onClick={updateHost}
           className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-full text-sm"
         >
-          Opslaan
+          Host opslaan
         </button>
       </section>
 
-      {/* EXTRA */}
+      {/* TIMER INSTELLINGEN */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
-        <h2 className="text-lg font-semibold mb-2">Extra instellingen</h2>
-        <p className="text-sm text-gray-600">
-          Timerinstellingen worden beheerd via het Hoofd Dashboard.
-        </p>
-      </section>
+        <h2 className="text-lg font-semibold mb-3">Game instellingen</h2>
 
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label className="text-xs text-gray-600">Voorronde (sec)</label>
+            <input
+              type="number"
+              min={30}
+              value={settings.roundDurationPre}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  roundDurationPre: Number(e.target.value),
+                })
+              }
+              className="w-full border border-gray-300 rounded-lg px-2 py-1 text-sm"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-gray-600">Finale (sec)</label>
+            <input
+              type="number"
+              min={60}
+              value={settings.roundDurationFinal}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  roundDurationFinal: Number(e.target.value),
+                })
+              }
+              className="w-full border border-gray-300 rounded-lg px-2 py-1 text-sm"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-gray-600">Grace (sec)</label>
+            <input
+              type="number"
+              min={0}
+              value={settings.graceSeconds}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  graceSeconds: Number(e.target.value),
+                })
+              }
+              className="w-full border border-gray-300 rounded-lg px-2 py-1 text-sm"
+            />
+          </div>
+        </div>
+
+        <button
+          onClick={updateTimers}
+          className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-full text-sm"
+        >
+          Instellingen opslaan
+        </button>
+      </section>
     </div>
   );
 }
