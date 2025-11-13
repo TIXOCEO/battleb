@@ -1,20 +1,21 @@
-// src/lib/socketClient.ts
+// frontend/lib/socketClient.ts
 import { io, Socket } from "socket.io-client";
 import type { ArenaState, QueueEntry, LogEntry } from "./adminTypes";
 
-// 🔗 Altijd jouw backend-IP gebruiken
+// Backend URL
 const BACKEND_URL = "http://178.251.232.12:4000";
 
 // Admin token
-const ADMIN_TOKEN = process.env.NEXT_PUBLIC_ADMIN_TOKEN || "supergeheim123";
+const ADMIN_TOKEN =
+  process.env.NEXT_PUBLIC_ADMIN_TOKEN || "supergeheim123";
 
-// ✅ ECHTE SINGLETON VIA GLOBAL
+// GLOBAL SINGLETON (Next.js safe)
 declare global {
   // eslint-disable-next-line no-var
   var __adminSocket: Socket | undefined;
 }
 
-// Types voor inkomende socket events (optioneel)
+// Types voor inkomende events
 export type SocketEvents = {
   updateArena: (data: ArenaState) => void;
   updateQueue: (data: { open: boolean; entries: QueueEntry[] }) => void;
@@ -23,43 +24,49 @@ export type SocketEvents = {
   roundEnd: (data: { round: number; type: string }) => void;
 };
 
+// ✔ Nooit server side aanmaken
+// ✔ Nooit disconnecten
+// ✔ Nooit dubbele instantiaties
+// ✔ Werkt volledig over meerdere admin pagina's (Dashboard ↔ Settings)
+
 export function getAdminSocket(): Socket {
   if (typeof window === "undefined") {
-    throw new Error("getAdminSocket mag alleen in client components worden gebruikt.");
+    throw new Error("getAdminSocket moet client-side gebruikt worden.");
   }
 
-  // ➜ als socket al bestaat (ook na route switch / HMR): zelfde instantie gebruiken
+  // ➜ Socket bestaat al? Gebruik die direct.
   if (globalThis.__adminSocket) {
     return globalThis.__adminSocket;
   }
 
-  console.log(`⚙️ Socket verbinden met: ${BACKEND_URL}`);
+  console.log(`⚙️ Verbinden met backend socket: ${BACKEND_URL}`);
 
-  const s = io(BACKEND_URL, {
-    // Belangrijk: eerst polling → daarna upgrade naar websocket
+  const socket = io(BACKEND_URL, {
     transports: ["polling", "websocket"],
     path: "/socket.io",
     auth: { token: ADMIN_TOKEN, role: "admin" },
     reconnection: true,
-    reconnectionAttempts: 20,
-    reconnectionDelay: 1500,
+    reconnectionAttempts: 40,
+    reconnectionDelay: 1200,
   });
 
-  s.on("connect", () => {
-    console.log(`✅ Verbonden met backend: ${BACKEND_URL}`);
+  socket.on("connect", () => {
+    console.log("✅ Admin socket verbonden:", socket.id);
   });
 
-  s.on("disconnect", (reason) => {
-    console.warn(`⚠️ Verbinding verbroken (${reason})`);
+  socket.on("disconnect", (reason) => {
+    console.warn("⚠️ Admin socket disconnect:", reason);
   });
 
-  s.on("connect_error", (err) => {
-    console.error(`❌ Socket connectie-fout (${BACKEND_URL}):`, err.message);
+  socket.on("connect_error", (err) => {
+    console.error("❌ Connect error:", err.message);
   });
 
-  globalThis.__adminSocket = s;
-  return s;
+  // Bewaar singleton
+  globalThis.__adminSocket = socket;
+
+  return socket;
 }
 
-// Zorg dat dit een module is voor TS (ivm declare global)
+// Zorg dat dit echt een module blijft
 export {};
