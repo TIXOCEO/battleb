@@ -1,3 +1,4 @@
+// app/admin/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -48,39 +49,67 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     const socket = getAdminSocket();
 
-    socket.on("updateArena", setArena);
-    socket.on("updateQueue", (d: any) => {
+    // Handlers als named functies zodat we ze in cleanup met .off() kunnen verwijderen
+    const handleUpdateArena = (data: ArenaState) => setArena(data);
+
+    const handleUpdateQueue = (d: any) => {
       setQueue(d.entries ?? []);
       setQueueOpen(d.open ?? true);
-    });
+    };
 
-    socket.on("log", (l: LogEntry) => setLogs((p) => [l, ...p].slice(0, 200)));
-    socket.on("initialLogs", (d: LogEntry[]) => setLogs(d.slice(0, 200)));
+    const handleLog = (l: LogEntry) =>
+      setLogs((prev) => [l, ...prev].slice(0, 200));
 
-    socket.on("streamStats", (s: StreamStats) => setStreamStats(s));
-    socket.on("streamLeaderboard", (entries: LeaderboardEntry[]) =>
-      setLeaderboard(entries)
-    );
-    socket.on("gameSession", (session: GameSessionState) =>
-      setGameSession(session)
-    );
+    const handleInitialLogs = (d: LogEntry[]) =>
+      setLogs(d.slice(0, 200));
 
-    socket.on("connect_error", (err: any) => {
+    const handleStreamStats = (s: StreamStats) => setStreamStats(s);
+
+    const handleLeaderboard = (entries: LeaderboardEntry[]) =>
+      setLeaderboard(entries);
+
+    const handleGameSession = (session: GameSessionState) =>
+      setGameSession(session);
+
+    const handleConnectError = (err: any) => {
       console.error("❌ Socket connectie-fout:", err?.message || err);
       setStatus("❌ Socket verbinding verbroken");
-    });
+    };
 
-    socket.on("round:start", (d) =>
-      setStatus(`▶️ Ronde gestart (${d.type}) — ${d.duration}s`)
-    );
-    socket.on("round:grace", (d) =>
-      setStatus(`⏳ Grace-periode actief (${d.grace}s)`)
-    );
-    socket.on("round:end", () => setStatus("⛔ Ronde beëindigd"));
+    const handleRoundStart = (d: any) =>
+      setStatus(`▶️ Ronde gestart (${d.type}) — ${d.duration}s`);
 
+    const handleRoundGrace = (d: any) =>
+      setStatus(`⏳ Grace-periode actief (${d.grace}s)`);
+
+    const handleRoundEnd = () => setStatus("⛔ Ronde beëindigd");
+
+    // Registreren
+    socket.on("updateArena", handleUpdateArena);
+    socket.on("updateQueue", handleUpdateQueue);
+    socket.on("log", handleLog);
+    socket.on("initialLogs", handleInitialLogs);
+    socket.on("streamStats", handleStreamStats);
+    socket.on("streamLeaderboard", handleLeaderboard);
+    socket.on("gameSession", handleGameSession);
+    socket.on("connect_error", handleConnectError);
+    socket.on("round:start", handleRoundStart);
+    socket.on("round:grace", handleRoundGrace);
+    socket.on("round:end", handleRoundEnd);
+
+    // ❗ NIET disconnecten, alleen eigen listeners afmelden
     return () => {
-      socket.removeAllListeners();
-      socket.disconnect();
+      socket.off("updateArena", handleUpdateArena);
+      socket.off("updateQueue", handleUpdateQueue);
+      socket.off("log", handleLog);
+      socket.off("initialLogs", handleInitialLogs);
+      socket.off("streamStats", handleStreamStats);
+      socket.off("streamLeaderboard", handleLeaderboard);
+      socket.off("gameSession", handleGameSession);
+      socket.off("connect_error", handleConnectError);
+      socket.off("round:start", handleRoundStart);
+      socket.off("round:grace", handleRoundGrace);
+      socket.off("round:end", handleRoundEnd);
     };
   }, []);
 
@@ -339,10 +368,7 @@ export default function AdminDashboardPage() {
                       {p.status === "alive" && (
                         <button
                           onClick={() =>
-                            emitAdminWithUser(
-                              "admin:eliminate",
-                              p.username
-                            )
+                            emitAdminWithUser("admin:eliminate", p.username)
                           }
                           className="mt-2 px-2 py-1 text-[11px] rounded-full border border-red-300 text-red-700 bg-red-50"
                         >
@@ -539,4 +565,4 @@ export default function AdminDashboardPage() {
       </footer>
     </main>
   );
-}
+      }
