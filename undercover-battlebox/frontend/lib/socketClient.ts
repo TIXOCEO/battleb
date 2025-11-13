@@ -1,4 +1,3 @@
-
 // src/lib/socketClient.ts
 import { io, Socket } from "socket.io-client";
 import type { ArenaState, QueueEntry, LogEntry } from "./adminTypes";
@@ -29,12 +28,18 @@ export function getAdminSocket(): Socket {
     console.log(`⚙️ Initialiseer socket verbinding naar: ${BACKEND_URL}`);
 
     socket = io(BACKEND_URL, {
-      path: "/socket.io", // belangrijk: exact pad van server
-      transports: ["websocket"],
+      //
+      // 🎯 **CRITICAL FIX**
+      // Socket.IO moet *altijd* polling toestaan bij de eerste handshake.
+      // Daarna upgrade hij automatisch naar WebSocket.
+      //
+      transports: ["polling", "websocket"],
+      path: "/socket.io",
       auth: { token: ADMIN_TOKEN, role: "admin" },
+
       reconnection: true,
-      reconnectionAttempts: 20,
-      reconnectionDelay: 1500,
+      reconnectionAttempts: 30,
+      reconnectionDelay: 1000,
     });
 
     socket.on("connect", () => {
@@ -46,7 +51,10 @@ export function getAdminSocket(): Socket {
     });
 
     socket.on("connect_error", (err) => {
-      console.error(`❌ Socket connectie-fout (${BACKEND_URL}):`, err.message);
+      console.error(
+        `❌ Socket connectie-fout (${BACKEND_URL}):`,
+        err.message
+      );
     });
   }
 
