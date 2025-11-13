@@ -1,3 +1,4 @@
+// app/admin/settings/page.tsx
 "use client";
 
 import React, { useEffect, useState } from "react";
@@ -8,6 +9,11 @@ type ArenaSettings = {
   roundDurationPre: number;
   roundDurationFinal: number;
   graceSeconds: number;
+};
+
+type GameSessionState = {
+  active: boolean;
+  gameId: number | null;
 };
 
 export default function SettingsPage() {
@@ -21,6 +27,7 @@ export default function SettingsPage() {
 
   const [status, setStatus] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
+  const [gameActive, setGameActive] = useState(false);
 
   // ───────────────────────────────────────────────
   // SOCKET INITIALISATIE
@@ -28,11 +35,9 @@ export default function SettingsPage() {
   useEffect(() => {
     const socket = getAdminSocket();
 
-    // CONNECT EVENTS
     const handleConnect = () => setConnected(true);
     const handleDisconnect = () => setConnected(false);
 
-    // SETTINGS EVENTS
     const handleSettings = (s: ArenaSettings) => setSettings(s);
 
     const handleHost = (h: string) => {
@@ -41,7 +46,11 @@ export default function SettingsPage() {
       setHostUsername(clean);
     };
 
-    // 1) Huidige settings ophalen
+    const handleGameSession = (session: GameSessionState) => {
+      setGameActive(!!session?.active);
+    };
+
+    // 1) Huidige settings + host binnenhalen
     socket.emit("admin:getSettings", {}, (res: any) => {
       if (res?.success) {
         if (res.settings) setSettings(res.settings);
@@ -55,18 +64,20 @@ export default function SettingsPage() {
       }
     });
 
-    // REGISTREREN
+    // Registreren
     socket.on("settings", handleSettings);
     socket.on("host", handleHost);
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
+    socket.on("gameSession", handleGameSession);
 
-    // CLEANUP
+    // Cleanup
     return () => {
       socket.off("settings", handleSettings);
       socket.off("host", handleHost);
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
+      socket.off("gameSession", handleGameSession);
     };
   }, []);
 
@@ -74,6 +85,11 @@ export default function SettingsPage() {
   // HOST OPSLAAN
   // ───────────────────────────────────────────────
   const updateHost = () => {
+    if (gameActive) {
+      setStatus("❌ Host kan niet worden gewijzigd tijdens een actief spel");
+      return;
+    }
+
     if (!hostUsername.trim()) return;
 
     const socket = getAdminSocket();
@@ -155,15 +171,30 @@ export default function SettingsPage() {
           type="text"
           value={hostUsername}
           onChange={(e) => setHostUsername(e.target.value)}
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1"
+          disabled={gameActive}
+          className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1 ${
+            gameActive ? "bg-gray-100 cursor-not-allowed" : ""
+          }`}
         />
 
         <button
           onClick={updateHost}
-          className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-full text-sm"
+          disabled={gameActive}
+          className={`mt-3 px-4 py-2 rounded-full text-sm text-white ${
+            gameActive
+              ? "bg-gray-400 cursor-not-allowed"
+              : "bg-blue-600 hover:bg-blue-700"
+          }`}
         >
           Host opslaan
         </button>
+
+        {gameActive && (
+          <p className="mt-2 text-xs text-amber-600">
+            Host kan alleen worden gewijzigd als er géén spel actief is.
+            Stop eerst het huidige spel via het dashboard.
+          </p>
+        )}
       </section>
 
       {/* TIMER INSTELLINGEN */}
