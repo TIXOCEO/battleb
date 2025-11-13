@@ -2,19 +2,14 @@
 import { io, Socket } from "socket.io-client";
 import type { ArenaState, QueueEntry, LogEntry } from "./adminTypes";
 
-// 🔧 Gebruik .env.local variabele, maar verwijder eventuele trailing slash
-const BACKEND_URL =
-  (process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000").replace(
-    /\/+$/,
-    ""
-  );
+// 👇 HARD FIX → gebruik altijd jouw server-IP
+const BACKEND_URL = "http://178.251.232.12:4000";
 
-// Admin token uit .env.local
+// Admin token
 const ADMIN_TOKEN = process.env.NEXT_PUBLIC_ADMIN_TOKEN || "supergeheim123";
 
 let socket: Socket | null = null;
 
-// Types voor inkomende socket events (optioneel)
 export type SocketEvents = {
   updateArena: (data: ArenaState) => void;
   updateQueue: (data: { open: boolean; entries: QueueEntry[] }) => void;
@@ -25,21 +20,18 @@ export type SocketEvents = {
 
 export function getAdminSocket(): Socket {
   if (!socket) {
-    console.log(`⚙️ Initialiseer socket verbinding naar: ${BACKEND_URL}`);
+    console.log(`⚙️ Socket verbinden met: ${BACKEND_URL}`);
 
     socket = io(BACKEND_URL, {
       //
-      // 🎯 **CRITICAL FIX**
-      // Socket.IO moet *altijd* polling toestaan bij de eerste handshake.
-      // Daarna upgrade hij automatisch naar WebSocket.
+      // Belangrijk: eerst polling → daarna upgrade naar websocket
       //
       transports: ["polling", "websocket"],
       path: "/socket.io",
       auth: { token: ADMIN_TOKEN, role: "admin" },
-
       reconnection: true,
-      reconnectionAttempts: 30,
-      reconnectionDelay: 1000,
+      reconnectionAttempts: 20,
+      reconnectionDelay: 1500,
     });
 
     socket.on("connect", () => {
