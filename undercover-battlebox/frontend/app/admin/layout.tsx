@@ -1,4 +1,3 @@
-// app/admin/layout.tsx
 import type { ReactNode } from "react";
 import Link from "next/link";
 
@@ -25,7 +24,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             </div>
 
             {/* NAV */}
-            <nav className="flex items-center gap-4 text-xs">
+            <nav className="flex items-center gap-4 text-xs font-medium">
               <Link
                 href="/admin"
                 className="text-gray-700 hover:text-[#ff4d4f] transition"
@@ -42,11 +41,15 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             </nav>
           </header>
 
-          {/* PAGE CONTENT */}
+          {/* MAIN CONTENT */}
           <main className="flex-1 p-4 md:p-6">
             {children}
           </main>
 
+          {/* FOOTER */}
+          <footer className="text-center text-xs text-gray-400 py-4">
+            BattleBox Admin © {new Date().getFullYear()}
+          </footer>
         </div>
       </body>
     </html>
