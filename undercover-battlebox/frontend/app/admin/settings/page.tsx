@@ -23,7 +23,7 @@ export default function SettingsPage() {
   useEffect(() => {
     const socket = getAdminSocket();
 
-    // Complete settings + host ophalen
+    // Huidige settings + host via ACK ophalen
     socket.emit("admin:getSettings", {}, (res: any) => {
       if (res.success) {
         setSettings(res.settings);
@@ -31,30 +31,32 @@ export default function SettingsPage() {
       }
     });
 
-    // LIVE updates
+    // Live updates (wanneer backend settings wijzigt)
     socket.on("settings", (s: ArenaSettings) => setSettings(s));
     socket.on("host", (h: string) => setHostUsername(h || ""));
 
     return () => {
-      socket.off("settings");
-      socket.off("host");
+      socket.removeAllListeners();
     };
   }, []);
 
-  // HOST OPSLAAN
+  // Opslaan host
   const updateHost = () => {
-    const username = hostUsername.trim().replace(/^@/, "");
-    if (!username) return;
-
+    if (!hostUsername.trim()) return;
     const socket = getAdminSocket();
-    socket.emit("admin:setHost", { username }, (res: AdminAckResponse) => {
-      setStatus(res.success ? "✔ Host opgeslagen" : `❌ ${res.message}`);
-    });
+
+    socket.emit(
+      "admin:setHost",
+      { username: hostUsername.trim().replace(/^@/, "") },
+      (res: AdminAckResponse) =>
+        setStatus(res.success ? "✔ Host opgeslagen" : `❌ ${res.message}`)
+    );
   };
 
-  // TIMERS OPSLAAN
+  // Opslaan timers
   const updateTimers = () => {
     const socket = getAdminSocket();
+
     socket.emit(
       "admin:updateSettings",
       {
@@ -72,7 +74,7 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto p-4 md:p-6">
+    <main className="max-w-3xl mx-auto p-4 md:p-6">
       <h1 className="text-2xl font-bold mb-4">⚙ Admin Settings</h1>
 
       {status && (
@@ -81,19 +83,21 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* HOST BLOCK */}
+      {/* HOST CONFIG */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
         <h2 className="text-lg font-semibold mb-2">Host instellingen</h2>
-
         <p className="text-sm text-gray-600 mb-3">
-          Huidige host:{" "}
-          <span className="font-bold text-[#ff4d4f]">
-            @{hostUsername || "niet ingesteld"}
-          </span>
+          De host is de gebruiker die het spel host en alle host-gifts ontvangt.
         </p>
 
-        <label className="text-xs text-gray-600">Nieuwe TikTok username</label>
+        <label className="text-xs text-gray-600">Huidige host</label>
+        <div className="mb-3 px-3 py-2 bg-gray-100 rounded-lg text-sm font-mono">
+          {hostUsername || <span className="text-gray-500">Geen host ingesteld</span>}
+        </div>
 
+        <label className="text-xs text-gray-600">
+          Nieuwe TikTok username (zonder @)
+        </label>
         <input
           type="text"
           value={hostUsername}
@@ -109,9 +113,9 @@ export default function SettingsPage() {
         </button>
       </section>
 
-      {/* GAME TIMER BLOCK */}
+      {/* TIMER CONFIG */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
-        <h2 className="text-lg font-semibold mb-2">Game instellingen</h2>
+        <h2 className="text-lg font-semibold mb-2">Game timers</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
@@ -121,10 +125,10 @@ export default function SettingsPage() {
               min={30}
               value={settings.roundDurationPre}
               onChange={(e) =>
-                setSettings({
-                  ...settings,
+                setSettings((s) => ({
+                  ...s,
                   roundDurationPre: Number(e.target.value),
-                })
+                }))
               }
               className="w-full border border-gray-300 rounded-lg px-2 py-1 text-sm"
             />
@@ -137,10 +141,10 @@ export default function SettingsPage() {
               min={60}
               value={settings.roundDurationFinal}
               onChange={(e) =>
-                setSettings({
-                  ...settings,
+                setSettings((s) => ({
+                  ...s,
                   roundDurationFinal: Number(e.target.value),
-                })
+                }))
               }
               className="w-full border border-gray-300 rounded-lg px-2 py-1 text-sm"
             />
@@ -153,10 +157,10 @@ export default function SettingsPage() {
               min={0}
               value={settings.graceSeconds}
               onChange={(e) =>
-                setSettings({
-                  ...settings,
+                setSettings((s) => ({
+                  ...s,
                   graceSeconds: Number(e.target.value),
-                })
+                }))
               }
               className="w-full border border-gray-300 rounded-lg px-2 py-1 text-sm"
             />
@@ -170,6 +174,6 @@ export default function SettingsPage() {
           Instellingen opslaan
         </button>
       </section>
-    </div>
+    </main>
   );
 }
