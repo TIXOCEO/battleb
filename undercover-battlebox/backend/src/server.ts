@@ -1,4 +1,4 @@
-// src/server.ts — Undercover BattleBox Engine — v1.3 dynamic-host clean
+// src/server.ts — Undercover BattleBox Engine — v1.4 dynamic-host + snapshot + host-lock
 
 import express from "express";
 import http from "http";
@@ -150,11 +150,13 @@ async function loadActiveGame() {
 }
 
 async function startNewGame() {
-  const res = await pool.query(`
-    INSERT INTO games (status)
-    VALUES ('running')
-    RETURNING id, started_at
-  `);
+  const res = await pool.query(
+    `
+      INSERT INTO games (status)
+      VALUES ('running')
+      RETURNING id, started_at
+    `
+  );
 
   currentGameId = Number(res.rows[0].id);
 
@@ -220,73 +222,75 @@ io.on("connection", async (socket: AdminSocket) => {
 
   console.log("ADMIN CONNECT:", socket.id);
 
+  // Basis state pushen
   socket.emit("initialLogs", logBuffer);
   socket.emit("updateArena", getArena());
   socket.emit("updateQueue", { open: true, entries: await getQueue() });
-
   socket.emit("gameSession", {
     active: currentGameId !== null,
     gameId: currentGameId,
-  
-  socket.on("admin:getInitialSnapshot", async (_, ack) => {
-  const arena = getArena();
-  const queue = { open: true, entries: await getQueue() };
-  const logs = logBuffer;
-  const stats = currentGameId ? await (() => broadcastStats()) : null;
-
-  const statsQuery = currentGameId
-    ? await pool.query(
-        `
-          SELECT
-            COUNT(DISTINCT CASE WHEN receiver_role IN ('speler','cohost')
-              THEN receiver_id END) AS total_players,
-            COALESCE(SUM(CASE WHEN receiver_role IN ('speler','cohost')
-              THEN diamonds ELSE 0 END), 0) AS total_player_diamonds,
-            COALESCE(SUM(CASE WHEN receiver_role = 'host'
-              THEN diamonds ELSE 0 END), 0) AS total_host_diamonds
-          FROM gifts
-          WHERE game_id = $1
-        `,
-        [currentGameId]
-      )
-    : null;
-
-  const statsSnapshot = statsQuery
-    ? {
-        totalPlayers: Number(statsQuery.rows[0].total_players || 0),
-        totalPlayerDiamonds: Number(
-          statsQuery.rows[0].total_player_diamonds || 0
-        ),
-        totalHostDiamonds: Number(
-          statsQuery.rows[0].total_host_diamonds || 0
-        ),
-      }
-    : null;
-
-  ack({
-    arena,
-    queue,
-    logs,
-    stats: statsSnapshot,
-    gameSession: {
-      active: currentGameId !== null,
-      gameId: currentGameId,
-    },
-    leaderboard: [], // kun jij later vullen — optioneel
-  });
-});
-
   });
 
-  // Event: send arena timer settings to dashboard (still used)
+  // Huidige timer settings + host
   socket.emit("settings", getArenaSettings());
-
-  // Send current host to settings page
   socket.emit("host", await getSetting("host_username"));
 
   emitLog({ type: "system", message: "Admin dashboard verbonden" });
 
+  // 🔄 Snapshot endpoint voor dashboard
+  socket.on("admin:getInitialSnapshot", async (_: any, ack: Function) => {
+    try {
+      const arena = getArena();
+      const queue = { open: true, entries: await getQueue() };
+      const logs = logBuffer;
+
+      let statsSnapshot: StreamStats | null = null;
+
+      if (currentGameId) {
+        const statsQuery = await pool.query(
+          `
+            SELECT
+              COUNT(DISTINCT CASE WHEN receiver_role IN ('speler','cohost')
+                THEN receiver_id END) AS total_players,
+              COALESCE(SUM(CASE WHEN receiver_role IN ('speler','cohost')
+                THEN diamonds ELSE 0 END), 0) AS total_player_diamonds,
+              COALESCE(SUM(CASE WHEN receiver_role = 'host'
+                THEN diamonds ELSE 0 END), 0) AS total_host_diamonds
+            FROM gifts
+            WHERE game_id = $1
+          `,
+          [currentGameId]
+        );
+
+        const row = statsQuery.rows[0] || {};
+
+        statsSnapshot = {
+          totalPlayers: Number(row.total_players || 0),
+          totalPlayerDiamonds: Number(row.total_player_diamonds || 0),
+          totalHostDiamonds: Number(row.total_host_diamonds || 0),
+        };
+      }
+
+      ack({
+        arena,
+        queue,
+        logs,
+        stats: statsSnapshot,
+        gameSession: {
+          active: currentGameId !== null,
+          gameId: currentGameId,
+        },
+        leaderboard: [], // optioneel later invullen
+      });
+    } catch (err) {
+      console.error("admin:getInitialSnapshot error:", err);
+      ack(null);
+    }
+  });
+
+  // ─────────────────────────────────────
   // UNIVERSAL ACTION HANDLER
+  // ─────────────────────────────────────
   const handle = async (action: string, data: any, ack: Function) => {
     try {
       // SETTINGS (READ)
@@ -298,8 +302,15 @@ io.on("connection", async (socket: AdminSocket) => {
         });
       }
 
-      // UPDATE HOST
+      // UPDATE HOST — alleen wanneer géén spel actief is
       if (action === "setHost") {
+        if (currentGameId) {
+          return ack({
+            success: false,
+            message: "Host kan niet worden gewijzigd tijdens een actief spel",
+          });
+        }
+
         const name = data?.username?.trim().replace(/^@/, "") || "";
         await setSetting("host_username", name);
         await refreshHostUsername();
@@ -359,7 +370,8 @@ io.on("connection", async (socket: AdminSocket) => {
       const userRes = await pool.query(
         `SELECT tiktok_id, display_name, username
          FROM users
-         WHERE username ILIKE $1 OR username ILIKE $2 LIMIT 1`,
+         WHERE username ILIKE $1 OR username ILIKE $2
+         LIMIT 1`,
         [raw, `@${raw}`]
       );
 
