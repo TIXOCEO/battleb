@@ -1,4 +1,5 @@
-// backend/src/db.ts — v1.1 SETTINGS + USERS + QUEUE
+// src/db.ts — v1.1 Settings-Enabled
+
 import { Pool } from "pg";
 
 const pool = new Pool({
@@ -9,22 +10,15 @@ const pool = new Pool({
   port: 5432,
 });
 
-export default pool;
-
-/* --------------------------------------------------------
-   INIT DB — maakt alle tabellen indien nodig
--------------------------------------------------------- */
 export async function initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
-      tiktok_id TEXT PRIMARY KEY,
+      id SERIAL PRIMARY KEY,
+      tiktok_id TEXT UNIQUE NOT NULL,
       username TEXT NOT NULL,
-      display_name TEXT NOT NULL,
+      display_name TEXT DEFAULT '',
       bp_daily INTEGER DEFAULT 0,
       bp_total DOUBLE PRECISION DEFAULT 0,
-      diamonds_total INTEGER DEFAULT 0,
-      diamonds_stream INTEGER DEFAULT 0,
-      diamonds_current_round INTEGER DEFAULT 0,
       streak INTEGER DEFAULT 0,
       badges TEXT[] DEFAULT '{}',
       blocks JSONB DEFAULT '{"queue": false, "twists": false, "boosters": false}'
@@ -40,7 +34,7 @@ export async function initDB() {
     );
   `);
 
-  /* SETTINGS-TABEL */
+  // NEW: Settings
   await pool.query(`
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
@@ -48,12 +42,12 @@ export async function initDB() {
     );
   `);
 
-  /* FORCE DEFAULT VALUES IN SETTINGS */
+  // Default settings if missing
   const defaults: [string, string][] = [
     ["host_username", ""],
     ["roundDurationPre", "180"],
     ["roundDurationFinal", "300"],
-    ["graceSeconds", "5"]
+    ["graceSeconds", "5"],
   ];
 
   for (const [key, value] of defaults) {
@@ -66,21 +60,13 @@ export async function initDB() {
   }
 }
 
-/* --------------------------------------------------------
-   SETTINGS HELPERS
--------------------------------------------------------- */
-
-/** 1) Haal 1 waarde op */
+// Helpers
 export async function getSetting(key: string): Promise<string | null> {
-  const res = await pool.query(
-    `SELECT value FROM settings WHERE key = $1 LIMIT 1`,
-    [key]
-  );
-  return res.rows[0]?.value ?? null;
+  const r = await pool.query(`SELECT value FROM settings WHERE key=$1`, [key]);
+  return r.rows[0]?.value ?? null;
 }
 
-/** 2) Zet 1 waarde */
-export async function setSetting(key: string, value: string): Promise<void> {
+export async function setSetting(key: string, value: string) {
   await pool.query(
     `INSERT INTO settings(key, value)
      VALUES ($1, $2)
@@ -89,10 +75,4 @@ export async function setSetting(key: string, value: string): Promise<void> {
   );
 }
 
-/** 3) Haal ALLE settings op (voor admin pagina + backend init) */
-export async function getAllSettings(): Promise<Record<string, string>> {
-  const res = await pool.query(`SELECT key, value FROM settings`);
-  const out: Record<string, string> = {};
-  for (const row of res.rows) out[row.key] = row.value;
-  return out;
-}
+export default pool;
