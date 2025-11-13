@@ -227,6 +227,55 @@ io.on("connection", async (socket: AdminSocket) => {
   socket.emit("gameSession", {
     active: currentGameId !== null,
     gameId: currentGameId,
+  
+  socket.on("admin:getInitialSnapshot", async (_, ack) => {
+  const arena = getArena();
+  const queue = { open: true, entries: await getQueue() };
+  const logs = logBuffer;
+  const stats = currentGameId ? await (() => broadcastStats()) : null;
+
+  const statsQuery = currentGameId
+    ? await pool.query(
+        `
+          SELECT
+            COUNT(DISTINCT CASE WHEN receiver_role IN ('speler','cohost')
+              THEN receiver_id END) AS total_players,
+            COALESCE(SUM(CASE WHEN receiver_role IN ('speler','cohost')
+              THEN diamonds ELSE 0 END), 0) AS total_player_diamonds,
+            COALESCE(SUM(CASE WHEN receiver_role = 'host'
+              THEN diamonds ELSE 0 END), 0) AS total_host_diamonds
+          FROM gifts
+          WHERE game_id = $1
+        `,
+        [currentGameId]
+      )
+    : null;
+
+  const statsSnapshot = statsQuery
+    ? {
+        totalPlayers: Number(statsQuery.rows[0].total_players || 0),
+        totalPlayerDiamonds: Number(
+          statsQuery.rows[0].total_player_diamonds || 0
+        ),
+        totalHostDiamonds: Number(
+          statsQuery.rows[0].total_host_diamonds || 0
+        ),
+      }
+    : null;
+
+  ack({
+    arena,
+    queue,
+    logs,
+    stats: statsSnapshot,
+    gameSession: {
+      active: currentGameId !== null,
+      gameId: currentGameId,
+    },
+    leaderboard: [], // kun jij later vullen — optioneel
+  });
+});
+
   });
 
   // Event: send arena timer settings to dashboard (still used)
