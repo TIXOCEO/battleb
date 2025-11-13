@@ -1,27 +1,54 @@
+// src/engines/1-connection.ts — v0.7.0
+// TikTok LIVE webcast connector
+//
+// Doelen:
+//  - Stabiele connectie met automatische retries
+//  - Live identity-updates uit ALLE eventtypes
+//  - Supersterke samenwerking met 2-user-engine.ts
+//  - Minimaliseert “Onbekend” tijd tot < 1 seconde
+//  - Real-time verversen van display_name & username
+//
+// BELANGRIJK: altijd buiten gift-engine om identities updaten
+// zodat host-detection en gift mapping *optimaal* werkt.
+
 import { WebcastPushConnection } from "tiktok-live-connector";
 import { upsertIdentityFromLooseEvent } from "./2-user-engine";
 
-/**
- * Start TikTok connection met retry + identity-updaters.
- * @param username TikTok host username (zonder @ of met @ – beide oké)
- * @param onConnected callback na succesvolle connect
- */
+// ─────────────────────────────────────────────────────────────
+// TikTok verbinden met retry
+// ─────────────────────────────────────────────────────────────
+
 export async function startConnection(
   username: string,
   onConnected: () => void
 ) {
-  const host = username.replace(/^@+/, "");
-  const conn = new WebcastPushConnection(host);
+  const host = username.replace(/^@+/, "").trim();
+  const conn = new WebcastPushConnection(host, {
+    // TikTok stuurt soms halve user-objecten.
+    // Deze opties verhogen reliability.
+    requestOptions: {
+      timeout: 15000,
+    },
+    enableExtendedGiftInfo: true,
+  });
 
-  // —— Verbinden met retries
-  for (let i = 0; i < 6; i++) {
+  console.log("VERBINDEN MET TIKTOK… @" + host);
+
+  // Max 8 retries (± 50 sec)
+  for (let i = 0; i < 8; i++) {
     try {
       await conn.connect();
-      console.info(`Verbonden met @${host}`);
+      console.log(`Verbonden met TikTok livestream van @${host}`);
       break;
     } catch (err: any) {
-      console.error(`Poging ${i + 1} mislukt:`, err?.message || err);
-      if (i === 5) process.exit(1);
+      console.error(
+        `⛔ Verbinding mislukt (poging ${i + 1}/8):`,
+        err?.message || err
+      );
+      if (i === 7) {
+        console.error("GEEN VERBINDING MOGELIJK → STOP SERVER");
+        process.exit(1);
+      }
       await new Promise((r) => setTimeout(r, 7000));
     }
   }
@@ -29,31 +56,34 @@ export async function startConnection(
   conn.on("connected", () => {
     console.log("=".repeat(80));
     console.log("BATTLEBOX LIVE – VERBONDEN MET @" + host);
-    console.log("Gifts aan @" + host + " = TWIST (geen arena)");
-    console.log("Alle andere gifts = ARENA (op ontvanger/speler)");
+    console.log("Alle inkomende events → identity-updates");
+    console.log("Gift-engine gebruikt deze identiteiten realtime");
     console.log("=".repeat(80));
     onConnected();
   });
 
-  // —— Identity updaters (zodat Onbekend snel verdwijnt)
+  // IDENTITEITEN SNEL UPDATEN
   attachIdentityUpdaters(conn);
 
   return { conn };
 }
 
-/**
- * Luistert breed op events en probeert de user zo snel mogelijk
- * te updaten / aan te maken met (id, display_name, uniqueId).
- * Dit dekt: chat, like, follow, share/social, member/join én gift
- * (zowel zender als ontvanger – extra veiligheid naast gift-engine).
- */
+// ─────────────────────────────────────────────────────────────
+// Identity Updaters — de kern van jouw systeem
+//
+// DIT IS WAAR jij Onbekend oplost.
+//
+// Elk event bevat user-info. Zodra TikTok iets beters stuurt,
+// wordt de database onmiddellijk geüpdatet.
+// ─────────────────────────────────────────────────────────────
+
 function attachIdentityUpdaters(conn: any) {
-  // 1) Chat-berichten (meest frequent en snel → perfecte bron)
+  // 1) Chat (beste event, komt het snelst binnen)
   conn.on("chat", (d: any) => {
     upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
   });
 
-  // 2) Likes (zeer frequent; bevat user)
+  // 2) Likes (ook superfrequent)
   conn.on("like", (d: any) => {
     upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
   });
@@ -63,31 +93,51 @@ function attachIdentityUpdaters(conn: any) {
     upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
   });
 
-  // 4) Share / Social
+  // 4) Social / share
   conn.on("social", (d: any) => {
     upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
   });
 
-  // 5) Member (join). Sommige events heten 'member' in deze lib (joiners).
+  // 5) Member (join / viewer joined)
   conn.on("member", (d: any) => {
+    // TikTok stuurt hier heel vaak real-nicknames!
     upsertIdentityFromLooseEvent(d?.user || d);
   });
 
-  // 6) Subscription (soms met user)
+  // 6) Subscribe
   conn.on("subscribe", (d: any) => {
     upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
   });
 
-  // 7) Gift (zowel sender als ontvanger bijwerken; de gift-engine doet dit ook,
-  //    maar dit is extra defensief en versnelt upgrades naar echte namen)
+  // 7) Live moderator events (optioneel)
+  conn.on("moderator", (d: any) => {
+    upsertIdentityFromLooseEvent(d?.user || d);
+  });
+
+  // 8) Gift events → update zowel sender als ontvanger
   conn.on("gift", (d: any) => {
-    // Zender
+    // Sender
     upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
-    // Ontvanger (cohost/speler)
+
+    // Receiver (cohost/speler/host)
     if (d?.toUser || d?.receiver) {
       upsertIdentityFromLooseEvent(d?.toUser || d?.receiver);
     }
   });
 
-  // (Eventueel kun je hier later nog 'linkMicBattle' etc. aanhaken)
+  // 9) Mic changes (soms bevatten deelnemers info)
+  conn.on("linkMicBattle", (d: any) => {
+    if (d?.battleUsers) {
+      for (const u of d.battleUsers) {
+        upsertIdentityFromLooseEvent(u);
+      }
+    }
+  });
+
+  // 10) Live room entry / guest enter → bevat user object
+  conn.on("liveRoomUser", (d: any) => {
+    upsertIdentityFromLooseEvent(d?.user || d);
+  });
+
+  console.log("[IDENTITY ENGINE] Running (chat/like/follow/social/member/gift/subscribe/moderator/battle)");
 }
