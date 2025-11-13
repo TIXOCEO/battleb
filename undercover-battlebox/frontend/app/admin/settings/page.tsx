@@ -1,4 +1,3 @@
-// app/admin/settings/page.tsx
 "use client";
 
 import React, { useEffect, useState } from "react";
@@ -21,58 +20,83 @@ export default function SettingsPage() {
   });
 
   const [status, setStatus] = useState<string | null>(null);
+  const [connected, setConnected] = useState(false);
 
+  // ───────────────────────────────────────────────
+  // SOCKET INITIALISATIE
+  // ───────────────────────────────────────────────
   useEffect(() => {
     const socket = getAdminSocket();
 
-    // Handlers apart zodat we ze in cleanup weer kunnen afmelden
+    // CONNECT EVENTS
+    const handleConnect = () => setConnected(true);
+    const handleDisconnect = () => setConnected(false);
+
+    // SETTINGS EVENTS
     const handleSettings = (s: ArenaSettings) => setSettings(s);
 
     const handleHost = (h: string) => {
-      setCurrentHost(h || "");
-      setHostUsername(h || "");
+      const clean = h?.trim() || "";
+      setCurrentHost(clean);
+      setHostUsername(clean);
     };
 
-    // Huidige settings + host binnenhalen
+    // 1) Huidige settings ophalen
     socket.emit("admin:getSettings", {}, (res: any) => {
       if (res?.success) {
         if (res.settings) setSettings(res.settings);
         if (typeof res.host === "string") {
-          setHostUsername(res.host || "");
-          setCurrentHost(res.host || "");
+          setCurrentHost(res.host);
+          setHostUsername(res.host);
         }
-      } else if (res?.message) {
-        setStatus(`❌ ${res.message}`);
+        setConnected(true);
+      } else {
+        setStatus(`❌ ${res?.message || "Kon settings niet laden"}`);
       }
     });
 
+    // REGISTREREN
     socket.on("settings", handleSettings);
     socket.on("host", handleHost);
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
 
-    // ❗ GEEN removeAllListeners en GEEN disconnect
+    // CLEANUP
     return () => {
       socket.off("settings", handleSettings);
       socket.off("host", handleHost);
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
     };
   }, []);
 
-  // Opslaan HOST
+  // ───────────────────────────────────────────────
+  // HOST OPSLAAN
+  // ───────────────────────────────────────────────
   const updateHost = () => {
     if (!hostUsername.trim()) return;
 
     const socket = getAdminSocket();
-    socket.emit(
-      "admin:setHost",
-      { username: hostUsername.trim().replace(/^@/, "") },
-      (res: AdminAckResponse) => {
-        setStatus(res.success ? "✔ Host opgeslagen" : `❌ ${res.message}`);
+
+    const payload = {
+      username: hostUsername.trim().replace(/^@/, ""),
+    };
+
+    socket.emit("admin:setHost", payload, (res: AdminAckResponse) => {
+      if (res.success) {
+        setStatus("✔ Host opgeslagen");
+      } else {
+        setStatus(`❌ ${res.message}`);
       }
-    );
+    });
   };
 
-  // Opslaan TIMERS
+  // ───────────────────────────────────────────────
+  // TIMERS OPSLAAN
+  // ───────────────────────────────────────────────
   const updateTimers = () => {
     const socket = getAdminSocket();
+
     socket.emit(
       "admin:updateSettings",
       {
@@ -80,18 +104,33 @@ export default function SettingsPage() {
         roundDurationFinal: settings.roundDurationFinal,
         graceSeconds: settings.graceSeconds,
       },
-      (res: AdminAckResponse) =>
+      (res: AdminAckResponse) => {
         setStatus(
           res.success
             ? "✔ Timer-instellingen opgeslagen"
             : `❌ ${res.message}`
-        )
+        );
+      }
     );
   };
 
+  // ───────────────────────────────────────────────
+  // UI
+  // ───────────────────────────────────────────────
   return (
     <div className="max-w-3xl mx-auto">
       <h1 className="text-2xl font-bold mb-4">⚙ Admin Settings</h1>
+
+      {/* VERBINDINGS STATUS */}
+      <div
+        className={`text-sm mb-4 px-3 py-1.5 rounded-full inline-block ${
+          connected
+            ? "bg-green-100 text-green-700"
+            : "bg-red-100 text-red-700"
+        }`}
+      >
+        {connected ? "Verbonden met server" : "❌ Niet verbonden"}
+      </div>
 
       {/* STATUS MELDING */}
       {status && (
@@ -100,9 +139,10 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* HUIDIGE HOST INFO */}
+      {/* HUIDIGE HOST */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
         <div className="text-xs text-gray-500 mb-1">Huidige host</div>
+
         <div className="text-lg font-semibold mb-3">
           {currentHost ? `@${currentHost}` : "— geen host ingesteld —"}
         </div>
@@ -110,6 +150,7 @@ export default function SettingsPage() {
         <label className="text-xs text-gray-600">
           Nieuwe TikTok host username (zonder @)
         </label>
+
         <input
           type="text"
           value={hostUsername}
