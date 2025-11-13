@@ -98,6 +98,25 @@ export default function AdminDashboardPage() {
     socket.on("round:grace", handleRoundGrace);
     socket.on("round:end", handleRoundEnd);
 
+// SNAPSHOT LOAD BIJ ENTER OP DASHBOARD
+useEffect(() => {
+  const socket = getAdminSocket();
+
+  socket.emit("admin:getInitialSnapshot", {}, (snap: any) => {
+    if (!snap) return;
+
+    if (snap.arena) setArena(snap.arena);
+    if (snap.queue) {
+      setQueue(snap.queue.entries ?? []);
+      setQueueOpen(snap.queue.open ?? true);
+    }
+    if (snap.logs) setLogs(snap.logs.slice(0, 200));
+    if (snap.stats) setStreamStats(snap.stats);
+    if (snap.gameSession) setGameSession(snap.gameSession);
+    if (snap.leaderboard) setLeaderboard(snap.leaderboard);
+  });
+}, []);
+    
     // CLEANUP (alleen eigen handlers ongeldig maken)
     return () => {
       socket.off("updateArena", handleArena);
