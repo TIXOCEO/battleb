@@ -25,16 +25,16 @@ export type SocketEvents = {
 };
 
 // ✔ Nooit server side aanmaken
-// ✔ Nooit disconnecten
+// ✔ Nooit disconnecten in components
 // ✔ Nooit dubbele instantiaties
-// ✔ Werkt volledig over meerdere admin pagina's (Dashboard ↔ Settings)
+// ✔ Werkt over meerdere admin pagina's (Dashboard ↔ Settings)
 
 export function getAdminSocket(): Socket {
   if (typeof window === "undefined") {
     throw new Error("getAdminSocket moet client-side gebruikt worden.");
   }
 
-  // ➜ Socket bestaat al? Gebruik die direct.
+  // Socket bestaat al? Gebruik die.
   if (globalThis.__adminSocket) {
     return globalThis.__adminSocket;
   }
@@ -62,11 +62,8 @@ export function getAdminSocket(): Socket {
     console.error("❌ Connect error:", err.message);
   });
 
-  // Bewaar singleton
   globalThis.__adminSocket = socket;
-
   return socket;
 }
 
-// Zorg dat dit echt een module blijft
 export {};
