@@ -1,9 +1,10 @@
-// src/engines/3-gift-engine.ts — v1.3 FINAL
-// - Dynamic HOST via DB (settings.host_username)
-// - Ultra-robust receiver resolver
-// - Zero-debounce duplicates
-// - Event logging compatible with Admin Dashboard
-// - Fully compatible with server.ts v1.2 dynamic-host
+// src/engines/3-gift-engine.ts — v1.4 HEART-ME FANCLUB
+// - Dynamic host
+// - Duplicate filtering
+// - Heart Me gift → activate fan for 24h IF receiver = host
+// - Stream + round diamonds
+// - BP rewards
+// - Identity upgrades
 
 import pool, { getSetting } from "../db";
 import { getOrUpdateUser } from "./2-user-engine";
@@ -11,9 +12,7 @@ import { addDiamonds, addBP } from "./4-points-engine";
 import { getArena, addDiamondsToArenaPlayer } from "./5-game-engine";
 import { emitLog, getCurrentGameId, broadcastStats } from "../server";
 
-// ─────────────────────────────────────────────
-// STRING NORMALIZER
-// ─────────────────────────────────────────────
+// Normalizer
 function norm(v: any) {
   return (v || "")
     .toString()
@@ -23,12 +22,10 @@ function norm(v: any) {
     .replace(/[^\p{L}\p{N}_]/gu, "");
 }
 
-// ─────────────────────────────────────────────
 // HOST CACHE
-// ─────────────────────────────────────────────
 let HOST_USERNAME_CACHE = "";
 
-// Load host on server boot
+// Init on boot
 export async function initDynamicHost() {
   await refreshHostUsername();
 }
@@ -39,24 +36,14 @@ export async function refreshHostUsername() {
   console.log("🔄 HOST UPDATED:", HOST_USERNAME_CACHE || "(none)");
 }
 
-// ─────────────────────────────────────────────
-// DUPLICATE PREVENTION
-// ─────────────────────────────────────────────
+// Duplicate filter
 const processedMsgIds = new Set<string>();
 setInterval(() => processedMsgIds.clear(), 60_000);
 
-// ─────────────────────────────────────────────
-// RECEIVER RESOLVE ENGINE v2.0
-// ─────────────────────────────────────────────
+// Receiver resolve
 async function resolveReceiver(event: any) {
-  console.log("────────────────────────────────────────────");
-  console.log("🎯 RECEIVER RESOLVE DEBUG");
-  console.log("HOST =", HOST_USERNAME_CACHE);
-  console.log("--------------------------------------------");
-
   const hostRaw = HOST_USERNAME_CACHE;
 
-  // Fields
   const eventId =
     event.receiverUserId ||
     event.toUserId ||
@@ -73,19 +60,13 @@ async function resolveReceiver(event: any) {
   const nickRaw =
     event.toUser?.nickname ||
     event.receiver?.nickname ||
-    event.toUser?.displayName ||
     null;
 
   const uniqueNorm = uniqueRaw ? norm(uniqueRaw) : null;
   const nickNorm = nickRaw ? norm(nickRaw) : null;
 
-  console.log("receiverUserId =", eventId);
-  console.log("uniqueId =", uniqueRaw, "→", uniqueNorm);
-  console.log("nickname =", nickRaw, "→", nickNorm);
-
-  // 1) uniqueId EXACT match
+  // uniqueId → host
   if (uniqueNorm && hostRaw && uniqueNorm === hostRaw) {
-    console.log("➡ HOST via uniqueId");
     return {
       id: null,
       username: hostRaw,
@@ -94,9 +75,8 @@ async function resolveReceiver(event: any) {
     };
   }
 
-  // 2) fuzzy nickname incl. emojis variations
+  // fuzzy nickname → host
   if (nickNorm && hostRaw && nickNorm.includes(hostRaw)) {
-    console.log("➡ HOST via fuzzy nickname");
     return {
       id: null,
       username: hostRaw,
@@ -105,7 +85,7 @@ async function resolveReceiver(event: any) {
     };
   }
 
-  // 3) DB fallback
+  // DB fallback
   if (eventId) {
     const r = await getOrUpdateUser(
       String(eventId),
@@ -113,15 +93,7 @@ async function resolveReceiver(event: any) {
       uniqueRaw || null
     );
 
-    console.log("DB result:", {
-      id: r.id,
-      username: r.username,
-      display_name: r.display_name,
-      usernameNorm: norm(r.username),
-    });
-
     if (hostRaw && norm(r.username) === hostRaw) {
-      console.log("➡ HOST via DB username");
       return {
         id: r.id,
         username: r.username.replace(/^@/, ""),
@@ -138,9 +110,7 @@ async function resolveReceiver(event: any) {
     };
   }
 
-  // 4) no receiver data → assume host
   if (hostRaw) {
-    console.log("❗ NO DATA → fallback HOST");
     return {
       id: null,
       username: hostRaw,
@@ -149,8 +119,6 @@ async function resolveReceiver(event: any) {
     };
   }
 
-  // 5) nothing → unknown player
-  console.log("❗ NO DATA + NO HOST → fallback speler");
   return {
     id: null,
     username: "",
@@ -159,11 +127,23 @@ async function resolveReceiver(event: any) {
   };
 }
 
-// ─────────────────────────────────────────────
+// Activate fan 24h
+async function activateFan(userId: bigint) {
+  const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  await pool.query(
+    `
+    UPDATE users
+       SET is_fan = true,
+           fan_expires_at = $1
+     WHERE tiktok_id = $2
+    `,
+    [expires, userId]
+  );
+}
+
 // GIFT ENGINE
-// ─────────────────────────────────────────────
 export function initGiftEngine(conn: any) {
-  console.log("🎁 GIFT ENGINE v1.3 LOADED");
+  console.log("🎁 GIFT ENGINE v1.4 LOADED (Heart-Me Enabled)");
 
   conn.on("gift", async (data: any) => {
     const msgId = String(data.msgId ?? data.id ?? data.logId ?? "");
@@ -171,12 +151,13 @@ export function initGiftEngine(conn: any) {
     processedMsgIds.add(msgId);
 
     try {
-      // SENDER
+      // Sender
       const senderId = (
         data.user?.userId ||
         data.sender?.userId ||
         data.userId
       )?.toString();
+
       if (!senderId) return;
 
       const sender = await getOrUpdateUser(
@@ -187,7 +168,7 @@ export function initGiftEngine(conn: any) {
 
       const senderUsername = sender.username.replace(/^@+/, "");
 
-      // Gift value
+      // Gift diamonds
       const rawDiamonds = Number(data.diamondCount || 0);
       if (rawDiamonds <= 0) return;
 
@@ -204,7 +185,7 @@ export function initGiftEngine(conn: any) {
 
       if (credited <= 0) return;
 
-      // RESOLVE RECEIVER
+      // Resolve receiver
       const receiver = await resolveReceiver(data);
       const isHost = receiver.role === "host";
 
@@ -212,29 +193,23 @@ export function initGiftEngine(conn: any) {
       const arena = getArena();
       const now = Date.now();
 
-      const inActive = arena.status === "active" && now <= arena.roundCutoff;
-      const inGrace = arena.status === "grace" && now <= arena.graceEnd;
+      const inActive =
+        arena.status === "active" && now <= arena.roundCutoff;
+      const inGrace =
+        arena.status === "grace" && now <= arena.graceEnd;
 
       const inRound = inActive || inGrace;
 
       // RULES
       if (!isHost && !inRound) {
-        emitLog({
-          type: "system",
-          message: `[GIFT IGNORE] Buiten ronde: ${data.giftName} → ${receiver.display_name}`,
-        });
         return;
       }
 
       if (isHost && !gameId) {
-        emitLog({
-          type: "system",
-          message: `[GIFT IGNORE] Geen actief spel → host gift genegeerd`,
-        });
         return;
       }
 
-      // APPLY POINTS
+      // APPLY diamonds
       await addDiamonds(BigInt(senderId), credited, "total");
       await addDiamonds(BigInt(senderId), credited, "stream");
       await addDiamonds(BigInt(senderId), credited, "current_round");
@@ -242,13 +217,28 @@ export function initGiftEngine(conn: any) {
       const bpGain = credited * 0.2;
       await addBP(BigInt(senderId), bpGain, "GIFT", sender.display_name);
 
+      // Only to active arena players
       if (!isHost && receiver.id && inRound) {
         if (arena.players.some((p: any) => p.id === receiver.id)) {
           await addDiamondsToArenaPlayer(receiver.id, credited);
         }
       }
 
-      // SAVE GIFT
+      // ♥ HEART ME → FAN 24H
+      if (
+        isHost &&
+        (data.giftName?.toLowerCase() === "heart me" ||
+          data.giftId === 5655)
+      ) {
+        await activateFan(BigInt(senderId));
+
+        emitLog({
+          type: "gift",
+          message: `${sender.display_name} werd FAN voor 24h ❤️`,
+        });
+      }
+
+      // Save gift
       await pool.query(
         `
         INSERT INTO gifts (
@@ -273,16 +263,11 @@ export function initGiftEngine(conn: any) {
         ]
       );
 
-      // LOG
-      const label = isHost
-        ? `${receiver.display_name} [HOST]`
-        : `${receiver.display_name} (@${receiver.username})`;
-
       emitLog({
         type: "gift",
-        message: `${sender.display_name} (@${senderUsername}) → ${label}: ${
+        message: `${sender.display_name} → ${receiver.display_name}: ${
           data.giftName
-        } (${credited}💎${repeat > 1 ? ` x${repeat}` : ""})`,
+        } (${credited}💎)`,
       });
 
       await broadcastStats();
