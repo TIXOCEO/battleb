@@ -1,6 +1,7 @@
 // ============================================================================
-// 5-GAME-ENGINE.ts — Arena Engine v2.1 FINAL
+// 5-GAME-ENGINE.ts — Arena Engine v2.2 FINAL
 // Ondersteunt: unlimited spelers, tie-groups, danger, elimination, force mode
+// Bevat: safeAddArenaDiamonds() voor Gift Engine compatibiliteit
 // ============================================================================
 
 import { io } from "../server";
@@ -33,7 +34,7 @@ interface ArenaSettings {
   roundDurationPre: number;
   roundDurationFinal: number;
   graceSeconds: number;
-  forceEliminations: boolean; // NEW
+  forceEliminations: boolean;
 }
 
 interface Arena {
@@ -103,16 +104,11 @@ async function loadArenaSettingsFromDB(): Promise<void> {
 
   const map = new Map(rows.map((r: any) => [r.key, r.value]));
 
-  const pre  = Number(map.get("roundDurationPre")  ?? DEFAULT_SETTINGS.roundDurationPre);
-  const fin  = Number(map.get("roundDurationFinal") ?? DEFAULT_SETTINGS.roundDurationFinal);
-  const grace = Number(map.get("graceSeconds") ?? DEFAULT_SETTINGS.graceSeconds);
-  const force = (map.get("forceEliminations") ?? "true") === "true";
-
   arena.settings = {
-    roundDurationPre: pre > 0 ? pre : DEFAULT_SETTINGS.roundDurationPre,
-    roundDurationFinal: fin > 0 ? fin : DEFAULT_SETTINGS.roundDurationFinal,
-    graceSeconds: grace >= 0 ? grace : DEFAULT_SETTINGS.graceSeconds,
-    forceEliminations: force,
+    roundDurationPre: Number(map.get("roundDurationPre") ?? DEFAULT_SETTINGS.roundDurationPre),
+    roundDurationFinal: Number(map.get("roundDurationFinal") ?? DEFAULT_SETTINGS.roundDurationFinal),
+    graceSeconds: Number(map.get("graceSeconds") ?? DEFAULT_SETTINGS.graceSeconds),
+    forceEliminations: (map.get("forceEliminations") ?? "true") === "true",
   };
 }
 
@@ -127,11 +123,12 @@ async function saveArenaSettingsToDB(s: Partial<ArenaSettings>): Promise<void> {
   ];
 
   for (const [k, v] of rows) {
-    await pool.query(`
-      INSERT INTO settings(key,value)
-      VALUES ($1,$2)
-      ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value
-    `, [k, v]);
+    await pool.query(
+      `INSERT INTO settings(key,value)
+       VALUES ($1,$2)
+       ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value`,
+      [k, v]
+    );
   }
 
   emitArena();
@@ -158,13 +155,7 @@ function sortPlayers(): void {
 }
 
 // =======================================
-// 🔥 TIE-GROUP LOGICA
-// =======================================
-//
-// - Alle spelers met dezelfde diamonds horen bij dezelfde group
-// - Danger = laatste tie-groep in active fase
-// - Elimination = laatste tie-groep in grace/ended
-// - Immune blijft top3 (ongeacht tie)
+// TIE-GROUP LOGICA
 // =======================================
 
 function updatePositionStatuses(): void {
@@ -176,7 +167,7 @@ function updatePositionStatuses(): void {
     return;
   }
 
-  // ▼ 1. Identificeer alle tie groups
+  // 1. Tie groups bepalen
   const groups: { diamonds: number; members: Player[] }[] = [];
   let current: Player[] = [p[0]];
 
@@ -190,26 +181,22 @@ function updatePositionStatuses(): void {
   }
   groups.push({ diamonds: current[0].diamonds, members: [...current] });
 
-  // ▼ 2. Bepaal top3 (immune) — op basis van posities, niet op groups
+  // 2. Top 3 immune
   const immuneIds = p.slice(0, 3).map(pl => pl.id);
 
-  // ▼ 3. Welke group is "onderste"?
+  // 3. Laatste group
   const lastGroup = groups[groups.length - 1];
 
-  // ▼ 4. Active fase = danger op laatste group
-  // ▼    Grace/Ended = elimination op laatste group
   let endangered = new Set<string>();
   let doomed = new Set<string>();
 
   if (arena.status === "active") {
-    // alleen danger
     lastGroup.members.forEach(pl => endangered.add(pl.id));
   } else if (arena.status === "grace" || arena.status === "ended") {
-    // elimination
     lastGroup.members.forEach(pl => doomed.add(pl.id));
   }
 
-  // ▼ 5. Toewijzen
+  // 4. Classification
   for (const pl of p) {
     if (immuneIds.includes(pl.id)) {
       map[pl.id] = "immune";
@@ -284,6 +271,21 @@ export async function arenaClear(): Promise<void> {
 }
 
 // ============================================================================
+// DIAMOND UPDATE (SAFE)
+// ============================================================================
+// Wordt gebruikt door Gift Engine
+// Crasht nooit, zelfs als speler niet in de arena zit
+
+export async function safeAddArenaDiamonds(id: string, amount: number): Promise<void> {
+  const pl = arena.players.find(p => p.id === id);
+  if (!pl) return;
+
+  pl.diamonds += Number(amount);
+  sortPlayers();
+  emitArena();
+}
+
+// ============================================================================
 // ROUND MANAGEMENT
 // ============================================================================
 
@@ -296,11 +298,10 @@ function getDurationForType(type: RoundType): number {
 }
 
 export function startRound(type: RoundType): boolean {
-  // BLOCK: Force eliminations staan aan → maar er zijn nog spelers met elimination
+  // Block als admin nog moet elimineren
   if (arena.settings.forceEliminations) {
     const eliminationExists = Object.values(arena.positionMap).includes("elimination");
     if (eliminationExists) {
-      // Admin moet eerst mensen wegklikken
       return false;
     }
   }
@@ -308,11 +309,9 @@ export function startRound(type: RoundType): boolean {
   if (arena.status === "active" || arena.status === "grace") return false;
   if (arena.players.length < 1) return false;
 
-  // increment ronde
   arena.round += 1;
   arena.type = type;
 
-  // tijden
   const secs = getDurationForType(type);
   arena.timeLeft = secs;
   arena.status = "active";
@@ -322,7 +321,6 @@ export function startRound(type: RoundType): boolean {
   arena.roundCutoff = arena.roundStartTime + secs * 1000;
   arena.graceEnd = arena.roundCutoff + arena.settings.graceSeconds * 1000;
 
-  // reset ronde diamonds
   for (const pl of arena.players) {
     pl.diamonds = 0;
   }
@@ -341,18 +339,17 @@ export function startRound(type: RoundType): boolean {
   roundTick = setInterval(() => {
     const now = Date.now();
 
-    // ACTIVE fase
+    // ACTIVE
     if (arena.status === "active") {
       const left = Math.max(0, Math.ceil((arena.roundCutoff - now) / 1000));
       arena.timeLeft = left;
 
       if (left <= 0) {
-        // naar grace
         arena.status = "grace";
         arena.isRunning = false;
         arena.timeLeft = 0;
 
-        updatePositionStatuses(); // laatste tie-group wordt elimination
+        updatePositionStatuses();
         emitArena();
 
         io.emit("round:grace", {
@@ -366,7 +363,7 @@ export function startRound(type: RoundType): boolean {
       return;
     }
 
-    // GRACE fase
+    // GRACE
     if (arena.status === "grace") {
       if (now >= arena.graceEnd) {
         endRound();
@@ -377,7 +374,7 @@ export function startRound(type: RoundType): boolean {
       return;
     }
 
-    // EINDE → interval stoppen
+    // EINDE
     if (arena.status === "ended" || arena.status === "idle") {
       if (roundTick) clearInterval(roundTick);
       roundTick = null;
@@ -388,14 +385,12 @@ export function startRound(type: RoundType): boolean {
 }
 
 export function endRound(): void {
-  // 1) Check forceEliminations
   if (arena.settings.forceEliminations) {
     const doomed = Object.entries(arena.positionMap)
       .filter(([_, s]) => s === "elimination")
       .map(([id]) => id);
 
     if (doomed.length > 0) {
-      // ronde eindigt, maar admin MOET nog elimineren
       arena.status = "ended";
       arena.isRunning = false;
       arena.timeLeft = 0;
@@ -410,11 +405,11 @@ export function endRound(): void {
         pendingEliminations: doomed,
       });
 
-      return; // game blijft locked tot admin wegklikt
+      return;
     }
   }
 
-  // 2) normaal einde
+  // normaal einde
   arena.status = "ended";
   arena.isRunning = false;
   arena.timeLeft = 0;
@@ -435,7 +430,6 @@ export function endRound(): void {
 
 function getTop3() {
   const sorted = [...arena.players];
-  // veilig slice (minder dan 3 spelers)
   return sorted.slice(0, 3).map((p) => ({
     id: p.id,
     display_name: p.display_name,
@@ -480,7 +474,7 @@ export function emitArena() {
 }
 
 // ============================================================================
-// INIT GAME
+// INIT
 // ============================================================================
 
 export async function initGame() {
