@@ -1,4 +1,4 @@
-// src/engines/1-connection.ts — v0.7.0
+// src/engines/1-connection.ts — v0.7.1
 // TikTok LIVE webcast connector
 //
 // Doelen:
@@ -13,6 +13,9 @@
 
 import { WebcastPushConnection } from "tiktok-live-connector";
 import { upsertIdentityFromLooseEvent } from "./2-user-engine";
+
+// Huidige actieve TikTok-verbinding, zodat we hem netjes kunnen stoppen
+let activeConn: WebcastPushConnection | null = null;
 
 // ─────────────────────────────────────────────────────────────
 // TikTok verbinden met retry
@@ -65,7 +68,38 @@ export async function startConnection(
   // IDENTITEITEN SNEL UPDATEN
   attachIdentityUpdaters(conn);
 
+  // Actieve connectie opslaan zodat we hem kunnen stoppen bij host-wissel
+  activeConn = conn;
+
   return { conn };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Verbinding netjes stoppen (voor host-wissel / shutdown)
+// ─────────────────────────────────────────────────────────────
+
+export async function stopConnection(
+  conn?: WebcastPushConnection | null
+): Promise<void> {
+  const c = conn || activeConn;
+  if (!c) return;
+
+  try {
+    console.log("🔌 TikTok verbinding wordt afgesloten…");
+    // tiktok-live-connector heeft een disconnect() method
+    if (typeof c.disconnect === "function") {
+      await c.disconnect();
+    } else if (typeof (c as any).close === "function") {
+      await (c as any).close();
+    }
+    console.log("🛑 TikTok verbinding succesvol gestopt.");
+  } catch (err) {
+    console.error("❌ Fout bij stopConnection:", err);
+  } finally {
+    if (!conn || conn === activeConn) {
+      activeConn = null;
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -139,5 +173,7 @@ function attachIdentityUpdaters(conn: any) {
     upsertIdentityFromLooseEvent(d?.user || d);
   });
 
-  console.log("[IDENTITY ENGINE] Running (chat/like/follow/social/member/gift/subscribe/moderator/battle)");
+  console.log(
+    "[IDENTITY ENGINE] Running (chat/like/follow/social/member/gift/subscribe/moderator/battle)"
+  );
 }
