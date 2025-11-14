@@ -9,7 +9,7 @@ import dotenv from "dotenv";
 import pool, { getSetting, setSetting } from "./db";
 import { initDB } from "./db";
 
-import { startConnection } from "./engines/1-connection";
+import { startConnection, stopConnection } from "./engines/1-connection";
 import {
   initGiftEngine,
   initDynamicHost,
@@ -209,7 +209,12 @@ let tiktokConn: any = null;
 async function restartTikTokConnection() {
   try {
     if (tiktokConn) {
-      try { await stopConnection(tiktokConn); } catch {}
+      try {
+        await stopConnection(tiktokConn);
+      } catch {
+        // ignore errors on closing old connection
+      }
+      tiktokConn = null;
     }
 
     const host = await getSetting("host_username");
@@ -224,15 +229,10 @@ async function restartTikTokConnection() {
     tiktokConn = conn;
 
     initGiftEngine(conn);
-
   } catch (err) {
     console.error("❌ Fout bij restart TikTok:", err);
   }
 }
-
-
-
-
 
 io.on("connection", async (socket: AdminSocket) => {
   if (!socket.isAdmin) return socket.disconnect();
@@ -254,55 +254,62 @@ io.on("connection", async (socket: AdminSocket) => {
   emitLog({ type: "system", message: "Admin dashboard verbonden" });
 
   // SNAPSHOT ENDPOINT
-  socket.on("admin:getInitialSnapshot", async (_: any, ack: Function) => {
-    try {
-      const arena = getArena();
-      const queue = { open: true, entries: await getQueue() };
-      const logs = logBuffer;
+  socket.on(
+    "admin:getInitialSnapshot",
+    async (_: any, ack: Function) => {
+      try {
+        const arena = getArena();
+        const queue = { open: true, entries: await getQueue() };
+        const logs = logBuffer;
 
-      let statsSnapshot: StreamStats | null = null;
+        let statsSnapshot: StreamStats | null = null;
 
-      if (currentGameId) {
-        const statsQuery = await pool.query(
-          `
-            SELECT
-              COUNT(DISTINCT CASE WHEN receiver_role IN ('speler','cohost')
-                THEN receiver_id END) AS total_players,
-              COALESCE(SUM(CASE WHEN receiver_role IN ('speler','cohost')
-                THEN diamonds ELSE 0 END), 0) AS total_player_diamonds,
-              COALESCE(SUM(CASE WHEN receiver_role = 'host')
-                THEN diamonds ELSE 0 END), 0) AS total_host_diamonds
-            FROM gifts
-            WHERE game_id = $1
-          `,
-          [currentGameId]
-        );
+        if (currentGameId) {
+          const statsQuery = await pool.query(
+            `
+              SELECT
+                COUNT(DISTINCT CASE WHEN receiver_role IN ('speler','cohost')
+                  THEN receiver_id END) AS total_players,
+                COALESCE(SUM(CASE WHEN receiver_role IN ('speler','cohost')
+                  THEN diamonds ELSE 0 END), 0) AS total_player_diamonds,
+                COALESCE(SUM(CASE WHEN receiver_role = 'host'
+                  THEN diamonds ELSE 0 END), 0) AS total_host_diamonds
+              FROM gifts
+              WHERE game_id = $1
+            `,
+            [currentGameId]
+          );
 
-        const row = statsQuery.rows[0] || {};
+          const row = statsQuery.rows[0] || {};
 
-        statsSnapshot = {
-          totalPlayers: Number(row.total_players || 0),
-          totalPlayerDiamonds: Number(row.total_player_diamonds || 0),
-          totalHostDiamonds: Number(row.total_host_diamonds || 0),
-        };
+          statsSnapshot = {
+            totalPlayers: Number(row.total_players || 0),
+            totalPlayerDiamonds: Number(
+              row.total_player_diamonds || 0
+            ),
+            totalHostDiamonds: Number(
+              row.total_host_diamonds || 0
+            ),
+          };
+        }
+
+        ack({
+          arena,
+          queue,
+          logs,
+          stats: statsSnapshot,
+          gameSession: {
+            active: currentGameId !== null,
+            gameId: currentGameId,
+          },
+          leaderboard: [],
+        });
+      } catch (err) {
+        console.error("admin:getInitialSnapshot error:", err);
+        ack(null);
       }
-
-      ack({
-        arena,
-        queue,
-        logs,
-        stats: statsSnapshot,
-        gameSession: {
-          active: currentGameId !== null,
-          gameId: currentGameId,
-        },
-        leaderboard: [],
-      });
-    } catch (err) {
-      console.error("admin:getInitialSnapshot error:", err);
-      ack(null);
     }
-  });
+  );
 
   // MAIN HANDLER
   const handle = async (action: string, data: any, ack: Function) => {
@@ -313,6 +320,7 @@ io.on("connection", async (socket: AdminSocket) => {
           success: true,
           settings: getArenaSettings(),
           host: (await getSetting("host_username")) || "",
+          gameActive: currentGameId !== null,
         });
       }
 
@@ -321,7 +329,8 @@ io.on("connection", async (socket: AdminSocket) => {
         if (currentGameId) {
           return ack({
             success: false,
-            message: "Host kan niet worden gewijzigd tijdens een actief spel",
+            message:
+              "Host kan niet worden gewijzigd tijdens een actief spel",
           });
         }
 
@@ -351,7 +360,10 @@ io.on("connection", async (socket: AdminSocket) => {
 
       if (action === "stopGame") {
         if (!currentGameId)
-          return ack({ success: false, message: "Geen actief spel" });
+          return ack({
+            success: false,
+            message: "Geen actief spel",
+          });
 
         await stopCurrentGame();
         return ack({ success: true });
@@ -382,7 +394,10 @@ io.on("connection", async (socket: AdminSocket) => {
 
       // USER OPS
       if (!data?.username)
-        return ack({ success: false, message: "username vereist" });
+        return ack({
+          success: false,
+          message: "username vereist",
+        });
 
       const raw = data.username.trim().replace(/^@/, "");
 
@@ -406,9 +421,10 @@ io.on("connection", async (socket: AdminSocket) => {
       switch (action) {
         case "addToArena":
           arenaJoin(String(tiktok_id), display_name, username);
-          await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [
-            tiktok_id,
-          ]);
+          await pool.query(
+            `DELETE FROM queue WHERE user_tiktok_id=$1`,
+            [tiktok_id]
+          );
           await emitQueue();
           emitArena();
           emitLog({ type: "join", message: `${display_name} → arena` });
@@ -427,9 +443,10 @@ io.on("connection", async (socket: AdminSocket) => {
           break;
 
         case "removeFromQueue":
-          await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [
-            tiktok_id,
-          ]);
+          await pool.query(
+            `DELETE FROM queue WHERE user_tiktok_id=$1`,
+            [tiktok_id]
+          );
           await emitQueue();
           emitLog({
             type: "elim",
@@ -479,10 +496,10 @@ initDB().then(async () => {
   initGame();
   await loadActiveGame();
 
-  // Load host from DB
+  // Dynamic host system
   await initDynamicHost();
 
-  // Start TikTok with host from DB, not from .env
+  // Start TikTok met host uit DB ipv .env
   const host = await getSetting("host_username");
 
   if (host) {
@@ -494,4 +511,3 @@ initDB().then(async () => {
     console.log("⚠ Geen host ingesteld — wacht op admin:setHost");
   }
 });
-
