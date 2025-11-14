@@ -1,4 +1,3 @@
-// app/admin/settings/page.tsx
 "use client";
 
 import React, { useEffect, useState } from "react";
@@ -9,6 +8,7 @@ type ArenaSettings = {
   roundDurationPre: number;
   roundDurationFinal: number;
   graceSeconds: number;
+  forceEliminations: boolean;
 };
 
 type GameSessionState = {
@@ -17,20 +17,22 @@ type GameSessionState = {
 };
 
 export default function SettingsPage() {
-  const [hostUsername, setHostUsername] = useState("");
-  const [currentHost, setCurrentHost] = useState("");
+  const [hostUsername, setHostUsername] = useState(""); // input veld
+  const [currentHost, setCurrentHost] = useState("");   // opgeslagen host
+
   const [settings, setSettings] = useState<ArenaSettings>({
     roundDurationPre: 180,
     roundDurationFinal: 300,
     graceSeconds: 5,
+    forceEliminations: true,
   });
 
-  const [status, setStatus] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
   const [gameActive, setGameActive] = useState(false);
 
   // ───────────────────────────────────────────────
-  // SOCKET INITIALISATIE
+  // INIT SOCKET
   // ───────────────────────────────────────────────
   useEffect(() => {
     const socket = getAdminSocket();
@@ -38,40 +40,47 @@ export default function SettingsPage() {
     const handleConnect = () => setConnected(true);
     const handleDisconnect = () => setConnected(false);
 
-    const handleSettings = (s: ArenaSettings) => setSettings(s);
+    const handleSettings = (s: ArenaSettings) =>
+      setSettings((prev) => ({ ...prev, ...s }));
 
     const handleHost = (h: string) => {
       const clean = h?.trim() || "";
       setCurrentHost(clean);
-      setHostUsername(clean);
+
+      // alleen initial sync
+      setHostUsername((prev) => {
+        if (!prev || prev === currentHost) return clean;
+        return prev;
+      });
     };
 
-    const handleGameSession = (session: GameSessionState) => {
+    const handleGameSession = (session: GameSessionState) =>
       setGameActive(!!session?.active);
-    };
 
-    // 1) Huidige settings + host binnenhalen
+    // INITIAL LOAD
     socket.emit("admin:getSettings", {}, (res: any) => {
       if (res?.success) {
         if (res.settings) setSettings(res.settings);
+
         if (typeof res.host === "string") {
           setCurrentHost(res.host);
           setHostUsername(res.host);
         }
+
+        setGameActive(!!res.gameActive);
+
         setConnected(true);
       } else {
         setStatus(`❌ ${res?.message || "Kon settings niet laden"}`);
       }
     });
 
-    // Registreren
     socket.on("settings", handleSettings);
     socket.on("host", handleHost);
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
     socket.on("gameSession", handleGameSession);
 
-    // Cleanup
     return () => {
       socket.off("settings", handleSettings);
       socket.off("host", handleHost);
@@ -94,17 +103,15 @@ export default function SettingsPage() {
 
     const socket = getAdminSocket();
 
-    const payload = {
-      username: hostUsername.trim().replace(/^@/, ""),
-    };
-
-    socket.emit("admin:setHost", payload, (res: AdminAckResponse) => {
-      if (res.success) {
-        setStatus("✔ Host opgeslagen");
-      } else {
-        setStatus(`❌ ${res.message}`);
+    socket.emit(
+      "admin:setHost",
+      { username: hostUsername.trim().replace(/^@/, "") },
+      (res: AdminAckResponse) => {
+        setStatus(
+          res.success ? "✔ Host opgeslagen" : `❌ ${res.message}`
+        );
       }
-    });
+    );
   };
 
   // ───────────────────────────────────────────────
@@ -119,6 +126,7 @@ export default function SettingsPage() {
         roundDurationPre: settings.roundDurationPre,
         roundDurationFinal: settings.roundDurationFinal,
         graceSeconds: settings.graceSeconds,
+        forceEliminations: settings.forceEliminations,
       },
       (res: AdminAckResponse) => {
         setStatus(
@@ -137,25 +145,23 @@ export default function SettingsPage() {
     <div className="max-w-3xl mx-auto">
       <h1 className="text-2xl font-bold mb-4">⚙ Admin Settings</h1>
 
-      {/* VERBINDINGS STATUS */}
+      {/* Verbindingsstatus */}
       <div
         className={`text-sm mb-4 px-3 py-1.5 rounded-full inline-block ${
-          connected
-            ? "bg-green-100 text-green-700"
-            : "bg-red-100 text-red-700"
+          connected ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
         }`}
       >
         {connected ? "Verbonden met server" : "❌ Niet verbonden"}
       </div>
 
-      {/* STATUS MELDING */}
+      {/* Feedback */}
       {status && (
         <div className="mb-4 p-2 text-center text-sm bg-blue-50 border border-blue-200 text-blue-700 rounded-xl">
           {status}
         </div>
       )}
 
-      {/* HUIDIGE HOST */}
+      {/* HOST INSTELLING */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
         <div className="text-xs text-gray-500 mb-1">Huidige host</div>
 
@@ -170,8 +176,8 @@ export default function SettingsPage() {
         <input
           type="text"
           value={hostUsername}
-          onChange={(e) => setHostUsername(e.target.value)}
           disabled={gameActive}
+          onChange={(e) => setHostUsername(e.target.value)}
           className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1 ${
             gameActive ? "bg-gray-100 cursor-not-allowed" : ""
           }`}
@@ -191,17 +197,17 @@ export default function SettingsPage() {
 
         {gameActive && (
           <p className="mt-2 text-xs text-amber-600">
-            Host kan alleen worden gewijzigd als er géén spel actief is.
-            Stop eerst het huidige spel via het dashboard.
+            Host kan alleen worden gewijzigd wanneer er géén spel actief is.
           </p>
         )}
       </section>
 
-      {/* TIMER INSTELLINGEN */}
+      {/* GAME SETTINGS */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
         <h2 className="text-lg font-semibold mb-3">Game instellingen</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+
           <div>
             <label className="text-xs text-gray-600">Voorronde (sec)</label>
             <input
@@ -249,11 +255,29 @@ export default function SettingsPage() {
               className="w-full border border-gray-300 rounded-lg px-2 py-1 text-sm"
             />
           </div>
+
+        </div>
+
+        {/* FORCE ELIMINATIONS */}
+        <div className="mt-4">
+          <label className="text-xs text-gray-600 flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={settings.forceEliminations}
+              onChange={(e) =>
+                setSettings((prev) => ({
+                  ...prev,
+                  forceEliminations: e.target.checked,
+                }))
+              }
+            />
+            Forceer eliminaties vereist voor ronde-einde
+          </label>
         </div>
 
         <button
           onClick={updateTimers}
-          className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-full text-sm"
+          className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-full text-sm"
         >
           Instellingen opslaan
         </button>
