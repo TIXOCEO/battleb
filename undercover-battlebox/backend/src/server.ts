@@ -1,5 +1,9 @@
-// src/server.ts — Undercover BattleBox Engine — v1.5 stable-host-sync
+// src/server.ts — Undercover BattleBox Engine — v1.6
+// Met nieuwe Chat Engine (Heart Me + join), geen autojoin, geen boost in chat.
 
+// ─────────────────────────────────────────────
+// IMPORTS
+// ─────────────────────────────────────────────
 import express from "express";
 import http from "http";
 import { Server, Socket } from "socket.io";
@@ -10,6 +14,7 @@ import pool, { getSetting, setSetting } from "./db";
 import { initDB } from "./db";
 
 import { startConnection, stopConnection } from "./engines/1-connection";
+
 import {
   initGiftEngine,
   initDynamicHost,
@@ -30,18 +35,27 @@ import {
 } from "./engines/5-game-engine";
 
 import { getQueue, addToQueue } from "./queue";
+import { initChatEngine } from "./engines/6-chat-engine";
 
 dotenv.config();
 
+// ─────────────────────────────────────────────
 // ADMIN TOKEN
+// ─────────────────────────────────────────────
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "supersecret123";
 
+// ─────────────────────────────────────────────
+// EXPRESS + HTTP
+// ─────────────────────────────────────────────
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const server = http.createServer(app);
 
+// ─────────────────────────────────────────────
+// SOCKET SERVER
+// ─────────────────────────────────────────────
 export const io = new Server(server, {
   cors: { origin: "*" },
   path: "/socket.io",
@@ -61,8 +75,11 @@ type StreamStats = {
   totalHostDiamonds: number;
 };
 
-// STATE
+// ─────────────────────────────────────────────
+// STATE + LOG SYSTEM
+// ─────────────────────────────────────────────
 let currentGameId: number | null = null;
+
 export function getCurrentGameId() {
   return currentGameId;
 }
@@ -84,12 +101,17 @@ export function emitLog(log: Partial<LogEntry>) {
   io.emit("log", entry);
 }
 
+// ─────────────────────────────────────────────
+// QUEUE EMITTER
+// ─────────────────────────────────────────────
 export async function emitQueue() {
   const entries = await getQueue();
   io.emit("updateQueue", { open: true, entries });
 }
 
-// STREAM STATS
+// ─────────────────────────────────────────────
+// STREAM STATISTICS
+// ─────────────────────────────────────────────
 export async function broadcastStats() {
   if (!currentGameId) return;
 
@@ -110,16 +132,16 @@ export async function broadcastStats() {
 
   const row = statsRes.rows[0] || {};
 
-  const stats: StreamStats = {
+  io.emit("streamStats", {
     totalPlayers: Number(row.total_players || 0),
     totalPlayerDiamonds: Number(row.total_player_diamonds || 0),
     totalHostDiamonds: Number(row.total_host_diamonds || 0),
-  };
-
-  io.emit("streamStats", stats);
+  });
 }
 
+// ─────────────────────────────────────────────
 // GAME SESSION LOADING
+// ─────────────────────────────────────────────
 async function loadActiveGame() {
   const res = await pool.query(`
     SELECT id FROM games
@@ -166,21 +188,21 @@ async function startNewGame() {
 async function stopCurrentGame() {
   if (!currentGameId) return;
 
-  const gameId = currentGameId;
+  const id = currentGameId;
 
   await pool.query(
     `UPDATE games SET status='ended', ended_at=NOW() WHERE id=$1`,
-    [gameId]
+    [id]
   );
 
   emitLog({
     type: "system",
-    message: `Spel beëindigd (#${gameId})`,
+    message: `Spel beëindigd (#${id})`,
   });
 
   io.emit("gameSession", {
     active: false,
-    gameId,
+    gameId: id,
     endedAt: new Date().toISOString(),
   });
 
@@ -189,7 +211,9 @@ async function stopCurrentGame() {
   await broadcastStats();
 }
 
-// ADMIN SOCKET
+// ─────────────────────────────────────────────
+// ADMIN SOCKET AUTH
+// ─────────────────────────────────────────────
 interface AdminSocket extends Socket {
   isAdmin?: boolean;
 }
@@ -202,18 +226,17 @@ io.use((socket: any, next) => {
   next(new Error("Unauthorized"));
 });
 
-// START TIKTOK CONNECTION HOLDER
+// ─────────────────────────────────────────────
+// TIKTOK CONNECTION
+// ─────────────────────────────────────────────
 let tiktokConn: any = null;
 
-// RESTART TIKTOK CONNECTION (used after host change)
 async function restartTikTokConnection() {
   try {
     if (tiktokConn) {
       try {
         await stopConnection(tiktokConn);
-      } catch {
-        // ignore errors on closing old connection
-      }
+      } catch {}
       tiktokConn = null;
     }
 
@@ -223,26 +246,30 @@ async function restartTikTokConnection() {
       return;
     }
 
-    console.log("🔄 TIKTOK opnieuw verbinden met host:", host);
-
+    console.log("🔄 TikTok opnieuw verbinden met host:", host);
     const { conn } = await startConnection(host, () => {});
     tiktokConn = conn;
 
     initGiftEngine(conn);
+    initChatEngine(conn);
+
   } catch (err) {
-    console.error("❌ Fout bij restart TikTok:", err);
+    console.error("❌ Fout bij opnieuw verbinden:", err);
   }
 }
 
+// ─────────────────────────────────────────────
+// ADMIN SOCKET EVENTS
+// ─────────────────────────────────────────────
 io.on("connection", async (socket: AdminSocket) => {
   if (!socket.isAdmin) return socket.disconnect();
 
   console.log("ADMIN CONNECT:", socket.id);
 
-  // PUSH CURRENT STATE
   socket.emit("initialLogs", logBuffer);
   socket.emit("updateArena", getArena());
   socket.emit("updateQueue", { open: true, entries: await getQueue() });
+
   socket.emit("gameSession", {
     active: currentGameId !== null,
     gameId: currentGameId,
@@ -253,68 +280,10 @@ io.on("connection", async (socket: AdminSocket) => {
 
   emitLog({ type: "system", message: "Admin dashboard verbonden" });
 
-  // SNAPSHOT ENDPOINT
-  socket.on(
-    "admin:getInitialSnapshot",
-    async (_: any, ack: Function) => {
-      try {
-        const arena = getArena();
-        const queue = { open: true, entries: await getQueue() };
-        const logs = logBuffer;
-
-        let statsSnapshot: StreamStats | null = null;
-
-        if (currentGameId) {
-          const statsQuery = await pool.query(
-            `
-              SELECT
-                COUNT(DISTINCT CASE WHEN receiver_role IN ('speler','cohost')
-                  THEN receiver_id END) AS total_players,
-                COALESCE(SUM(CASE WHEN receiver_role IN ('speler','cohost')
-                  THEN diamonds ELSE 0 END), 0) AS total_player_diamonds,
-                COALESCE(SUM(CASE WHEN receiver_role = 'host'
-                  THEN diamonds ELSE 0 END), 0) AS total_host_diamonds
-              FROM gifts
-              WHERE game_id = $1
-            `,
-            [currentGameId]
-          );
-
-          const row = statsQuery.rows[0] || {};
-
-          statsSnapshot = {
-            totalPlayers: Number(row.total_players || 0),
-            totalPlayerDiamonds: Number(
-              row.total_player_diamonds || 0
-            ),
-            totalHostDiamonds: Number(
-              row.total_host_diamonds || 0
-            ),
-          };
-        }
-
-        ack({
-          arena,
-          queue,
-          logs,
-          stats: statsSnapshot,
-          gameSession: {
-            active: currentGameId !== null,
-            gameId: currentGameId,
-          },
-          leaderboard: [],
-        });
-      } catch (err) {
-        console.error("admin:getInitialSnapshot error:", err);
-        ack(null);
-      }
-    }
-  );
-
-  // MAIN HANDLER
+  // --- GENERIC HANDLER ---
   const handle = async (action: string, data: any, ack: Function) => {
     try {
-      // READ SETTINGS
+      // SETTINGS LADEN
       if (action === "getSettings") {
         return ack({
           success: true,
@@ -324,13 +293,12 @@ io.on("connection", async (socket: AdminSocket) => {
         });
       }
 
-      // SET HOST (BLOCK WHEN GAME ACTIVE)
+      // HOST INSTELLEN
       if (action === "setHost") {
         if (currentGameId) {
           return ack({
             success: false,
-            message:
-              "Host kan niet worden gewijzigd tijdens een actief spel",
+            message: "Host kan niet worden gewijzigd tijdens een actief spel",
           });
         }
 
@@ -350,26 +318,24 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // GAME START
+      // GAME START/STOP
       if (action === "startGame") {
         if (currentGameId)
           return ack({ success: false, message: "Er draait al een spel" });
+
         await startNewGame();
         return ack({ success: true });
       }
 
       if (action === "stopGame") {
         if (!currentGameId)
-          return ack({
-            success: false,
-            message: "Geen actief spel",
-          });
+          return ack({ success: false, message: "Geen actief spel" });
 
         await stopCurrentGame();
         return ack({ success: true });
       }
 
-      // ROUND CONTROL
+      // ROUND CONTROLS
       if (action === "startRound") {
         const ok = startRound(data?.type || "quarter");
         return ack(ok ? { success: true } : { success: false });
@@ -380,7 +346,7 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // UPDATE TIMER SETTINGS
+      // TIMER SETTINGS
       if (action === "updateSettings") {
         await updateArenaSettings({
           roundDurationPre: Number(data?.roundDurationPre),
@@ -392,7 +358,8 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // USER OPS
+      // ==== USER ACTIONS ====
+
       if (!data?.username)
         return ack({
           success: false,
@@ -417,7 +384,6 @@ io.on("connection", async (socket: AdminSocket) => {
 
       const { tiktok_id, display_name, username } = userRes.rows[0];
 
-      // ACTIONS
       switch (action) {
         case "addToArena":
           arenaJoin(String(tiktok_id), display_name, username);
@@ -456,6 +422,7 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       return ack({ success: true });
+
     } catch (err: any) {
       console.error("Admin error:", err);
       return ack({
@@ -487,7 +454,9 @@ io.on("connection", async (socket: AdminSocket) => {
   );
 });
 
-// STARTUP
+// ─────────────────────────────────────────────
+// STARTUP LOGIC
+// ─────────────────────────────────────────────
 initDB().then(async () => {
   server.listen(4000, () => {
     console.log("BATTLEBOX LIVE → http://0.0.0.0:4000");
@@ -496,17 +465,19 @@ initDB().then(async () => {
   initGame();
   await loadActiveGame();
 
-  // Dynamic host system
+  // Host laden
   await initDynamicHost();
 
-  // Start TikTok met host uit DB ipv .env
   const host = await getSetting("host_username");
 
   if (host) {
     console.log("Connecting TikTok with saved host:", host);
     const { conn } = await startConnection(host, () => {});
     tiktokConn = conn;
+
     initGiftEngine(conn);
+    initChatEngine(conn);
+
   } else {
     console.log("⚠ Geen host ingesteld — wacht op admin:setHost");
   }
