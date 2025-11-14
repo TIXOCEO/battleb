@@ -1,6 +1,12 @@
 // lib/adminTypes.ts
 
-export type ArenaPlayerStatus = "alive" | "eliminated" | "shielded" | "danger";
+export type ArenaPlayerStatus =
+  | "alive"
+  | "eliminated"
+  | "shielded"
+  | "danger"
+  | "elimination"
+  | "immune";
 
 export interface ArenaPlayer {
   id: string;
@@ -9,6 +15,9 @@ export interface ArenaPlayer {
   diamonds: number;
   boosters: string[];
   status: "alive" | "eliminated";
+
+  // Nieuw toegevoegd — nodig voor UI (kleurstatusboxen)
+  positionStatus: ArenaPlayerStatus;
 }
 
 export interface ArenaState {
