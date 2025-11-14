@@ -9,7 +9,7 @@ import dotenv from "dotenv";
 import pool, { getSetting, setSetting } from "./db";
 import { initDB } from "./db";
 
-import { startConnection, stopConnection } from "./engines/1-connection";
+import { startConnection } from "./engines/1-connection";
 import {
   initGiftEngine,
   initDynamicHost,
