@@ -35,9 +35,7 @@ export default function AdminDashboardPage() {
   const [queueOpen, setQueueOpen] = useState(true);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [username, setUsername] = useState("");
-
   const [status, setStatus] = useState<string | null>(null);
-
   const [streamStats, setStreamStats] = useState<StreamStats | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [gameSession, setGameSession] = useState<GameSessionState>({
@@ -45,78 +43,59 @@ export default function AdminDashboardPage() {
     gameId: null,
   });
 
-  // ───────────────────────────────────────────────
-  // SOCKET LISTENERS (blijven bestaan)
-  // ───────────────────────────────────────────────
   useEffect(() => {
     const socket = getAdminSocket();
 
-    const handleArena = (data: ArenaState) => setArena(data);
-    const handleQueue = (d: any) => {
+    socket.on("updateArena", (data: ArenaState) => setArena(data));
+    socket.on("updateQueue", (d: any) => {
       setQueue(d.entries ?? []);
       setQueueOpen(d.open ?? true);
-    };
-    const handleLog = (l: LogEntry) =>
-      setLogs((prev) => [l, ...prev].slice(0, 200));
-    const handleInitialLogs = (d: LogEntry[]) =>
-      setLogs(d.slice(0, 200));
-
-    const handleStats = (s: StreamStats) => setStreamStats(s);
-    const handleLeaderboard = (entries: LeaderboardEntry[]) =>
-      setLeaderboard(entries);
-
-    const handleGameSession = (session: GameSessionState) =>
-      setGameSession(session);
-
-    const handleConnectError = (err: any) => {
-      console.error("❌ Socket connectiefout:", err?.message);
-      setStatus("❌ Socket verbinding weggevallen");
-    };
-
-    const handleRoundStart = (d: any) =>
-      setStatus(`▶️ Ronde gestart (${d.type}) — ${d.duration}s`);
-
-    const handleRoundGrace = (d: any) =>
-      setStatus(`⏳ Grace-periode actief (${d.grace}s)`);
-
-    const handleRoundEnd = () => setStatus("⛔ Ronde beëindigd");
-
-    // REGISTRATIE
-    socket.on("updateArena", handleArena);
-    socket.on("updateQueue", handleQueue);
-    socket.on("log", handleLog);
-    socket.on("initialLogs", handleInitialLogs);
-    socket.on("streamStats", handleStats);
-    socket.on("streamLeaderboard", handleLeaderboard);
-    socket.on("gameSession", handleGameSession);
-    socket.on("connect_error", handleConnectError);
-    socket.on("round:start", handleRoundStart);
-    socket.on("round:grace", handleRoundGrace);
-    socket.on("round:end", handleRoundEnd);
+    });
+    socket.on("log", (l: LogEntry) =>
+      setLogs((prev) => [l, ...prev].slice(0, 200))
+    );
+    socket.on("initialLogs", (d: LogEntry[]) =>
+      setLogs(d.slice(0, 200))
+    );
+    socket.on("streamStats", (s: StreamStats) => setStreamStats(s));
+    socket.on("streamLeaderboard", (e: LeaderboardEntry[]) =>
+      setLeaderboard(e)
+    );
+    socket.on("gameSession", (s: GameSessionState) =>
+      setGameSession(s)
+    );
+    socket.on("connect_error", () =>
+      setStatus("❌ Socket verbinding weggevallen")
+    );
+    socket.on("round:start", (d: any) =>
+      setStatus(`▶️ Ronde gestart (${d.type}) — ${d.duration}s`)
+    );
+    socket.on("round:grace", (d: any) =>
+      setStatus(`⏳ Grace-periode actief (${d.grace}s)`)
+    );
+    socket.on("round:end", () =>
+      setStatus("⛔ Ronde beëindigd")
+    );
 
     return () => {
-      socket.off("updateArena", handleArena);
-      socket.off("updateQueue", handleQueue);
-      socket.off("log", handleLog);
-      socket.off("initialLogs", handleInitialLogs);
-      socket.off("streamStats", handleStats);
-      socket.off("streamLeaderboard", handleLeaderboard);
-      socket.off("gameSession", handleGameSession);
-      socket.off("connect_error", handleConnectError);
-      socket.off("round:start", handleRoundStart);
-      socket.off("round:grace", handleRoundGrace);
-      socket.off("round:end", handleRoundEnd);
+      socket.off("updateArena");
+      socket.off("updateQueue");
+      socket.off("log");
+      socket.off("initialLogs");
+      socket.off("streamStats");
+      socket.off("streamLeaderboard");
+      socket.off("gameSession");
+      socket.off("connect_error");
+      socket.off("round:start");
+      socket.off("round:grace");
+      socket.off("round:end");
     };
   }, []);
 
-  // ───────────────────────────────────────────────
-  // Snapshot laden bij paginabetreden
-  // ───────────────────────────────────────────────
   useEffect(() => {
     const socket = getAdminSocket();
     socket.emit("admin:getInitialSnapshot", {}, (snap: any) => {
       if (!snap) return;
-
       if (snap.arena) setArena(snap.arena);
       if (snap.queue) {
         setQueue(snap.queue.entries ?? []);
@@ -129,9 +108,6 @@ export default function AdminDashboardPage() {
     });
   }, []);
 
-  // ───────────────────────────────────────────────
-  // EMITTER HELPERS
-  // ───────────────────────────────────────────────
   const emitAdmin = (event: string, payload?: any) => {
     const socket = getAdminSocket();
     setStatus(`Bezig met ${event}...`);
@@ -153,10 +129,7 @@ export default function AdminDashboardPage() {
     );
   };
 
-  // ───────────────────────────────────────────────
-  // SORTED PLAYERS
-  // ───────────────────────────────────────────────
-  const sortedPlayers = useMemo(
+  const players = useMemo(
     () => arena?.players ?? [],
     [arena]
   );
@@ -164,20 +137,31 @@ export default function AdminDashboardPage() {
   const fmt = (n: number) =>
     n.toLocaleString("nl-NL", { maximumFractionDigits: 0 });
 
-  // ───────────────────────────────────────────────
-  // RENDER
-  // ───────────────────────────────────────────────
+  const colorForPosition = (p: any) => {
+    switch (p.positionStatus) {
+      case "immune":
+        return "bg-green-100 border-green-300";
+      case "danger":
+        return "bg-orange-100 border-orange-300";
+      case "elimination":
+        return "bg-red-200 border-red-400";
+      default:
+        return "bg-gray-50 border-gray-200";
+    }
+  };
+
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
-
-      {/* HEADER */}
       <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-6">
         <div className="flex items-center gap-2">
           <div className="text-2xl font-bold text-[#ff4d4f]">UB</div>
           <div>
-            <div className="text-xl font-semibold">Undercover BattleBox – Admin</div>
+            <div className="text-xl font-semibold">
+              Undercover BattleBox – Admin
+            </div>
             <div className="text-xs text-gray-500">
-              Verbonden als <span className="font-semibold text-green-600">Admin</span>
+              Verbonden als{" "}
+              <span className="font-semibold text-green-600">Admin</span>
             </div>
           </div>
         </div>
@@ -197,9 +181,7 @@ export default function AdminDashboardPage() {
         </div>
       </header>
 
-      {/* SPEL & RONDEBESTURING */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Spelbesturing */}
         <div className="flex flex-col gap-3">
           <div className="text-sm font-semibold">Spelbesturing</div>
 
@@ -210,6 +192,7 @@ export default function AdminDashboardPage() {
             >
               Start spel
             </button>
+
             <button
               onClick={() => emitAdmin("admin:stopGame")}
               className="px-3 py-1.5 bg-yellow-500 text-white rounded-full text-xs"
@@ -218,7 +201,6 @@ export default function AdminDashboardPage() {
             </button>
           </div>
 
-          {/* Rondebesturing */}
           <div>
             <div className="text-xs text-gray-600 mb-1">Ronde type</div>
             <div className="flex gap-2 flex-wrap">
@@ -249,7 +231,6 @@ export default function AdminDashboardPage() {
             </div>
           </div>
 
-          {/* Status ronde */}
           <div className="mt-3 text-sm">
             <div className="text-gray-600">Ronde status:</div>
 
@@ -271,11 +252,10 @@ export default function AdminDashboardPage() {
               Tijd:{" "}
               <span className="font-mono">
                 {arena?.timeLeft
-                  ? `${Math.floor(arena.timeLeft / 60)
-                      .toString()
-                      .padStart(2, "0")}:${(arena.timeLeft % 60)
-                      .toString()
-                      .padStart(2, "0")}`
+                  ? `${String(Math.floor(arena.timeLeft / 60)).padStart(
+                      2,
+                      "0"
+                    )}:${String(arena.timeLeft % 60).padStart(2, "0")}`
                   : "00:00"}
               </span>
             </div>
@@ -288,7 +268,6 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* SPELER ACTIES */}
         <div className="lg:col-span-2 flex flex-col gap-3">
           <div className="text-sm font-semibold">Speleracties</div>
 
@@ -332,79 +311,57 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* STATUS MELDING */}
       {status && (
         <div className="mb-4 text-sm text-center bg-amber-50 border border-amber-200 text-amber-800 rounded-xl py-2">
           {status}
         </div>
       )}
 
-      {/* ARENA + QUEUE */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* ARENA */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Arena</h2>
           <p className="text-sm text-gray-500 mb-4">
             {arena
               ? `Ronde #${arena.round} • ${arena.type}`
-              : "Geen ronde actief"}{" "}
-            • Max 8 spelers
+              : "Geen ronde actief"}
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-
-            {sortedPlayers.length
-              ? sortedPlayers.map((p, idx) => {
-                  const last3 = idx >= sortedPlayers.length - 3;
-
-                  // kleur op basis van ronde status + ranking + eliminatie
-                  let boxClass = "bg-gray-50 border-gray-200";
-
-                  if (p.status === "eliminated")
-                    boxClass = "bg-red-50 border-red-200";
-
-                  else if (arena?.status === "active" && last3)
-                    boxClass = "bg-orange-50 border-orange-200";
-
-                  else if (arena?.status === "grace" && last3)
-                    boxClass = "bg-red-100 border-red-300";
-
-                  return (
-                    <div
-                      key={p.id}
-                      className={`rounded-lg p-3 border text-sm shadow ${boxClass}`}
-                    >
-                      <div className="flex justify-between items-center">
-                        <span className="font-bold">#{idx + 1}</span>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-300 text-gray-700">
-                          {p.status}
-                        </span>
-                      </div>
-
-                      <div className="font-semibold truncate">
-                        {p.display_name} (@{p.username})
-                      </div>
-
-                      <div className="text-xs text-gray-600">
-                        Ronde: {fmt(p.diamonds)} 💎
-                      </div>
-
-                      {p.status === "alive" && (
-                        <button
-                          onClick={() =>
-                            emitAdminWithUser(
-                              "admin:eliminate",
-                              p.username
-                            )
-                          }
-                          className="mt-2 px-2 py-1 text-[11px] rounded-full border border-red-300 text-red-700 bg-red-50"
-                        >
-                          Elimineer
-                        </button>
-                      )}
+            {players.length
+              ? players.map((p, idx) => (
+                  <div
+                    key={p.id}
+                    className={`rounded-lg p-3 border text-sm shadow ${colorForPosition(
+                      p
+                    )}`}
+                  >
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold">#{idx + 1}</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-300 text-gray-700">
+                        {p.positionStatus}
+                      </span>
                     </div>
-                  );
-                })
+
+                    <div className="font-semibold truncate">
+                      {p.display_name} (@{p.username})
+                    </div>
+
+                    <div className="text-xs text-gray-600">
+                      Ronde: {fmt(p.diamonds)} 💎
+                    </div>
+
+                    {p.positionStatus === "elimination" && (
+                      <button
+                        onClick={() =>
+                          emitAdminWithUser("admin:eliminate", p.username)
+                        }
+                        className="mt-2 px-2 py-1 text-[11px] rounded-full border border-red-300 text-red-700 bg-red-50"
+                      >
+                        Verwijder speler
+                      </button>
+                    )}
+                  </div>
+                ))
               : Array.from({ length: 8 }).map((_, i) => (
                   <div
                     key={i}
@@ -413,11 +370,9 @@ export default function AdminDashboardPage() {
                     #{i + 1} – WACHT OP SPELER
                   </div>
                 ))}
-
           </div>
         </div>
 
-        {/* QUEUE */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Wachtrij</h2>
           <p className="text-sm text-gray-500 mb-3">
@@ -434,44 +389,112 @@ export default function AdminDashboardPage() {
           </p>
 
           {queue.length ? (
-            queue.map((q) => (
-              <div
-                key={q.tiktok_id}
-                className="rounded-lg border border-gray-200 bg-gray-50 p-2 mb-2 text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div>
-                  <div className="font-semibold text-gray-900">
-                    {q.display_name} (@{q.username})
+            queue.map((q) => {
+              const badges: JSX.Element[] = [];
+
+              if (q.is_vip) {
+                badges.push(
+                  <span
+                    key="vip"
+                    className="px-2 py-0.5 text-[10px] rounded-full bg-yellow-200 text-yellow-900 border border-yellow-400"
+                  >
+                    VIP
+                  </span>
+                );
+              }
+
+              if (q.is_fan && !q.is_vip) {
+                badges.push(
+                  <span
+                    key="fan"
+                    className="px-2 py-0.5 text-[10px] rounded-full bg-blue-100 text-blue-700 border border-blue-300"
+                  >
+                    Fan
+                  </span>
+                );
+              }
+
+              if (q.priorityDelta > 0) {
+                badges.push(
+                  <span
+                    key="boost"
+                    className="px-2 py-0.5 text-[10px] rounded-full bg-purple-100 text-purple-700 border border-purple-300"
+                  >
+                    Boost +{q.priorityDelta}
+                  </span>
+                );
+              }
+
+              return (
+                <div
+                  key={q.tiktok_id}
+                  className="rounded-lg border border-gray-200 bg-gray-50 p-2 mb-2 text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div>
+                    <div className="font-semibold text-gray-900">
+                      {q.display_name} (@{q.username})
+                    </div>
+
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {badges}
+                    </div>
+
+                    <div className="mt-1 text-xs text-gray-500">
+                      #{q.position} • {q.reason}
+                    </div>
                   </div>
-                  <div className="text-xs text-gray-500">
-                    #{q.position ?? "-"} {q.reason ?? ""}
+
+                  <div className="flex gap-1 mt-2 sm:mt-0 justify-end">
+
+                    <button
+                      onClick={() =>
+                        emitAdmin("admin:boostUser", {
+                          username: q.username,
+                        })
+                      }
+                      className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
+                    >
+                      ▲
+                    </button>
+
+                    <button
+                      onClick={() =>
+                        emitAdmin("admin:demoteUser", {
+                          username: q.username,
+                        })
+                      }
+                      className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
+                    >
+                      ▼
+                    </button>
+
+                    <button
+                      onClick={() =>
+                        emitAdminWithUser(
+                          "admin:addToArena",
+                          q.username
+                        )
+                      }
+                      className="px-2 py-1 rounded-full border border-[#ff4d4f] text-[#ff4d4f]"
+                    >
+                      → Arena
+                    </button>
+
+                    <button
+                      onClick={() =>
+                        emitAdminWithUser(
+                          "admin:removeFromQueue",
+                          q.username
+                        )
+                      }
+                      className="px-2 py-1 rounded-full border border-red-300 text-red-700 bg-red-50"
+                    >
+                      ✕
+                    </button>
                   </div>
                 </div>
-
-                <div className="flex gap-1 mt-2 sm:mt-0 justify-end">
-                  <button
-                    onClick={() =>
-                      emitAdminWithUser("admin:addToArena", q.username)
-                    }
-                    className="px-2 py-1 rounded-full border border-[#ff4d4f] text-[#ff4d4f]"
-                  >
-                    → Arena
-                  </button>
-
-                  <button
-                    onClick={() =>
-                      emitAdminWithUser(
-                        "admin:removeFromQueue",
-                        q.username
-                      )
-                    }
-                    className="px-2 py-1 rounded-full border border-red-300 text-red-700 bg-red-50"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-            ))
+              );
+            })
           ) : (
             <div className="text-sm text-gray-500 italic">
               Wachtrij is leeg.
@@ -480,10 +503,7 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* LEADERBOARD + STATS */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-
-        {/* LEADERBOARD */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Leaderboard</h2>
           <p className="text-xs text-gray-500 mb-3">
@@ -519,7 +539,6 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* STATS */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Stream stats</h2>
           <p className="text-xs text-gray-500 mb-3">
@@ -564,7 +583,6 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* LOGS */}
       <section className="mt-6 bg-white rounded-2xl shadow p-4">
         <h2 className="text-lg font-semibold mb-2">Log feed</h2>
 
@@ -600,7 +618,6 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* FOOTER */}
       <footer className="mt-4 text-xs text-gray-400 text-center">
         BattleBox Engine v{process.env.NEXT_PUBLIC_BATTLEBOX_VERSION || "dev"}
       </footer>
