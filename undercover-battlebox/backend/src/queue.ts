@@ -1,6 +1,6 @@
-// src/queue.ts — QUEUE ENGINE v2.0
-// FANCLUB = echte Heart-Me fan via is_fan + fan_expires_at
-// Geen badges meer. VIP = users.is_vip
+// src/queue.ts — QUEUE ENGINE v2.2 FINAL
+// Priority = VIP(5) + BOOST(X) — FAN heeft geen priority meer
+// Fan blijft wél zichtbaar in UI en bepaald of iemand mag !join
 
 import pool from "./db";
 
@@ -15,7 +15,10 @@ export type QueueEntry = {
   is_fan: boolean;
 };
 
-// CREATE USER (fallback)
+// ---------------------------------------------------------
+// USER HELPERS
+// ---------------------------------------------------------
+
 async function createUser(tiktok_id: string, username: string) {
   const r = await pool.query(
     `
@@ -40,7 +43,10 @@ async function getUser(tiktok_id: string) {
   return r.rows[0] || null;
 }
 
-// Add to queue
+// ---------------------------------------------------------
+// ADD TO QUEUE
+// ---------------------------------------------------------
+
 export async function addToQueue(
   tiktok_id: string,
   username: string
@@ -48,18 +54,22 @@ export async function addToQueue(
   let user = await getUser(tiktok_id);
   if (!user) user = await createUser(tiktok_id, username);
 
-  // Queue block?
   if (user.blocks?.queue) throw new Error("Geblokkeerd van de queue");
 
   await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [tiktok_id]);
 
   await pool.query(
-    `INSERT INTO queue (user_tiktok_id, boost_spots) VALUES ($1,0)`,
+    `INSERT INTO queue (user_tiktok_id, boost_spots)
+     VALUES ($1,0)`,
     [tiktok_id]
   );
 }
 
-// BOOST spots
+// ---------------------------------------------------------
+// BOOST (fallback voor admin)
+// De chat versie gebruikt boost-engine.ts → applyBoost()
+// ---------------------------------------------------------
+
 export async function boostQueue(
   tiktok_id: string,
   spots: number
@@ -73,6 +83,7 @@ export async function boostQueue(
     `SELECT bp_total FROM users WHERE tiktok_id=$1`,
     [tiktok_id]
   );
+
   if (!r.rows[0] || r.rows[0].bp_total < cost)
     throw new Error("Niet genoeg BP");
 
@@ -82,17 +93,22 @@ export async function boostQueue(
   );
 
   await pool.query(
-    `UPDATE queue SET boost_spots = boost_spots + $1 WHERE user_tiktok_id=$2`,
+    `UPDATE queue SET boost_spots = boost_spots + $1
+     WHERE user_tiktok_id=$2`,
     [spots, tiktok_id]
   );
 }
 
-// Leave queue
+// ---------------------------------------------------------
+// LEAVE QUEUE
+// ---------------------------------------------------------
+
 export async function leaveQueue(tiktok_id: string): Promise<number> {
   const r = await pool.query(
     `SELECT boost_spots FROM queue WHERE user_tiktok_id=$1`,
     [tiktok_id]
   );
+
   if (!r.rows[0]) return 0;
 
   const boost = r.rows[0].boost_spots;
@@ -111,26 +127,24 @@ export async function leaveQueue(tiktok_id: string): Promise<number> {
   return refund;
 }
 
-// PRIORITY RULES v2:
-// 1. VIP (users.is_vip)             +20
-// 2. FAN (users.is_fan + still valid) +10
-// 3. BOOST SPOTS (0–5)              +X
-// Total priority = vip + fan + boost
-// Sort desc, then joined_at asc
+// ---------------------------------------------------------
+// NEW PRIORITY RULES (v2.2)
+// VIP = +5
+// FAN = +0
+// BOOST = +X
+// ---------------------------------------------------------
 
-function calcPriority(
-  isVip: boolean,
-  isFan: boolean,
-  boost: number
-): number {
+function calcPriority(isVip: boolean, boost: number): number {
   let p = 0;
-  if (isVip) p += 20;
-  if (isFan) p += 10;
+  if (isVip) p += 5;
   p += boost || 0;
   return p;
 }
 
-// Fetch queue
+// ---------------------------------------------------------
+// GET QUEUE
+// ---------------------------------------------------------
+
 export async function getQueue(): Promise<QueueEntry[]> {
   const r = await pool.query(
     `
@@ -148,7 +162,6 @@ export async function getQueue(): Promise<QueueEntry[]> {
     `
   );
 
-  // Normalize fanclub validity
   const now = Date.now();
 
   const mapped = r.rows.map((row: any) => {
@@ -161,11 +174,11 @@ export async function getQueue(): Promise<QueueEntry[]> {
     const fan = !!fanValid;
     const boost = row.boost_spots || 0;
 
-    const priority = calcPriority(vip, fan, boost);
+    const priority = calcPriority(vip, boost);
 
     let reason = "Standaard";
     if (vip) reason = "VIP";
-    else if (fan) reason = "Fan";
+    if (fan) reason = fan && !vip ? "Fan" : reason;
 
     if (boost > 0) {
       if (reason === "Standaard") reason = `Boost +${boost}`;
@@ -194,7 +207,6 @@ export async function getQueue(): Promise<QueueEntry[]> {
            new Date(b.joined_at).getTime();
   });
 
-  // Add position numbers
   return mapped.map((row, i) => ({
     position: i + 1,
     tiktok_id: row.tiktok_id,
