@@ -495,7 +495,6 @@ io.on("connection", async (socket: AdminSocket) => {
 // STARTUP
 // ─────────────────────────────────────────────
 initDB().then(async () => {
-  export { emitArena, emitQueue };
   server.listen(4000, () => {
     console.log("BATTLEBOX LIVE → http://0.0.0.0:4000");
   });
