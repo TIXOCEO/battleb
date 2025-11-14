@@ -1,26 +1,28 @@
 // src/engines/6-chat-engine.ts
-// CHAT ENGINE — v1.1 (Simplified)
+// CHAT ENGINE — v1.2 (Heart Me + JOIN + BOOST via chat ONLY)
+
 // Functies:
-//  - Heart Me gift → fan voor 24 uur
-//  - Alleen fans mogen !join gebruiken
-//  - !join zet speler ALLEEN in de queue
-//  - Geen autoplacement in arena
-//  - Geen boosters (!boost) meer
-//  - Geen !leave refund? → blijft bestaan of wil je ook weg? (momenteel behouden)
-//
-// Imports & dependency engines
+//  - Heart Me gift activeert fan-status (elders via gift-engine)
+//  - Alleen fans mogen !join doen
+//  - !boost X → kost 200 BP per plek
+//  - Alleen mogelijk als gebruiker in queue staat
+//  - Geen autojoin in arena
+//  - !leave geeft refund (queue.ts regelt dit)
+//  - Admin UI gebruikt GEEN boost, alleen promote/demote
+
 import pool from "../db";
 import { emitLog, emitQueue } from "../server";
 
 import { addToQueue, leaveQueue } from "../queue";
 import { getOrUpdateUser } from "./2-user-engine";
+import { applyBoost, parseBoostChatCommand } from "./7-boost-engine";
 
-// -------------------------------------------
-// Helper functions
-// -------------------------------------------
+// ------------------------------------------------------
+// Helpers
+// ------------------------------------------------------
 
-function clean(value: any): string {
-  return (value || "").toString().trim();
+function clean(v: any): string {
+  return (v || "").toString().trim();
 }
 
 function extractCommand(text: string): { cmd: string; args: string[] } | null {
@@ -34,7 +36,7 @@ async function ensureFanStatus(userId: bigint): Promise<boolean> {
     `
       SELECT is_fan, fan_expires_at
       FROM users
-      WHERE tiktok_id = $1
+      WHERE tiktok_id=$1
     `,
     [userId]
   );
@@ -42,17 +44,15 @@ async function ensureFanStatus(userId: bigint): Promise<boolean> {
   if (!res.rows[0]) return false;
 
   const { is_fan, fan_expires_at } = res.rows[0];
-
   if (!is_fan) return false;
   if (!fan_expires_at) return false;
 
   const now = new Date();
-  const expiry = new Date(fan_expires_at);
+  const exp = new Date(fan_expires_at);
 
-  if (expiry <= now) {
-    // verlopen → reset
+  if (exp <= now) {
     await pool.query(
-      `UPDATE users SET is_fan = FALSE, fan_expires_at = NULL WHERE tiktok_id = $1`,
+      `UPDATE users SET is_fan=FALSE, fan_expires_at=NULL WHERE tiktok_id=$1`,
       [userId]
     );
     return false;
@@ -61,12 +61,12 @@ async function ensureFanStatus(userId: bigint): Promise<boolean> {
   return true;
 }
 
-// -------------------------------------------
+// ------------------------------------------------------
 // MAIN ENGINE
-// -------------------------------------------
+// ------------------------------------------------------
 
 export function initChatEngine(conn: any) {
-  console.log("💬 CHAT ENGINE v1.1 LOADED (simplified)");
+  console.log("💬 CHAT ENGINE v1.2 LOADED (Join + Boost)");
 
   conn.on("chat", async (msg: any) => {
     try {
@@ -84,7 +84,7 @@ export function initChatEngine(conn: any) {
       const command = extractCommand(text);
       if (!command) return;
 
-      const { cmd, args } = command;
+      const { cmd } = command;
 
       const user = await getOrUpdateUser(
         String(userId),
@@ -97,14 +97,14 @@ export function initChatEngine(conn: any) {
 
       const isFan = await ensureFanStatus(dbUserId);
 
-      // -----------------------------------
-      // !join — alleen voor fans
-      // -----------------------------------
+      // ------------------------------------------
+      // !join — alleen fans
+      // ------------------------------------------
       if (cmd === "!join") {
         if (!isFan) {
           emitLog({
             type: "queue",
-            message: `${user.display_name} probeert te joinen, maar is geen fan`,
+            message: `${user.display_name} probeert te joinen maar is geen fan`,
           });
           return;
         }
@@ -114,36 +114,45 @@ export function initChatEngine(conn: any) {
 
         emitLog({
           type: "queue",
-          message: `${user.display_name} heeft zich bij de wachtlijst gevoegd`,
+          message: `${user.display_name} staat nu in de wachtrij`,
         });
 
         return;
       }
 
-      // -----------------------------------
-      // !leave — queue verlaten
-      // (refund mechanisme van leaveQueue blijft actief)
-      // -----------------------------------
+      // ------------------------------------------
+      // !leave — verlaat queue
+      // ------------------------------------------
       if (cmd === "!leave") {
         const refund = await leaveQueue(String(userId));
         await emitQueue();
 
         emitLog({
           type: "queue",
-          message: `${user.display_name} heeft de wachtrij verlaten (refund ${refund} BP)`,
+          message: `${user.display_name} heeft de wachtlijst verlaten (refund ${refund} BP)`,
         });
 
         return;
       }
 
-      // -----------------------------------
-      // !boost — VERWIJDERD
-      // -----------------------------------
+      // ------------------------------------------
+      // !boost X — BOOST VIA CHAT ONLY
+      // ------------------------------------------
       if (cmd === "!boost") {
+        const spots = await parseBoostChatCommand(text);
+        if (!spots) return;
+
+        const result = await applyBoost(
+          String(userId),
+          spots,
+          user.display_name
+        );
+
         emitLog({
-          type: "system",
-          message: `${user.display_name} probeert !boost te gebruiken → boost is uitgeschakeld`,
+          type: "booster",
+          message: `${user.display_name} → ${result.message}`,
         });
+
         return;
       }
 
