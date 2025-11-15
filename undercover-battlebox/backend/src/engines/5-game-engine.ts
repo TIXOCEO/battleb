@@ -320,7 +320,7 @@ export function startRound(type: RoundType) {
 
       emitArena();
 
-      if (arena.status === "grace") {
+      if (arena.status === ("grace" as ArenaStatus)) {
         io.emit("round:grace", {
           round: arena.round,
           grace: arena.settings.graceSeconds,
