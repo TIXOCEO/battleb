@@ -326,15 +326,16 @@ export function startRound(type: RoundType) {
       return;
     }
 
-    if (arena.status === "grace") {
-      if (now >= arena.graceEnd) {
-        endRound();
-      } else {
-        mutate(() => {});
-        emitArena();
-      }
-      return;
-    }
+// Grace phase
+if (arena.status === "grace" as ArenaStatus) {
+  if (now >= arena.graceEnd) {
+    endRound();
+  } else {
+    emitArena();
+  }
+  return;
+}
+
 
     if (arena.status === "ended" || arena.status === "idle") {
       clearInterval(roundTick!);
