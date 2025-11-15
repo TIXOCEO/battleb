@@ -27,8 +27,6 @@ export async function startConnection(
 ) {
   const host = username.replace(/^@+/, "").trim();
   const conn = new WebcastPushConnection(host, {
-    // TikTok stuurt soms halve user-objecten.
-    // Deze opties verhogen reliability.
     requestOptions: {
       timeout: 15000,
     },
@@ -68,6 +66,24 @@ export async function startConnection(
   // IDENTITEITEN SNEL UPDATEN
   attachIdentityUpdaters(conn);
 
+  // ─────────────────────────────────────────────
+  // ✔ HIER TOEGEVOEGD → OFFICIËLE GIFTS-LIJST FUNCTIE
+  // ─────────────────────────────────────────────
+  conn.getAvailableGifts = async () => {
+    try {
+      // interne functie van TikTok-Live-Connector
+      if (typeof (conn as any).getAvailableGiftsList === "function") {
+        return await (conn as any).getAvailableGiftsList();
+      }
+      console.error("⚠️ getAvailableGiftsList() bestaat niet in connector!");
+      return [];
+    } catch (err) {
+      console.error("❌ Fout in getAvailableGifts:", err);
+      return [];
+    }
+  };
+  // ─────────────────────────────────────────────
+
   // Actieve connectie opslaan zodat we hem kunnen stoppen bij host-wissel
   activeConn = conn;
 
@@ -86,7 +102,6 @@ export async function stopConnection(
 
   try {
     console.log("🔌 TikTok verbinding wordt afgesloten…");
-    // tiktok-live-connector heeft een disconnect() method
     if (typeof c.disconnect === "function") {
       await c.disconnect();
     } else if (typeof (c as any).close === "function") {
@@ -104,20 +119,15 @@ export async function stopConnection(
 
 // ─────────────────────────────────────────────────────────────
 // Identity Updaters — de kern van jouw systeem
-//
-// DIT IS WAAR jij Onbekend oplost.
-//
-// Elk event bevat user-info. Zodra TikTok iets beters stuurt,
-// wordt de database onmiddellijk geüpdatet.
 // ─────────────────────────────────────────────────────────────
 
 function attachIdentityUpdaters(conn: any) {
-  // 1) Chat (beste event, komt het snelst binnen)
+  // 1) Chat
   conn.on("chat", (d: any) => {
     upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
   });
 
-  // 2) Likes (ook superfrequent)
+  // 2) Likes
   conn.on("like", (d: any) => {
     upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
   });
@@ -127,14 +137,13 @@ function attachIdentityUpdaters(conn: any) {
     upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
   });
 
-  // 4) Social / share
+  // 4) Social
   conn.on("social", (d: any) => {
     upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
   });
 
-  // 5) Member (join / viewer joined)
+  // 5) Member (join)
   conn.on("member", (d: any) => {
-    // TikTok stuurt hier heel vaak real-nicknames!
     upsertIdentityFromLooseEvent(d?.user || d);
   });
 
@@ -143,23 +152,20 @@ function attachIdentityUpdaters(conn: any) {
     upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
   });
 
-  // 7) Live moderator events (optioneel)
+  // 7) Moderator
   conn.on("moderator", (d: any) => {
     upsertIdentityFromLooseEvent(d?.user || d);
   });
 
-  // 8) Gift events → update zowel sender als ontvanger
+  // 8) Gift
   conn.on("gift", (d: any) => {
-    // Sender
     upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
-
-    // Receiver (cohost/speler/host)
     if (d?.toUser || d?.receiver) {
       upsertIdentityFromLooseEvent(d?.toUser || d?.receiver);
     }
   });
 
-  // 9) Mic changes (soms bevatten deelnemers info)
+  // 9) Mic battle user info
   conn.on("linkMicBattle", (d: any) => {
     if (d?.battleUsers) {
       for (const u of d.battleUsers) {
@@ -168,7 +174,7 @@ function attachIdentityUpdaters(conn: any) {
     }
   });
 
-  // 10) Live room entry / guest enter → bevat user object
+  // 10) liveRoomUser → enters
   conn.on("liveRoomUser", (d: any) => {
     upsertIdentityFromLooseEvent(d?.user || d);
   });
