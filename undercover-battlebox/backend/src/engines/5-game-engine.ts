@@ -1,7 +1,8 @@
 // ============================================================================
-// 5-GAME-ENGINE.ts — Arena Engine v2.3 FIXED (OPTIE B)
+// 5-GAME-ENGINE.ts — Arena Engine v2.4 (OPTIE C — PRODUCTION SAFE)
 // Unlimited spelers, tie-groups, danger, elimination, force mode
-// Immunity type bestaat nog maar wordt nergens toegewezen
+// Immunity type bestaat maar wordt nooit gebruikt
+// getArena() is PURE en veroorzaakt NOOIT side-effects
 // ============================================================================
 
 import { io } from "../server";
@@ -18,7 +19,7 @@ export type PositionStatus =
   | "active"
   | "danger"
   | "elimination"
-  | "immune"; // ← bestaat nog, maar niet gebruikt
+  | "immune"; // ← bestaat, maar wordt niet toegewezen
 
 interface Player {
   id: string;
@@ -86,6 +87,70 @@ const arena: Arena = {
 };
 
 // ============================================================================
+// INTERNAL MUTATION HELPERS (NO SIDE EFFECTS OUTSIDE)
+// ============================================================================
+
+function _sortPlayers() {
+  arena.players.sort(
+    (a, b) => b.diamonds - a.diamonds || a.joined_at - b.joined_at
+  );
+  arena.lastSortedAt = Date.now();
+}
+
+function _recomputePositionMap() {
+  const p = arena.players;
+  const map: Record<string, PositionStatus> = {};
+
+  if (p.length === 0) {
+    arena.positionMap = {};
+    return;
+  }
+
+  // --- Tie groups ---
+  const groups: { diamonds: number; members: Player[] }[] = [];
+  let current: Player[] = [p[0]];
+
+  for (let i = 1; i < p.length; i++) {
+    if (p[i].diamonds === p[i - 1].diamonds) current.push(p[i]);
+    else {
+      groups.push({ diamonds: current[0].diamonds, members: [...current] });
+      current = [p[i]];
+    }
+  }
+  groups.push({ diamonds: current[0].diamonds, members: [...current] });
+
+  const lastGroup = groups[groups.length - 1];
+
+  const endangered = new Set<string>();
+  const doomed = new Set<string>();
+
+  if (arena.status === "active") {
+    lastGroup.members.forEach(pl => endangered.add(pl.id));
+  } else if (arena.status === "grace" || arena.status === "ended") {
+    lastGroup.members.forEach(pl => doomed.add(pl.id));
+  }
+
+  for (const pl of p) {
+    if (doomed.has(pl.id)) map[pl.id] = "elimination";
+    else if (endangered.has(pl.id)) map[pl.id] = "danger";
+    else map[pl.id] = "active";
+  }
+
+  arena.positionMap = map;
+}
+
+/**
+ * SAFE mutation wrapper — ONLY mutates local state
+ * NEVER calls emitArena()
+ * NEVER calls getArena()
+ */
+function mutate(mutator: () => void) {
+  mutator();
+  _sortPlayers();
+  _recomputePositionMap();
+}
+
+// ============================================================================
 // SETTINGS – LOAD + SAVE
 // ============================================================================
 
@@ -104,16 +169,20 @@ async function loadArenaSettingsFromDB(): Promise<void> {
 
   const map = new Map(rows.map((r: any) => [r.key, r.value]));
 
-  arena.settings = {
-    roundDurationPre: Number(map.get("roundDurationPre") ?? DEFAULT_SETTINGS.roundDurationPre),
-    roundDurationFinal: Number(map.get("roundDurationFinal") ?? DEFAULT_SETTINGS.roundDurationFinal),
-    graceSeconds: Number(map.get("graceSeconds") ?? DEFAULT_SETTINGS.graceSeconds),
-    forceEliminations: (map.get("forceEliminations") ?? "true") === "true",
-  };
+  mutate(() => {
+    arena.settings = {
+      roundDurationPre: Number(map.get("roundDurationPre") ?? DEFAULT_SETTINGS.roundDurationPre),
+      roundDurationFinal: Number(map.get("roundDurationFinal") ?? DEFAULT_SETTINGS.roundDurationFinal),
+      graceSeconds: Number(map.get("graceSeconds") ?? DEFAULT_SETTINGS.graceSeconds),
+      forceEliminations: (map.get("forceEliminations") ?? "true") === "true",
+    };
+  });
 }
 
-async function saveArenaSettingsToDB(s: Partial<ArenaSettings>): Promise<void> {
-  arena.settings = { ...arena.settings, ...s };
+export async function updateArenaSettings(s: Partial<ArenaSettings>) {
+  mutate(() => {
+    arena.settings = { ...arena.settings, ...s };
+  });
 
   const rows: [string, string][] = [
     ["roundDurationPre", String(arena.settings.roundDurationPre)],
@@ -134,150 +203,52 @@ async function saveArenaSettingsToDB(s: Partial<ArenaSettings>): Promise<void> {
   emitArena();
 }
 
-export async function updateArenaSettings(s: Partial<ArenaSettings>) {
-  await saveArenaSettingsToDB(s);
-}
-
 export function getArenaSettings(): ArenaSettings {
   return { ...arena.settings };
-}
-
-// ============================================================================
-// SORTING + POSITION STATUS
-// ============================================================================
-
-function sortPlayers(): void {
-  arena.players.sort(
-    (a, b) => b.diamonds - a.diamonds || a.joined_at - b.joined_at
-  );
-  arena.lastSortedAt = Date.now();
-  updatePositionStatuses();
-}
-
-// Used everywhere a recompute must happen
-function recomputePositions(): void {
-  sortPlayers();
-  updatePositionStatuses();
-  emitArena();
-}
-
-// ============================================================================
-// POSITION LOGICA — immunity UITGESCHAKELD
-// ============================================================================
-
-function updatePositionStatuses(): void {
-  const p = arena.players;
-  const map: Record<string, PositionStatus> = {};
-
-  if (p.length === 0) {
-    arena.positionMap = {};
-    return;
-  }
-
-  // Tie-groups bepalen
-  const groups: { diamonds: number; members: Player[] }[] = [];
-  let current: Player[] = [p[0]];
-
-  for (let i = 1; i < p.length; i++) {
-    if (p[i].diamonds === p[i - 1].diamonds) {
-      current.push(p[i]);
-    } else {
-      groups.push({ diamonds: current[0].diamonds, members: [...current] });
-      current = [p[i]];
-    }
-  }
-  groups.push({ diamonds: current[0].diamonds, members: [...current] });
-
-  const lastGroup = groups[groups.length - 1];
-  let endangered = new Set<string>();
-  let doomed = new Set<string>();
-
-  if (arena.status === "active") {
-    lastGroup.members.forEach(pl => endangered.add(pl.id));
-  } else if (arena.status === "grace" || arena.status === "ended") {
-    lastGroup.members.forEach(pl => doomed.add(pl.id));
-  }
-
-  for (const pl of p) {
-    if (doomed.has(pl.id)) {
-      map[pl.id] = "elimination";
-    } else if (endangered.has(pl.id)) {
-      map[pl.id] = "danger";
-    } else {
-      map[pl.id] = "active";
-    }
-  }
-
-  arena.positionMap = map;
 }
 
 // ============================================================================
 // PLAYER MANAGEMENT
 // ============================================================================
 
-export function arenaJoin(
-  tiktok_id: string,
-  display_name: string,
-  username: string
-): boolean {
-  if (arena.players.some(p => p.id === tiktok_id)) return false;
+export function arenaJoin(id: string, display_name: string, username: string) {
+  if (arena.players.some(p => p.id === id)) return false;
 
-  const pl: Player = {
-    id: tiktok_id,
-    display_name,
-    username,
-    diamonds: 0,
-    boosters: [],
-    status: "alive",
-    joined_at: Date.now(),
-  };
+  mutate(() => {
+    arena.players.push({
+      id,
+      display_name,
+      username,
+      diamonds: 0,
+      boosters: [],
+      status: "alive",
+      joined_at: Date.now(),
+    });
+  });
 
-  arena.players.push(pl);
-  recomputePositions();
+  emitArena();
   return true;
 }
 
-export function arenaLeave(tiktok_id: string): void {
-  const idx = arena.players.findIndex(p => p.id === tiktok_id);
-  if (idx === -1) return;
+export function arenaLeave(id: string) {
+  mutate(() => {
+    arena.players = arena.players.filter(p => p.id !== id);
+  });
 
-  arena.players.splice(idx, 1);
-
-  // FULL FIX: positionMap wordt compleet opnieuw berekend!!
-  recomputePositions();
-}
-
-export async function arenaClear(): Promise<void> {
-  for (const p of arena.players) {
-    await pool.query(
-      `UPDATE users SET diamonds_current_round = 0 WHERE tiktok_id=$1`,
-      [BigInt(p.id)]
-    );
-  }
-
-  arena.players = [];
-  arena.round = 0;
-  arena.type = "quarter";
-  arena.status = "idle";
-  arena.timeLeft = 0;
-  arena.isRunning = false;
-  arena.roundStartTime = 0;
-  arena.roundCutoff = 0;
-  arena.graceEnd = 0;
-
-  recomputePositions();
+  emitArena();
 }
 
 // ============================================================================
-// SAFE DIAMOND ADD (voor Gift Engine)
+// SAFE DIAMOND ADD
 // ============================================================================
 
-export async function safeAddArenaDiamonds(id: string, amount: number): Promise<void> {
-  const pl = arena.players.find(p => p.id === id);
-  if (!pl) return;
+export async function safeAddArenaDiamonds(id: string, amount: number) {
+  mutate(() => {
+    const pl = arena.players.find(p => p.id === id);
+    if (pl) pl.diamonds += Number(amount);
+  });
 
-  pl.diamonds += Number(amount);
-  recomputePositions();
+  emitArena();
 }
 
 // ============================================================================
@@ -286,45 +257,43 @@ export async function safeAddArenaDiamonds(id: string, amount: number): Promise<
 
 let roundTick: NodeJS.Timeout | null = null;
 
-function getDurationForType(type: RoundType): number {
+function getDurationFor(type: RoundType) {
   return type === "finale"
     ? arena.settings.roundDurationFinal
     : arena.settings.roundDurationPre;
 }
 
-export function startRound(type: RoundType): boolean {
-  if (arena.settings.forceEliminations) {
-    const eliminationExists = Object.values(arena.positionMap).includes("elimination");
-    if (eliminationExists) {
-      return false;
-    }
+export function startRound(type: RoundType) {
+  if (arena.settings.forceEliminations &&
+      Object.values(arena.positionMap).includes("elimination")) {
+    return false;
   }
 
   if (arena.status === "active" || arena.status === "grace") return false;
-  if (arena.players.length < 1) return false;
+  if (arena.players.length === 0) return false;
 
-  arena.round += 1;
-  arena.type = type;
+  mutate(() => {
+    arena.round += 1;
+    arena.type = type;
 
-  const secs = getDurationForType(type);
-  arena.timeLeft = secs;
-  arena.status = "active";
-  arena.isRunning = true;
+    const secs = getDurationFor(type);
+    arena.timeLeft = secs;
+    arena.status = "active";
+    arena.isRunning = true;
 
-  arena.roundStartTime = Date.now();
-  arena.roundCutoff = arena.roundStartTime + secs * 1000;
-  arena.graceEnd = arena.roundCutoff + arena.settings.graceSeconds * 1000;
+    arena.roundStartTime = Date.now();
+    arena.roundCutoff = arena.roundStartTime + secs * 1000;
+    arena.graceEnd = arena.roundCutoff + arena.settings.graceSeconds * 1000;
 
-  for (const pl of arena.players) {
-    pl.diamonds = 0;
-  }
+    arena.players.forEach(p => (p.diamonds = 0));
+  });
 
-  recomputePositions();
+  emitArena();
 
   io.emit("round:start", {
     round: arena.round,
     type: arena.type,
-    duration: secs,
+    duration: arena.timeLeft,
   });
 
   if (roundTick) clearInterval(roundTick);
@@ -333,23 +302,27 @@ export function startRound(type: RoundType): boolean {
     const now = Date.now();
 
     if (arena.status === "active") {
-      const left = Math.max(0, Math.ceil((arena.roundCutoff - now) / 1000));
-      arena.timeLeft = left;
+      mutate(() => {
+        arena.timeLeft = Math.max(
+          0,
+          Math.ceil((arena.roundCutoff - now) / 1000)
+        );
 
-      if (left <= 0) {
-        arena.status = "grace";
-        arena.isRunning = false;
-        arena.timeLeft = 0;
+        if (arena.timeLeft <= 0) {
+          arena.status = "grace";
+          arena.isRunning = false;
+        }
+      });
 
-        recomputePositions();
+      emitArena();
 
+      if (arena.status === "grace") {
         io.emit("round:grace", {
           round: arena.round,
           grace: arena.settings.graceSeconds,
         });
-      } else {
-        recomputePositions();
       }
+
       return;
     }
 
@@ -357,13 +330,14 @@ export function startRound(type: RoundType): boolean {
       if (now >= arena.graceEnd) {
         endRound();
       } else {
-        recomputePositions();
+        mutate(() => {});
+        emitArena();
       }
       return;
     }
 
     if (arena.status === "ended" || arena.status === "idle") {
-      if (roundTick) clearInterval(roundTick);
+      clearInterval(roundTick!);
       roundTick = null;
     }
   }, 1000);
@@ -371,34 +345,41 @@ export function startRound(type: RoundType): boolean {
   return true;
 }
 
-export function endRound(): void {
+export function endRound() {
+  let doomedIds: string[] = [];
+
   if (arena.settings.forceEliminations) {
-    const doomed = Object.entries(arena.positionMap)
+    doomedIds = Object.entries(arena.positionMap)
       .filter(([_, s]) => s === "elimination")
       .map(([id]) => id);
 
-    if (doomed.length > 0) {
-      arena.status = "ended";
-      arena.isRunning = false;
-      arena.timeLeft = 0;
+    if (doomedIds.length > 0) {
+      mutate(() => {
+        arena.status = "ended";
+        arena.isRunning = false;
+        arena.timeLeft = 0;
+      });
 
-      recomputePositions();
+      emitArena();
 
       io.emit("round:end", {
         round: arena.round,
         type: arena.type,
         top3: getTop3(),
-        pendingEliminations: doomed,
+        pendingEliminations: doomedIds,
       });
+
       return;
     }
   }
 
-  arena.status = "ended";
-  arena.isRunning = false;
-  arena.timeLeft = 0;
+  mutate(() => {
+    arena.status = "ended";
+    arena.isRunning = false;
+    arena.timeLeft = 0;
+  });
 
-  recomputePositions();
+  emitArena();
 
   io.emit("round:end", {
     round: arena.round,
@@ -406,14 +387,10 @@ export function endRound(): void {
     top3: getTop3(),
     pendingEliminations: [],
   });
-
-  if (roundTick) clearInterval(roundTick);
-  roundTick = null;
 }
 
 function getTop3() {
-  const sorted = [...arena.players];
-  return sorted.slice(0, 3).map((p) => ({
+  return [...arena.players].slice(0, 3).map(p => ({
     id: p.id,
     display_name: p.display_name,
     username: p.username,
@@ -422,14 +399,12 @@ function getTop3() {
 }
 
 // ============================================================================
-// SNAPSHOT + EMIT
+// PURE SNAPSHOT (NO SIDE EFFECTS)
 // ============================================================================
 
 export function getArena() {
-  recomputePositions();
-
   return {
-    players: arena.players.map((p) => ({
+    players: arena.players.map(p => ({
       id: p.id,
       display_name: p.display_name,
       username: p.username.replace(/^@+/, ""),
@@ -451,6 +426,10 @@ export function getArena() {
   };
 }
 
+// ============================================================================
+// EMIT (NO SIDE EFFECTS)
+// ============================================================================
+
 export function emitArena() {
   io.emit("updateArena", getArena());
 }
@@ -461,5 +440,6 @@ export function emitArena() {
 
 export async function initGame() {
   await loadArenaSettingsFromDB();
-  recomputePositions();
+  mutate(() => {});
+  emitArena();
 }
