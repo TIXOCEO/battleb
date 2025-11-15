@@ -41,6 +41,8 @@ import {
 import { getQueue, addToQueue } from "./queue";
 import { initChatEngine } from "./engines/6-chat-engine";
 import { applyBoost } from "./engines/7-boost-engine";
+export let tiktokConnShared: any = null;
+
 
 dotenv.config();
 
@@ -252,6 +254,7 @@ async function restartTikTokConnection() {
 
     const { conn } = await startConnection(host, () => {});
     tiktokConn = conn;
+    tiktokConnShared = conn;
 
     initGiftEngine(conn);
     initChatEngine(conn);
