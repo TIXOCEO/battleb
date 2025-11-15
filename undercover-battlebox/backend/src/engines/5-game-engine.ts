@@ -1,7 +1,7 @@
 // ============================================================================
-// 5-GAME-ENGINE.ts — Arena Engine v2.2 FINAL
-// Ondersteunt: unlimited spelers, tie-groups, danger, elimination, force mode
-// Bevat: safeAddArenaDiamonds() voor Gift Engine compatibiliteit
+// 5-GAME-ENGINE.ts — Arena Engine v2.3
+// Unlimited spelers, tie-groups, danger, elimination, force mode
+// Immunity type blijft bestaan, maar wordt nergens toegewezen (twist-ready)
 // ============================================================================
 
 import { io } from "../server";
@@ -18,16 +18,16 @@ export type PositionStatus =
   | "active"
   | "danger"
   | "elimination"
-  | "immune";
+  | "immune";   // ← immunity bestaat nog, maar wordt nu nooit gebruikt
 
 interface Player {
   id: string;
   display_name: string;
   username: string;
-  diamonds: number;      // huidige ronde
+  diamonds: number;
   boosters: string[];
   status: "alive" | "eliminated";
-  joined_at: number;     // voor sorteervolgorde bij ties
+  joined_at: number;
 }
 
 interface ArenaSettings {
@@ -154,9 +154,9 @@ function sortPlayers(): void {
   updatePositionStatuses();
 }
 
-// =======================================
-// TIE-GROUP LOGICA
-// =======================================
+// ============================================================================
+// POSITION LOGICA — immunity is UITGESCHAKELD
+// ============================================================================
 
 function updatePositionStatuses(): void {
   const p = arena.players;
@@ -167,7 +167,7 @@ function updatePositionStatuses(): void {
     return;
   }
 
-  // 1. Tie groups bepalen
+  // Tie-groups bepalen
   const groups: { diamonds: number; members: Player[] }[] = [];
   let current: Player[] = [p[0]];
 
@@ -181,10 +181,7 @@ function updatePositionStatuses(): void {
   }
   groups.push({ diamonds: current[0].diamonds, members: [...current] });
 
-  // 2. Top 3 immune
-  const immuneIds = p.slice(0, 3).map(pl => pl.id);
-
-  // 3. Laatste group
+  // Geen immune — alles is actief tenzij danger/elimination
   const lastGroup = groups[groups.length - 1];
 
   let endangered = new Set<string>();
@@ -196,11 +193,9 @@ function updatePositionStatuses(): void {
     lastGroup.members.forEach(pl => doomed.add(pl.id));
   }
 
-  // 4. Classification
+  // Final assignment
   for (const pl of p) {
-    if (immuneIds.includes(pl.id)) {
-      map[pl.id] = "immune";
-    } else if (doomed.has(pl.id)) {
+    if (doomed.has(pl.id)) {
       map[pl.id] = "elimination";
     } else if (endangered.has(pl.id)) {
       map[pl.id] = "danger";
@@ -208,6 +203,9 @@ function updatePositionStatuses(): void {
       map[pl.id] = "active";
     }
   }
+
+  // Immunity bestaat nog als type, maar wordt NOOIT gebruikt:
+  // map[id] is dus nooit "immune"
 
   arena.positionMap = map;
 }
@@ -271,10 +269,8 @@ export async function arenaClear(): Promise<void> {
 }
 
 // ============================================================================
-// DIAMOND UPDATE (SAFE)
+// SAFE DIAMOND ADD (voor Gift Engine)
 // ============================================================================
-// Wordt gebruikt door Gift Engine
-// Crasht nooit, zelfs als speler niet in de arena zit
 
 export async function safeAddArenaDiamonds(id: string, amount: number): Promise<void> {
   const pl = arena.players.find(p => p.id === id);
@@ -298,7 +294,7 @@ function getDurationForType(type: RoundType): number {
 }
 
 export function startRound(type: RoundType): boolean {
-  // Block als admin nog moet elimineren
+  // Force eliminations?
   if (arena.settings.forceEliminations) {
     const eliminationExists = Object.values(arena.positionMap).includes("elimination");
     if (eliminationExists) {
@@ -339,7 +335,6 @@ export function startRound(type: RoundType): boolean {
   roundTick = setInterval(() => {
     const now = Date.now();
 
-    // ACTIVE
     if (arena.status === "active") {
       const left = Math.max(0, Math.ceil((arena.roundCutoff - now) / 1000));
       arena.timeLeft = left;
@@ -374,7 +369,6 @@ export function startRound(type: RoundType): boolean {
       return;
     }
 
-    // EINDE
     if (arena.status === "ended" || arena.status === "idle") {
       if (roundTick) clearInterval(roundTick);
       roundTick = null;
@@ -404,12 +398,10 @@ export function endRound(): void {
         top3: getTop3(),
         pendingEliminations: doomed,
       });
-
       return;
     }
   }
 
-  // normaal einde
   arena.status = "ended";
   arena.isRunning = false;
   arena.timeLeft = 0;
@@ -483,3 +475,4 @@ export async function initGame() {
   updatePositionStatuses();
   emitArena();
 }
+
