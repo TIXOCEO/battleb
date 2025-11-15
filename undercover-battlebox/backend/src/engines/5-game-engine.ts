@@ -124,7 +124,7 @@ function _recomputePositionMap() {
   const endangered = new Set<string>();
   const doomed = new Set<string>();
 
-  if (arena.status === "active") {
+  if (arena.status === "grace" || arena.status === "ended") {
     lastGroup.members.forEach(pl => endangered.add(pl.id));
   } else if (arena.status === "grace" || arena.status === "ended") {
     lastGroup.members.forEach(pl => doomed.add(pl.id));
