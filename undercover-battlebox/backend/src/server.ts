@@ -550,7 +550,7 @@ initDB().then(async () => {
     console.log("Connecting TikTok with saved host:", host);
     const { conn } = await startConnection(host, () => {});
     tiktokConn = conn;
-    sharedTikTokConn = conn;
+    tiktokConnShared = conn;
 
     initGiftEngine(conn);
     initChatEngine(conn);
