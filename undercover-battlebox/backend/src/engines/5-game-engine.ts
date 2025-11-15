@@ -1,7 +1,7 @@
 // ============================================================================
-// 5-GAME-ENGINE.ts — Arena Engine v2.3
+// 5-GAME-ENGINE.ts — Arena Engine v2.3 FIXED (OPTIE B)
 // Unlimited spelers, tie-groups, danger, elimination, force mode
-// Immunity type blijft bestaan, maar wordt nergens toegewezen (twist-ready)
+// Immunity type bestaat nog maar wordt nergens toegewezen
 // ============================================================================
 
 import { io } from "../server";
@@ -18,7 +18,7 @@ export type PositionStatus =
   | "active"
   | "danger"
   | "elimination"
-  | "immune";   // ← immunity bestaat nog, maar wordt nu nooit gebruikt
+  | "immune"; // ← bestaat nog, maar niet gebruikt
 
 interface Player {
   id: string;
@@ -154,8 +154,15 @@ function sortPlayers(): void {
   updatePositionStatuses();
 }
 
+// Used everywhere a recompute must happen
+function recomputePositions(): void {
+  sortPlayers();
+  updatePositionStatuses();
+  emitArena();
+}
+
 // ============================================================================
-// POSITION LOGICA — immunity is UITGESCHAKELD
+// POSITION LOGICA — immunity UITGESCHAKELD
 // ============================================================================
 
 function updatePositionStatuses(): void {
@@ -181,9 +188,7 @@ function updatePositionStatuses(): void {
   }
   groups.push({ diamonds: current[0].diamonds, members: [...current] });
 
-  // Geen immune — alles is actief tenzij danger/elimination
   const lastGroup = groups[groups.length - 1];
-
   let endangered = new Set<string>();
   let doomed = new Set<string>();
 
@@ -193,7 +198,6 @@ function updatePositionStatuses(): void {
     lastGroup.members.forEach(pl => doomed.add(pl.id));
   }
 
-  // Final assignment
   for (const pl of p) {
     if (doomed.has(pl.id)) {
       map[pl.id] = "elimination";
@@ -203,9 +207,6 @@ function updatePositionStatuses(): void {
       map[pl.id] = "active";
     }
   }
-
-  // Immunity bestaat nog als type, maar wordt NOOIT gebruikt:
-  // map[id] is dus nooit "immune"
 
   arena.positionMap = map;
 }
@@ -232,8 +233,7 @@ export function arenaJoin(
   };
 
   arena.players.push(pl);
-  sortPlayers();
-  emitArena();
+  recomputePositions();
   return true;
 }
 
@@ -242,8 +242,9 @@ export function arenaLeave(tiktok_id: string): void {
   if (idx === -1) return;
 
   arena.players.splice(idx, 1);
-  sortPlayers();
-  emitArena();
+
+  // FULL FIX: positionMap wordt compleet opnieuw berekend!!
+  recomputePositions();
 }
 
 export async function arenaClear(): Promise<void> {
@@ -264,8 +265,7 @@ export async function arenaClear(): Promise<void> {
   arena.roundCutoff = 0;
   arena.graceEnd = 0;
 
-  sortPlayers();
-  emitArena();
+  recomputePositions();
 }
 
 // ============================================================================
@@ -277,8 +277,7 @@ export async function safeAddArenaDiamonds(id: string, amount: number): Promise<
   if (!pl) return;
 
   pl.diamonds += Number(amount);
-  sortPlayers();
-  emitArena();
+  recomputePositions();
 }
 
 // ============================================================================
@@ -294,7 +293,6 @@ function getDurationForType(type: RoundType): number {
 }
 
 export function startRound(type: RoundType): boolean {
-  // Force eliminations?
   if (arena.settings.forceEliminations) {
     const eliminationExists = Object.values(arena.positionMap).includes("elimination");
     if (eliminationExists) {
@@ -321,8 +319,7 @@ export function startRound(type: RoundType): boolean {
     pl.diamonds = 0;
   }
 
-  sortPlayers();
-  emitArena();
+  recomputePositions();
 
   io.emit("round:start", {
     round: arena.round,
@@ -344,27 +341,23 @@ export function startRound(type: RoundType): boolean {
         arena.isRunning = false;
         arena.timeLeft = 0;
 
-        updatePositionStatuses();
-        emitArena();
+        recomputePositions();
 
         io.emit("round:grace", {
           round: arena.round,
           grace: arena.settings.graceSeconds,
         });
       } else {
-        updatePositionStatuses();
-        emitArena();
+        recomputePositions();
       }
       return;
     }
 
-    // GRACE
     if (arena.status === "grace") {
       if (now >= arena.graceEnd) {
         endRound();
       } else {
-        updatePositionStatuses();
-        emitArena();
+        recomputePositions();
       }
       return;
     }
@@ -389,8 +382,7 @@ export function endRound(): void {
       arena.isRunning = false;
       arena.timeLeft = 0;
 
-      updatePositionStatuses();
-      emitArena();
+      recomputePositions();
 
       io.emit("round:end", {
         round: arena.round,
@@ -406,8 +398,7 @@ export function endRound(): void {
   arena.isRunning = false;
   arena.timeLeft = 0;
 
-  updatePositionStatuses();
-  emitArena();
+  recomputePositions();
 
   io.emit("round:end", {
     round: arena.round,
@@ -435,8 +426,7 @@ function getTop3() {
 // ============================================================================
 
 export function getArena() {
-  sortPlayers();
-  updatePositionStatuses();
+  recomputePositions();
 
   return {
     players: arena.players.map((p) => ({
@@ -471,8 +461,5 @@ export function emitArena() {
 
 export async function initGame() {
   await loadArenaSettingsFromDB();
-  sortPlayers();
-  updatePositionStatuses();
-  emitArena();
+  recomputePositions();
 }
-
