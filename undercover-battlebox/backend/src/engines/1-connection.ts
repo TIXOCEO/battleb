@@ -1,25 +1,14 @@
 // src/engines/1-connection.ts — v0.7.1
 // TikTok LIVE webcast connector
-//
-// Doelen:
-//  - Stabiele connectie met automatische retries
-//  - Live identity-updates uit ALLE eventtypes
-//  - Supersterke samenwerking met 2-user-engine.ts
-//  - Minimaliseert “Onbekend” tijd tot < 1 seconde
-//  - Real-time verversen van display_name & username
-//
-// BELANGRIJK: altijd buiten gift-engine om identities updaten
-// zodat host-detection en gift mapping *optimaal* werkt.
 
 import { WebcastPushConnection } from "tiktok-live-connector";
 import { upsertIdentityFromLooseEvent } from "./2-user-engine";
 
-// Huidige actieve TikTok-verbinding, zodat we hem netjes kunnen stoppen
 let activeConn: WebcastPushConnection | null = null;
 
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // TikTok verbinden met retry
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
 
 export async function startConnection(
   username: string,
@@ -35,7 +24,7 @@ export async function startConnection(
 
   console.log("VERBINDEN MET TIKTOK… @" + host);
 
-  // Max 8 retries (± 50 sec)
+  // Max 8 retries
   for (let i = 0; i < 8; i++) {
     try {
       await conn.connect();
@@ -63,42 +52,37 @@ export async function startConnection(
     onConnected();
   });
 
-  // IDENTITEITEN SNEL UPDATEN
+  // Identity updates
   attachIdentityUpdaters(conn);
 
-  // ─────────────────────────────────────────────
-  // ✔ HIER TOEGEVOEGD → OFFICIËLE GIFTS-LIJST FUNCTIE
-  // ─────────────────────────────────────────────
-// Voeg getAvailableGifts toe via een veilige cast
-;(conn as any).getAvailableGifts = async () => {
-  try {
-    const giftsObj = (conn as any).availableGifts;
+  // ─────────────────────────────────────────────────────────────
+  // ✔ OFFICIËLE GIFTS-LIJST FUNCTIE (compatibel met jouw versie)
+  // ─────────────────────────────────────────────────────────────
+  (conn as any).getAvailableGifts = async () => {
+    try {
+      const giftsObj = (conn as any).availableGifts;
 
-    if (!giftsObj || typeof giftsObj !== "object") {
-      console.error("⚠️ availableGifts bestaat niet of is leeg");
+      if (!giftsObj || typeof giftsObj !== "object") {
+        console.error("⚠️ availableGifts bestaat niet of is leeg");
+        return [];
+      }
+
+      return Object.values(giftsObj);
+    } catch (err) {
+      console.error("❌ Fout in getAvailableGifts:", err);
       return [];
     }
+  };
 
-    // Maak van het object een array
-    return Object.values(giftsObj);
-  } catch (err) {
-    console.error("❌ Fout in getAvailableGifts:", err);
-    return [];
-  }
-};
-
-
-  // ─────────────────────────────────────────────
-
-  // Actieve connectie opslaan zodat we hem kunnen stoppen bij host-wissel
+  // Actieve verbinding onthouden
   activeConn = conn;
 
   return { conn };
 }
 
-// ─────────────────────────────────────────────────────────────
-// Verbinding netjes stoppen (voor host-wissel / shutdown)
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// Verbinding stoppen
+// ─────────────────────────────────────────────
 
 export async function stopConnection(
   conn?: WebcastPushConnection | null
@@ -108,11 +92,13 @@ export async function stopConnection(
 
   try {
     console.log("🔌 TikTok verbinding wordt afgesloten…");
+
     if (typeof c.disconnect === "function") {
       await c.disconnect();
     } else if (typeof (c as any).close === "function") {
       await (c as any).close();
     }
+
     console.log("🛑 TikTok verbinding succesvol gestopt.");
   } catch (err) {
     console.error("❌ Fout bij stopConnection:", err);
@@ -123,55 +109,39 @@ export async function stopConnection(
   }
 }
 
-// ─────────────────────────────────────────────────────────────
-// Identity Updaters — de kern van jouw systeem
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// Identity Updaters
+// ─────────────────────────────────────────────
 
 function attachIdentityUpdaters(conn: any) {
-
-  attachIdentityUpdaters(conn);
-
-// Voeg getAvailableGifts toe via een veilige cast
-;(conn as any).getAvailableGifts = async () => {
-    ...
-};
-  
-  // 1) Chat
   conn.on("chat", (d: any) => {
     upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
   });
 
-  // 2) Likes
   conn.on("like", (d: any) => {
     upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
   });
 
-  // 3) Follow
   conn.on("follow", (d: any) => {
     upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
   });
 
-  // 4) Social
   conn.on("social", (d: any) => {
     upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
   });
 
-  // 5) Member (join)
   conn.on("member", (d: any) => {
     upsertIdentityFromLooseEvent(d?.user || d);
   });
 
-  // 6) Subscribe
   conn.on("subscribe", (d: any) => {
     upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
   });
 
-  // 7) Moderator
   conn.on("moderator", (d: any) => {
     upsertIdentityFromLooseEvent(d?.user || d);
   });
 
-  // 8) Gift
   conn.on("gift", (d: any) => {
     upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
     if (d?.toUser || d?.receiver) {
@@ -179,7 +149,6 @@ function attachIdentityUpdaters(conn: any) {
     }
   });
 
-  // 9) Mic battle user info
   conn.on("linkMicBattle", (d: any) => {
     if (d?.battleUsers) {
       for (const u of d.battleUsers) {
@@ -188,7 +157,6 @@ function attachIdentityUpdaters(conn: any) {
     }
   });
 
-  // 10) liveRoomUser → enters
   conn.on("liveRoomUser", (d: any) => {
     upsertIdentityFromLooseEvent(d?.user || d);
   });
