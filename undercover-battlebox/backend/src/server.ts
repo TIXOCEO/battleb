@@ -21,7 +21,6 @@ import {
   initGame,
   arenaJoin,
   arenaLeave,
-  arenaClear,
   getArena,
   emitArena,
   startRound,
