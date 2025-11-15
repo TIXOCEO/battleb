@@ -69,19 +69,23 @@ export async function startConnection(
   // ─────────────────────────────────────────────
   // ✔ HIER TOEGEVOEGD → OFFICIËLE GIFTS-LIJST FUNCTIE
   // ─────────────────────────────────────────────
-  conn.getAvailableGifts = async () => {
-    try {
-      // interne functie van TikTok-Live-Connector
-      if (typeof (conn as any).getAvailableGiftsList === "function") {
-        return await (conn as any).getAvailableGiftsList();
-      }
-      console.error("⚠️ getAvailableGiftsList() bestaat niet in connector!");
-      return [];
-    } catch (err) {
-      console.error("❌ Fout in getAvailableGifts:", err);
+conn.getAvailableGifts = async () => {
+  try {
+    const giftsObj = (conn as any).availableGifts;
+
+    if (!giftsObj || typeof giftsObj !== "object") {
+      console.error("⚠️ availableGifts bestaat niet of is leeg");
       return [];
     }
-  };
+
+    // availableGifts is een object: { giftId: { ...giftData }, ... }
+    return Object.values(giftsObj);
+  } catch (err) {
+    console.error("❌ Fout in getAvailableGifts:", err);
+    return [];
+  }
+};
+
   // ─────────────────────────────────────────────
 
   // Actieve connectie opslaan zodat we hem kunnen stoppen bij host-wissel
