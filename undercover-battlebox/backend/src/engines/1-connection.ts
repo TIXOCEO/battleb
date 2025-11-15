@@ -69,7 +69,8 @@ export async function startConnection(
   // ─────────────────────────────────────────────
   // ✔ HIER TOEGEVOEGD → OFFICIËLE GIFTS-LIJST FUNCTIE
   // ─────────────────────────────────────────────
-conn.getAvailableGifts = async () => {
+// Voeg getAvailableGifts toe via een veilige cast
+;(conn as any).getAvailableGifts = async () => {
   try {
     const giftsObj = (conn as any).availableGifts;
 
@@ -78,13 +79,14 @@ conn.getAvailableGifts = async () => {
       return [];
     }
 
-    // availableGifts is een object: { giftId: { ...giftData }, ... }
+    // Maak van het object een array
     return Object.values(giftsObj);
   } catch (err) {
     console.error("❌ Fout in getAvailableGifts:", err);
     return [];
   }
 };
+
 
   // ─────────────────────────────────────────────
 
@@ -126,6 +128,14 @@ export async function stopConnection(
 // ─────────────────────────────────────────────────────────────
 
 function attachIdentityUpdaters(conn: any) {
+
+  attachIdentityUpdaters(conn);
+
+// Voeg getAvailableGifts toe via een veilige cast
+;(conn as any).getAvailableGifts = async () => {
+    ...
+};
+  
   // 1) Chat
   conn.on("chat", (d: any) => {
     upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
