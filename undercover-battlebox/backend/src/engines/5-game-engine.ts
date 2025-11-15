@@ -126,9 +126,13 @@ function _recomputePositionMap() {
 
   if (arena.status === "grace" || arena.status === "ended") {
     lastGroup.members.forEach(pl => endangered.add(pl.id));
-  } else if (arena.status === "grace" || arena.status === "ended") {
-    lastGroup.members.forEach(pl => doomed.add(pl.id));
-  }
+} else if (
+  arena.status === ("grace" as ArenaStatus) ||
+  arena.status === ("ended" as ArenaStatus)
+) {
+  lastGroup.members.forEach(pl => doomed.add(pl.id));
+}
+
 
   for (const pl of p) {
     if (doomed.has(pl.id)) map[pl.id] = "elimination";
@@ -327,7 +331,7 @@ export function startRound(type: RoundType) {
     }
 
 // Grace phase
-if (arena.status === "grace" as ArenaStatus) {
+if (arena.status === ("grace" as ArenaStatus)) {
   if (now >= arena.graceEnd) {
     endRound();
   } else {
@@ -335,6 +339,7 @@ if (arena.status === "grace" as ArenaStatus) {
   }
   return;
 }
+
 
 
     if (arena.status === "ended" || arena.status === "idle") {
