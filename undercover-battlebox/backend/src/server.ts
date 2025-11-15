@@ -61,6 +61,43 @@ app.use(express.json());
 const server = http.createServer(app);
 
 // ─────────────────────────────────────────────
+// GIFT LIST ENDPOINT (super simpel)
+// ─────────────────────────────────────────────
+app.get("/admin/gifts", async (req, res) => {
+  try {
+    if (!tiktokConnShared) {
+      return res.json({
+        success: false,
+        message: "Geen actieve TikTok-verbinding",
+        gifts: []
+      });
+    }
+
+    const gifts = await tiktokConnShared.getAvailableGifts();
+
+    const simplified = gifts.map((g: any) => ({
+      id: g.id,
+      name: g.name,
+      diamonds: g.diamond_count
+    }));
+
+    return res.json({
+      success: true,
+      total: simplified.length,
+      gifts: simplified
+    });
+
+  } catch (err: any) {
+    return res.json({
+      success: false,
+      error: err.message,
+      gifts: []
+    });
+  }
+});
+
+
+// ─────────────────────────────────────────────
 // SOCKET.IO INITIALISATIE
 // ─────────────────────────────────────────────
 export const io = new Server(server, {
