@@ -1,5 +1,5 @@
 // ============================================================================
-// server.ts — Undercover BattleBox Engine — v2.10 (Twist Integrated)
+// server.ts — Undercover BattleBox Engine — v2.12 (Twist Stable Build)
 // ============================================================================
 //
 // Geïntegreerde componenten:
@@ -19,7 +19,7 @@ import { Server, Socket } from "socket.io";
 import cors from "cors";
 import dotenv from "dotenv";
 
-import pool, { getSetting, setSetting } from "./db";
+import pool, { getSetting } from "./db";
 import { initDB } from "./db";
 
 // TikTok connectie
@@ -54,14 +54,11 @@ import { initChatEngine } from "./engines/6-chat-engine";
 // BP Boost Engine
 import { applyBoost } from "./engines/7-boost-engine";
 
-// Twist engine
+// Twist engine (!use)
 import { parseUseCommand } from "./engines/8-twist-engine";
 
 // Admin twist engine
 import { initAdminTwistEngine } from "./engines/9-admin-twist-engine";
-
-// Twist inventory for snapshots
-import { getUserTwistInventory } from "./engines/twist-inventory";
 
 // User resolve
 import { getOrUpdateUser } from "./engines/2-user-engine";
@@ -129,7 +126,7 @@ export const io = new Server(server, {
 // ============================================================================
 // LOGGING
 // ============================================================================
-type LogEntry = {
+export type LogEntry = {
   id: string;
   timestamp: string;
   type: string;
@@ -234,11 +231,10 @@ async function restartTikTokConnection() {
       const { conn } = await startConnection(host, () => {});
       tiktokConnShared = conn;
 
-      // Engines koppelen
       initGiftEngine(conn);
       initChatEngine(conn);
 
-      // Voeg hier twist-chat toe (!use)
+      // Twist chat detectie (!use)
       conn.on("chat", async (msg: any) => {
         const senderId =
           msg.user?.userId ||
@@ -301,10 +297,13 @@ io.on("connection", async (socket: AdminSocket) => {
 
   console.log("Admin verbonden");
 
-  // Snapshot
+  // Snapshot initial
   socket.emit("initialLogs", logBuffer);
   socket.emit("updateArena", getArena());
-  socket.emit("updateQueue", { open: true, entries: await getQueue() });
+  socket.emit("updateQueue", {
+    open: true,
+    entries: await getQueue(),
+  });
   socket.emit("gameSession", {
     active: !!currentGameId,
     gameId: currentGameId,
@@ -420,6 +419,11 @@ io.on("connection", async (socket: AdminSocket) => {
     }
   });
 });
+
+// ============================================================================
+// EXPORT emitArena (BELANGRIJK!)
+// ============================================================================
+export { emitArena };
 
 // ============================================================================
 // STARTUP
