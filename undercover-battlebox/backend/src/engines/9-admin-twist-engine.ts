@@ -1,53 +1,35 @@
 // ============================================================================
-// 9-admin-twist-engine.ts — Admin Twist Engine v1.0 (FINAL)
+// 9-admin-twist-engine.ts — Admin Twist Engine (dashboard control)
 // ============================================================================
 //
-// Dit bestand regelt ALLE twist-acties vanuit de ADMIN DASHBOARD:
-//
-//   ✅ admin:giveTwist    → geef een twist tegoed aan gebruiker
-//   ✅ admin:useTwist     → gebruik twist namens speler
-//   ✅ admin:getTwistInv  → haal inventory op
-//
-// Belangrijk:
-//  - Admin omzeilt DIAMOND kosten
-//  - Admin mag twist gebruiken zonder chat
-//  - Admin mag twist direct op target richten
-//  - Admin interactie loopt ALTIJD via twist-engine.ts
-//
-// Afhankelijk van:
-//  - twist-engine
-//  - twist-definitions
-//  - twist-inventory
-//  - server socket (emitLog / ack)
-//  - user-engine
+// Admin kan:
+//   • Give twist to user
+//   • Use twist (zelfde als !use)
+//   • List inventory
 //
 // ============================================================================
-
-import { io } from "../server";
-import { getOrUpdateUser } from "./2-user-engine";
 
 import {
-  addTwistToUser,
-  getUserTwistInventory,
-  userHasTwist,
+  giveTwistToUser,
   consumeTwistFromUser,
+  listTwistsForUser,
 } from "./twist-inventory";
 
 import {
   TWIST_MAP,
-  findTwistByAlias,
   TwistType,
+  resolveTwistAlias,
 } from "./twist-definitions";
 
 import { useTwist } from "./8-twist-engine";
 import pool from "../db";
 
 // ============================================================================
-// Helper: zoek user op username
+// HELPER: zoek user
 // ============================================================================
 
-async function findUserByUsername(raw: string) {
-  const clean = raw.replace("@", "").trim().toLowerCase();
+async function findUser(raw: string) {
+  const clean = raw.replace("@", "").toLowerCase();
 
   const { rows } = await pool.query(
     `
@@ -69,152 +51,55 @@ async function findUserByUsername(raw: string) {
 }
 
 // ============================================================================
-// ADMIN EVENT HANDLERS
+// ADMIN → GIVE TWIST
 // ============================================================================
 
-export function initAdminTwistEngine(adminSocket: any) {
-  // --------------------------------------------------------------------------
-  // 1. ADMIN → GEEF TWIST TEGOED
-  // --------------------------------------------------------------------------
-  adminSocket.on(
-    "admin:giveTwist",
-    async (payload: { username: string; twist: string; amount: number },
-      ack: Function
-    ) => {
-      try {
-        const { username, twist, amount } = payload;
+export async function adminGiveTwist(
+  requester: string,
+  targetUsername: string,
+  twist: TwistType
+) {
+  const u = await findUser(targetUsername);
+  if (!u) throw new Error("Gebruiker bestaat niet");
 
-        const t = findTwistByAlias(twist.toLowerCase());
-        if (!t) {
-          return ack({
-            success: false,
-            message: `Twist '${twist}' bestaat niet.`,
-          });
-        }
+  await giveTwistToUser(u.id, twist);
 
-        const user = await findUserByUsername(username);
-        if (!user) {
-          return ack({
-            success: false,
-            message: `Gebruiker '${username}' niet gevonden.`,
-          });
-        }
+  return {
+    success: true,
+    message: `Twist '${TWIST_MAP[twist].giftName}' toegevoegd aan ${u.display_name}`,
+  };
+}
 
-        await addTwistToUser(user.id, t, amount);
+// ============================================================================
+// ADMIN → USE TWIST
+// ============================================================================
 
-        ack({
-          success: true,
-          message: `Twist ${t} toegevoegd aan @${user.username}.`,
-        });
+export async function adminUseTwist(
+  requester: string,
+  username: string,
+  twist: TwistType,
+  target?: string
+) {
+  const u = await findUser(username);
+  if (!u) throw new Error("Gebruiker bestaat niet");
 
-        io.emit("log", {
-          type: "twist",
-          timestamp: Date.now(),
-          message: `ADMIN gaf ${amount}× ${t} aan ${user.display_name}.`,
-        });
-      } catch (e: any) {
-        ack({ success: false, message: e.message });
-      }
-    }
-  );
+  await useTwist(u.id, u.display_name, twist, target);
 
-  // --------------------------------------------------------------------------
-  // 2. ADMIN → GEBRUIK TWIST NAMENS SPELER
-  // --------------------------------------------------------------------------
-  adminSocket.on(
-    "admin:useTwist",
-    async (
-      payload: { username: string; twist: string; target?: string },
-      ack: Function
-    ) => {
-      try {
-        const { username, twist, target } = payload;
+  return { success: true };
+}
 
-        const t = findTwistByAlias(twist.toLowerCase());
-        if (!t) {
-          return ack({
-            success: false,
-            message: `Twist '${twist}' bestaat niet.`,
-          });
-        }
+// ============================================================================
+// ADMIN → INVENTORY
+// ============================================================================
 
-        const user = await findUserByUsername(username);
-        if (!user) {
-          return ack({
-            success: false,
-            message: `Gebruiker '${username}' niet gevonden.`,
-          });
-        }
+export async function adminListTwists(username: string) {
+  const u = await findUser(username);
+  if (!u) throw new Error("Gebruiker bestaat niet");
 
-        // Heeft user twist?
-        const has = await userHasTwist(user.id, t);
-        if (!has) {
-          return ack({
-            success: false,
-            message: `@${user.username} heeft geen ${t} tegoed.`,
-          });
-        }
+  const list = await listTwistsForUser(u.id);
 
-        // Consume twist
-        await consumeTwistFromUser(user.id, t);
-
-        await useTwist(
-          user.id,
-          user.display_name,
-          t,
-          target ? target.replace("@", "") : undefined
-        );
-
-        ack({
-          success: true,
-          message: `Twist '${t}' gebruikt door ${user.display_name}.`,
-        });
-
-        // Log
-        io.emit("log", {
-          type: "twist",
-          timestamp: Date.now(),
-          message: `ADMIN gebruikte ${t} namens ${user.display_name}` +
-                   (target ? ` op ${target}` : ""),
-        });
-      } catch (e: any) {
-        ack({ success: false, message: e.message });
-      }
-    }
-  );
-
-  // --------------------------------------------------------------------------
-  // 3. ADMIN → GET INVENTORY
-  // --------------------------------------------------------------------------
-  adminSocket.on(
-    "admin:getTwistInv",
-    async (payload: { username: string }, ack: Function) => {
-      try {
-        const { username } = payload;
-
-        const user = await findUserByUsername(username);
-        if (!user) {
-          return ack({
-            success: false,
-            inventory: null,
-            message: `Gebruiker '${username}' niet gevonden.`,
-          });
-        }
-
-        const inv = await getUserTwistInventory(user.id);
-
-        return ack({
-          success: true,
-          inventory: inv,
-          message: `Twist inventory van ${user.display_name}.`,
-        });
-      } catch (e: any) {
-        return ack({
-          success: false,
-          inventory: null,
-          message: e.message,
-        });
-      }
-    }
-  );
+  return {
+    user: u,
+    twists: list.map(t => TWIST_MAP[t].giftName),
+  };
 }
