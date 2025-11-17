@@ -1,88 +1,89 @@
-// src/engines/1-connection.ts — v0.7.1
-// TikTok LIVE webcast connector
+// ============================================================================
+// src/engines/1-connection.ts — v1.25 (Crash-Safe / Idle Mode)
+// TikTok LIVE connector — NOOIT meer process.exit
+// ============================================================================
 
 import { WebcastPushConnection } from "tiktok-live-connector";
 import { upsertIdentityFromLooseEvent } from "./2-user-engine";
 
+// Globale actieve verbinding
 let activeConn: WebcastPushConnection | null = null;
 
-// ─────────────────────────────────────────────
-// TikTok verbinden met retry
-// ─────────────────────────────────────────────
+// ============================================================================
+// TikTok verbinden (met retries, maar nooit crashen)
+// ============================================================================
 
 export async function startConnection(
   username: string,
   onConnected: () => void
-) {
+): Promise<{ conn: WebcastPushConnection | null }> {
   const host = username.replace(/^@+/, "").trim();
+
   const conn = new WebcastPushConnection(host, {
-    requestOptions: {
-      timeout: 15000,
-    },
+    requestOptions: { timeout: 15000 },
     enableExtendedGiftInfo: true,
   });
 
   console.log("VERBINDEN MET TIKTOK… @" + host);
 
-  // Max 8 retries
+  let connected = false;
+
   for (let i = 0; i < 8; i++) {
     try {
       await conn.connect();
-      console.log(`Verbonden met TikTok livestream van @${host}`);
+      console.log(`✔ Verbonden met TikTok livestream van @${host}`);
+      connected = true;
       break;
     } catch (err: any) {
       console.error(
         `⛔ Verbinding mislukt (poging ${i + 1}/8):`,
         err?.message || err
       );
+
+      // laatste poging → stop connectie maar crash niet
       if (i === 7) {
-        console.error("GEEN VERBINDING MOGELIJK → STOP SERVER");
-        process.exit(1);
+        console.error(
+          `⚠ @${host} lijkt offline → TikTok-engine in IDLE-modus`
+        );
+        return { conn: null };
       }
-      await new Promise((r) => setTimeout(r, 7000));
+
+      // wacht en probeer opnieuw
+      await new Promise((res) => setTimeout(res, 7000));
     }
   }
 
+  if (!connected) return { conn: null };
+
   conn.on("connected", () => {
     console.log("=".repeat(80));
-    console.log("BATTLEBOX LIVE – VERBONDEN MET @" + host);
-    console.log("Alle inkomende events → identity-updates");
-    console.log("Gift-engine gebruikt deze identiteiten realtime");
+    console.log(`BATTLEBOX – VERBONDEN MET @${host}`);
+    console.log("Alle events komen binnen — gift engine actief");
     console.log("=".repeat(80));
     onConnected();
   });
 
-  // Identity updates
+  // Identiteit-updates koppelen
   attachIdentityUpdaters(conn);
 
-  // ─────────────────────────────────────────────────────────────
-  // ✔ OFFICIËLE GIFTS-LIJST FUNCTIE (compatibel met jouw versie)
-  // ─────────────────────────────────────────────────────────────
+  // Gifts-lijst functie
   (conn as any).getAvailableGifts = async () => {
     try {
       const giftsObj = (conn as any).availableGifts;
-
-      if (!giftsObj || typeof giftsObj !== "object") {
-        console.error("⚠️ availableGifts bestaat niet of is leeg");
-        return [];
-      }
-
+      if (!giftsObj || typeof giftsObj !== "object") return [];
       return Object.values(giftsObj);
-    } catch (err) {
-      console.error("❌ Fout in getAvailableGifts:", err);
+    } catch {
       return [];
     }
   };
 
-  // Actieve verbinding onthouden
   activeConn = conn;
-
   return { conn };
 }
 
-// ─────────────────────────────────────────────
+// ============================================================================
 // Verbinding stoppen
-// ─────────────────────────────────────────────
+// ============================================================================
 
 export async function stopConnection(
   conn?: WebcastPushConnection | null
@@ -99,69 +100,43 @@ export async function stopConnection(
       await (c as any).close();
     }
 
-    console.log("🛑 TikTok verbinding succesvol gestopt.");
+    console.log("🛑 TikTok verbinding gestopt.");
   } catch (err) {
     console.error("❌ Fout bij stopConnection:", err);
   } finally {
-    if (!conn || conn === activeConn) {
-      activeConn = null;
-    }
+    if (!conn || conn === activeConn) activeConn = null;
   }
 }
 
-// ─────────────────────────────────────────────
-// Identity Updaters
-// ─────────────────────────────────────────────
+// ============================================================================
+// Identity sync vanuit TikTok events
+// ============================================================================
 
 function attachIdentityUpdaters(conn: any) {
-  conn.on("chat", (d: any) => {
+  const update = (d: any) =>
     upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
-  });
 
-  conn.on("like", (d: any) => {
-    upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
-  });
-
-  conn.on("follow", (d: any) => {
-    upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
-  });
-
-  conn.on("social", (d: any) => {
-    upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
-  });
-
-  conn.on("member", (d: any) => {
-    upsertIdentityFromLooseEvent(d?.user || d);
-  });
-
-  conn.on("subscribe", (d: any) => {
-    upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
-  });
-
-  conn.on("moderator", (d: any) => {
-    upsertIdentityFromLooseEvent(d?.user || d);
-  });
+  conn.on("chat", update);
+  conn.on("like", update);
+  conn.on("follow", update);
+  conn.on("social", update);
+  conn.on("member", update);
+  conn.on("subscribe", update);
+  conn.on("moderator", update);
+  conn.on("liveRoomUser", update);
 
   conn.on("gift", (d: any) => {
-    upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
+    update(d);
     if (d?.toUser || d?.receiver) {
-      upsertIdentityFromLooseEvent(d?.toUser || d?.receiver);
+      update(d?.toUser || d?.receiver);
     }
   });
 
   conn.on("linkMicBattle", (d: any) => {
     if (d?.battleUsers) {
-      for (const u of d.battleUsers) {
-        upsertIdentityFromLooseEvent(u);
-      }
+      for (const u of d.battleUsers) update(u);
     }
   });
 
-  conn.on("liveRoomUser", (d: any) => {
-    upsertIdentityFromLooseEvent(d?.user || d);
-  });
-
-  console.log(
-    "[IDENTITY ENGINE] Running (chat/like/follow/social/member/gift/subscribe/moderator/battle)"
-  );
+  console.log("[IDENTITY ENGINE] TikTok identity updates actief");
 }
