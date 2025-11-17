@@ -1,6 +1,14 @@
-// src/queue.ts — QUEUE ENGINE v2.2 FINAL
-// Priority = VIP(5) + BOOST(X) — FAN heeft geen priority meer
-// Fan blijft wél zichtbaar in UI en bepaald of iemand mag !join
+// ============================================================================
+// queue.ts — QUEUE ENGINE v3.0 (STRICT, NO USER CREATION)
+// ============================================================================
+//
+// DOELEN:
+//  - Admin mag GEEN users aanmaken
+//  - Alleen TikTok events creëren users
+//  - Queue accepteert ALLEEN echte users met valide tiktok_id (BIGINT)
+//  - Nooit meer invalid syntax / bigint errors
+//
+// ============================================================================
 
 import pool from "./db";
 
@@ -15,60 +23,69 @@ export type QueueEntry = {
   is_fan: boolean;
 };
 
-// ---------------------------------------------------------
-// USER HELPERS
-// ---------------------------------------------------------
+// ---------------------------------------------------------------------------
+// USER HELPERS — LET OP: GEEN createUser() meer!
+// ---------------------------------------------------------------------------
 
-async function createUser(tiktok_id: string, username: string) {
+async function fetchUserByUsername(clean: string) {
   const r = await pool.query(
     `
-    INSERT INTO users (
-      tiktok_id, username, display_name,
-      is_fan, fan_expires_at,
-      is_vip, bp_total, diamonds_total
-    )
-    VALUES ($1,$2,$2,false,NULL,false,0,0)
-    RETURNING *
-    `,
-    [tiktok_id, username]
-  );
-  return r.rows[0];
-}
-
-async function getUser(tiktok_id: string) {
-  const r = await pool.query(
-    `SELECT * FROM users WHERE tiktok_id=$1`,
-    [tiktok_id]
+    SELECT tiktok_id, username, display_name
+    FROM users
+    WHERE LOWER(username)=LOWER($1)
+    LIMIT 1
+  `,
+    [clean]
   );
   return r.rows[0] || null;
 }
 
-// ---------------------------------------------------------
-// ADD TO QUEUE
-// ---------------------------------------------------------
+async function fetchUserById(tiktok_id: string) {
+  const r = await pool.query(
+    `SELECT * FROM users WHERE tiktok_id=$1`,
+    [BigInt(tiktok_id)]
+  );
+  return r.rows[0] || null;
+}
 
-export async function addToQueue(
-  tiktok_id: string,
-  username: string
-): Promise<void> {
-  let user = await getUser(tiktok_id);
-  if (!user) user = await createUser(tiktok_id, username);
+// ---------------------------------------------------------------------------
+// ADD TO QUEUE — ONLY EXISTING USERS (STRICT)
+// ---------------------------------------------------------------------------
 
-  if (user.blocks?.queue) throw new Error("Geblokkeerd van de queue");
+export async function addToQueueByUsername(username: string): Promise<void> {
+  const clean = username.replace("@", "").toLowerCase();
 
-  await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [tiktok_id]);
+  const user = await fetchUserByUsername(clean);
+  if (!user) throw new Error("User bestaat niet in database (nog geen TikTok data ontvangen)");
+
+  return addToQueue(String(user.tiktok_id));
+}
+
+export async function addToQueue(tiktok_id: string): Promise<void> {
+  const user = await fetchUserById(tiktok_id);
+  if (!user)
+    throw new Error("User bestaat niet — kan niet toevoegen aan queue");
+
+  if (user.blocks?.queue)
+    throw new Error("Geblokkeerd voor de queue");
 
   await pool.query(
-    `INSERT INTO queue (user_tiktok_id, boost_spots)
-     VALUES ($1,0)`,
-    [tiktok_id]
+    `DELETE FROM queue WHERE user_tiktok_id=$1`,
+    [BigInt(tiktok_id)]
+  );
+
+  await pool.query(
+    `
+    INSERT INTO queue (user_tiktok_id, boost_spots)
+    VALUES ($1,0)
+  `,
+    [BigInt(tiktok_id)]
   );
 }
 
-// ---------------------------------------------------------
-// BOOST (fallback voor admin)
-// De chat versie gebruikt boost-engine.ts → applyBoost()
-// ---------------------------------------------------------
+// ---------------------------------------------------------------------------
+// BOOST
+// ---------------------------------------------------------------------------
 
 export async function boostQueue(
   tiktok_id: string,
@@ -81,7 +98,7 @@ export async function boostQueue(
 
   const r = await pool.query(
     `SELECT bp_total FROM users WHERE tiktok_id=$1`,
-    [tiktok_id]
+    [BigInt(tiktok_id)]
   );
 
   if (!r.rows[0] || r.rows[0].bp_total < cost)
@@ -89,24 +106,31 @@ export async function boostQueue(
 
   await pool.query(
     `UPDATE users SET bp_total = bp_total - $1 WHERE tiktok_id=$2`,
-    [cost, tiktok_id]
+    [cost, BigInt(tiktok_id)]
   );
 
   await pool.query(
-    `UPDATE queue SET boost_spots = boost_spots + $1
-     WHERE user_tiktok_id=$2`,
-    [spots, tiktok_id]
+    `
+    UPDATE queue
+       SET boost_spots = boost_spots + $1
+     WHERE user_tiktok_id=$2
+  `,
+    [spots, BigInt(tiktok_id)]
   );
 }
 
-// ---------------------------------------------------------
+// ---------------------------------------------------------------------------
 // LEAVE QUEUE
-// ---------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 export async function leaveQueue(tiktok_id: string): Promise<number> {
   const r = await pool.query(
-    `SELECT boost_spots FROM queue WHERE user_tiktok_id=$1`,
-    [tiktok_id]
+    `
+    SELECT boost_spots
+    FROM queue
+    WHERE user_tiktok_id=$1
+  `,
+    [BigInt(tiktok_id)]
   );
 
   if (!r.rows[0]) return 0;
@@ -116,34 +140,28 @@ export async function leaveQueue(tiktok_id: string): Promise<number> {
 
   await pool.query(
     `UPDATE users SET bp_total = bp_total + $1 WHERE tiktok_id=$2`,
-    [refund, tiktok_id]
+    [refund, BigInt(tiktok_id)]
   );
 
   await pool.query(
     `DELETE FROM queue WHERE user_tiktok_id=$1`,
-    [tiktok_id]
+    [BigInt(tiktok_id)]
   );
 
   return refund;
 }
 
-// ---------------------------------------------------------
-// NEW PRIORITY RULES (v2.2)
-// VIP = +5
-// FAN = +0
-// BOOST = +X
-// ---------------------------------------------------------
+// ---------------------------------------------------------------------------
+// PRIORITY RULES
+// ---------------------------------------------------------------------------
 
 function calcPriority(isVip: boolean, boost: number): number {
-  let p = 0;
-  if (isVip) p += 5;
-  p += boost || 0;
-  return p;
+  return (isVip ? 5 : 0) + (boost || 0);
 }
 
-// ---------------------------------------------------------
+// ---------------------------------------------------------------------------
 // GET QUEUE
-// ---------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 export async function getQueue(): Promise<QueueEntry[]> {
   const r = await pool.query(
@@ -159,7 +177,7 @@ export async function getQueue(): Promise<QueueEntry[]> {
       u.is_vip
     FROM queue q
     JOIN users u ON u.tiktok_id = q.user_tiktok_id
-    `
+  `
   );
 
   const now = Date.now();
@@ -178,12 +196,8 @@ export async function getQueue(): Promise<QueueEntry[]> {
 
     let reason = "Standaard";
     if (vip) reason = "VIP";
-    if (fan) reason = fan && !vip ? "Fan" : reason;
-
-    if (boost > 0) {
-      if (reason === "Standaard") reason = `Boost +${boost}`;
-      else reason += ` + Boost`;
-    }
+    if (fan && !vip) reason = "Fan";
+    if (boost > 0) reason = `Boost +${boost}`;
 
     return {
       tiktok_id: row.user_tiktok_id.toString(),
@@ -198,13 +212,10 @@ export async function getQueue(): Promise<QueueEntry[]> {
     };
   });
 
-  // Sort:
-  // 1) priority DESC
-  // 2) joined_at ASC
+  // Sort — eerst priority DESC, dan joined_at ASC
   mapped.sort((a, b) => {
     if (b.priority !== a.priority) return b.priority - a.priority;
-    return new Date(a.joined_at).getTime() -
-           new Date(b.joined_at).getTime();
+    return new Date(a.joined_at).getTime() - new Date(b.joined_at).getTime();
   });
 
   return mapped.map((row, i) => ({
