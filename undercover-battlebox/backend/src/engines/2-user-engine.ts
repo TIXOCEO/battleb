@@ -1,16 +1,14 @@
 // ============================================================================
-// 2-user-engine.ts — USER ENGINE v3.1 (STRICT + ATOMIC UPSERT)
+// 2-user-engine.ts — USER ENGINE v3.3 (STRICT TIKTOK-ONLY, CLEAN, SAFE)
 // ============================================================================
 //
-// Doelen:
-//  - Alleen TikTok events mogen users aanmaken
-//  - Admin is read-only (geen create)
-//  - NOOIT MEER duplicate key errors (✓ atomic UPSERT)
-//  - Username/display_name upgrades zodra TikTok betere data geeft
-//  - last_seen_at ALTIJD geüpdatet
-//  - username altijd lowercase zonder '@'
-//  - tiktok_id = absolute primary identity
-//
+// ✔ Admin kan GEEN users aanmaken
+// ✔ TikTok events zijn de enige bron voor nieuwe users
+// ✔ Nooit duplicate inserts door veilige UPSERT-logica
+// ✔ Username lowercase zonder '@'
+// ✔ display_name altijd schoon
+// ✔ last_seen_at altijd bijgewerkt
+// ✔ Veilig bij slechte data van TikTok
 // ============================================================================
 
 import pool from "../db";
@@ -38,18 +36,7 @@ function cleanDisplay(v?: string | null): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// ATOMIC UPSERT — GEEN DUPLICATE KEY ERRORS OOIT NOG
-// ---------------------------------------------------------------------------
-//
-// Let op: dit vervangt JOUW hele bestaande insert/update flow,
-// maar is 100% compatible met de rest van de backend.
-//
-// INSERT ... ON CONFLICT(tiktok_id)
-//   DO UPDATE SET display_name=?, username=?, last_seen_at=NOW()
-//
-// Hiermee voorkomen we ALLE race conditions.
-// TikTok kan 20 events per milliseconde sturen → dit blijft altijd stabiel.
-//
+// CORE FUNCTION — TikTok-only UPSERT (admin maakt nooit users!)
 // ---------------------------------------------------------------------------
 
 export async function getOrUpdateUser(
@@ -70,36 +57,76 @@ export async function getOrUpdateUser(
   const newDisplay = cleanDisplay(nickname);
   const newUsername = normalizeHandle(uniqueId, nickname);
 
+  // 1) Bestaat user al?
+  const existing = await pool.query(
+    `
+    SELECT display_name, username
+    FROM users
+    WHERE tiktok_id = $1
+    LIMIT 1
+  `,
+    [tid]
+  );
+
+  if (existing.rows.length > 0) {
+    // 2) UPDATE bestaande user indien betere data binnenkomt
+    const { display_name: oldDisplay, username: oldUser } = existing.rows[0];
+
+    const needsUpgrade =
+      (newDisplay && newDisplay !== oldDisplay) ||
+      (newUsername && newUsername !== oldUser);
+
+    if (needsUpgrade) {
+      await pool.query(
+        `
+        UPDATE users
+           SET display_name = $1,
+               username = $2,
+               last_seen_at = NOW()
+         WHERE tiktok_id = $3
+      `,
+        [
+          newDisplay || oldDisplay || `Onbekend#${tiktok_id.slice(-5)}`,
+          newUsername || oldUser || `onbekend${tiktok_id.slice(-5)}`,
+          tid,
+        ]
+      );
+    } else {
+      await pool.query(
+        `UPDATE users SET last_seen_at = NOW() WHERE tiktok_id=$1`,
+        [tid]
+      );
+    }
+
+    return {
+      id: tiktok_id,
+      display_name:
+        newDisplay || oldDisplay || `Onbekend#${tiktok_id.slice(-5)}`,
+      username:
+        newUsername || oldUser || `onbekend${tiktok_id.slice(-5)}`,
+    };
+  }
+
+  // 3) NIEUWE USER — alleen toegestaan via TikTok event
   const finalDisplay = newDisplay || `Onbekend#${tiktok_id.slice(-5)}`;
   const finalUsername = newUsername || `onbekend${tiktok_id.slice(-5)}`;
 
-  // 🚀 **ATOMIC UPSERT**
-  const res = await pool.query(
+  await pool.query(
     `
-      INSERT INTO users (
-        tiktok_id, display_name, username,
-        diamonds_total, bp_total, last_seen_at,
-        is_fan, fan_expires_at, is_vip
-      )
-      VALUES ($1,$2,$3,0,0,NOW(),false,NULL,false)
-
-      ON CONFLICT (tiktok_id)
-      DO UPDATE SET
-        display_name = EXCLUDED.display_name,
-        username = EXCLUDED.username,
-        last_seen_at = NOW()
-
-      RETURNING tiktok_id, display_name, username
-    `,
+    INSERT INTO users (
+      tiktok_id, display_name, username,
+      diamonds_total, bp_total, last_seen_at,
+      is_fan, fan_expires_at, is_vip
+    )
+    VALUES ($1,$2,$3,0,0,NOW(),false,NULL,false)
+  `,
     [tid, finalDisplay, finalUsername]
   );
 
-  const row = res.rows[0];
-
   return {
-    id: row.tiktok_id.toString(),
-    display_name: row.display_name,
-    username: row.username.replace(/^@+/, ""),
+    id: tiktok_id,
+    display_name: finalDisplay,
+    username: finalUsername,
   };
 }
 
@@ -126,11 +153,8 @@ export async function upsertIdentityFromLooseEvent(loose: any): Promise<void> {
 
   if (!id) return;
 
-  const display =
-    u?.nickname || u?.displayName || undefined;
-
-  const unique =
-    u?.uniqueId || u?.unique_id || undefined;
+  const display = u?.nickname || u?.displayName || undefined;
+  const unique = u?.uniqueId || u?.unique_id || undefined;
 
   await getOrUpdateUser(String(id), display, unique);
 }
