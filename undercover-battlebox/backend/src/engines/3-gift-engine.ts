@@ -1,16 +1,14 @@
 // ============================================================================
-// 3-gift-engine.ts — GIFT ENGINE v4.0 FINAL
-// Compatible with server.ts v4.0, user-engine v4.0, queue v4.0
-// Danny Goldenbelt — Undercover BattleBox
+// 3-gift-engine.ts — v4.1 (Danny Stable Build)
+// ============================================================================
 //
-// ✔ Geen io.currentGameId hack meer — gebruikt echte import uit server.ts
-// ✔ Gifts tonen weer correct in logs
-// ✔ Geen duplicate inserts
-// ✔ Fanclub correct
-// ✔ Arena awarding correct tijdens rondes
-// ✔ Gifts naar host tellen alleen als game loopt
-// ✔ Gifts naar spelers tellen alleen in active/grace
-// ✔ resolveReceiver 100% stabiel
+// ✔ FIX: geen import currentGameId (server exporteert die niet)
+// ✔ Correct gebruik: io.currentGameId (private runtime state)
+// ✔ Volledig compatibel met server v3.3
+// ✔ Volledig compatibel met new user-engine v4
+// ✔ BigInt-safe
+// ✔ Correct host detection
+// ✔ Correct diamond & BP accounting
 //
 // ============================================================================
 
@@ -18,10 +16,21 @@ import pool, { getSetting } from "../db";
 import { getOrUpdateUser } from "./2-user-engine";
 import { addDiamonds, addBP } from "./4-points-engine";
 import { getArena, safeAddArenaDiamonds } from "./5-game-engine";
-import { emitLog } from "../server";
+import { emitLog, io } from "../server";
 
-import { currentGameId } from "../server";   // <── FIXED: echte import (v4.x)
-
+// ============================================================================
+// HELPER: GAME SESSION ID (SAFE)
+// ============================================================================
+//
+// server.ts voegt RUNTIME dit toe:
+//     io.currentGameId = X
+//
+// Daarom gebruiken we deze veilige getter.
+//
+function getCurrentGameSessionId(): number | null {
+  // @ts-ignore — patched by server.ts
+  return io.currentGameId ?? null;
+}
 
 // ============================================================================
 // NORMALIZER
@@ -51,13 +60,13 @@ export async function refreshHostUsername() {
 }
 
 // ============================================================================
-// DEDUP
+// DUPLICATE FILTER
 // ============================================================================
 const processedMsgIds = new Set<string>();
 setInterval(() => processedMsgIds.clear(), 60_000);
 
 // ============================================================================
-// RESOLVE RECEIVER
+// RECEIVER RESOLVER
 // ============================================================================
 async function resolveReceiver(event: any) {
   const hostRaw = HOST_USERNAME_CACHE;
@@ -83,17 +92,17 @@ async function resolveReceiver(event: any) {
   const uniqueNorm = uniqueRaw ? norm(uniqueRaw) : null;
   const nickNorm = nickRaw ? norm(nickRaw) : null;
 
-  // ✔ direct uniqueId match → host
+  // uniqueId direct host match
   if (uniqueNorm && hostRaw && uniqueNorm === hostRaw) {
     return { id: null, username: hostRaw, display_name: uniqueRaw, role: "host" };
   }
 
-  // ✔ fuzzy nickname match → host
+  // nickname fuzzy match
   if (nickNorm && hostRaw && nickNorm.includes(hostRaw)) {
     return { id: null, username: hostRaw, display_name: nickRaw, role: "host" };
   }
 
-  // ✔ fallback: DB user
+  // DB fallback
   if (eventId) {
     const r = await getOrUpdateUser(
       String(eventId),
@@ -104,7 +113,7 @@ async function resolveReceiver(event: any) {
     if (hostRaw && norm(r.username) === hostRaw) {
       return {
         id: r.id,
-        username: r.username,
+        username: r.username.replace(/^@/, ""),
         display_name: r.display_name,
         role: "host",
       };
@@ -112,13 +121,13 @@ async function resolveReceiver(event: any) {
 
     return {
       id: r.id,
-      username: r.username,
+      username: r.username.replace(/^@/, ""),
       display_name: r.display_name,
       role: "speler",
     };
   }
 
-  // ✔ ultimate fallback
+  // ultimate fallback
   if (hostRaw) {
     return { id: null, username: hostRaw, display_name: hostRaw, role: "host" };
   }
@@ -136,6 +145,7 @@ async function resolveReceiver(event: any) {
 // ============================================================================
 async function activateFan(userId: bigint) {
   const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
   await pool.query(
     `
     UPDATE users
@@ -148,23 +158,22 @@ async function activateFan(userId: bigint) {
 }
 
 // ============================================================================
-// MAIN GIFT ENGINE
+// GIFT ENGINE
 // ============================================================================
 export function initGiftEngine(conn: any) {
-  console.log("🎁 GIFT ENGINE v4.0 LOADED");
+  console.log("🎁 GIFT ENGINE v4.1 LOADED");
 
   conn.on("gift", async (data: any) => {
-    // ------------------------------------------------------------------
-    // 1) Duplicate filter
-    // ------------------------------------------------------------------
     const msgId = String(data.msgId ?? data.id ?? data.logId ?? "");
+
+    // Duplicate filter
     if (msgId && processedMsgIds.has(msgId)) return;
     processedMsgIds.add(msgId);
 
     try {
-      // ----------------------------------------------------------------
-      // 2) Sender
-      // ----------------------------------------------------------------
+      // ------------------------------
+      // SENDER
+      // ------------------------------
       const senderId =
         data.user?.userId ||
         data.sender?.userId ||
@@ -178,11 +187,11 @@ export function initGiftEngine(conn: any) {
         data.user?.uniqueId || data.sender?.uniqueId
       );
 
-      const senderUsername = sender.username;
+      const senderUsername = sender.username.replace(/^@/, "");
 
-      // ----------------------------------------------------------------
-      // 3) Diamonds
-      // ----------------------------------------------------------------
+      // ------------------------------
+      // DIAMOND LOGIC
+      // ------------------------------
       const rawDiamonds = Number(data.diamondCount || 0);
       if (rawDiamonds <= 0) return;
 
@@ -199,55 +208,51 @@ export function initGiftEngine(conn: any) {
 
       if (credited <= 0) return;
 
-      // ----------------------------------------------------------------
-      // 4) Receiver
-      // ----------------------------------------------------------------
+      // ------------------------------
+      // RECEIVER
+      // ------------------------------
       const receiver = await resolveReceiver(data);
       const isHost = receiver.role === "host";
 
-      // ----------------------------------------------------------------
-      // 5) Game state (FIXED!)
-      // ----------------------------------------------------------------
-      const gameId = currentGameId;   // <── werkt nu altijd
-
+      // ------------------------------
+      // GAME STATE
+      // ------------------------------
+      const gameId = getCurrentGameSessionId();
       const arena = getArena();
       const now = Date.now();
 
       const inActive = arena.status === "active" && now <= arena.roundCutoff;
       const inGrace = arena.status === "grace" && now <= arena.graceEnd;
+
       const inRound = inActive || inGrace;
 
-      // Gifts naar HOST → ALLEEN ALS GAME LOOPT
+      // Host gifts only count inside game
       if (isHost && !gameId) return;
 
-      // Gifts naar SPELERS → ALLEEN IN ACTIEVE RONDE
+      // Player gifts only inside round
       if (!isHost && !inRound) return;
 
-      // ----------------------------------------------------------------
-      // 6) Credit sender
-      // ----------------------------------------------------------------
+      // ------------------------------
+      // CREDIT DIAMONDS + BP
+      // ------------------------------
       await addDiamonds(BigInt(senderId), credited, "total");
       await addDiamonds(BigInt(senderId), credited, "stream");
       await addDiamonds(BigInt(senderId), credited, "current_round");
 
-      // BP = 20%
       const bpGain = credited * 0.2;
       await addBP(BigInt(senderId), bpGain, "GIFT", sender.display_name);
 
-      // ----------------------------------------------------------------
-      // 7) Add diamonds to arena player
-      // ----------------------------------------------------------------
+      // Arena diamonds
       if (!isHost && receiver.id && inRound) {
         await safeAddArenaDiamonds(receiver.id.toString(), credited);
       }
 
-      // ----------------------------------------------------------------
-      // 8) Fanclub (24h)
-      // ----------------------------------------------------------------
+      // ------------------------------
+      // FANCLUB GIFT
+      // ------------------------------
       if (
         isHost &&
-        (data.giftName?.toLowerCase() === "heart me" ||
-          data.giftId === 5655)
+        (data.giftName?.toLowerCase() === "heart me" || data.giftId === 5655)
       ) {
         await activateFan(BigInt(senderId));
 
@@ -257,9 +262,9 @@ export function initGiftEngine(conn: any) {
         });
       }
 
-      // ----------------------------------------------------------------
-      // 9) Save in DB
-      // ----------------------------------------------------------------
+      // ------------------------------
+      // SAVE IN DB
+      // ------------------------------
       await pool.query(
         `
         INSERT INTO gifts (
@@ -284,14 +289,13 @@ export function initGiftEngine(conn: any) {
         ]
       );
 
-      // ----------------------------------------------------------------
-      // 10) Emit log
-      // ----------------------------------------------------------------
+      // ------------------------------
+      // LOG
+      // ------------------------------
       emitLog({
         type: "gift",
         message: `${sender.display_name} → ${receiver.display_name}: ${data.giftName} (${credited}💎)`,
       });
-
     } catch (err: any) {
       console.error("GiftEngine ERROR:", err?.message || err);
     }
