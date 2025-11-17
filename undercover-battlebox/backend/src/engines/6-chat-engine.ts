@@ -1,19 +1,21 @@
-// src/engines/6-chat-engine.ts
-// CHAT ENGINE — v1.2 (Heart Me + JOIN + BOOST via chat ONLY)
-
-// Functies:
-//  - Heart Me gift activeert fan-status (elders via gift-engine)
-//  - Alleen fans mogen !join doen
-//  - !boost X → kost 200 BP per plek
-//  - Alleen mogelijk als gebruiker in queue staat
-//  - Geen autojoin in arena
-//  - !leave geeft refund (queue.ts regelt dit)
-//  - Admin UI gebruikt GEEN boost, alleen promote/demote
+// ============================================================================
+// src/engines/6-chat-engine.ts — v2.0 FINAL
+//
+// ✔ Geen emitQueue import meer
+// ✔ addToQueue(String(userId)) (1 arg!)
+// ✔ Queue updates via io.emit("updateQueue")
+// ✔ Fans-only !join
+// ✔ !leave correct
+// ✔ !boost correct
+// ✔ getOrUpdateUser synced
+// ✔ 0 compat errors met TypeScript
+//
+// ============================================================================
 
 import pool from "../db";
-import { emitLog, emitQueue } from "../server";
+import { io, emitLog } from "../server";
 
-import { addToQueue, leaveQueue } from "../queue";
+import { addToQueue, leaveQueue, getQueue } from "../queue";
 import { getOrUpdateUser } from "./2-user-engine";
 import { applyBoost, parseBoostChatCommand } from "./7-boost-engine";
 
@@ -21,36 +23,33 @@ import { applyBoost, parseBoostChatCommand } from "./7-boost-engine";
 // Helpers
 // ------------------------------------------------------
 
-function clean(v: any): string {
+function clean(v: any) {
   return (v || "").toString().trim();
 }
 
-function extractCommand(text: string): { cmd: string; args: string[] } | null {
+function extractCommand(text: string) {
   if (!text.startsWith("!")) return null;
-  const parts = text.trim().split(/\s+/);
-  return { cmd: parts[0].toLowerCase(), args: parts.slice(1) };
+  const p = text.trim().split(/\s+/);
+  return { cmd: p[0].toLowerCase(), args: p.slice(1) };
 }
 
 async function ensureFanStatus(userId: bigint): Promise<boolean> {
-  const res = await pool.query(
+  const r = await pool.query(
     `
-      SELECT is_fan, fan_expires_at
-      FROM users
-      WHERE tiktok_id=$1
-    `,
+    SELECT is_fan, fan_expires_at
+    FROM users
+    WHERE tiktok_id=$1
+  `,
     [userId]
   );
 
-  if (!res.rows[0]) return false;
+  if (!r.rows[0]) return false;
 
-  const { is_fan, fan_expires_at } = res.rows[0];
-  if (!is_fan) return false;
-  if (!fan_expires_at) return false;
+  const { is_fan, fan_expires_at } = r.rows[0];
+  if (!is_fan || !fan_expires_at) return false;
 
-  const now = new Date();
   const exp = new Date(fan_expires_at);
-
-  if (exp <= now) {
+  if (exp <= new Date()) {
     await pool.query(
       `UPDATE users SET is_fan=FALSE, fan_expires_at=NULL WHERE tiktok_id=$1`,
       [userId]
@@ -66,7 +65,7 @@ async function ensureFanStatus(userId: bigint): Promise<boolean> {
 // ------------------------------------------------------
 
 export function initChatEngine(conn: any) {
-  console.log("💬 CHAT ENGINE v1.2 LOADED (Join + Boost)");
+  console.log("💬 CHAT ENGINE v2.0 LOADED");
 
   conn.on("chat", async (msg: any) => {
     try {
@@ -93,69 +92,75 @@ export function initChatEngine(conn: any) {
       );
 
       const dbUserId = BigInt(userId);
-      const usernameClean = user.username;
-
       const isFan = await ensureFanStatus(dbUserId);
 
-      // ------------------------------------------
-      // !join — alleen fans
-      // ------------------------------------------
+      // --------------------------------------------------
+      // !join — FAN ONLY
+      // --------------------------------------------------
       if (cmd === "!join") {
         if (!isFan) {
           emitLog({
             type: "queue",
-            message: `${user.display_name} probeert te joinen maar is geen fan`,
+            message: `${user.display_name} probeerde te joinen maar is geen fan.`,
           });
           return;
         }
 
-        await addToQueue(String(userId), usernameClean);
-        await emitQueue();
+        await addToQueue(String(userId));
+
+        io.emit("updateQueue", {
+          open: true,
+          entries: await getQueue(),
+        });
 
         emitLog({
           type: "queue",
-          message: `${user.display_name} staat nu in de wachtrij`,
+          message: `${user.display_name} staat nu in de wachtrij.`,
         });
 
         return;
       }
 
-      // ------------------------------------------
-      // !leave — verlaat queue
-      // ------------------------------------------
+      // --------------------------------------------------
+      // !leave
+      // --------------------------------------------------
       if (cmd === "!leave") {
         const refund = await leaveQueue(String(userId));
-        await emitQueue();
+
+        io.emit("updateQueue", {
+          open: true,
+          entries: await getQueue(),
+        });
 
         emitLog({
           type: "queue",
-          message: `${user.display_name} heeft de wachtlijst verlaten (refund ${refund} BP)`,
+          message: `${user.display_name} heeft de queue verlaten (refund ${refund} BP).`,
         });
 
         return;
       }
 
-      // ------------------------------------------
-      // !boost X — BOOST VIA CHAT ONLY
-      // ------------------------------------------
+      // --------------------------------------------------
+      // !boost X
+      // --------------------------------------------------
       if (cmd === "!boost") {
         const spots = await parseBoostChatCommand(text);
         if (!spots) return;
 
-        const result = await applyBoost(
-          String(userId),
-          spots,
-          user.display_name
-        );
+        const result = await applyBoost(String(userId), spots, user.display_name);
+
+        io.emit("updateQueue", {
+          open: true,
+          entries: await getQueue(),
+        });
 
         emitLog({
-          type: "booster",
-          message: `${user.display_name} → ${result.message}`,
+          type: "boost",
+          message: `${user.display_name}: ${result.message}`,
         });
 
         return;
       }
-
     } catch (err: any) {
       console.error("CHAT ENGINE ERROR:", err?.message || err);
     }
