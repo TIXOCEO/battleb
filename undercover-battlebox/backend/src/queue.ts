@@ -1,12 +1,13 @@
 // ============================================================================
-// queue.ts — QUEUE ENGINE v3.0 (STRICT, NO USER CREATION)
+// queue.ts — QUEUE ENGINE v3.2 (STRICT, NO USER CREATION)
 // ============================================================================
 //
-// DOELEN:
-//  - Admin mag GEEN users aanmaken
-//  - Alleen TikTok events creëren users
-//  - Queue accepteert ALLEEN echte users met valide tiktok_id (BIGINT)
-//  - Nooit meer invalid syntax / bigint errors
+// ✔ Admin mag GEEN users aanmaken
+// ✔ Alleen TikTok events creëren users
+// ✔ Queue accepteert ALLEEN bestaande users
+// ✔ BigInt veilig
+// ✔ addToQueue(tiktok_id) = 1 argument
+// ✔ addToQueueByUsername() is helper
 //
 // ============================================================================
 
@@ -24,7 +25,7 @@ export type QueueEntry = {
 };
 
 // ---------------------------------------------------------------------------
-// USER HELPERS — LET OP: GEEN createUser() meer!
+// HELPERS
 // ---------------------------------------------------------------------------
 
 async function fetchUserByUsername(clean: string) {
@@ -49,14 +50,15 @@ async function fetchUserById(tiktok_id: string) {
 }
 
 // ---------------------------------------------------------------------------
-// ADD TO QUEUE — ONLY EXISTING USERS (STRICT)
+// ADD TO QUEUE — STRICT (ONLY EXISTING USERS)
 // ---------------------------------------------------------------------------
 
 export async function addToQueueByUsername(username: string): Promise<void> {
   const clean = username.replace("@", "").toLowerCase();
 
   const user = await fetchUserByUsername(clean);
-  if (!user) throw new Error("User bestaat niet in database (nog geen TikTok data ontvangen)");
+  if (!user)
+    throw new Error("User bestaat niet — nog nooit TikTok events ontvangen");
 
   return addToQueue(String(user.tiktok_id));
 }
@@ -64,15 +66,14 @@ export async function addToQueueByUsername(username: string): Promise<void> {
 export async function addToQueue(tiktok_id: string): Promise<void> {
   const user = await fetchUserById(tiktok_id);
   if (!user)
-    throw new Error("User bestaat niet — kan niet toevoegen aan queue");
+    throw new Error("User bestaat niet — kan niet in queue");
 
   if (user.blocks?.queue)
     throw new Error("Geblokkeerd voor de queue");
 
-  await pool.query(
-    `DELETE FROM queue WHERE user_tiktok_id=$1`,
-    [BigInt(tiktok_id)]
-  );
+  await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [
+    BigInt(tiktok_id),
+  ]);
 
   await pool.query(
     `
@@ -87,10 +88,7 @@ export async function addToQueue(tiktok_id: string): Promise<void> {
 // BOOST
 // ---------------------------------------------------------------------------
 
-export async function boostQueue(
-  tiktok_id: string,
-  spots: number
-): Promise<void> {
+export async function boostQueue(tiktok_id: string, spots: number) {
   if (spots < 1 || spots > 5)
     throw new Error("Boost 1 t/m 5 plekken");
 
@@ -155,7 +153,7 @@ export async function leaveQueue(tiktok_id: string): Promise<number> {
 // PRIORITY RULES
 // ---------------------------------------------------------------------------
 
-function calcPriority(isVip: boolean, boost: number): number {
+function calcPriority(isVip: boolean, boost: number) {
   return (isVip ? 5 : 0) + (boost || 0);
 }
 
@@ -196,7 +194,7 @@ export async function getQueue(): Promise<QueueEntry[]> {
 
     let reason = "Standaard";
     if (vip) reason = "VIP";
-    if (fan && !vip) reason = "Fan";
+    else if (fan) reason = "Fan";
     if (boost > 0) reason = `Boost +${boost}`;
 
     return {
@@ -212,10 +210,11 @@ export async function getQueue(): Promise<QueueEntry[]> {
     };
   });
 
-  // Sort — eerst priority DESC, dan joined_at ASC
   mapped.sort((a, b) => {
     if (b.priority !== a.priority) return b.priority - a.priority;
-    return new Date(a.joined_at).getTime() - new Date(b.joined_at).getTime();
+    return (
+      new Date(a.joined_at).getTime() - new Date(b.joined_at).getTime()
+    );
   });
 
   return mapped.map((row, i) => ({
