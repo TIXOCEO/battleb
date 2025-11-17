@@ -1,4 +1,4 @@
-// src/server.ts — Undercover BattleBox Engine — v2.0 TWIST-READY
+// src/server.ts — Undercover BattleBox Engine — v2.1 TWIST-READY (BUILD SAFE)
 // Nu met:
 //  - Chat Engine (!join, !leave, !boost)
 //  - Boost-engine integratie (chat-only)
@@ -7,9 +7,8 @@
 //  - Ranking updates
 //  - Host + reconnect flow
 //  - Admin promote/demote in wachtrij
-//  - ✅ Twist-engine integratie (!use ...)
-//  - ✅ Admin-twist-engine integratie
-//  - ✅ io.currentGameId voor nieuwe gift-engine varianten
+//  - Twist-engine integratie (!use ...)
+//  - Admin-twist-engine integratie
 
 import express from "express";
 import http from "http";
@@ -45,7 +44,7 @@ import { getQueue, addToQueue } from "./queue";
 import { initChatEngine } from "./engines/6-chat-engine";
 import { applyBoost } from "./engines/7-boost-engine";
 
-// ✅ Twist imports
+// Twist imports
 import { parseUseCommand } from "./engines/8-twist-engine";
 import { initAdminTwistEngine } from "./engines/9-admin-twist-engine";
 import { getOrUpdateUser } from "./engines/2-user-engine";
@@ -93,13 +92,12 @@ type StreamStats = {
 // ─────────────────────────────────────────────
 let currentGameId: number | null = null;
 
-// Voor oude gift-engine v1.5:
+// Backwards compatibility (old gift-engine)
 export function getCurrentGameId() {
   return currentGameId;
 }
 
-// Voor nieuwe gift-engine varianten: we hangen het óók aan io
-// (typecast via any om TS tevreden te houden)
+// Nieuwere engines kunnen dit gebruiken:
 (io as any).currentGameId = null;
 
 // LOG BUFFER
@@ -270,37 +268,37 @@ async function restartTikTokConnection() {
     const { conn } = await startConnection(host, () => {});
     tiktokConn = conn;
 
-    // Gifts + chat engine (!join/!leave/!boost)
     initGiftEngine(conn);
     initChatEngine(conn);
 
-    // ✅ Extra listener voor !use twists
-    conn.on("chat", async (msg: any) => {
-      try {
-        const senderId =
-          msg.user?.userId ||
-          msg.sender?.userId ||
-          msg.userId ||
-          msg.uid;
+    if (conn) {
+      conn.on("chat", async (msg: any) => {
+        try {
+          const senderId =
+            msg.user?.userId ||
+            msg.sender?.userId ||
+            msg.userId ||
+            msg.uid;
 
-        if (!senderId) return;
+          if (!senderId) return;
 
-        const rawText = msg.comment || msg.text || msg.content || "";
-        const text = rawText.toString().trim();
+          const rawText = msg.comment || msg.text || msg.content || "";
+          const text = rawText.toString().trim();
 
-        if (!text.toLowerCase().startsWith("!use ")) return;
+          if (!text.toLowerCase().startsWith("!use ")) return;
 
-        const sender = await getOrUpdateUser(
-          String(senderId),
-          msg.user?.nickname || msg.sender?.nickname,
-          msg.user?.uniqueId || msg.sender?.uniqueId
-        );
+          const sender = await getOrUpdateUser(
+            String(senderId),
+            msg.user?.nickname || msg.sender?.nickname,
+            msg.user?.uniqueId || msg.sender?.uniqueId
+          );
 
-        await parseUseCommand(sender.id, sender.display_name, text);
-      } catch (err: any) {
-        console.error("Twist chat handler error:", err?.message || err);
-      }
-    });
+          await parseUseCommand(sender.id, sender.display_name, text);
+        } catch (err: any) {
+          console.error("Twist chat handler error:", err?.message || err);
+        }
+      });
+    }
 
   } catch (err) {
     console.error("❌ TikTok reconnect error:", err);
@@ -315,7 +313,7 @@ io.on("connection", async (socket: AdminSocket) => {
 
   console.log("ADMIN CONNECT:", socket.id);
 
-  // PUSH SNAPSHOTS
+  // Push snapshots
   socket.emit("initialLogs", logBuffer);
   socket.emit("updateArena", getArena());
   socket.emit("updateQueue", { open: true, entries: await getQueue() });
@@ -329,7 +327,6 @@ io.on("connection", async (socket: AdminSocket) => {
 
   emitLog({ type: "system", message: "Admin dashboard verbonden" });
 
-  // ✅ Admin twist events (geeft zelf extra socket.on's)
   initAdminTwistEngine(socket);
 
   // GENERIEKE HANDLER
@@ -345,7 +342,7 @@ io.on("connection", async (socket: AdminSocket) => {
         });
       }
 
-      // HOST SETTEN
+      // Host instellen
       if (action === "setHost") {
         if (currentGameId) {
           return ack({
@@ -387,7 +384,7 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // RONDE
+      // Ronde beheer
       if (action === "startRound") {
         const ok = startRound(data?.type || "quarter");
         return ack(ok ? { success: true } : { success: false });
@@ -398,7 +395,7 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // SETTINGS
+      // Instellingen bijwerken
       if (action === "updateSettings") {
         await updateArenaSettings({
           roundDurationPre: Number(data?.roundDurationPre),
@@ -410,7 +407,7 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // USER ACTIONS
+      // User acties
       if (!data?.username)
         return ack({
           success: false,
@@ -436,8 +433,6 @@ io.on("connection", async (socket: AdminSocket) => {
       const { tiktok_id, display_name, username } = userRes.rows[0];
 
       switch (action) {
-
-        // → Arena
         case "addToArena":
           arenaJoin(String(tiktok_id), display_name, username);
           await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [
@@ -448,21 +443,18 @@ io.on("connection", async (socket: AdminSocket) => {
           emitLog({ type: "join", message: `${display_name} → arena` });
           break;
 
-        // → Queue
         case "addToQueue":
           await addToQueue(String(tiktok_id), username);
           await emitQueue();
           emitLog({ type: "join", message: `${display_name} → queue` });
           break;
 
-        // Elimineren
         case "eliminate":
           arenaLeave(String(tiktok_id));
           emitArena();
           emitLog({ type: "elim", message: `${display_name} geëlimineerd` });
           break;
 
-        // Queue verwijderen
         case "removeFromQueue":
           await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [
             tiktok_id,
@@ -474,7 +466,6 @@ io.on("connection", async (socket: AdminSocket) => {
           });
           break;
 
-        // PROMOTE user (1 plek omhoog)
         case "promoteUser":
           await applyBoost(String(tiktok_id), 1, display_name);
           await emitQueue();
@@ -484,7 +475,6 @@ io.on("connection", async (socket: AdminSocket) => {
           });
           break;
 
-        // DEMOTE user (1 plek omlaag)
         case "demoteUser":
           await pool.query(
             `UPDATE queue SET boost_spots = GREATEST(boost_spots - 1, 0)
@@ -510,7 +500,6 @@ io.on("connection", async (socket: AdminSocket) => {
     }
   };
 
-  // SOCKET ROUTES
   socket.on("admin:getSettings", (d, ack) => handle("getSettings", d, ack));
   socket.on("admin:setHost", (d, ack) => handle("setHost", d, ack));
 
@@ -540,6 +529,11 @@ io.on("connection", async (socket: AdminSocket) => {
   );
 });
 
+// ───────────────────────────────────────────
+// EXPORTS
+// ───────────────────────────────────────────
+export { emitArena }; // ← essentieel voor twist-engine
+
 // ─────────────────────────────────────────────
 // STARTUP
 // ─────────────────────────────────────────────
@@ -563,33 +557,34 @@ initDB().then(async () => {
     initGiftEngine(conn);
     initChatEngine(conn);
 
-    // ✅ Ook hier: twist-chat koppelen bij eerste boot
-    tiktokConn.on("chat", async (msg: any) => {
-      try {
-        const senderId =
-          msg.user?.userId ||
-          msg.sender?.userId ||
-          msg.userId ||
-          msg.uid;
+    if (conn) {
+      conn.on("chat", async (msg: any) => {
+        try {
+          const senderId =
+            msg.user?.userId ||
+            msg.sender?.userId ||
+            msg.userId ||
+            msg.uid;
 
-        if (!senderId) return;
+          if (!senderId) return;
 
-        const rawText = msg.comment || msg.text || msg.content || "";
-        const text = rawText.toString().trim();
+          const rawText = msg.comment || msg.text || msg.content || "";
+          const text = rawText.toString().trim();
 
-        if (!text.toLowerCase().startsWith("!use ")) return;
+          if (!text.toLowerCase().startsWith("!use ")) return;
 
-        const sender = await getOrUpdateUser(
-          String(senderId),
-          msg.user?.nickname || msg.sender?.nickname,
-          msg.user?.uniqueId || msg.sender?.uniqueId
-        );
+          const sender = await getOrUpdateUser(
+            String(senderId),
+            msg.user?.nickname || msg.sender?.nickname,
+            msg.user?.uniqueId || msg.sender?.uniqueId
+          );
 
-        await parseUseCommand(sender.id, sender.display_name, text);
-      } catch (err: any) {
-        console.error("Twist chat handler error:", err?.message || err);
-      }
-    });
+          await parseUseCommand(sender.id, sender.display_name, text);
+        } catch (err: any) {
+          console.error("Twist chat handler error:", err?.message || err);
+        }
+      });
+    }
   } else {
     console.log("⚠ Geen host ingesteld — wacht op admin:setHost");
   }
