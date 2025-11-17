@@ -1,35 +1,45 @@
-// ============================================================================
-// 2-user-engine.ts — USER ENGINE v4.0 (STRICT TIKTOK-ONLY, UPSERT SAFE)
-// ============================================================================
+// src/engines/2-user-engine.ts
+// USER ENGINE — versie 0.7.2 STABLE (BattleBox)
 //
-// ✔ Echte PostgreSQL UPSERT → onmogelijk om duplicate-key errors te krijgen
-// ✔ Admin kan NOOIT users aanmaken (alleen TikTok events)
-// ✔ Username altijd lowercase, zonder '@'
-// ✔ Display_name altijd netjes geformatteerd
-// ✔ last_seen_at ALTIJD geüpdatet
-// ✔ Nickname / uniqueId combineren tot beste username
-// ✔ Volledige compatibiliteit met alle andere engines
-// ============================================================================
+// Doelen:
+//  - Onbekend minimaliseren
+//  - Upgrades wanneer betere data binnenkomt
+//  - last_seen_at altijd bijwerken
+//  - Consistent met gift-engine, chat-engine, twist-engine & server
+//
+// Gebruikte kolommen (users):
+// tiktok_id (bigint), display_name, username, last_seen_at,
+// diamonds_total, bp_total, is_fan, fan_expires_at, (optioneel: multiplier, blocks, etc.)
 
 import pool from "../db";
 
-// -------------------------------------------------------------
-// HELPERS
-// -------------------------------------------------------------
+export interface UserIdentity {
+  id: string;            // tiktok_id als string
+  display_name: string;  // nette naam voor logs / UI
+  username: string;      // zonder @, voor logica en matching
+}
 
+// Normalise username → altijd met @ in de database
 function normalizeHandle(uid?: string | null, fallback?: string | null): string {
-  const base =
-    uid?.toString().trim().replace(/^@+/, "") ||
+  const raw =
+    uid?.toString().trim() ||
     fallback?.toString().trim() ||
     "";
 
-  if (!base) return "";
+  if (!raw) return "";
 
-  return base
+  // Haal leading @ weg, maak lowercase, verwijder rare chars
+  const clean = raw
+    .replace(/^@+/, "")
     .toLowerCase()
     .replace(/[^a-z0-9_]/g, "");
+
+  if (!clean) return "";
+
+  return clean.startsWith("@") ? clean : "@" + clean;
 }
 
+// Clean displayname voor UI
 function cleanDisplay(v?: string | null): string | null {
   if (!v) return null;
   const t = v.trim();
@@ -38,63 +48,133 @@ function cleanDisplay(v?: string | null): string | null {
   return t;
 }
 
-// -------------------------------------------------------------
-// UPSERT — DE ENIGE TOEGESTANE MANIER OM USERS BIJ TE WERKEN
-// -------------------------------------------------------------
-
+/**
+ * Centrale user-upsert:
+ *  - Wordt aangeroepen door gift-engine, chat-engine, server/twists
+ *  - Zorgt dat username & display_name zo goed mogelijk zijn
+ *  - Past bestaande records aan als betere data binnenkomt
+ */
 export async function getOrUpdateUser(
   tiktok_id: string,
   nickname?: string,
   uniqueId?: string
-): Promise<{ id: string; display_name: string; username: string }> {
+): Promise<UserIdentity> {
   if (!tiktok_id) {
     return {
       id: "??",
       display_name: "Onbekend",
-      username: "onbekend"
+      username: "onbekend",
     };
   }
 
   const tid = BigInt(tiktok_id);
 
-  const newDisplay = cleanDisplay(nickname) || `Onbekend#${tiktok_id.slice(-5)}`;
-  const newUsername =
-    normalizeHandle(uniqueId, nickname) ||
-    `onbekend${tiktok_id.slice(-5)}`;
+  // Huidige record ophalen
+  const existing = await pool.query<
+    { display_name: string | null; username: string | null }
+  >(
+    `
+    SELECT display_name, username
+    FROM users
+    WHERE tiktok_id = $1
+    LIMIT 1
+    `,
+    [tid]
+  );
 
-  // ⭐ NIEUWE SUPER VEILIGE UPSERT ⭐
-  const result = await pool.query(
+  // Nieuwe (mogelijke) waarden uit event
+  const newDisplay = cleanDisplay(nickname);
+  const newUsernameFull = normalizeHandle(uniqueId, nickname);
+  const newUsernameClean = newUsernameFull.replace(/^@+/, "");
+
+  // BESTAANDE USER → upgrade als er betere data is
+  if (existing.rows[0]) {
+    const { display_name, username } = existing.rows[0];
+
+    const wasUnknown =
+      (display_name || "").startsWith("Onbekend#") ||
+      (username || "").toLowerCase().startsWith("@onbekend");
+
+    const currentUsernameClean = (username || "").replace(/^@+/, "");
+
+    const needsUpgrade =
+      wasUnknown ||
+      (newDisplay && newDisplay !== display_name) ||
+      (newUsernameClean &&
+        newUsernameClean !== currentUsernameClean &&
+        newUsernameClean !== "");
+
+    if (needsUpgrade) {
+      await pool.query(
+        `
+        UPDATE users
+           SET display_name = $1,
+               username     = $2,
+               last_seen_at = NOW()
+         WHERE tiktok_id   = $3
+        `,
+        [
+          newDisplay || display_name || `Onbekend#${tiktok_id.slice(-5)}`,
+          newUsernameFull || username || `@onbekend${tiktok_id.slice(-5)}`,
+          tid,
+        ]
+      );
+    } else {
+      // Alleen last_seen_at bijwerken
+      await pool.query(
+        `UPDATE users SET last_seen_at = NOW() WHERE tiktok_id = $1`,
+        [tid]
+      );
+    }
+
+    return {
+      id: tiktok_id,
+      display_name:
+        newDisplay || display_name || `Onbekend#${tiktok_id.slice(-5)}`,
+      // Zonder @ teruggeven voor interne logica
+      username: (newUsernameFull || username || "@onbekend")
+        .replace(/^@+/, ""),
+    };
+  }
+
+  // NIEUWE USER
+  const finalDisplay = newDisplay || `Onbekend#${tiktok_id.slice(-5)}`;
+  const finalUsername = newUsernameFull || `@onbekend${tiktok_id.slice(-5)}`;
+
+  await pool.query(
     `
     INSERT INTO users (
-      tiktok_id, display_name, username,
-      diamonds_total, bp_total, last_seen_at,
-      is_fan, fan_expires_at, is_vip
+      tiktok_id,
+      display_name,
+      username,
+      diamonds_total,
+      bp_total,
+      last_seen_at,
+      is_fan,
+      fan_expires_at
     )
-    VALUES ($1,$2,$3,0,0,NOW(),false,NULL,false)
-    ON CONFLICT (tiktok_id) DO UPDATE
-      SET display_name = EXCLUDED.display_name,
-          username     = EXCLUDED.username,
-          last_seen_at = NOW()
-    RETURNING display_name, username
-  `,
-    [tid, newDisplay, newUsername]
+    VALUES ($1,$2,$3,0,0,NOW(),false,NULL)
+    `,
+    [tid, finalDisplay, finalUsername]
   );
 
   return {
     id: tiktok_id,
-    display_name: result.rows[0].display_name,
-    username: result.rows[0].username
+    display_name: finalDisplay,
+    username: finalUsername.replace(/^@+/, ""),
   };
 }
 
-// -------------------------------------------------------------
-// TikTok loose event auto-upsert
-// -------------------------------------------------------------
-
+/**
+ * upsertIdentityFromLooseEvent
+ * ----------------------------
+ * Wordt gebruikt als er een willekeurig TikTok event binnenkomt
+ * en je "gratis" de identity wilt bijwerken, zonder verdere logica.
+ */
 export async function upsertIdentityFromLooseEvent(loose: any): Promise<void> {
   if (!loose) return;
 
-  const u =
+  const user =
     loose?.user ||
     loose?.sender ||
     loose?.toUser ||
@@ -102,16 +182,23 @@ export async function upsertIdentityFromLooseEvent(loose: any): Promise<void> {
     loose;
 
   const id =
-    u?.userId ||
-    u?.id ||
-    u?.uid ||
-    u?.secUid ||
+    user?.userId ||
+    user?.id ||
+    user?.uid ||
+    user?.secUid ||
     null;
 
   if (!id) return;
 
-  const display = u?.nickname || u?.displayName || undefined;
-  const unique  = u?.uniqueId || u?.unique_id || undefined;
+  const display =
+    user?.nickname ||
+    user?.displayName ||
+    undefined;
+
+  const unique =
+    user?.uniqueId ||
+    user?.unique_id ||
+    undefined;
 
   await getOrUpdateUser(String(id), display, unique);
 }
