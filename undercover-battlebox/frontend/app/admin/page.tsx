@@ -29,13 +29,19 @@ type GameSessionState = {
   endedAt?: string | null;
 };
 
+// For autocomplete
+type SearchUser = {
+  tiktok_id: string;
+  username: string;
+  display_name: string;
+};
+
 export default function AdminDashboardPage() {
+  // CORE STATES
   const [arena, setArena] = useState<ArenaState | null>(null);
   const [queue, setQueue] = useState<QueueEntry[]>([]);
   const [queueOpen, setQueueOpen] = useState(true);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [username, setUsername] = useState("");
-  const [status, setStatus] = useState<string | null>(null);
   const [streamStats, setStreamStats] = useState<StreamStats | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [gameSession, setGameSession] = useState<GameSessionState>({
@@ -43,11 +49,23 @@ export default function AdminDashboardPage() {
     gameId: null,
   });
 
-  // Nieuwe states voor TWISTS
+  // INPUT STATES
+  const [username, setUsername] = useState("");
+  const [status, setStatus] = useState<string | null>(null);
+
+  // TWISTS
   const [twistUser, setTwistUser] = useState("");
   const [twistType, setTwistType] = useState("");
   const [twistTarget, setTwistTarget] = useState("");
 
+  // AUTOCOMPLETE RESULTS
+  const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
+  const [showResults, setShowResults] = useState(false);
+  const [typing, setTyping] = useState("");
+
+  // ============================================================
+  // SOCKET SETUP
+  // ============================================================
   useEffect(() => {
     const socket = getAdminSocket();
 
@@ -65,15 +83,19 @@ export default function AdminDashboardPage() {
       setLeaderboard(e)
     );
     socket.on("gameSession", (s: GameSessionState) => setGameSession(s));
+
     socket.on("connect_error", () =>
       setStatus("❌ Socket verbinding weggevallen")
     );
+
     socket.on("round:start", (d: any) =>
       setStatus(`▶️ Ronde gestart (${d.type}) — ${d.duration}s`)
     );
+
     socket.on("round:grace", (d: any) =>
       setStatus(`⏳ Grace-periode actief (${d.grace}s)`)
     );
+
     socket.on("round:end", () => setStatus("⛔ Ronde beëindigd"));
 
     return () => {
@@ -91,6 +113,9 @@ export default function AdminDashboardPage() {
     };
   }, []);
 
+  // ============================================================
+  // FETCH INITIAL SNAPSHOT
+  // ============================================================
   useEffect(() => {
     const socket = getAdminSocket();
     socket.emit("admin:getInitialSnapshot", {}, (snap: any) => {
@@ -107,6 +132,9 @@ export default function AdminDashboardPage() {
     });
   }, []);
 
+  // ============================================================
+  // ADMIN EMITTERS
+  // ============================================================
   const emitAdmin = (event: string, payload?: any) => {
     const socket = getAdminSocket();
     setStatus(`Bezig met ${event}...`);
@@ -146,8 +174,56 @@ export default function AdminDashboardPage() {
     }
   };
 
+  // ============================================================
+  // AUTOCOMPLETE — search via socket first, then HTTP fallback
+  // ============================================================
+  useEffect(() => {
+    if (!typing.trim() || typing.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+
+    const run = async () => {
+      const socket = getAdminSocket();
+
+      socket.emit(
+        "admin:searchUsers",
+        { query: typing },
+        async (res: { users: SearchUser[] }) => {
+          if (res.users?.length) {
+            setSearchResults(res.users);
+            return;
+          }
+
+          // fallback HTTP
+          const http = await fetch(
+            `/admin/searchUsers?query=${encodeURIComponent(typing)}`
+          );
+          const json = await http.json();
+          setSearchResults(json.users || []);
+        }
+      );
+    };
+
+    const timer = setTimeout(run, 150);
+    return () => clearTimeout(timer);
+  }, [typing]);
+
+  const applyAutoFill = (u: SearchUser) => {
+    setUsername(u.username);
+    setTwistUser(u.username);
+    setTwistTarget(u.username);
+    setTyping("");
+    setSearchResults([]);
+    setShowResults(false);
+  };
+
+  // ============================================================
+  // RENDER UI
+  // ============================================================
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
+      {/* HEADER */}
       <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-6">
         <div className="flex items-center gap-2">
           <div className="text-2xl font-bold text-[#ff4d4f]">UB</div>
@@ -162,18 +238,10 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 text-xs">
-          <span
-            className={`px-3 py-1 rounded-full ${
-              gameSession.active
-                ? "bg-green-100 text-green-700"
-                : "bg-gray-200 text-gray-800"
-            }`}
-          >
-            {gameSession.active
-              ? `Spel actief (#${gameSession.gameId})`
-              : "Geen spel actief"}
-          </span>
+        <div className="text-xs px-3 py-1 rounded-full bg-gray-200 text-gray-800">
+          {gameSession.active
+            ? `Spel actief (#${gameSession.gameId})`
+            : "Geen spel actief"}
         </div>
       </header>
 
@@ -202,14 +270,18 @@ export default function AdminDashboardPage() {
             <div className="text-xs text-gray-600 mb-1">Ronde type</div>
             <div className="flex gap-2 flex-wrap">
               <button
-                onClick={() => emitAdmin("admin:startRound", { type: "quarter" })}
+                onClick={() =>
+                  emitAdmin("admin:startRound", { type: "quarter" })
+                }
                 className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full text-xs"
               >
                 Start voorronde
               </button>
 
               <button
-                onClick={() => emitAdmin("admin:startRound", { type: "finale" })}
+                onClick={() =>
+                  emitAdmin("admin:startRound", { type: "finale" })
+                }
                 className="px-3 py-1.5 bg-gray-900 text-white rounded-full text-xs"
               >
                 Start finale
@@ -223,79 +295,62 @@ export default function AdminDashboardPage() {
               </button>
             </div>
           </div>
-
-          <div className="mt-3 text-sm">
-            <div className="text-gray-600">Ronde status:</div>
-
-            <div
-              className={`inline-block mt-1 px-2 py-1 rounded-full text-xs ${
-                arena?.status === "active"
-                  ? "bg-green-100 text-green-700"
-                  : arena?.status === "grace"
-                  ? "bg-amber-100 text-amber-700"
-                  : arena?.status === "ended"
-                  ? "bg-red-100 text-red-700"
-                  : "bg-gray-100 text-gray-700"
-              }`}
-            >
-              {arena?.status ?? "idle"}
-            </div>
-
-            <div className="mt-1 text-gray-700">
-              Tijd:{" "}
-              <span className="font-mono">
-                {arena?.timeLeft
-                  ? `${String(Math.floor(arena.timeLeft / 60)).padStart(
-                      2,
-                      "0"
-                    )}:${String(arena.timeLeft % 60).padStart(2, "0")}`
-                  : "00:00"}
-              </span>
-            </div>
-
-            {arena?.status === "grace" && (
-              <div className="text-xs text-amber-600 mt-1">
-                Grace-periode — gifts tellen nog mee…
-              </div>
-            )}
-          </div>
         </div>
 
-                {/* SPELERS ACTIES */}
+        {/* SPELERSACTIES */}
         <div className="lg:col-span-2 flex flex-col gap-3">
           <div className="text-sm font-semibold">Speleracties</div>
 
-          <div className="flex flex-col md:flex-row gap-3 md:items-end">
+          <div className="flex flex-col md:flex-row gap-3 md:items-end relative">
             <div className="flex-1">
               <label className="text-xs text-gray-600 font-semibold mb-1 block">
-                @username
+                @username (zoek)
               </label>
               <input
                 type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="@gebruikersnaam"
+                value={typing}
+                onChange={(e) => {
+                  setTyping(e.target.value);
+                  setShowResults(true);
+                }}
+                onFocus={() => setShowResults(true)}
+                placeholder="@zoeken"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
               />
+
+              {showResults && searchResults.length > 0 && (
+                <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
+                  {searchResults.map((u) => (
+                    <div
+                      key={u.tiktok_id}
+                      onClick={() => applyAutoFill(u)}
+                      className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+                    >
+                      <span className="font-semibold">{u.display_name}</span>{" "}
+                      <span className="text-gray-500">@{u.username}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="flex gap-2 text-xs">
               <button
-                onClick={() => emitAdminWithUser("admin:addToArena")}
+                onClick={() => emitAdminWithUser("admin:addToArena", username)}
                 className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full"
               >
                 → Arena
               </button>
 
               <button
-                onClick={() => emitAdminWithUser("admin:addToQueue")}
+                onClick={() => emitAdminWithUser("admin:addToQueue", username)}
                 className="px-3 py-1.5 bg-gray-800 text-white rounded-full"
               >
                 → Queue
               </button>
 
               <button
-                onClick={() => emitAdminWithUser("admin:eliminate")}
+                onClick={() => emitAdminWithUser("admin:eliminate", username)}
                 className="px-3 py-1.5 bg-red-600 text-white rounded-full"
               >
                 Elimineer
@@ -305,16 +360,18 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* STATUS BALK */}
+      {/* STATUS */}
       {status && (
         <div className="mb-4 text-sm text-center bg-amber-50 border border-amber-200 text-amber-800 rounded-xl py-2">
           {status}
         </div>
       )}
 
-      {/* =============== ARENA & QUEUE =============== */}
-      <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* ============================================================
+          ARENA + QUEUE WEERGAVE
+      ============================================================ */}
 
+      <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* ARENA */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Arena</h2>
@@ -489,7 +546,7 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* LEADERBOARD + STATS */}
+      {/* LEADERBOARD & STATS */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
         {/* LEADERBOARD */}
         <div className="bg-white rounded-2xl shadow p-4">
@@ -512,7 +569,9 @@ export default function AdminDashboardPage() {
                     </span>
                   </div>
 
-                  <span className="font-semibold">{fmt(e.total_diamonds)} 💎</span>
+                  <span className="font-semibold">
+                    {fmt(e.total_diamonds)} 💎
+                  </span>
                 </div>
               ))
             ) : (
@@ -521,7 +580,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* STREAM STATS */}
+        {/* STATS */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Stream stats</h2>
           <p className="text-xs text-gray-500 mb-3">
@@ -558,12 +617,11 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* ========================= TWISTS UI ========================= */}
+      {/* TWISTS */}
       <section className="mt-8 bg-white rounded-2xl shadow p-4">
         <h2 className="text-xl font-semibold mb-4">Twists</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-
           {/* GIVE TWIST */}
           <div className="p-4 border rounded-xl bg-gray-50 shadow-sm">
             <h3 className="font-semibold mb-3">Twist geven aan speler</h3>
@@ -695,9 +753,8 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* FOOTER */}
       <footer className="mt-4 text-xs text-gray-400 text-center">
-        BattleBox Engine v{process.env.NEXT_PUBLIC_BATTLEBOX_VERSION || "dev"}
+        BattleBox Engine v3.1 Danny Stable
       </footer>
     </main>
   );
