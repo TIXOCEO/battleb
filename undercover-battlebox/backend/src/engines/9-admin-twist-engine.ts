@@ -1,5 +1,5 @@
 // ============================================================================
-// 9-admin-twist-engine.ts — v2.0 (Build-Safe)
+// 9-admin-twist-engine.ts — v2.1 (Build-Safe, TS-Safe)
 // ============================================================================
 
 import { Socket } from "socket.io";
@@ -40,6 +40,7 @@ async function fetchUserByUsername(username: string) {
 // ============================================================================
 // EXPORT
 // ============================================================================
+
 export function initAdminTwistEngine(socket: Socket) {
   // ========================================================================
   // ADMIN: Geef twist
@@ -53,10 +54,11 @@ export function initAdminTwistEngine(socket: Socket) {
       try {
         const clean = twist.toLowerCase().trim();
 
-        if (!TWIST_MAP[clean]) {
+        // ⭐ TypeScript-save key check
+        if (!Object.prototype.hasOwnProperty.call(TWIST_MAP, clean)) {
           return ack({
             success: false,
-            message: "Onbekende twist",
+            message: `Onbekende twist '${clean}'`,
           });
         }
 
@@ -96,10 +98,10 @@ export function initAdminTwistEngine(socket: Socket) {
       try {
         const clean = twist.toLowerCase().trim();
 
-        if (!TWIST_MAP[clean]) {
+        if (!Object.prototype.hasOwnProperty.call(TWIST_MAP, clean)) {
           return ack({
             success: false,
-            message: "Onbekende twist",
+            message: `Onbekende twist '${clean}'`,
           });
         }
 
@@ -114,7 +116,6 @@ export function initAdminTwistEngine(socket: Socket) {
         }
 
         const ok = await consumeTwistFromUser(user.tiktok_id, twistType);
-
         if (!ok) {
           return ack({
             success: false,
@@ -139,10 +140,7 @@ export function initAdminTwistEngine(socket: Socket) {
   // ========================================================================
   socket.on(
     "admin:twist:list",
-    async (
-      { username }: { username: string },
-      ack: Function
-    ) => {
+    async ({ username }: { username: string }, ack: Function) => {
       try {
         const user = await fetchUserByUsername(username);
         if (!user) {
@@ -165,14 +163,11 @@ export function initAdminTwistEngine(socket: Socket) {
   );
 
   // ========================================================================
-  // ADMIN: Verwijder ALLE twists
+  // ADMIN: Clear ALL twists
   // ========================================================================
   socket.on(
     "admin:twist:clear",
-    async (
-      { username }: { username: string },
-      ack: Function
-    ) => {
+    async ({ username }: { username: string }, ack: Function) => {
       try {
         const user = await fetchUserByUsername(username);
         if (!user) {
