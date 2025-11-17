@@ -1,23 +1,24 @@
-// src/engines/2-user-engine.ts
-// USER ENGINE — STABLE VERSION 1.0
+// ============================================================================
+// 2-user-engine.ts — USER ENGINE v2.0 (STRICT TIKTOK-ID ONLY)
+// ============================================================================
 //
-// Doelen:
+// DOELEN:
+//  - Alleen TikTok events mogen users aanmaken (admin = read-only)
 //  - Nooit meer duplicate key errors
-//  - Upgrades wanneer betere data binnenkomt
-//  - last_seen_at altijd bijwerken
-//  - Consistent met gift-engine + identity updates
+//  - Username upgrades zodra TikTok betere data geeft
+//  - display_name upgrades zodra TikTok betere data geeft
+//  - last_seen_at wordt ALTIJD geüpdatet
+//  - username altijd lowercase zonder '@'
+//  - tiktok_id blijft ALTIJD leidend
 //
-// Gebruikte kolommen (users):
-// tiktok_id (bigint), display_name, username, last_seen_at,
-// diamonds_total, bp_total, is_fan, fan_expires_at
+// ============================================================================
 
 import pool from "../db";
 
-// ─────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 // HELPERS
-// ─────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 
-// Normaliseer username, zet nooit @ ervoor in database, maar wel in memory
 function normalizeHandle(uid?: string | null, fallback?: string | null): string {
   const clean =
     uid?.toString().trim().replace(/^@+/, "") ||
@@ -36,9 +37,9 @@ function cleanDisplay(v?: string | null): string | null {
   return t;
 }
 
-// ─────────────────────────────────────────────
-// CORE FUNCTION — FIXED SAFE UPSERT
-// ─────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// CORE FUNCTION — TikTok-only UPSERT (admin maakt nooit users!)
+// ---------------------------------------------------------------------------
 
 export async function getOrUpdateUser(
   tiktok_id: string,
@@ -55,30 +56,26 @@ export async function getOrUpdateUser(
 
   const tid = BigInt(tiktok_id);
 
-  // Nieuwe user-waarde candidates
   const newDisplay = cleanDisplay(nickname);
   const newUsername = normalizeHandle(uniqueId, nickname);
 
-  // ─────────────────────────────────────────────
-  // 1) BESTAAT USER?
-  // ─────────────────────────────────────────────
+  // 1) Bestaat user?
   const existing = await pool.query(
     `
     SELECT display_name, username
     FROM users
     WHERE tiktok_id = $1
     LIMIT 1
-    `,
+  `,
     [tid]
   );
 
   if (existing.rows.length > 0) {
-    // ─────────────────────────────────────────────
     // 2) UPDATE bestaande user
-    // ─────────────────────────────────────────────
+
     const { display_name, username } = existing.rows[0];
 
-    const oldUser = username?.replace(/^@+/, "") || "";
+    const oldUser = username || "";
     const oldDisplay = display_name || null;
 
     const needsUpgrade =
@@ -102,23 +99,21 @@ export async function getOrUpdateUser(
       );
     } else {
       await pool.query(
-        `UPDATE users SET last_seen_at = NOW() WHERE tiktok_id = $1`,
+        `UPDATE users SET last_seen_at = NOW() WHERE tiktok_id=$1`,
         [tid]
       );
     }
 
     return {
       id: tiktok_id,
-      display_name: newDisplay || oldDisplay || `Onbekend#${tiktok_id.slice(-5)}`,
-      username: (newUsername || oldUser || `onbekend${tiktok_id.slice(-5)}`).replace(/^@+/, ""),
+      display_name:
+        newDisplay || oldDisplay || `Onbekend#${tiktok_id.slice(-5)}`,
+      username:
+        newUsername || oldUser || `onbekend${tiktok_id.slice(-5)}`,
     };
   }
 
-  // ─────────────────────────────────────────────
-  // 3) NIEUWE USER — altijd 1 veilige INSERT
-  //    Nooit een duplicate error!
-  // ─────────────────────────────────────────────
-
+  // 3) NIEUWE USER — alleen toegestaan via TikTok event
   const finalDisplay = newDisplay || `Onbekend#${tiktok_id.slice(-5)}`;
   const finalUsername = newUsername || `onbekend${tiktok_id.slice(-5)}`;
 
@@ -127,10 +122,10 @@ export async function getOrUpdateUser(
     INSERT INTO users (
       tiktok_id, display_name, username,
       diamonds_total, bp_total, last_seen_at,
-      is_fan, fan_expires_at
+      is_fan, fan_expires_at, is_vip
     )
-    VALUES ($1,$2,$3,0,0,NOW(),false,NULL)
-    `,
+    VALUES ($1,$2,$3,0,0,NOW(),false,NULL,false)
+  `,
     [tid, finalDisplay, finalUsername]
   );
 
@@ -141,14 +136,14 @@ export async function getOrUpdateUser(
   };
 }
 
-// ─────────────────────────────────────────────
-// AUTO-UPSERT vanuit elk TikTok event
-// ─────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// AUTO-UPSERT vanuit TikTok events
+// ---------------------------------------------------------------------------
 
 export async function upsertIdentityFromLooseEvent(loose: any): Promise<void> {
   if (!loose) return;
 
-  const user =
+  const u =
     loose?.user ||
     loose?.sender ||
     loose?.toUser ||
@@ -156,19 +151,19 @@ export async function upsertIdentityFromLooseEvent(loose: any): Promise<void> {
     loose;
 
   const id =
-    user?.userId ||
-    user?.id ||
-    user?.uid ||
-    user?.secUid ||
+    u?.userId ||
+    u?.id ||
+    u?.uid ||
+    u?.secUid ||
     null;
 
   if (!id) return;
 
   const display =
-    user?.nickname || user?.displayName || undefined;
+    u?.nickname || u?.displayName || undefined;
 
   const unique =
-    user?.uniqueId || user?.unique_id || undefined;
+    u?.uniqueId || u?.unique_id || undefined;
 
   await getOrUpdateUser(String(id), display, unique);
 }
