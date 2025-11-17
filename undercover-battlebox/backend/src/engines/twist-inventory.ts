@@ -1,15 +1,15 @@
 // ============================================================================
-// twist-inventory.ts — v1.0
-// Inventaris van twists per gebruiker (geeft / neemt / verbruikt)
+// twist-inventory.ts — v1.1 (Build-Safe)
+// ============================================================================
+// Bewaart welke twists elke gebruiker bezit.
 // ============================================================================
 
 import pool from "../db";
 import type { TwistType } from "./twist-definitions";
 
 // ============================================================================
-// DATABASE INIT
+// INIT
 // ============================================================================
-
 export async function initTwistInventoryTable() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS twist_inventory (
@@ -22,25 +22,25 @@ export async function initTwistInventoryTable() {
 }
 
 // ============================================================================
-// GIVE TWIST TO USER
+// GIVE TWIST
 // ============================================================================
-
-export async function giveTwistToUser(userId: string, twist: TwistType) {
+export async function giveTwistToUser(
+  userId: string,
+  twist: TwistType
+) {
   await pool.query(
-    `INSERT INTO twist_inventory (user_id, twist_type)
-     VALUES ($1, $2)`,
+    `
+    INSERT INTO twist_inventory (user_id, twist_type)
+    VALUES ($1, $2)
+    `,
     [userId, twist]
   );
-
   return true;
 }
 
 // ============================================================================
-// CONSUME (USE) ONE TWIST
+// CONSUME TWIST (1 stuk)
 // ============================================================================
-// ⭐ Dit was de FUNCTIE die miste — build error opgelost
-// ============================================================================
-
 export async function consumeTwistFromUser(
   userId: string,
   twist: TwistType
@@ -59,13 +59,12 @@ export async function consumeTwistFromUser(
     [userId, twist]
   );
 
-  return res.rowCount > 0;
+  return (res.rowCount ?? 0) > 0;
 }
 
 // ============================================================================
-// LIST TWISTS FOR USER
+// LIST USER INVENTORY
 // ============================================================================
-
 export async function listTwistsForUser(
   userId: string
 ): Promise<TwistType[]> {
@@ -85,8 +84,9 @@ export async function listTwistsForUser(
 // ============================================================================
 // CLEAR ALL USER TWISTS
 // ============================================================================
-
-export async function clearTwistsForUser(userId: string) {
+export async function clearTwistsForUser(
+  userId: string
+) {
   await pool.query(
     `
     DELETE FROM twist_inventory
