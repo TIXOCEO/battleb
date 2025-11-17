@@ -1,16 +1,5 @@
 // ============================================================================
-// server.ts — Undercover BattleBox Engine — v2.12 (Twist Stable Build)
-// ============================================================================
-//
-// Geïntegreerde componenten:
-//   - Gift Engine + Fanclub + Diamonds
-//   - Chat Engine (!join, !leave, !boost, !use <twist>)
-//   - Twist Engine (bestand 8)
-//   - Twist Inventory (bestand 2)
-//   - Admin Twist Controls (bestand 9)
-//   - Queue Engine
-//   - Arena Engine (bestand 5)
-//
+// server.ts — Undercover BattleBox Engine — v2.40 (Stable / Idle Mode / Host Swap)
 // ============================================================================
 
 import express from "express";
@@ -22,37 +11,30 @@ import dotenv from "dotenv";
 import pool, { getSetting } from "./db";
 import { initDB } from "./db";
 
-// TikTok connectie
+// TikTok connection engine
 import { startConnection, stopConnection } from "./engines/1-connection";
 
 // Gift engine
 import {
   initGiftEngine,
   initDynamicHost,
-  refreshHostUsername,
 } from "./engines/3-gift-engine";
 
-// Arena / Game engine
+// Arena engine
 import {
   initGame,
   arenaJoin,
-  arenaLeave,
   getArena,
   emitArena,
   startRound,
   endRound,
-  updateArenaSettings,
-  getArenaSettings,
 } from "./engines/5-game-engine";
 
 // Queue
 import { getQueue, addToQueue } from "./queue";
 
-// Chat engine (join/boost + !use passthrough)
+// Chat engine (!join / !boost / !use passthrough)
 import { initChatEngine } from "./engines/6-chat-engine";
-
-// BP Boost Engine
-import { applyBoost } from "./engines/7-boost-engine";
 
 // Twist engine (!use)
 import { parseUseCommand } from "./engines/8-twist-engine";
@@ -60,14 +42,14 @@ import { parseUseCommand } from "./engines/8-twist-engine";
 // Admin twist engine
 import { initAdminTwistEngine } from "./engines/9-admin-twist-engine";
 
-// User resolve
+// Users
 import { getOrUpdateUser } from "./engines/2-user-engine";
 
-// ENV
+// Load ENV
 dotenv.config();
 
 // ============================================================================
-// TIKTOK CONNECTION SHARED
+// SHARED TIKTOK CONNECTION
 // ============================================================================
 export let tiktokConnShared: any = null;
 
@@ -77,7 +59,7 @@ export let tiktokConnShared: any = null;
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "supersecret123";
 
 // ============================================================================
-// EXPRESS SERVER
+// EXPRESS + HTTP
 // ============================================================================
 const app = express();
 app.use(cors());
@@ -85,19 +67,23 @@ app.use(express.json());
 const server = http.createServer(app);
 
 // ============================================================================
-// EASY GIFT LIST ENDPOINT
+// GIFTS ENDPOINT
 // ============================================================================
 app.get("/admin/gifts", async (req, res) => {
   try {
-    if (!tiktokConnShared || typeof tiktokConnShared.getAvailableGifts !== "function") {
+    if (
+      !tiktokConnShared ||
+      typeof tiktokConnShared.getAvailableGifts !== "function"
+    ) {
       return res.json({
         success: false,
-        message: "Geen geldige TikTok connectie",
+        message: "Geen TikTok connectie actief",
         gifts: [],
       });
     }
 
     const gifts = await tiktokConnShared.getAvailableGifts();
+
     return res.json({
       success: true,
       gifts: gifts.map((g: any) => ({
@@ -116,7 +102,7 @@ app.get("/admin/gifts", async (req, res) => {
 });
 
 // ============================================================================
-// SOCKET.IO
+// SOCKET.IO INIT
 // ============================================================================
 export const io = new Server(server, {
   cors: { origin: "*" },
@@ -124,7 +110,7 @@ export const io = new Server(server, {
 });
 
 // ============================================================================
-// LOGGING
+// LOGGING BUFFER
 // ============================================================================
 export type LogEntry = {
   id: string;
@@ -152,45 +138,16 @@ export function emitLog(log: Partial<LogEntry>) {
 
   logBuffer.unshift(entry);
   if (logBuffer.length > LOG_MAX) logBuffer.pop();
+
   io.emit("log", entry);
 }
 
 // ============================================================================
-// QUEUE UPDATES
+// QUEUE NOTIFY
 // ============================================================================
 export async function emitQueue() {
   const entries = await getQueue();
   io.emit("updateQueue", { open: true, entries });
-}
-
-// ============================================================================
-// STREAM STATS
-// ============================================================================
-export async function broadcastStats() {
-  if (!currentGameId) return;
-
-  const statsRes = await pool.query(
-    `
-      SELECT
-        COUNT(DISTINCT CASE WHEN receiver_role IN ('speler','cohost')
-          THEN receiver_id END) AS total_players,
-        COALESCE(SUM(CASE WHEN receiver_role IN ('speler','cohost')
-          THEN diamonds ELSE 0 END), 0) AS total_player_diamonds,
-        COALESCE(SUM(CASE WHEN receiver_role = 'host'
-          THEN diamonds ELSE 0 END), 0) AS total_host_diamonds
-      FROM gifts
-      WHERE game_id = $1
-    `,
-    [currentGameId]
-  );
-
-  const row = statsRes.rows[0] || {};
-
-  io.emit("streamStats", {
-    totalPlayers: Number(row.total_players || 0),
-    totalPlayerDiamonds: Number(row.total_player_diamonds || 0),
-    totalHostDiamonds: Number(row.total_host_diamonds || 0),
-  });
 }
 
 // ============================================================================
@@ -206,76 +163,89 @@ async function loadActiveGame() {
 
   if (res.rows[0]) {
     currentGameId = Number(res.rows[0].id);
-    console.log(`[GAME] Actieve game geladen (#${currentGameId})`);
+    console.log(`[GAME] Actieve game: #${currentGameId}`);
   } else {
-    console.log("[GAME] Geen actieve game gevonden");
+    console.log("[GAME] Geen actief spel gevonden");
     currentGameId = null;
   }
 }
 
 // ============================================================================
-// TIKTOK CONNECTION HANDLER
+// TIKTOK RECONNECT — SAFE MODE
 // ============================================================================
 async function restartTikTokConnection() {
   try {
     if (tiktokConnShared) {
-      try { await stopConnection(tiktokConnShared); } catch {}
+      try {
+        await stopConnection(tiktokConnShared);
+      } catch {}
       tiktokConnShared = null;
     }
 
     const host = await getSetting("host_username");
 
-    if (process.env.NODE_ENV === "production" && host) {
-      console.log("🔄 TikTok opnieuw verbinden met host:", host);
-
-      const { conn } = await startConnection(host, () => {});
-      tiktokConnShared = conn;
-
-      initGiftEngine(conn);
-      initChatEngine(conn);
-
-      // Twist chat detectie (!use)
-      conn.on("chat", async (msg: any) => {
-        const senderId =
-          msg.user?.userId ||
-          msg.sender?.userId ||
-          msg.userId ||
-          msg.uid;
-
-        if (!senderId) return;
-
-        const text =
-          msg.comment ||
-          msg.text ||
-          msg.content ||
-          "";
-
-        const clean = text.trim().toLowerCase();
-        if (!clean.startsWith("!use ")) return;
-
-        const sender = await getOrUpdateUser(
-          String(senderId),
-          msg.user?.nickname || msg.sender?.nickname,
-          msg.user?.uniqueId || msg.sender?.uniqueId
-        );
-
-        await parseUseCommand(
-          sender.id,
-          sender.display_name,
-          clean
-        );
-      });
-
-    } else {
-      console.log("Simulatormodus — TikTok connectie overgeslagen.");
+    if (!host) {
+      console.log("⚠ Geen host ingesteld → TikTok idle mode");
+      return;
     }
+
+    if (process.env.NODE_ENV !== "production") {
+      console.log("Simulatie-modus — TikTok connectie niet gemaakt");
+      return;
+    }
+
+    console.log("🔄 Verbinden met TikTok host:", host);
+
+    const { conn } = await startConnection(host, () => {});
+
+    if (!conn) {
+      console.log(`⚠ Host @${host} offline → TikTok engine in IDLE-modus`);
+      tiktokConnShared = null;
+      return;
+    }
+
+    tiktokConnShared = conn;
+
+    initGiftEngine(conn);
+    initChatEngine(conn);
+
+    // Twist commands
+    conn.on("chat", async (msg: any) => {
+      const senderId =
+        msg.user?.userId ||
+        msg.sender?.userId ||
+        msg.userId ||
+        msg.uid;
+
+      if (!senderId) return;
+
+      const text =
+        msg.comment ||
+        msg.text ||
+        msg.content ||
+        "";
+
+      const clean = text.trim().toLowerCase();
+      if (!clean.startsWith("!use")) return;
+
+      const sender = await getOrUpdateUser(
+        String(senderId),
+        msg.user?.nickname || msg.sender?.nickname,
+        msg.user?.uniqueId || msg.sender?.uniqueId
+      );
+
+      await parseUseCommand(sender.id, sender.display_name, clean);
+    });
+
+    console.log("✔ TikTok connectie actief");
+
   } catch (err) {
-    console.error("❌ TikTok reconnect error:", err);
+    console.error("❌ Fout in restartTikTokConnection:", err);
   }
 }
 
 // ============================================================================
-// ADMIN AUTH
+// ADMIN SOCKET AUTH
 // ============================================================================
 interface AdminSocket extends Socket {
   isAdmin?: boolean;
@@ -297,7 +267,7 @@ io.on("connection", async (socket: AdminSocket) => {
 
   console.log("Admin verbonden");
 
-  // Snapshot initial
+  // Initial snapshot
   socket.emit("initialLogs", logBuffer);
   socket.emit("updateArena", getArena());
   socket.emit("updateQueue", {
@@ -309,20 +279,48 @@ io.on("connection", async (socket: AdminSocket) => {
     gameId: currentGameId,
   });
 
-  // -------------------
-  // Admin twist engine
-  // -------------------
+  // Twist-admin events
   initAdminTwistEngine(socket);
 
-  // -------------------
-  // ADMIN CONTROLS
-  // -------------------
+  // ====================================================================
+  // ADMIN: HOST INSTELLEN
+  // ====================================================================
+  socket.on("admin:setHost", async ({ username }, ack: Function) => {
+    try {
+      const clean = username.trim().replace(/^@/, "");
+      if (!clean)
+        return ack({ success: false, message: "Lege username" });
 
+      await pool.query(
+        `INSERT INTO settings(key,value)
+         VALUES ('host_username',$1)
+         ON CONFLICT(key) DO UPDATE SET value=$1`,
+        [clean]
+      );
+
+      io.emit("host", clean);
+
+      await restartTikTokConnection();
+
+      ack({ success: true, host: clean });
+      console.log("✔ Nieuwe host ingesteld:", clean);
+      
+    } catch (err: any) {
+      ack({ success: false, message: err.message });
+    }
+  });
+
+  // ====================================================================
+  // START GAME
+  // ====================================================================
   socket.on("admin:startGame", async (_, ack: Function) => {
     try {
       const res = await pool.query(
-        `INSERT INTO games(status, started_at) VALUES('running', NOW()) RETURNING id`
+        `INSERT INTO games(status, started_at)
+         VALUES('running', NOW())
+         RETURNING id`
       );
+
       currentGameId = Number(res.rows[0].id);
 
       ack({ success: true });
@@ -330,30 +328,34 @@ io.on("connection", async (socket: AdminSocket) => {
         active: true,
         gameId: currentGameId,
       });
+
       emitLog({
         type: "system",
         message: `Game #${currentGameId} gestart.`,
       });
+
     } catch (err: any) {
       ack({ success: false, message: err.message });
     }
   });
 
+  // ====================================================================
+  // STOP GAME
+  // ====================================================================
   socket.on("admin:stopGame", async (_, ack: Function) => {
     try {
       if (!currentGameId)
         return ack({ success: false, message: "Geen actief spel" });
 
       await pool.query(
-        `
-        UPDATE games
-        SET status='ended', ended_at=NOW()
-        WHERE id=$1
-      `,
+        `UPDATE games
+         SET status='ended', ended_at=NOW()
+         WHERE id=$1`,
         [currentGameId]
       );
 
       ack({ success: true });
+
       emitLog({
         type: "system",
         message: `Game #${currentGameId} beëindigd.`,
@@ -361,15 +363,16 @@ io.on("connection", async (socket: AdminSocket) => {
 
       currentGameId = null;
       io.emit("gameSession", { active: false, gameId: null });
+
     } catch (err: any) {
       ack({ success: false, message: err.message });
     }
   });
 
-  // -------------------
-  // Ronde controls
-  // -------------------
-  socket.on("admin:startRound", async ({ type }, ack: Function) => {
+  // ====================================================================
+  // Ronde-controls
+  // ====================================================================
+  socket.on("admin:startRound", ({ type }, ack: Function) => {
     const ok = startRound(type);
     ack({
       success: ok,
@@ -377,28 +380,34 @@ io.on("connection", async (socket: AdminSocket) => {
     });
   });
 
-  socket.on("admin:endRound", async (_, ack: Function) => {
+  socket.on("admin:endRound", (_, ack: Function) => {
     endRound();
     ack({ success: true });
   });
 
-  // -------------------
-  // Arena controls
-  // -------------------
+  // ====================================================================
+  // Arena: speler toevoegen
+  // ====================================================================
   socket.on("admin:addToArena", async ({ username }, ack: Function) => {
     try {
-      const userRes = await pool.query(
-        `SELECT tiktok_id, display_name, username FROM users WHERE LOWER(username)=LOWER($1) LIMIT 1`,
+      const res = await pool.query(
+        `SELECT tiktok_id, display_name, username
+         FROM users
+         WHERE LOWER(username)=LOWER($1)
+         LIMIT 1`,
         [username.replace("@", "")]
       );
 
-      if (!userRes.rows[0])
-        return ack({ success: false, message: "Niet gevonden" });
+      if (!res.rows[0])
+        return ack({
+          success: false,
+          message: "Speler niet gevonden",
+        });
 
-      const u = userRes.rows[0];
+      const u = res.rows[0];
 
       arenaJoin(
-        u.tiktok_id.toString(),
+        String(u.tiktok_id),
         u.display_name,
         u.username.replace("@", "")
       );
@@ -408,20 +417,10 @@ io.on("connection", async (socket: AdminSocket) => {
       ack({ success: false, message: err.message });
     }
   });
-
-  socket.on("admin:addToQueue", async ({ username }, ack: Function) => {
-    try {
-      await addToQueue(username.replace("@", ""), username.replace("@", ""));
-      await emitQueue();
-      ack({ success: true });
-    } catch (err: any) {
-      ack({ success: false, message: err.message });
-    }
-  });
 });
 
 // ============================================================================
-// EXPORT emitArena (BELANGRIJK!)
+// EXPORT emitArena
 // ============================================================================
 export { emitArena };
 
@@ -437,47 +436,6 @@ initDB().then(async () => {
   await loadActiveGame();
   await initDynamicHost();
 
-  const host = await getSetting("host_username");
-
-  if (process.env.NODE_ENV === "production" && host) {
-    console.log("Connecting TikTok with saved host:", host);
-
-    const { conn } = await startConnection(host, () => {});
-    tiktokConnShared = conn;
-
-    initGiftEngine(conn);
-    initChatEngine(conn);
-
-    // Twist chat detectie
-    conn.on("chat", async (msg: any) => {
-      const senderId =
-        msg.user?.userId ||
-        msg.sender?.userId ||
-        msg.userId ||
-        msg.uid;
-
-      if (!senderId) return;
-
-      const text =
-        msg.comment || msg.text || msg.content || "";
-
-      const clean = text.trim().toLowerCase();
-      if (!clean.startsWith("!use")) return;
-
-      const sender = await getOrUpdateUser(
-        String(senderId),
-        msg.user?.nickname || msg.sender?.nickname,
-        msg.user?.uniqueId || msg.sender?.uniqueId
-      );
-
-      await parseUseCommand(
-        sender.id,
-        sender.display_name,
-        clean
-      );
-    });
-
-  } else {
-    console.log("Simulatormodus — TikTok connectie overgeslagen.");
-  }
+  // TikTok connectie laden
+  await restartTikTokConnection();
 });
