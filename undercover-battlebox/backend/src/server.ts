@@ -1,15 +1,16 @@
 // ============================================================================
-// server.ts — Undercover BattleBox Engine — v3.0 (Danny Stable Build)
+// server.ts — Undercover BattleBox Engine — v3.1 (Danny Stable Build)
 // ============================================================================
 //
 // ✔ Admin kan GEEN users aanmaken
 // ✔ addToArena en addToQueue werken alleen via bestaande DB users
-// ✔ TikTok verbinding alleen als host online is (idle otherwise)
+// ✔ TikTok verbinding alleen als host online is (anders idle)
 // ✔ Nieuwe admin search API (HTTP + Socket)
-// ✔ Single clean connection handler
-// ✔ Geen duplicate handlers meer
-// ✔ Geen "invalid bigint" errors meer
-// ✔ Geen fallback naar .env host meer
+// ✔ Geen invalid bigint errors
+// ✔ Geen dubbele socket connect handlers
+// ✔ ParseUseCommand gefixt (!use)
+// ✔ Single clean admin connection
+// ✔ Queue updates correct gepushed
 //
 // ============================================================================
 
@@ -106,7 +107,7 @@ export async function broadcastStats() {
         THEN diamonds ELSE 0 END), 0) AS total_host_diamonds
     FROM gifts
     WHERE game_id=$1
-    `,
+  `,
     [currentGameId]
   );
 
@@ -150,6 +151,7 @@ async function restartTikTokConnection() {
 
   console.log("🔄 TikTok reconnect voor host:", host);
 
+  // oude verbinding sluiten
   if (tiktokConnShared) {
     try {
       await stopConnection(tiktokConnShared);
@@ -164,7 +166,7 @@ async function restartTikTokConnection() {
     initGiftEngine(conn);
     initChatEngine(conn);
 
-    // Twist chat (!use)
+    // Twist (!use)
     conn.on("chat", async (msg: any) => {
       const senderId =
         msg.user?.userId ||
@@ -240,7 +242,7 @@ io.on("connection", async (socket: AdminSocket) => {
   if (!socket.isAdmin) return;
   console.log("✓ Admin verbonden:", socket.id);
 
-  // Initial push
+  // INITIAL SNAPSHOT
   socket.emit("initialLogs", logBuffer);
   socket.emit("updateArena", getArena());
   socket.emit("updateQueue", {
@@ -252,10 +254,10 @@ io.on("connection", async (socket: AdminSocket) => {
     gameId: currentGameId,
   });
 
-  // admin-side twist engine
+  // ADMIN TWIST ENGINE
   initAdminTwistEngine(socket);
 
-  // Search autocomplete via socket
+  // Autocomplete (socket)
   socket.on("admin:searchUsers", async ({ query }, ack) => {
     const q = String(query || "").trim().toLowerCase();
     if (!q || q.length < 2) return ack({ users: [] });
@@ -275,9 +277,9 @@ io.on("connection", async (socket: AdminSocket) => {
     ack({ users: r.rows });
   });
 
-  // ==========================================================================
-  // ADMIN — START / STOP GAME
-  // ==========================================================================
+  // ========================================================================
+  // START GAME
+  // ========================================================================
   socket.on("admin:startGame", async (_, ack) => {
     try {
       const r = await pool.query(
@@ -304,6 +306,9 @@ io.on("connection", async (socket: AdminSocket) => {
     }
   });
 
+  // ========================================================================
+  // STOP GAME
+  // ========================================================================
   socket.on("admin:stopGame", async (_, ack) => {
     if (!currentGameId)
       return ack({ success: false, message: "Geen actief spel" });
@@ -326,9 +331,9 @@ io.on("connection", async (socket: AdminSocket) => {
     ack({ success: true });
   });
 
-  // ==========================================================================
-  // ADMIN — HOST CHANGE
-  // ==========================================================================
+  // ========================================================================
+  // SET HOST
+  // ========================================================================
   socket.on("admin:setHost", async ({ username }, ack) => {
     try {
       if (!username?.trim())
@@ -357,9 +362,9 @@ io.on("connection", async (socket: AdminSocket) => {
     }
   });
 
-  // ==========================================================================
-  // ADMIN — START/END ROUND
-  // ==========================================================================
+  // ========================================================================
+  // START ROUND / END ROUND
+  // ========================================================================
   socket.on("admin:startRound", ({ type }, ack) => {
     const ok = startRound(type);
     ack({
@@ -373,9 +378,9 @@ io.on("connection", async (socket: AdminSocket) => {
     ack({ success: true });
   });
 
-  // ==========================================================================
-  // ADMIN — ARENA ADD
-  // ==========================================================================
+  // ========================================================================
+  // ADD TO ARENA (DB user ONLY)
+  // ========================================================================
   socket.on("admin:addToArena", async ({ username }, ack) => {
     try {
       const clean = username.replace("@", "").toLowerCase();
@@ -391,7 +396,10 @@ io.on("connection", async (socket: AdminSocket) => {
       );
 
       if (!r.rows.length)
-        return ack({ success: false, message: "User niet gevonden" });
+        return ack({
+          success: false,
+          message: "User niet gevonden",
+        });
 
       const u = r.rows[0];
 
@@ -402,14 +410,13 @@ io.on("connection", async (socket: AdminSocket) => {
     }
   });
 
-  // ==========================================================================
-  // ADMIN — QUEUE ADD (NO USER CREATION ALLOWED)
-  // ==========================================================================
+  // ========================================================================
+  // ADD TO QUEUE (DB user ONLY)
+  // ========================================================================
   socket.on("admin:addToQueue", async ({ username }, ack) => {
     try {
       const clean = username.replace("@", "").toLowerCase();
 
-      // Fetch user, admin mag deze NIET maken
       const r = await pool.query(
         `
         SELECT tiktok_id, username
@@ -427,8 +434,10 @@ io.on("connection", async (socket: AdminSocket) => {
         });
 
       const u = r.rows[0];
+
       await addToQueue(String(u.tiktok_id), u.username);
-      await io.emit("updateQueue", {
+
+      io.emit("updateQueue", {
         open: true,
         entries: await getQueue(),
       });
