@@ -1,30 +1,33 @@
 // ============================================================================
-// 2-user-engine.ts — USER ENGINE v3.3 (STRICT TIKTOK-ONLY, CLEAN, SAFE)
+// 2-user-engine.ts — USER ENGINE v4.0 (STRICT TIKTOK-ONLY, UPSERT SAFE)
 // ============================================================================
 //
-// ✔ Admin kan GEEN users aanmaken
-// ✔ TikTok events zijn de enige bron voor nieuwe users
-// ✔ Nooit duplicate inserts door veilige UPSERT-logica
-// ✔ Username lowercase zonder '@'
-// ✔ display_name altijd schoon
-// ✔ last_seen_at altijd bijgewerkt
-// ✔ Veilig bij slechte data van TikTok
+// ✔ Echte PostgreSQL UPSERT → onmogelijk om duplicate-key errors te krijgen
+// ✔ Admin kan NOOIT users aanmaken (alleen TikTok events)
+// ✔ Username altijd lowercase, zonder '@'
+// ✔ Display_name altijd netjes geformatteerd
+// ✔ last_seen_at ALTIJD geüpdatet
+// ✔ Nickname / uniqueId combineren tot beste username
+// ✔ Volledige compatibiliteit met alle andere engines
 // ============================================================================
 
 import pool from "../db";
 
-// ---------------------------------------------------------------------------
+// -------------------------------------------------------------
 // HELPERS
-// ---------------------------------------------------------------------------
+// -------------------------------------------------------------
 
 function normalizeHandle(uid?: string | null, fallback?: string | null): string {
-  const clean =
+  const base =
     uid?.toString().trim().replace(/^@+/, "") ||
-    fallback?.toString().trim().toLowerCase().replace(/[^a-z0-9_]/g, "") ||
+    fallback?.toString().trim() ||
     "";
 
-  if (!clean) return "";
-  return clean.toLowerCase();
+  if (!base) return "";
+
+  return base
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "");
 }
 
 function cleanDisplay(v?: string | null): string | null {
@@ -35,9 +38,9 @@ function cleanDisplay(v?: string | null): string | null {
   return t;
 }
 
-// ---------------------------------------------------------------------------
-// CORE FUNCTION — TikTok-only UPSERT (admin maakt nooit users!)
-// ---------------------------------------------------------------------------
+// -------------------------------------------------------------
+// UPSERT — DE ENIGE TOEGESTANE MANIER OM USERS BIJ TE WERKEN
+// -------------------------------------------------------------
 
 export async function getOrUpdateUser(
   tiktok_id: string,
@@ -48,70 +51,19 @@ export async function getOrUpdateUser(
     return {
       id: "??",
       display_name: "Onbekend",
-      username: "onbekend",
+      username: "onbekend"
     };
   }
 
   const tid = BigInt(tiktok_id);
 
-  const newDisplay = cleanDisplay(nickname);
-  const newUsername = normalizeHandle(uniqueId, nickname);
+  const newDisplay = cleanDisplay(nickname) || `Onbekend#${tiktok_id.slice(-5)}`;
+  const newUsername =
+    normalizeHandle(uniqueId, nickname) ||
+    `onbekend${tiktok_id.slice(-5)}`;
 
-  // 1) Bestaat user al?
-  const existing = await pool.query(
-    `
-    SELECT display_name, username
-    FROM users
-    WHERE tiktok_id = $1
-    LIMIT 1
-  `,
-    [tid]
-  );
-
-  if (existing.rows.length > 0) {
-    // 2) UPDATE bestaande user indien betere data binnenkomt
-    const { display_name: oldDisplay, username: oldUser } = existing.rows[0];
-
-    const needsUpgrade =
-      (newDisplay && newDisplay !== oldDisplay) ||
-      (newUsername && newUsername !== oldUser);
-
-    if (needsUpgrade) {
-      await pool.query(
-        `
-        UPDATE users
-           SET display_name = $1,
-               username = $2,
-               last_seen_at = NOW()
-         WHERE tiktok_id = $3
-      `,
-        [
-          newDisplay || oldDisplay || `Onbekend#${tiktok_id.slice(-5)}`,
-          newUsername || oldUser || `onbekend${tiktok_id.slice(-5)}`,
-          tid,
-        ]
-      );
-    } else {
-      await pool.query(
-        `UPDATE users SET last_seen_at = NOW() WHERE tiktok_id=$1`,
-        [tid]
-      );
-    }
-
-    return {
-      id: tiktok_id,
-      display_name:
-        newDisplay || oldDisplay || `Onbekend#${tiktok_id.slice(-5)}`,
-      username:
-        newUsername || oldUser || `onbekend${tiktok_id.slice(-5)}`,
-    };
-  }
-
-  // 3) NIEUWE USER — alleen toegestaan via TikTok event
-  const finalDisplay = newDisplay || `Onbekend#${tiktok_id.slice(-5)}`;
-  const finalUsername = newUsername || `onbekend${tiktok_id.slice(-5)}`;
-
-  await pool.query(
+  // ⭐ NIEUWE SUPER VEILIGE UPSERT ⭐
+  const result = await pool.query(
     `
     INSERT INTO users (
       tiktok_id, display_name, username,
@@ -119,20 +71,25 @@ export async function getOrUpdateUser(
       is_fan, fan_expires_at, is_vip
     )
     VALUES ($1,$2,$3,0,0,NOW(),false,NULL,false)
+    ON CONFLICT (tiktok_id) DO UPDATE
+      SET display_name = EXCLUDED.display_name,
+          username     = EXCLUDED.username,
+          last_seen_at = NOW()
+    RETURNING display_name, username
   `,
-    [tid, finalDisplay, finalUsername]
+    [tid, newDisplay, newUsername]
   );
 
   return {
     id: tiktok_id,
-    display_name: finalDisplay,
-    username: finalUsername,
+    display_name: result.rows[0].display_name,
+    username: result.rows[0].username
   };
 }
 
-// ---------------------------------------------------------------------------
-// AUTO-UPSERT vanuit TikTok events
-// ---------------------------------------------------------------------------
+// -------------------------------------------------------------
+// TikTok loose event auto-upsert
+// -------------------------------------------------------------
 
 export async function upsertIdentityFromLooseEvent(loose: any): Promise<void> {
   if (!loose) return;
@@ -154,7 +111,7 @@ export async function upsertIdentityFromLooseEvent(loose: any): Promise<void> {
   if (!id) return;
 
   const display = u?.nickname || u?.displayName || undefined;
-  const unique = u?.uniqueId || u?.unique_id || undefined;
+  const unique  = u?.uniqueId || u?.unique_id || undefined;
 
   await getOrUpdateUser(String(id), display, unique);
 }
