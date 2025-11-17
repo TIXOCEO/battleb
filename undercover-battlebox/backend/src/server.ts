@@ -1,4 +1,4 @@
-// src/server.ts — Undercover BattleBox Engine — FIXED v1.95
+// src/server.ts — Undercover BattleBox Engine — v1.96 (simulatievriendelijk)
 
 import express from "express";
 import http from "http";
@@ -36,7 +36,7 @@ import { applyBoost } from "./engines/7-boost-engine";
 dotenv.config();
 
 // ─────────────────────────────────────────────
-// SHARED TIKTOK CONNECTION (ENIGE GELDIGE VAR)
+// SHARED TIKTOK CONNECTION
 // ─────────────────────────────────────────────
 export let tiktokConnShared: any = null;
 
@@ -62,7 +62,7 @@ app.get("/admin/gifts", async (req, res) => {
       return res.json({
         success: false,
         message: "Geen actieve TikTok-verbinding",
-        gifts: []
+        gifts: [],
       });
     }
 
@@ -70,7 +70,7 @@ app.get("/admin/gifts", async (req, res) => {
       return res.json({
         success: false,
         message: "TikTok-verbinding ondersteunt gift-opvraging nog niet",
-        gifts: []
+        gifts: [],
       });
     }
 
@@ -81,15 +81,14 @@ app.get("/admin/gifts", async (req, res) => {
       gifts: gifts.map((g: any) => ({
         id: g.id,
         name: g.name,
-        diamonds: g.diamond_count
-      }))
+        diamonds: g.diamond_count,
+      })),
     });
-
   } catch (err: any) {
     return res.json({
       success: false,
       error: err.message,
-      gifts: []
+      gifts: [],
     });
   }
 });
@@ -151,7 +150,8 @@ export async function emitQueue() {
 export async function broadcastStats() {
   if (!currentGameId) return;
 
-  const statsRes = await pool.query(`
+  const statsRes = await pool.query(
+    `
       SELECT
         COUNT(DISTINCT CASE WHEN receiver_role IN ('speler','cohost')
           THEN receiver_id END) AS total_players,
@@ -194,7 +194,7 @@ async function loadActiveGame() {
 }
 
 // ─────────────────────────────────────────────
-// TIKTOK CONNECTION MANAGEMENT (SCHOON)
+// TIKTOK CONNECTION MANAGEMENT (SAFE)
 // ─────────────────────────────────────────────
 async function restartTikTokConnection() {
   try {
@@ -206,19 +206,20 @@ async function restartTikTokConnection() {
     }
 
     const host = await getSetting("host_username");
-    if (!host) {
-      console.log("⚠ Geen host ingesteld — wacht op nieuwe host");
-      return;
+
+    if (process.env.NODE_ENV === "production" && host) {
+      console.log("🔄 TikTok opnieuw verbinden →", host);
+
+      const { conn } = await startConnection(host, () => {});
+      tiktokConnShared = conn;
+
+      initGiftEngine(conn);
+      initChatEngine(conn);
+    } else {
+      console.log(
+        "Simulatormodus — TikTok connectie overgeslagen (NODE_ENV ≠ production)"
+      );
     }
-
-    console.log("🔄 TikTok opnieuw verbinden →", host);
-
-    const { conn } = await startConnection(host, () => {});
-    tiktokConnShared = conn;
-
-    initGiftEngine(conn);
-    initChatEngine(conn);
-
   } catch (err) {
     console.error("❌ TikTok reconnect error:", err);
   }
@@ -239,8 +240,6 @@ io.use((socket: any, next) => {
   next(new Error("Unauthorized"));
 });
 
-// (ADMIN events blijven exact zoals je had — ik laat ze intact)
-
 // ─────────────────────────────────────────────
 // STARTUP
 // ─────────────────────────────────────────────
@@ -251,12 +250,11 @@ initDB().then(async () => {
 
   initGame();
   await loadActiveGame();
-
   await initDynamicHost();
 
   const host = await getSetting("host_username");
 
-  if (host) {
+  if (process.env.NODE_ENV === "production" && host) {
     console.log("Connecting TikTok with saved host:", host);
     const { conn } = await startConnection(host, () => {});
     tiktokConnShared = conn;
@@ -264,6 +262,8 @@ initDB().then(async () => {
     initGiftEngine(conn);
     initChatEngine(conn);
   } else {
-    console.log("⚠ Geen host ingesteld — wacht op admin:setHost");
+    console.log(
+      "Simulatormodus — TikTok connectie overgeslagen (NODE_ENV ≠ production)"
+    );
   }
 });
