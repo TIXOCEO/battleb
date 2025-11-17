@@ -185,34 +185,39 @@ async function restartTikTokConnection() {
     initGiftEngine(conn);
     initChatEngine(conn);
 
-    // !use detectie
-    conn.on("chat", async (msg: any) => {
-      const uid =
-        msg.user?.userId ||
-        msg.sender?.userId ||
-        msg.userId ||
-        msg.uid;
+// Twist chat detectie (!use)
+if (conn) {
+  conn.on("chat", async (msg: any) => {
+    const senderId =
+      msg.user?.userId ||
+      msg.sender?.userId ||
+      msg.userId ||
+      msg.uid;
 
-      if (!uid) return;
+    if (!senderId) return;
 
-      const txt =
-        msg.comment || msg.text || msg.content || "";
-      const clean = txt.trim().toLowerCase();
+    const text =
+      msg.comment ||
+      msg.text ||
+      msg.content ||
+      "";
 
-      if (!clean.startsWith("!use")) return;
+    const clean = text.trim().toLowerCase();
+    if (!clean.startsWith("!use ")) return;
 
-      const user = await getOrUpdateUser(
-        String(uid),
-        msg.user?.nickname || msg.sender?.nickname,
-        msg.user?.uniqueId || msg.sender?.uniqueId
-      );
+    const sender = await getOrUpdateUser(
+      String(senderId),
+      msg.user?.nickname || msg.sender?.nickname,
+      msg.user?.uniqueId || msg.sender?.uniqueId
+    );
 
-      await parseUseCommand(
-        user.id,
-        user.display_name,
-        clean
-      );
-    });
+    await parseUseCommand(
+      sender.id,
+      sender.display_name,
+      clean
+    );
+  });
+}
 
   } catch (err: any) {
     console.log("⚠ Host offline of geen verbinding mogelijk:", err?.message);
