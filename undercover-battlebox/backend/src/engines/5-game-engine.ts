@@ -1,8 +1,15 @@
 // ============================================================================
-// 5-GAME-ENGINE.ts — Arena Engine v2.4 (PRODUCTION SAFE)
-// Unlimited spelers, tie-groups, danger, elimination, force mode
-// Immunity type wordt gebruikt door twist-engine
-// getArena() is PURE en veroorzaakt NOOIT side-effects
+// 5-GAME-ENGINE.ts — Arena Engine v2.5 (DANNY STABLE BUILD)
+// ============================================================================
+//
+// - Unlimited spelers
+// - Tie-group logic
+// - Danger zone tijdens grace
+// - Immune system (via twists)
+// - Safe updates zonder race conditions
+// - getArena() is PURE — nooit muteren
+// - Compatible met twist-engine, gift-engine & admin
+//
 // ============================================================================
 
 import { io } from "../server";
@@ -18,8 +25,7 @@ export type RoundType = "quarter" | "semi" | "finale";
 export type PositionStatus =
   | "active"
   | "danger"
-  | "elimination"
-  | "immune";
+  | "elimination";
 
 interface Player {
   id: string;
@@ -27,7 +33,7 @@ interface Player {
   username: string;
   diamonds: number;
   boosters: string[];
-  status: "alive" | "eliminated"; 
+  status: "alive" | "eliminated";
   joined_at: number;
 }
 
@@ -46,6 +52,7 @@ interface Arena {
 
   timeLeft: number;
   isRunning: boolean;
+
   roundStartTime: number;
   roundCutoff: number;
   graceEnd: number;
@@ -76,18 +83,21 @@ const arena: Arena = {
   round: 0,
   type: "quarter",
   status: "idle",
+
   timeLeft: 0,
   isRunning: false,
+
   roundStartTime: 0,
   roundCutoff: 0,
   graceEnd: 0,
+
   settings: { ...DEFAULT_SETTINGS },
   lastSortedAt: Date.now(),
   positionMap: {},
 };
 
 // ============================================================================
-// INTERNAL MUTATION HELPERS
+// INTERNAL HELPERS (pure mutations)
 // ============================================================================
 
 function _sortPlayers() {
@@ -106,40 +116,38 @@ function _recomputePositionMap() {
     return;
   }
 
-  // --- Tie groups ---
+  // Detect tie groups
   const groups: { diamonds: number; members: Player[] }[] = [];
-  let current: Player[] = [p[0]];
+  let buffer: Player[] = [p[0]];
 
   for (let i = 1; i < p.length; i++) {
-    if (p[i].diamonds === p[i - 1].diamonds) current.push(p[i]);
-    else {
-      groups.push({ diamonds: current[0].diamonds, members: [...current] });
-      current = [p[i]];
+    if (p[i].diamonds === p[i - 1].diamonds) {
+      buffer.push(p[i]);
+    } else {
+      groups.push({ diamonds: buffer[0].diamonds, members: [...buffer] });
+      buffer = [p[i]];
     }
   }
-  groups.push({ diamonds: current[0].diamonds, members: [...current] });
+  groups.push({ diamonds: buffer[0].diamonds, members: [...buffer] });
 
   const lastGroup = groups[groups.length - 1];
-
   const endangered = new Set<string>();
-  const doomed = new Set<string>();
 
-  // "danger" groep tijdens grace
-  if (arena.status === ("grace" as ArenaStatus) || arena.status === ("ended" as ArenaStatus)) {
+  // Danger = lowest tie-group ONLY during grace
+  if (arena.status === "grace") {
     lastGroup.members.forEach(pl => endangered.add(pl.id));
   }
 
   for (const pl of p) {
-    if (doomed.has(pl.id)) map[pl.id] = "elimination";
-    else if (endangered.has(pl.id)) map[pl.id] = "danger";
+    if (endangered.has(pl.id)) map[pl.id] = "danger";
     else map[pl.id] = "active";
   }
 
   arena.positionMap = map;
 }
 
-function mutate(mutator: () => void) {
-  mutator();
+function mutate(fn: () => void) {
+  fn();
   _sortPlayers();
   _recomputePositionMap();
 }
@@ -156,20 +164,29 @@ async function loadArenaSettingsFromDB(): Promise<void> {
     )
   `);
 
-  const { rows } = await pool.query(`
-    SELECT key, value FROM settings
-    WHERE key IN ('roundDurationPre','roundDurationFinal','graceSeconds','forceEliminations')
+  const r = await pool.query(`
+    SELECT key, value
+    FROM settings
+    WHERE key IN (
+      'roundDurationPre','roundDurationFinal',
+      'graceSeconds','forceEliminations'
+    )
   `);
 
-  const map = new Map(rows.map((r: any) => [r.key, r.value]));
+  const map = new Map(r.rows.map((x: any) => [x.key, x.value]));
 
   mutate(() => {
-    arena.settings = {
-      roundDurationPre: Number(map.get("roundDurationPre") ?? DEFAULT_SETTINGS.roundDurationPre),
-      roundDurationFinal: Number(map.get("roundDurationFinal") ?? DEFAULT_SETTINGS.roundDurationFinal),
-      graceSeconds: Number(map.get("graceSeconds") ?? DEFAULT_SETTINGS.graceSeconds),
-      forceEliminations: (map.get("forceEliminations") ?? "true") === "true",
-    };
+    arena.settings.roundDurationPre =
+      Number(map.get("roundDurationPre") ?? DEFAULT_SETTINGS.roundDurationPre);
+
+    arena.settings.roundDurationFinal =
+      Number(map.get("roundDurationFinal") ?? DEFAULT_SETTINGS.roundDurationFinal);
+
+    arena.settings.graceSeconds =
+      Number(map.get("graceSeconds") ?? DEFAULT_SETTINGS.graceSeconds);
+
+    arena.settings.forceEliminations =
+      (map.get("forceEliminations") ?? "true") === "true";
   });
 }
 
@@ -178,10 +195,10 @@ export async function updateArenaSettings(s: Partial<ArenaSettings>) {
     arena.settings = { ...arena.settings, ...s };
   });
 
-  const pairs: [string, string][] = [
-    ["roundDurationPre", String(arena.settings.roundDurationPre)],
-    ["roundDurationFinal", String(arena.settings.roundDurationFinal)],
-    ["graceSeconds", String(arena.settings.graceSeconds)],
+  const pairs = [
+    ["roundDurationPre", arena.settings.roundDurationPre],
+    ["roundDurationFinal", arena.settings.roundDurationFinal],
+    ["graceSeconds", arena.settings.graceSeconds],
     ["forceEliminations", arena.settings.forceEliminations ? "true" : "false"],
   ];
 
@@ -189,20 +206,16 @@ export async function updateArenaSettings(s: Partial<ArenaSettings>) {
     await pool.query(
       `INSERT INTO settings(key,value)
        VALUES ($1,$2)
-       ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value`,
-      [k, v]
+       ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`,
+      [k, String(v)]
     );
   }
 
   emitArena();
 }
 
-export function getArenaSettings(): ArenaSettings {
-  return { ...arena.settings };
-}
-
 // ============================================================================
-// PLAYER MANAGEMENT
+// ARENA PLAYER MANAGEMENT
 // ============================================================================
 
 export function arenaJoin(id: string, display_name: string, username: string) {
@@ -228,18 +241,17 @@ export function arenaLeave(id: string) {
   mutate(() => {
     arena.players = arena.players.filter(p => p.id !== id);
   });
-
   emitArena();
 }
 
 // ============================================================================
-// DIAMONDS
+// DIAMOND SYSTEM
 // ============================================================================
 
 export async function safeAddArenaDiamonds(id: string, amount: number) {
   mutate(() => {
-    const pl = arena.players.find(p => p.id === id);
-    if (pl) pl.diamonds += Number(amount);
+    const p = arena.players.find(p => p.id === id);
+    if (p) p.diamonds += Number(amount);
   });
 
   emitArena();
@@ -251,18 +263,13 @@ export async function safeAddArenaDiamonds(id: string, amount: number) {
 
 let roundTick: NodeJS.Timeout | null = null;
 
-function getDurationFor(type: RoundType) {
+function getDuration(type: RoundType) {
   return type === "finale"
     ? arena.settings.roundDurationFinal
     : arena.settings.roundDurationPre;
 }
 
 export function startRound(type: RoundType) {
-  if (arena.settings.forceEliminations &&
-      Object.values(arena.positionMap).includes("elimination")) {
-    return false;
-  }
-
   if (arena.status === "active" || arena.status === "grace") return false;
   if (arena.players.length === 0) return false;
 
@@ -270,13 +277,14 @@ export function startRound(type: RoundType) {
     arena.round += 1;
     arena.type = type;
 
-    const secs = getDurationFor(type);
-    arena.timeLeft = secs;
+    const dur = getDuration(type);
+    arena.timeLeft = dur;
+
     arena.status = "active";
     arena.isRunning = true;
 
     arena.roundStartTime = Date.now();
-    arena.roundCutoff = arena.roundStartTime + secs * 1000;
+    arena.roundCutoff = arena.roundStartTime + dur * 1000;
     arena.graceEnd = arena.roundCutoff + arena.settings.graceSeconds * 1000;
 
     arena.players.forEach(p => (p.diamonds = 0));
@@ -295,6 +303,7 @@ export function startRound(type: RoundType) {
   roundTick = setInterval(() => {
     const now = Date.now();
 
+    // ACTIVE phase
     if (arena.status === "active") {
       mutate(() => {
         arena.timeLeft = Math.max(
@@ -310,7 +319,7 @@ export function startRound(type: RoundType) {
 
       emitArena();
 
-      if (arena.status === ("grace" as ArenaStatus)) {
+      if (arena.status === "grace") {
         io.emit("round:grace", {
           round: arena.round,
           grace: arena.settings.graceSeconds,
@@ -320,7 +329,8 @@ export function startRound(type: RoundType) {
       return;
     }
 
-    if (arena.status === ("grace" as ArenaStatus)) {
+    // GRACE phase
+    if (arena.status === "grace") {
       if (now >= arena.graceEnd) {
         endRound();
       } else {
@@ -329,8 +339,9 @@ export function startRound(type: RoundType) {
       return;
     }
 
+    // Round finished
     if (arena.status === "ended" || arena.status === "idle") {
-      clearInterval(roundTick!);
+      if (roundTick) clearInterval(roundTick);
       roundTick = null;
     }
   }, 1000);
@@ -339,43 +350,44 @@ export function startRound(type: RoundType) {
 }
 
 // ============================================================================
-// END ROUND — FINAL KILL LOGIC
+// END ROUND
 // ============================================================================
 
 export function endRound() {
   const players = arena.players;
 
-  const immuneSet = new Set(
-    players
-      .filter(p => p.boosters.includes("immune"))
-      .map(p => p.id)
+  const immuneIds = new Set(
+    players.filter(p => p.boosters.includes("immune")).map(p => p.id)
   );
 
-  const doomed = new Set<string>();
+  // Determine doomed players
+  const doomed: string[] = [];
 
   for (const p of players) {
     if (p.status === "eliminated") {
-      if (!immuneSet.has(p.id)) doomed.add(p.id);
+      if (!immuneIds.has(p.id)) doomed.push(p.id);
       continue;
     }
 
     const pos = arena.positionMap[p.id];
 
-    if (pos === "elimination" && !immuneSet.has(p.id)) {
-      doomed.add(p.id);
+    if (pos === "danger" && !immuneIds.has(p.id)) {
+      doomed.push(p.id);
     }
   }
 
-  let pending = Array.from(doomed);
-
-  if (!arena.settings.forceEliminations) {
-    pending = [];
-  }
+  // Respect forceEliminations
+  const finalKills = arena.settings.forceEliminations ? doomed : [];
 
   mutate(() => {
     arena.status = "ended";
     arena.isRunning = false;
     arena.timeLeft = 0;
+
+    for (const id of finalKills) {
+      const p = arena.players.find(x => x.id === id);
+      if (p) p.status = "eliminated";
+    }
   });
 
   emitArena();
@@ -384,7 +396,7 @@ export function endRound() {
     round: arena.round,
     type: arena.type,
     top3: getTop3(),
-    pendingEliminations: pending,
+    pendingEliminations: finalKills,
   });
 }
 
@@ -402,7 +414,7 @@ function getTop3() {
 }
 
 // ============================================================================
-// PURE SNAPSHOT
+// GET SNAPSHOT (PURE)
 // ============================================================================
 
 export function getArena() {
@@ -419,11 +431,14 @@ export function getArena() {
     round: arena.round,
     type: arena.type,
     status: arena.status,
+
     timeLeft: arena.timeLeft,
     isRunning: arena.isRunning,
+
     roundStartTime: arena.roundStartTime,
     roundCutoff: arena.roundCutoff,
     graceEnd: arena.graceEnd,
+
     settings: arena.settings,
     lastSortedAt: arena.lastSortedAt,
   };
