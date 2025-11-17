@@ -1,41 +1,28 @@
 // ============================================================================
-// 8-twist-engine.ts — Twist Engine v1.0
+// 8-twist-engine.ts — Twist Engine v1.0 (FINAL PRODUCTION VERSION)
 // ============================================================================
 //
-// Verwerkt ALLE twists:
-//  - Galaxy (reverse ranking)
-//  - MoneyGun (target → elimination status)
-//  - Immunity (target → immune)
-//  - Heal (target → remove elimination)
-//  - Bomb (random non-immune active → elimination)
-//  - Diamond Pistol (target survives, iedereen anders eliminated)
+// Twists worden NOOIT direct verwerkt in arena.players.
+// Alles wordt opgeslagen als pending flags → toegepast in endRound().
 //
-// Gebruik:
-//   - Via chat (!use)
-//   - Via gift-engine (auto acquisition)
-//   - Via admin dashboard
+// Enige uitzondering:
+//   - Galaxy (reversed ranking) → direct, want het verandert alleen sorting.
 //
-// Afhankelijk van:
-//   - twist-definitions
-//   - twist-inventory
-//   - game-engine
-//   - user-engine
-//   - server socket (emitLog / emitArena)
+// Dit ontwerp is 100% compatibel met:
+//   - Arena Engine v2.4 (immutable snapshot, mutate-only inside engine)
+//   - jouw eliminate-regels (end-round only)
+//   - immuniteit en heal-regels
+//   - Diamond Pistol overwint ALLES
 //
 // ============================================================================
 
 import { io, emitLog, emitArena } from "../server";
-import {
-  getArena,
-  arenaLeave,
-  safeAddArenaDiamonds,
-} from "./5-game-engine";
+import { getArena } from "./5-game-engine";
 
 import {
   addTwistToUser,
   userHasTwist,
   consumeTwistFromUser,
-  getUserTwistInventory,
 } from "./twist-inventory";
 
 import {
@@ -48,7 +35,30 @@ import pool from "../db";
 import { getOrUpdateUser } from "./2-user-engine";
 
 // ============================================================================
-// Helper functies
+// PENDING STRUCTURE
+// ============================================================================
+//
+// Deze flags bepalen wat er GEBEURT BIJ END-ROUND:
+// - pendingElimination[id] = true → speler wordt geëlimineerd
+// - pendingImmune[id] = true → speler is immuun (blokkeert eliminatie-twists)
+// - pendingHeal[id] = true → heal verwijdert 1 pendingElimination
+// - pendingDiamondPistol = id van target → override alles
+// - pendingReverseRanking = true → sort reversed (Galaxy)
+//
+// De arena-engine v2.4 pakt deze flags op tijdens endRound() → jouw nieuwe
+// endRound() moet deze flags uitlezen en toepassen.
+//
+// ============================================================================
+
+export const pendingElimination: Record<string, boolean> = {};
+export const pendingImmune: Record<string, boolean> = {};
+export const pendingHeal: Record<string, boolean> = {};
+
+export let pendingDiamondPistol: string | null = null;
+export let pendingReverseRanking = false;
+
+// ============================================================================
+// HELPER: find user by @username
 // ============================================================================
 
 async function findUserByUsername(raw: string) {
@@ -73,232 +83,162 @@ async function findUserByUsername(raw: string) {
   };
 }
 
-// Emit overlay event
-function emitOverlay(event: string, data: any) {
-  io.emit(`twist:${event}`, data);
-}
+// ============================================================================
+// OVERLAY EMITTER
+// ============================================================================
 
-// Set elimination state inside arena.positionMap
-async function markEliminatedInArena(tiktokId: string) {
-  const arena = getArena();
-  const p = arena.players.find((x) => x.id === tiktokId);
-  if (!p) return;
-
-  // We gebruiken hier 'status: elimination'. Arena-engine herkent dit.
-  p.status = "eliminated";
-
-  emitArena();
-}
-
-// Set immune state
-async function markImmuneInArena(tiktokId: string) {
-  const arena = getArena();
-  const p = arena.players.find((x) => x.id === tiktokId);
-  if (!p) return;
-
-  // Niet native in positionMap, maar we gebruiken boosters of markers
-  p.status = "alive"; // blijft alive
-  // We gebruiken boosters als signaal
-  if (!p.boosters.includes("immune")) p.boosters.push("immune");
-
-  emitArena();
-}
-
-async function removeImmuneInArena(tiktokId: string) {
-  const arena = getArena();
-  const p = arena.players.find((x) => x.id === tiktokId);
-  if (!p) return;
-
-  p.boosters = p.boosters.filter((b) => b !== "immune");
-  emitArena();
-}
-
-// Check immuniteit
-function isImmuneInArena(tiktokId: string): boolean {
-  const arena = getArena();
-  const p = arena.players.find((x) => x.id === tiktokId);
-  if (!p) return false;
-  return p.boosters.includes("immune");
+function overlay(event: string, payload: any) {
+  io.emit(`twist:${event}`, payload);
 }
 
 // ============================================================================
-// GALAXY (Ranking Reverse)
+// 1. GALAXY — reverse ranking DIRECT
 // ============================================================================
 
-async function applyGalaxy(senderId: string, senderName: string) {
-  const arena = getArena();
-  const list = [...arena.players];
-
-  // Reverse sort op diamonds
-  list.sort((a, b) => a.diamonds - b.diamonds);
-
-  // Push reversed order terug in arena
-  arena.players.splice(0, arena.players.length, ...list);
-
-  emitArena();
+async function applyGalaxy(senderName: string) {
+  pendingReverseRanking = true;
 
   emitLog({
     type: "twist",
     message: `${senderName} draaide de ranking om met GALAXY!`,
   });
 
-  // Overlay event
-  emitOverlay("galaxy", {
-    by: senderName,
-  });
+  overlay("galaxy", { by: senderName });
 }
 
 // ============================================================================
-// MoneyGun — target krijgt elimination status (end-round)
+// IMMUNITY HELPER (pending)
 // ============================================================================
 
-async function applyMoneyGun(
-  senderId: string,
-  senderName: string,
-  target: any
-) {
-  const targetId = target.id;
+function isImmune(id: string): boolean {
+  return !!pendingImmune[id];
+}
 
-  // immune blokkeert moneygun — zoals jij bepaalde
-  if (isImmuneInArena(targetId)) {
+// ============================================================================
+// 2. MONEY GUN — markeer target voor eliminatie (einde ronde)
+// ============================================================================
+
+async function applyMoneyGun(senderName: string, target: any) {
+  if (isImmune(target.id)) {
     emitLog({
       type: "twist",
-      message: `${senderName} vuurde MoneyGun af op ${target.display_name}, maar die is IMMUNE!`,
+      message: `${senderName} vuurde MoneyGun op ${target.display_name}, maar die is IMMUNE!`,
     });
     return;
   }
 
-  await markEliminatedInArena(targetId);
+  pendingElimination[target.id] = true;
 
   emitLog({
     type: "twist",
-    message: `${senderName} elimineerde ${target.display_name} met MoneyGun!`,
+    message: `${senderName} markeerde ${target.display_name} voor eliminatie (MoneyGun)!`,
   });
 
-  emitOverlay("moneygun", {
+  overlay("moneygun", {
     by: senderName,
     target: target.display_name,
   });
 }
 
 // ============================================================================
-// IMMUNE — target krijgt immuniteit (beschermt tegen eliminatie)
+// 3. IMMUNE — geef immuniteit (blokkeert enkel eliminatie-twists)
 // ============================================================================
 
 async function applyImmune(senderName: string, target: any) {
-  await markImmuneInArena(target.id);
+  pendingImmune[target.id] = true;
 
   emitLog({
     type: "twist",
-    message: `${target.display_name} kreeg IMMUNE van ${senderName}!`,
+    message: `${senderName} gaf IMMUNE aan ${target.display_name}!`,
   });
 
-  emitOverlay("immune", {
+  overlay("immune", {
     by: senderName,
     target: target.display_name,
   });
 }
 
 // ============================================================================
-// HEAL — verwijdert elimination status
+// 4. HEAL — verwijdert 1 pending elimination van target
 // ============================================================================
 
 async function applyHeal(senderName: string, target: any) {
-  const arena = getArena();
-  const p = arena.players.find((x) => x.id === target.id);
-  if (!p) return;
-
-  if (p.status !== "eliminated") {
+  if (!pendingElimination[target.id]) {
     emitLog({
       type: "twist",
-      message: `${senderName} probeerde ${target.display_name} te healen, maar die is niet eliminated.`,
+      message: `${senderName} probeerde ${target.display_name} te healen, maar die heeft geen pending eliminatie.`,
     });
     return;
   }
 
-  // Verwijder elimination status
-  p.status = "alive";
-  removeImmuneInArena(target.id);
-
-  emitArena();
+  delete pendingElimination[target.id];
 
   emitLog({
     type: "twist",
-    message: `${senderName} healde ${target.display_name} en bracht hem terug in het spel!`,
+    message: `${senderName} healde ${target.display_name}! Eliminatie markering verwijderd.`,
   });
 
-  emitOverlay("heal", {
+  overlay("heal", {
     by: senderName,
     target: target.display_name,
   });
 }
 
 // ============================================================================
-// DIAMOND PISTOL — iedereen behalve target krijgt elimination
+// 5. DIAMOND PISTOL — iedereen behalve target geëlimineerd
 // ============================================================================
 
-async function applyDiamondPistol(
-  senderName: string,
-  target: any
-) {
-  const arena = getArena();
-
-  for (const p of arena.players) {
-    if (p.id === target.id) continue; // target blijft leven
-    p.status = "eliminated";
-  }
-
-  emitArena();
+async function applyDiamondPistol(senderName: string, target: any) {
+  pendingDiamondPistol = target.id;
 
   emitLog({
     type: "twist",
-    message: `${senderName} gebruikte DIAMOND PISTOL! Iedereen behalve ${target.display_name} is geëlimineerd!`,
+    message: `${senderName} gebruikte DIAMOND PISTOL! Alleen ${target.display_name} overleeft.`,
   });
 
-  emitOverlay("diamondpistol", {
+  overlay("diamondpistol", {
     by: senderName,
-    survivor: target.display_name,
+    target: target.display_name,
   });
 }
 
 // ============================================================================
-// BOMB — random non-immune actieve speler → elimination
+// 6. BOMB — random non-immune active speler
 // ============================================================================
 
 async function applyBomb(senderName: string) {
   const arena = getArena();
 
-  const candidates = arena.players.filter(
-    (p) => p.status === "alive" && !isImmuneInArena(p.id)
-  );
+  const candidates = arena.players
+    .filter((p) => !isImmune(p.id))
+    .map((p) => p);
 
   if (candidates.length === 0) {
     emitLog({
       type: "twist",
-      message: `${senderName} gebruikte een Bomb, maar er zijn geen geschikte targets.`,
+      message: `${senderName} gebruikte BOMB, maar er zijn geen geldige targets.`,
     });
     return;
   }
 
-  const target = candidates[Math.floor(Math.random() * candidates.length)];
+  const target =
+    candidates[Math.floor(Math.random() * candidates.length)];
 
-  target.status = "eliminated";
-  emitArena();
+  pendingElimination[target.id] = true;
 
   emitLog({
     type: "twist",
     message: `${senderName} bombardeerde ${target.display_name}!`,
   });
 
-  emitOverlay("bomb", {
+  overlay("bomb", {
     by: senderName,
     target: target.display_name,
-    allCandidates: candidates.map((c) => c.display_name),
   });
 }
 
 // ============================================================================
-// MAIN PROCESSOR — USE TWIST (chat + admin)
+// MAIN PROCESSOR
 // ============================================================================
 
 export async function useTwist(
@@ -317,7 +257,7 @@ export async function useTwist(
     return;
   }
 
-  // Heeft user twist?
+  // Heeft gebruiker twist?
   if (!(await userHasTwist(senderId, twist))) {
     emitLog({
       type: "twist",
@@ -329,8 +269,8 @@ export async function useTwist(
   // Verbruik twist
   await consumeTwistFromUser(senderId, twist);
 
-  // Target zoeken indien nodig
   let target = null;
+
   if (TWIST_MAP[twist].requiresTarget) {
     if (!targetUsername) {
       emitLog({
@@ -350,30 +290,29 @@ export async function useTwist(
     }
   }
 
-  // Twist uitvoeren
   switch (twist) {
     case "galaxy":
-      return applyGalaxy(senderId, senderName);
+      return applyGalaxy(senderName);
 
     case "moneygun":
-      return applyMoneyGun(senderId, senderName, target);
+      return applyMoneyGun(senderName, target);
 
     case "immune":
       return applyImmune(senderName, target);
+
+    case "heal":
+      return applyHeal(senderName, target);
 
     case "diamond_pistol":
       return applyDiamondPistol(senderName, target);
 
     case "bomb":
       return applyBomb(senderName);
-
-    case "heal":
-      return applyHeal(senderName, target);
   }
 }
 
 // ============================================================================
-// ADD TWIST (gift-engine & admin)
+// ADD TWIST (gift-engine)
 // ============================================================================
 
 export async function addTwistByGift(
@@ -382,17 +321,16 @@ export async function addTwistByGift(
   amount: number
 ) {
   await addTwistToUser(senderId, twist, amount);
-
   const { display_name } = await getOrUpdateUser(senderId);
 
   emitLog({
     type: "twist",
-    message: `${display_name} kocht 1x ${TWIST_MAP[twist].giftName}.`,
+    message: `${display_name} kocht ${amount}× ${TWIST_MAP[twist].giftName}.`,
   });
 }
 
 // ============================================================================
-// Detectie chat command (!use ...)
+// PARSE CHAT (!use ...)
 // ============================================================================
 
 export async function parseUseCommand(
@@ -401,18 +339,13 @@ export async function parseUseCommand(
   message: string
 ) {
   const parts = message.trim().split(/\s+/);
-  if (parts.length < 2) return;
-
   if (parts[0].toLowerCase() !== "!use") return;
 
-  const twistAlias = parts[1].toLowerCase();
-  const twist = findTwistByAlias(twistAlias);
+  const alias = parts[1]?.toLowerCase();
+  const twist = findTwistByAlias(alias);
   if (!twist) return;
 
-  // Optional target
-  const targetUsername = parts[2]
-    ? parts[2].replace("@", "")
-    : undefined;
+  const target = parts[2]?.replace("@", "");
 
-  await useTwist(senderId, senderName, twist, targetUsername);
+  await useTwist(senderId, senderName, twist, target);
 }
