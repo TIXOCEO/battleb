@@ -1,14 +1,15 @@
 // ============================================================================
-// 3-gift-engine.ts — v4.1 (Danny Stable Build)
+// 3-gift-engine.ts — v4.2 (Danny Stable Build)
 // ============================================================================
 //
-// ✔ FIX: geen import currentGameId (server exporteert die niet)
-// ✔ Correct gebruik: io.currentGameId (private runtime state)
-// ✔ Volledig compatibel met server v3.3
-// ✔ Volledig compatibel met new user-engine v4
+// ✔ Twist-integratie (Galaxy, MoneyGun, Bomb, Immune, Heal, Diamond Pistol)
+// ✔ Gift → twist mapping via giftId uit twist-definitions
+// ✔ Support voor non-twist gifts (BP & diamonds)
+// ✔ Host-only HeartMe → Fan 24h
 // ✔ BigInt-safe
-// ✔ Correct host detection
-// ✔ Correct diamond & BP accounting
+// ✔ Game boundaries correct
+// ✔ No duplicates (msgId-ratelimiter)
+// ✔ Stable matcher met display_name en raw username
 //
 // ============================================================================
 
@@ -18,17 +19,18 @@ import { addDiamonds, addBP } from "./4-points-engine";
 import { getArena, safeAddArenaDiamonds } from "./5-game-engine";
 import { emitLog, io } from "../server";
 
+import {
+  TWIST_MAP,
+  TwistType,
+} from "./twist-definitions";
+
+import { addTwistByGift } from "./8-twist-engine";
+
 // ============================================================================
 // HELPER: GAME SESSION ID (SAFE)
 // ============================================================================
-//
-// server.ts voegt RUNTIME dit toe:
-//     io.currentGameId = X
-//
-// Daarom gebruiken we deze veilige getter.
-//
 function getCurrentGameSessionId(): number | null {
-  // @ts-ignore — patched by server.ts
+  // @ts-ignore patched in server.ts
   return io.currentGameId ?? null;
 }
 
@@ -92,17 +94,14 @@ async function resolveReceiver(event: any) {
   const uniqueNorm = uniqueRaw ? norm(uniqueRaw) : null;
   const nickNorm = nickRaw ? norm(nickRaw) : null;
 
-  // uniqueId direct host match
   if (uniqueNorm && hostRaw && uniqueNorm === hostRaw) {
     return { id: null, username: hostRaw, display_name: uniqueRaw, role: "host" };
   }
 
-  // nickname fuzzy match
   if (nickNorm && hostRaw && nickNorm.includes(hostRaw)) {
     return { id: null, username: hostRaw, display_name: nickRaw, role: "host" };
   }
 
-  // DB fallback
   if (eventId) {
     const r = await getOrUpdateUser(
       String(eventId),
@@ -127,7 +126,6 @@ async function resolveReceiver(event: any) {
     };
   }
 
-  // ultimate fallback
   if (hostRaw) {
     return { id: null, username: hostRaw, display_name: hostRaw, role: "host" };
   }
@@ -141,7 +139,7 @@ async function resolveReceiver(event: any) {
 }
 
 // ============================================================================
-// FANCLUB 24H
+// FANCLUB 24H — heart me gift
 // ============================================================================
 async function activateFan(userId: bigint) {
   const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -161,19 +159,15 @@ async function activateFan(userId: bigint) {
 // GIFT ENGINE
 // ============================================================================
 export function initGiftEngine(conn: any) {
-  console.log("🎁 GIFT ENGINE v4.1 LOADED");
+  console.log("🎁 GIFT ENGINE v4.2 LOADED WITH TWISTS");
 
   conn.on("gift", async (data: any) => {
     const msgId = String(data.msgId ?? data.id ?? data.logId ?? "");
 
-    // Duplicate filter
     if (msgId && processedMsgIds.has(msgId)) return;
     processedMsgIds.add(msgId);
 
     try {
-      // ------------------------------
-      // SENDER
-      // ------------------------------
       const senderId =
         data.user?.userId ||
         data.sender?.userId ||
@@ -189,9 +183,6 @@ export function initGiftEngine(conn: any) {
 
       const senderUsername = sender.username.replace(/^@/, "");
 
-      // ------------------------------
-      // DIAMOND LOGIC
-      // ------------------------------
       const rawDiamonds = Number(data.diamondCount || 0);
       if (rawDiamonds <= 0) return;
 
@@ -208,15 +199,9 @@ export function initGiftEngine(conn: any) {
 
       if (credited <= 0) return;
 
-      // ------------------------------
-      // RECEIVER
-      // ------------------------------
       const receiver = await resolveReceiver(data);
       const isHost = receiver.role === "host";
 
-      // ------------------------------
-      // GAME STATE
-      // ------------------------------
       const gameId = getCurrentGameSessionId();
       const arena = getArena();
       const now = Date.now();
@@ -226,15 +211,10 @@ export function initGiftEngine(conn: any) {
 
       const inRound = inActive || inGrace;
 
-      // Host gifts only count inside game
       if (isHost && !gameId) return;
-
-      // Player gifts only inside round
       if (!isHost && !inRound) return;
 
-      // ------------------------------
-      // CREDIT DIAMONDS + BP
-      // ------------------------------
+      // DIAMOND/BP ACCOUNTING
       await addDiamonds(BigInt(senderId), credited, "total");
       await addDiamonds(BigInt(senderId), credited, "stream");
       await addDiamonds(BigInt(senderId), credited, "current_round");
@@ -242,18 +222,34 @@ export function initGiftEngine(conn: any) {
       const bpGain = credited * 0.2;
       await addBP(BigInt(senderId), bpGain, "GIFT", sender.display_name);
 
-      // Arena diamonds
       if (!isHost && receiver.id && inRound) {
         await safeAddArenaDiamonds(receiver.id.toString(), credited);
       }
 
       // ------------------------------
-      // FANCLUB GIFT
+      // CHECK FOR TWIST GIFTS
       // ------------------------------
-      if (
-        isHost &&
-        (data.giftName?.toLowerCase() === "heart me" || data.giftId === 5655)
-      ) {
+      const giftId = Number(data.giftId);
+      let twistType: TwistType | null = null;
+
+      for (const key of Object.keys(TWIST_MAP) as TwistType[]) {
+        if (TWIST_MAP[key].giftId === giftId) {
+          twistType = key;
+          break;
+        }
+      }
+
+      if (twistType) {
+        await addTwistByGift(String(senderId), twistType);
+
+        emitLog({
+          type: "twist",
+          message: `${sender.display_name} ontving twist: ${TWIST_MAP[twistType].giftName}`,
+        });
+      }
+
+      // FANCLUB via HeartMe
+      if (isHost && (data.giftName?.toLowerCase() === "heart me" || data.giftId === 5655)) {
         await activateFan(BigInt(senderId));
 
         emitLog({
@@ -262,9 +258,7 @@ export function initGiftEngine(conn: any) {
         });
       }
 
-      // ------------------------------
-      // SAVE IN DB
-      // ------------------------------
+      // SAVE IN DATABASE
       await pool.query(
         `
         INSERT INTO gifts (
@@ -289,9 +283,6 @@ export function initGiftEngine(conn: any) {
         ]
       );
 
-      // ------------------------------
-      // LOG
-      // ------------------------------
       emitLog({
         type: "gift",
         message: `${sender.display_name} → ${receiver.display_name}: ${data.giftName} (${credited}💎)`,
