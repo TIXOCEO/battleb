@@ -1,7 +1,7 @@
 // ============================================================================
 // 5-GAME-ENGINE.ts — Arena Engine v2.4 (OPTIE C — PRODUCTION SAFE)
 // Unlimited spelers, tie-groups, danger, elimination, force mode
-// Immunity type bestaat maar wordt nooit gebruikt
+// Immunity type bestaat wel—wordt gebruikt door twist-engine
 // getArena() is PURE en veroorzaakt NOOIT side-effects
 // ============================================================================
 
@@ -19,7 +19,7 @@ export type PositionStatus =
   | "active"
   | "danger"
   | "elimination"
-  | "immune"; // ← bestaat, maar wordt niet toegewezen
+  | "immune";
 
 interface Player {
   id: string;
@@ -27,7 +27,7 @@ interface Player {
   username: string;
   diamonds: number;
   boosters: string[];
-  status: "alive" | "eliminated";
+  status: "alive" | "eliminated"; // gebruikt door twist-engine
   joined_at: number;
 }
 
@@ -87,7 +87,7 @@ const arena: Arena = {
 };
 
 // ============================================================================
-// INTERNAL MUTATION HELPERS (NO SIDE EFFECTS OUTSIDE)
+// INTERNAL MUTATION HELPERS
 // ============================================================================
 
 function _sortPlayers() {
@@ -126,13 +126,7 @@ function _recomputePositionMap() {
 
   if (arena.status === "grace" || arena.status === "ended") {
     lastGroup.members.forEach(pl => endangered.add(pl.id));
-} else if (
-  arena.status === ("grace" as ArenaStatus) ||
-  arena.status === ("ended" as ArenaStatus)
-) {
-  lastGroup.members.forEach(pl => doomed.add(pl.id));
-}
-
+  }
 
   for (const pl of p) {
     if (doomed.has(pl.id)) map[pl.id] = "elimination";
@@ -143,11 +137,6 @@ function _recomputePositionMap() {
   arena.positionMap = map;
 }
 
-/**
- * SAFE mutation wrapper — ONLY mutates local state
- * NEVER calls emitArena()
- * NEVER calls getArena()
- */
 function mutate(mutator: () => void) {
   mutator();
   _sortPlayers();
@@ -155,7 +144,7 @@ function mutate(mutator: () => void) {
 }
 
 // ============================================================================
-// SETTINGS – LOAD + SAVE
+// SETTINGS LOAD/SAVE
 // ============================================================================
 
 async function loadArenaSettingsFromDB(): Promise<void> {
@@ -188,14 +177,14 @@ export async function updateArenaSettings(s: Partial<ArenaSettings>) {
     arena.settings = { ...arena.settings, ...s };
   });
 
-  const rows: [string, string][] = [
+  const pairs: [string, string][] = [
     ["roundDurationPre", String(arena.settings.roundDurationPre)],
     ["roundDurationFinal", String(arena.settings.roundDurationFinal)],
     ["graceSeconds", String(arena.settings.graceSeconds)],
     ["forceEliminations", arena.settings.forceEliminations ? "true" : "false"],
   ];
 
-  for (const [k, v] of rows) {
+  for (const [k, v] of pairs) {
     await pool.query(
       `INSERT INTO settings(key,value)
        VALUES ($1,$2)
@@ -289,6 +278,7 @@ export function startRound(type: RoundType) {
     arena.roundCutoff = arena.roundStartTime + secs * 1000;
     arena.graceEnd = arena.roundCutoff + arena.settings.graceSeconds * 1000;
 
+    // Reset ronde-diamonds
     arena.players.forEach(p => (p.diamonds = 0));
   });
 
@@ -305,6 +295,7 @@ export function startRound(type: RoundType) {
   roundTick = setInterval(() => {
     const now = Date.now();
 
+    // ACTIVE
     if (arena.status === "active") {
       mutate(() => {
         arena.timeLeft = Math.max(
@@ -320,7 +311,7 @@ export function startRound(type: RoundType) {
 
       emitArena();
 
-      if (arena.status === ("grace" as ArenaStatus)) {
+      if (arena.status === "grace") {
         io.emit("round:grace", {
           round: arena.round,
           grace: arena.settings.graceSeconds,
@@ -330,18 +321,17 @@ export function startRound(type: RoundType) {
       return;
     }
 
-// Grace phase
-if (arena.status === ("grace" as ArenaStatus)) {
-  if (now >= arena.graceEnd) {
-    endRound();
-  } else {
-    emitArena();
-  }
-  return;
-}
+    // GRACE
+    if (arena.status === "grace") {
+      if (now >= arena.graceEnd) {
+        endRound();
+      } else {
+        emitArena();
+      }
+      return;
+    }
 
-
-
+    // STOP TICK
     if (arena.status === "ended" || arena.status === "idle") {
       clearInterval(roundTick!);
       roundTick = null;
@@ -351,32 +341,43 @@ if (arena.status === ("grace" as ArenaStatus)) {
   return true;
 }
 
+// ============================================================================
+// ENDROUND v3.2 — verwerkt twists en danger/elimination
+// ============================================================================
+
 export function endRound() {
-  let doomedIds: string[] = [];
+  const players = arena.players;
 
-  if (arena.settings.forceEliminations) {
-    doomedIds = Object.entries(arena.positionMap)
-      .filter(([_, s]) => s === "elimination")
-      .map(([id]) => id);
+  // DP active? (één alive, rest eliminated)
+  const diamondPistolUsed =
+    players.some(p => p.status === "alive") &&
+    players.some(p => p.status === "eliminated");
 
-    if (doomedIds.length > 0) {
-      mutate(() => {
-        arena.status = "ended";
-        arena.isRunning = false;
-        arena.timeLeft = 0;
-      });
+  const immuneSet = new Set(
+    players
+      .filter(p => p.boosters.includes("immune"))
+      .map(p => p.id)
+  );
 
-      emitArena();
+  const doomed = new Set<string>();
 
-      io.emit("round:end", {
-        round: arena.round,
-        type: arena.type,
-        top3: getTop3(),
-        pendingEliminations: doomedIds,
-      });
-
-      return;
+  for (const p of players) {
+    if (p.status === "eliminated") {
+      if (!immuneSet.has(p.id)) doomed.add(p.id);
+      continue;
     }
+
+    const pos = arena.positionMap[p.id];
+
+    if (pos === "elimination" && !immuneSet.has(p.id)) {
+      doomed.add(p.id);
+    }
+  }
+
+  let pending = Array.from(doomed);
+
+  if (!arena.settings.forceEliminations) {
+    pending = [];
   }
 
   mutate(() => {
@@ -391,9 +392,13 @@ export function endRound() {
     round: arena.round,
     type: arena.type,
     top3: getTop3(),
-    pendingEliminations: [],
+    pendingEliminations: pending,
   });
 }
+
+// ============================================================================
+// TOP 3
+// ============================================================================
 
 function getTop3() {
   return [...arena.players].slice(0, 3).map(p => ({
@@ -405,7 +410,7 @@ function getTop3() {
 }
 
 // ============================================================================
-// PURE SNAPSHOT (NO SIDE EFFECTS)
+// PURE SNAPSHOT
 // ============================================================================
 
 export function getArena() {
@@ -433,7 +438,7 @@ export function getArena() {
 }
 
 // ============================================================================
-// EMIT (NO SIDE EFFECTS)
+// EMIT
 // ============================================================================
 
 export function emitArena() {
