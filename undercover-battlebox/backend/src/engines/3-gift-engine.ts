@@ -1,14 +1,16 @@
 // ============================================================================
-// src/engines/3-gift-engine.ts — v2.0 FINAL (Compatible with Server v3.2)
-// Danny Goldenbelt / Undercover BattleBox
+// 3-gift-engine.ts — GIFT ENGINE v4.0 FINAL
+// Compatible with server.ts v4.0, user-engine v4.0, queue v4.0
+// Danny Goldenbelt — Undercover BattleBox
 //
-// ✔ Volledig compatible met nieuwe server.ts (geen getCurrentGameId import)
-// ✔ Haalt gameId op via socket broadcast structuur
-// ✔ Fanclub 24H correct
-// ✔ Arena awarding correct & safe
-// ✔ Dubbele messages gefilterd
-// ✔ addDiamonds / addBP correct
-// ✔ resolveReceiver volledig herschreven & stabiel
+// ✔ Geen io.currentGameId hack meer — gebruikt echte import uit server.ts
+// ✔ Gifts tonen weer correct in logs
+// ✔ Geen duplicate inserts
+// ✔ Fanclub correct
+// ✔ Arena awarding correct tijdens rondes
+// ✔ Gifts naar host tellen alleen als game loopt
+// ✔ Gifts naar spelers tellen alleen in active/grace
+// ✔ resolveReceiver 100% stabiel
 //
 // ============================================================================
 
@@ -17,19 +19,9 @@ import { getOrUpdateUser } from "./2-user-engine";
 import { addDiamonds, addBP } from "./4-points-engine";
 import { getArena, safeAddArenaDiamonds } from "./5-game-engine";
 import { emitLog } from "../server";
-import { io } from "../server";
 
-// Used instead of old getCurrentGameId
-function getCurrentGameSessionId(): number | null {
-  let gameId: number | null = null;
-  // @ts-ignore - we read from internal mem cache (server.ts emits this)
-  if (io.currentGameId) gameId = io.currentGameId;
-  return gameId;
-}
+import { currentGameId } from "../server";   // <── FIXED: echte import (v4.x)
 
-// OR → we store active session globally in server.ts
-// So we import it directly:
-import { } from "../server"; // keep TS happy
 
 // ============================================================================
 // NORMALIZER
@@ -59,7 +51,7 @@ export async function refreshHostUsername() {
 }
 
 // ============================================================================
-// DUPLICATE FILTER
+// DEDUP
 // ============================================================================
 const processedMsgIds = new Set<string>();
 setInterval(() => processedMsgIds.clear(), 60_000);
@@ -91,17 +83,17 @@ async function resolveReceiver(event: any) {
   const uniqueNorm = uniqueRaw ? norm(uniqueRaw) : null;
   const nickNorm = nickRaw ? norm(nickRaw) : null;
 
-  // uniqueId direct match
+  // ✔ direct uniqueId match → host
   if (uniqueNorm && hostRaw && uniqueNorm === hostRaw) {
     return { id: null, username: hostRaw, display_name: uniqueRaw, role: "host" };
   }
 
-  // nickname fuzzy
+  // ✔ fuzzy nickname match → host
   if (nickNorm && hostRaw && nickNorm.includes(hostRaw)) {
     return { id: null, username: hostRaw, display_name: nickRaw, role: "host" };
   }
 
-  // DB fallback
+  // ✔ fallback: DB user
   if (eventId) {
     const r = await getOrUpdateUser(
       String(eventId),
@@ -112,7 +104,7 @@ async function resolveReceiver(event: any) {
     if (hostRaw && norm(r.username) === hostRaw) {
       return {
         id: r.id,
-        username: r.username.replace(/^@/, ""),
+        username: r.username,
         display_name: r.display_name,
         role: "host",
       };
@@ -120,13 +112,13 @@ async function resolveReceiver(event: any) {
 
     return {
       id: r.id,
-      username: r.username.replace(/^@/, ""),
+      username: r.username,
       display_name: r.display_name,
       role: "speler",
     };
   }
 
-  // ultimate fallback
+  // ✔ ultimate fallback
   if (hostRaw) {
     return { id: null, username: hostRaw, display_name: hostRaw, role: "host" };
   }
@@ -156,18 +148,23 @@ async function activateFan(userId: bigint) {
 }
 
 // ============================================================================
-// GIFT ENGINE
+// MAIN GIFT ENGINE
 // ============================================================================
 export function initGiftEngine(conn: any) {
-  console.log("🎁 GIFT ENGINE v2.0 LOADED");
+  console.log("🎁 GIFT ENGINE v4.0 LOADED");
 
   conn.on("gift", async (data: any) => {
+    // ------------------------------------------------------------------
+    // 1) Duplicate filter
+    // ------------------------------------------------------------------
     const msgId = String(data.msgId ?? data.id ?? data.logId ?? "");
     if (msgId && processedMsgIds.has(msgId)) return;
     processedMsgIds.add(msgId);
 
     try {
-      // SENDER
+      // ----------------------------------------------------------------
+      // 2) Sender
+      // ----------------------------------------------------------------
       const senderId =
         data.user?.userId ||
         data.sender?.userId ||
@@ -181,9 +178,11 @@ export function initGiftEngine(conn: any) {
         data.user?.uniqueId || data.sender?.uniqueId
       );
 
-      const senderUsername = sender.username.replace(/^@/, "");
+      const senderUsername = sender.username;
 
-      // DIAMONDS
+      // ----------------------------------------------------------------
+      // 3) Diamonds
+      // ----------------------------------------------------------------
       const rawDiamonds = Number(data.diamondCount || 0);
       if (rawDiamonds <= 0) return;
 
@@ -200,28 +199,33 @@ export function initGiftEngine(conn: any) {
 
       if (credited <= 0) return;
 
-      // RECEIVER
+      // ----------------------------------------------------------------
+      // 4) Receiver
+      // ----------------------------------------------------------------
       const receiver = await resolveReceiver(data);
       const isHost = receiver.role === "host";
 
-      // GAME STATE
-      const gameId = getCurrentGameSessionId();
+      // ----------------------------------------------------------------
+      // 5) Game state (FIXED!)
+      // ----------------------------------------------------------------
+      const gameId = currentGameId;   // <── werkt nu altijd
 
       const arena = getArena();
       const now = Date.now();
 
       const inActive = arena.status === "active" && now <= arena.roundCutoff;
       const inGrace = arena.status === "grace" && now <= arena.graceEnd;
-
       const inRound = inActive || inGrace;
 
-      // gifts to host → only count if game running
+      // Gifts naar HOST → ALLEEN ALS GAME LOOPT
       if (isHost && !gameId) return;
 
-      // gifts to players → only inside round
+      // Gifts naar SPELERS → ALLEEN IN ACTIEVE RONDE
       if (!isHost && !inRound) return;
 
-      // CREDIT DIAMONDS
+      // ----------------------------------------------------------------
+      // 6) Credit sender
+      // ----------------------------------------------------------------
       await addDiamonds(BigInt(senderId), credited, "total");
       await addDiamonds(BigInt(senderId), credited, "stream");
       await addDiamonds(BigInt(senderId), credited, "current_round");
@@ -230,15 +234,20 @@ export function initGiftEngine(conn: any) {
       const bpGain = credited * 0.2;
       await addBP(BigInt(senderId), bpGain, "GIFT", sender.display_name);
 
-      // add to arena player
+      // ----------------------------------------------------------------
+      // 7) Add diamonds to arena player
+      // ----------------------------------------------------------------
       if (!isHost && receiver.id && inRound) {
         await safeAddArenaDiamonds(receiver.id.toString(), credited);
       }
 
-      // FANCLUB
+      // ----------------------------------------------------------------
+      // 8) Fanclub (24h)
+      // ----------------------------------------------------------------
       if (
         isHost &&
-        (data.giftName?.toLowerCase() === "heart me" || data.giftId === 5655)
+        (data.giftName?.toLowerCase() === "heart me" ||
+          data.giftId === 5655)
       ) {
         await activateFan(BigInt(senderId));
 
@@ -248,7 +257,9 @@ export function initGiftEngine(conn: any) {
         });
       }
 
-      // SAVE IN DB
+      // ----------------------------------------------------------------
+      // 9) Save in DB
+      // ----------------------------------------------------------------
       await pool.query(
         `
         INSERT INTO gifts (
@@ -273,12 +284,14 @@ export function initGiftEngine(conn: any) {
         ]
       );
 
+      // ----------------------------------------------------------------
+      // 10) Emit log
+      // ----------------------------------------------------------------
       emitLog({
         type: "gift",
-        message: `${sender.display_name} → ${receiver.display_name}: ${
-          data.giftName
-        } (${credited}💎)`,
+        message: `${sender.display_name} → ${receiver.display_name}: ${data.giftName} (${credited}💎)`,
       });
+
     } catch (err: any) {
       console.error("GiftEngine ERROR:", err?.message || err);
     }
