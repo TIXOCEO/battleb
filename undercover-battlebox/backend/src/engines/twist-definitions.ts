@@ -1,114 +1,174 @@
 // ============================================================================
-// twist-definitions.ts — Twist Type Definitions v1.0
-// ============================================================================
-//
-// Bevat:
-//  - TwistType enum
-//  - Definitie van alle twists
-//  - Aliases (!use moneygun, !use mg, !use gun, etc.)
-//  - Zoekfunctie findTwistByAlias()
-//  - Metadata nodig voor engines + admin tools
-//
+// twist-definitions.ts — v1.0
+// Centrale registry voor alle TWISTS / BOOSTERS / EFFECTEN
+// Gelezen door twist-engine + admin-twist-engine
 // ============================================================================
 
-
-// Alle twist types — core identifiers
 export type TwistType =
-  | "reverse_rank"
-  | "money_gun"
-  | "immune"
-  | "diamond_pistol"
+  | "galaxy"
+  | "moneygun"
   | "bomb"
-  | "heal";
+  | "shield"
+  | "immune"
+  | "eliminate1"
+  | "revive"
+  | "fanboost"
+  | "vipboost"
+  | "queuejump"
+  | "diamondpistol";
 
-// ---------------------------------------------
-// ALLE TWISTS MET COMPLETE METADATA
-// ---------------------------------------------
+// ============================================================================
+// TWIST DEFINITIONS
+// ============================================================================
 
-export const TWIST_MAP: Record<
-  TwistType,
-  {
-    giftId: number;
-    giftName: string;
-    diamonds: number;
-    aliases: string[];
-    description: string;
-    targeted: boolean;        // moet er een @username doel zijn?
-    isOffensive: boolean;     // valt een speler direct aan?
-  }
-> = {
-  reverse_rank: {
-    giftId: 11046,
+export interface TwistDefinition {
+  giftId: number | null;         // gift koppeling (optioneel)
+  giftName: string;              // herkenbare naam
+  diamonds: number;              // waarde (voor logs / leaderboards)
+  aliases: string[];             // tekst triggers
+  description: string;           // admin UI en debugging
+  requiresTarget: boolean;       // moet admin of engine een user kiezen?
+  targeted: boolean;             // twist werkt OP iemand (niet AoE)
+  isOffensive: boolean;          // veroorzaakt schade/elimination?
+}
+
+// ============================================================================
+// DE CENTRALE TWIST MAP
+// Niets hier aanpassen tenzij je nieuwe twists toevoegt
+// ============================================================================
+
+export const TWIST_MAP: Record<TwistType, TwistDefinition> = {
+  galaxy: {
+    giftId: 5650,
     giftName: "Galaxy",
     diamonds: 1000,
-    aliases: ["galaxy", "reverse", "rr", "flip", "sterrenstelsel"],
-    description: "Draait de arena-ranglijst om op basis van diamonds.",
+    aliases: ["galaxy", "gxy"],
+    description: "Galaxy — keert de ranglijst om",
+    requiresTarget: false,
     targeted: false,
     isOffensive: false,
   },
 
-  money_gun: {
-    giftId: 7168,
+  moneygun: {
+    giftId: 5499,
     giftName: "Money Gun",
     diamonds: 500,
-    aliases: ["moneygun", "mg", "gun", "elimineer"],
-    description: "Schiet een speler af — markeert als eliminated voor einde ronde.",
-    targeted: true,
-    isOffensive: true,
-  },
-
-  immune: {
-    giftId: 14658,
-    giftName: "Blooming Heart",
-    diamonds: 1599,
-    aliases: ["heart", "immune", "shield", "protect", "immu", "immuun"],
-    description: "Geeft een speler immuniteit voor eliminatie.",
-    targeted: true,
-    isOffensive: false,
-  },
-
-  diamond_pistol: {
-    giftId: 14768,
-    giftName: "Diamond Gun",
-    diamonds: 5000,
-    aliases: ["diamondpistol", "dp", "wipe", "diamantpistool"],
-    description: "Wiped ALLE spelers behalve het doelwit — einde ronde eliminatie.",
-    targeted: true,
+    aliases: ["moneygun", "gun"],
+    description: "MoneyGun — elimineert 1 speler aan het einde van de ronde",
+    requiresTarget: false,
+    targeted: false,
     isOffensive: true,
   },
 
   bomb: {
-    giftId: 16101,
-    giftName: "Space Dog",
-    diamonds: 2500,
-    aliases: ["bomb", "dog", "explode", "bd", "bom"],
-    description: "Selecteert 1 willekeurige speler om te elimineren.",
+    giftId: 7781,
+    giftName: "Bomb",
+    diamonds: 800,
+    aliases: ["bomb", "boom"],
+    description: "Bomb — AoE damage op onderste posities",
+    requiresTarget: false,
     targeted: false,
     isOffensive: true,
   },
 
-  heal: {
-    giftId: 14210,
-    giftName: "Galaxy Globe",
-    diamonds: 1500,
-    aliases: ["heal", "globe", "hg", "reanimate", "herstel"],
-    description: "Verwijdert 1 eliminatie-status van een speler.",
+  shield: {
+    giftId: 9921,
+    giftName: "Shield",
+    diamonds: 500,
+    aliases: ["shield", "protect"],
+    description: "Shield — beschermt tegen 1 aanval",
+    requiresTarget: false,
+    targeted: false,
+    isOffensive: false,
+  },
+
+  immune: {
+    giftId: 6601,
+    giftName: "Immune Boost",
+    diamonds: 700,
+    aliases: ["immune", "immunity"],
+    description: "Immune — speler is immuun voor eliminaties",
+    requiresTarget: true,
     targeted: true,
     isOffensive: false,
   },
+
+  eliminate1: {
+    giftId: null,
+    giftName: "Admin Eliminate 1",
+    diamonds: 0,
+    aliases: ["elim1"],
+    description: "Admin-mode eliminate (1 speler)",
+    requiresTarget: true,
+    targeted: true,
+    isOffensive: true,
+  },
+
+  revive: {
+    giftId: null,
+    giftName: "Revive",
+    diamonds: 0,
+    aliases: ["revive", "rez"],
+    description: "Brengt een speler terug in de queue",
+    requiresTarget: true,
+    targeted: true,
+    isOffensive: false,
+  },
+
+  fanboost: {
+    giftId: null,
+    giftName: "Fan Booster",
+    diamonds: 0,
+    aliases: ["fanboost"],
+    description: "Geeft fan-move omhoog",
+    requiresTarget: true,
+    targeted: true,
+    isOffensive: false,
+  },
+
+  vipboost: {
+    giftId: null,
+    giftName: "VIP Booster",
+    diamonds: 0,
+    aliases: ["vipboost"],
+    description: "Geeft VIP push omhoog",
+    requiresTarget: true,
+    targeted: true,
+    isOffensive: false,
+  },
+
+  queuejump: {
+    giftId: null,
+    giftName: "Queue Jump",
+    diamonds: 0,
+    aliases: ["jump", "qjump"],
+    description: "Springt direct naar voren in de queue",
+    requiresTarget: true,
+    targeted: true,
+    isOffensive: false,
+  },
+
+  diamondpistol: {
+    giftId: 999001,
+    giftName: "Diamond Pistol",
+    diamonds: 5000,
+    aliases: ["pistol", "dp"],
+    description: "Schiet 7 spelers dood (twist-engine doet dit zelf)",
+    requiresTarget: false,
+    targeted: false,
+    isOffensive: true,
+  },
 };
 
-
 // ============================================================================
-// Zoekfunctie voor commando’s (!use moneygun @test)
+// HELPER — find twist by alias
 // ============================================================================
 
-export function findTwistByAlias(aliasRaw: string): TwistType | null {
-  const alias = aliasRaw.trim().toLowerCase();
+export function resolveTwistAlias(input: string): TwistType | null {
+  const lower = input.toLowerCase();
 
   for (const key of Object.keys(TWIST_MAP) as TwistType[]) {
-    const t = TWIST_MAP[key];
-    if (t.aliases.includes(alias)) return key;
+    if (TWIST_MAP[key].aliases.includes(lower)) return key;
   }
 
   return null;
