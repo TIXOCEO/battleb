@@ -1,14 +1,14 @@
 // ============================================================================
-// src/engines/6-chat-engine.ts — v2.0 FINAL
+// 6-chat-engine.ts — v2.1 (Danny Stable + Twist Support)
+// ============================================================================
 //
-// ✔ Geen emitQueue import meer
-// ✔ addToQueue(String(userId)) (1 arg!)
-// ✔ Queue updates via io.emit("updateQueue")
-// ✔ Fans-only !join
-// ✔ !leave correct
-// ✔ !boost correct
-// ✔ getOrUpdateUser synced
-// ✔ 0 compat errors met TypeScript
+// ✔ Fans-only !join (via HeartMe gift, 24h)
+// ✔ !leave voor queue exit + BP refund
+// ✔ !boost X voor 1-5 spots boost
+// ✔ !use <twist> <target> geïntegreerd (via Twist Engine)
+// ✔ Geen duplicate events of false positives
+// ✔ Gebruikt getOrUpdateUser (DB user-sync)
+// ✔ Voltage safe, BigInt safe
 //
 // ============================================================================
 
@@ -18,6 +18,7 @@ import { io, emitLog } from "../server";
 import { addToQueue, leaveQueue, getQueue } from "../queue";
 import { getOrUpdateUser } from "./2-user-engine";
 import { applyBoost, parseBoostChatCommand } from "./7-boost-engine";
+import { parseUseCommand } from "./8-twist-engine";
 
 // ------------------------------------------------------
 // Helpers
@@ -38,7 +39,7 @@ async function ensureFanStatus(userId: bigint): Promise<boolean> {
     `
     SELECT is_fan, fan_expires_at
     FROM users
-    WHERE tiktok_id=$1
+    WHERE tiktok_id = $1
   `,
     [userId]
   );
@@ -51,7 +52,7 @@ async function ensureFanStatus(userId: bigint): Promise<boolean> {
   const exp = new Date(fan_expires_at);
   if (exp <= new Date()) {
     await pool.query(
-      `UPDATE users SET is_fan=FALSE, fan_expires_at=NULL WHERE tiktok_id=$1`,
+      `UPDATE users SET is_fan = FALSE, fan_expires_at = NULL WHERE tiktok_id = $1`,
       [userId]
     );
     return false;
@@ -65,7 +66,7 @@ async function ensureFanStatus(userId: bigint): Promise<boolean> {
 // ------------------------------------------------------
 
 export function initChatEngine(conn: any) {
-  console.log("💬 CHAT ENGINE v2.0 LOADED");
+  console.log("💬 CHAT ENGINE v2.1 LOADED");
 
   conn.on("chat", async (msg: any) => {
     try {
@@ -106,7 +107,12 @@ export function initChatEngine(conn: any) {
           return;
         }
 
-        await addToQueue(String(userId));
+        try {
+          await addToQueue(String(userId));
+        } catch (err: any) {
+          emitLog({ type: "queue", message: err.message });
+          return;
+        }
 
         io.emit("updateQueue", {
           open: true,
@@ -147,18 +153,35 @@ export function initChatEngine(conn: any) {
         const spots = await parseBoostChatCommand(text);
         if (!spots) return;
 
-        const result = await applyBoost(String(userId), spots, user.display_name);
+        try {
+          const result = await applyBoost(String(userId), spots, user.display_name);
 
-        io.emit("updateQueue", {
-          open: true,
-          entries: await getQueue(),
-        });
+          io.emit("updateQueue", {
+            open: true,
+            entries: await getQueue(),
+          });
 
-        emitLog({
-          type: "boost",
-          message: `${user.display_name}: ${result.message}`,
-        });
+          emitLog({
+            type: "boost",
+            message: `${user.display_name}: ${result.message}`,
+          });
+        } catch (err: any) {
+          emitLog({
+            type: "boost",
+            message: err.message,
+          });
+        }
 
+        return;
+      }
+
+      // --------------------------------------------------
+      // !use <twist> [target]
+      // --------------------------------------------------
+      if (cmd === "!use") {
+        // Inject full raw message
+        const msgRaw = msg.comment || msg.text || msg.content;
+        await parseUseCommand(String(userId), user.display_name, msgRaw);
         return;
       }
     } catch (err: any) {
