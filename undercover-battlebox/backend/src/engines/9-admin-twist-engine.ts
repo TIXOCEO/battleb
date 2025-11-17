@@ -1,14 +1,11 @@
 // ============================================================================
-// 9-admin-twist-engine.ts — v1.2 (Build-safe)
-// ============================================================================
-// Admin-paneel acties voor twist beheer:
-//  - Geef twist
-//  - Verwijder twist
-//  - Toon huidige inventory
+// 9-admin-twist-engine.ts — v2.0 (Build-Safe)
 // ============================================================================
 
 import { Socket } from "socket.io";
+import pool from "../db";
 import { emitLog } from "../server";
+
 import {
   giveTwistToUser,
   consumeTwistFromUser,
@@ -19,37 +16,65 @@ import {
 import {
   TWIST_MAP,
   type TwistType,
-  findTwistByAlias,
 } from "./twist-definitions";
 
 // ============================================================================
-// EXPORT: initAdminTwistEngine
-// (DIT MISSTE WAARDOOR DE BUILD FOUT GAF)
+// INTERNAL: fetch user
+// ============================================================================
+async function fetchUserByUsername(username: string) {
+  const clean = username.replace("@", "").toLowerCase();
+
+  const res = await pool.query(
+    `
+    SELECT tiktok_id, display_name, username
+    FROM users
+    WHERE LOWER(username) = $1
+    LIMIT 1
+    `,
+    [clean]
+  );
+
+  return res.rows[0] || null;
+}
+
+// ============================================================================
+// EXPORT
 // ============================================================================
 export function initAdminTwistEngine(socket: Socket) {
-  // ---------------------------------------------------------
-  // ADMIN: Give twist to user
-  // ---------------------------------------------------------
+  // ========================================================================
+  // ADMIN: Geef twist
+  // ========================================================================
   socket.on(
     "admin:twist:give",
-    async ({ username, twist }: { username: string; twist: string }, ack: Function) => {
+    async (
+      { username, twist }: { username: string; twist: string },
+      ack: Function
+    ) => {
       try {
-        const twistType = findTwistByAlias(twist);
-        if (!twistType) {
-          return ack({ success: false, message: "Onbekende twist" });
+        const clean = twist.toLowerCase().trim();
+
+        if (!TWIST_MAP[clean]) {
+          return ack({
+            success: false,
+            message: "Onbekende twist",
+          });
         }
 
-        // Fetch user
-        const db = await socket.fetchUser(username);
-        if (!db) {
-          return ack({ success: false, message: "Gebruiker niet gevonden" });
+        const twistType = clean as TwistType;
+
+        const user = await fetchUserByUsername(username);
+        if (!user) {
+          return ack({
+            success: false,
+            message: "Gebruiker niet gevonden",
+          });
         }
 
-        await giveTwistToUser(db.tiktok_id, twistType);
+        await giveTwistToUser(user.tiktok_id, twistType);
 
         emitLog({
           type: "twist",
-          message: `ADMIN gaf twist ${twistType} aan ${db.display_name}`,
+          message: `ADMIN gaf twist '${twistType}' aan ${user.display_name}`,
         });
 
         ack({ success: true });
@@ -59,31 +84,47 @@ export function initAdminTwistEngine(socket: Socket) {
     }
   );
 
-  // ---------------------------------------------------------
-  // ADMIN: Remove one twist
-  // ---------------------------------------------------------
+  // ========================================================================
+  // ADMIN: Verwijder één twist
+  // ========================================================================
   socket.on(
     "admin:twist:remove",
-    async ({ username, twist }: { username: string; twist: string }, ack: Function) => {
+    async (
+      { username, twist }: { username: string; twist: string },
+      ack: Function
+    ) => {
       try {
-        const twistType = findTwistByAlias(twist);
-        if (!twistType) {
-          return ack({ success: false, message: "Onbekende twist" });
+        const clean = twist.toLowerCase().trim();
+
+        if (!TWIST_MAP[clean]) {
+          return ack({
+            success: false,
+            message: "Onbekende twist",
+          });
         }
 
-        const db = await socket.fetchUser(username);
-        if (!db) {
-          return ack({ success: false, message: "Gebruiker niet gevonden" });
+        const twistType = clean as TwistType;
+
+        const user = await fetchUserByUsername(username);
+        if (!user) {
+          return ack({
+            success: false,
+            message: "Gebruiker niet gevonden",
+          });
         }
 
-        const success = await consumeTwistFromUser(db.tiktok_id, twistType);
-        if (!success) {
-          return ack({ success: false, message: "Gebruiker heeft dit niet" });
+        const ok = await consumeTwistFromUser(user.tiktok_id, twistType);
+
+        if (!ok) {
+          return ack({
+            success: false,
+            message: "Gebruiker heeft deze twist niet",
+          });
         }
 
         emitLog({
           type: "twist",
-          message: `ADMIN verwijderde twist ${twistType} van ${db.display_name}`,
+          message: `ADMIN verwijderde twist '${twistType}' van ${user.display_name}`,
         });
 
         ack({ success: true });
@@ -93,19 +134,25 @@ export function initAdminTwistEngine(socket: Socket) {
     }
   );
 
-  // ---------------------------------------------------------
-  // ADMIN: List twists
-  // ---------------------------------------------------------
+  // ========================================================================
+  // ADMIN: Toon inventory
+  // ========================================================================
   socket.on(
     "admin:twist:list",
-    async ({ username }: { username: string }, ack: Function) => {
+    async (
+      { username }: { username: string },
+      ack: Function
+    ) => {
       try {
-        const db = await socket.fetchUser(username);
-        if (!db) {
-          return ack({ success: false, message: "Gebruiker niet gevonden" });
+        const user = await fetchUserByUsername(username);
+        if (!user) {
+          return ack({
+            success: false,
+            message: "Gebruiker niet gevonden",
+          });
         }
 
-        const items = await listTwistsForUser(db.tiktok_id);
+        const items = await listTwistsForUser(user.tiktok_id);
 
         ack({
           success: true,
@@ -117,23 +164,29 @@ export function initAdminTwistEngine(socket: Socket) {
     }
   );
 
-  // ---------------------------------------------------------
-  // ADMIN: Clear all twists
-  // ---------------------------------------------------------
+  // ========================================================================
+  // ADMIN: Verwijder ALLE twists
+  // ========================================================================
   socket.on(
     "admin:twist:clear",
-    async ({ username }: { username: string }, ack: Function) => {
+    async (
+      { username }: { username: string },
+      ack: Function
+    ) => {
       try {
-        const db = await socket.fetchUser(username);
-        if (!db) {
-          return ack({ success: false, message: "Gebruiker niet gevonden" });
+        const user = await fetchUserByUsername(username);
+        if (!user) {
+          return ack({
+            success: false,
+            message: "Gebruiker niet gevonden",
+          });
         }
 
-        await clearTwistsForUser(db.tiktok_id);
+        await clearTwistsForUser(user.tiktok_id);
 
         emitLog({
           type: "twist",
-          message: `ADMIN verwijderde alle twists van ${db.display_name}`,
+          message: `ADMIN verwijderde ALLE twists van ${user.display_name}`,
         });
 
         ack({ success: true });
