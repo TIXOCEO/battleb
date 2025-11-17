@@ -1,99 +1,184 @@
+// ============================================================================
+// twist-inventory.ts — v1.0
+// Slaat twist-tegoeden per gebruiker op in de database.
+//
+// Database-vereiste:
+//  In tabel "users" moet een kolom "blocks" bestaan (jsonb)
+//  Dit veld gebruiken we nu als "twists inventory".
+//
+// Structuur in DB:
+//   blocks: {
+//      twists: {
+//         moneygun: number,
+//         galaxy: number,
+//         diamond_pistol: number,
+//         immune: number,
+//         bomb: number,
+//         heal: number
+//      }
+//   }
+//
+// ============================================================================
+
 import pool from "../db";
-import { TwistType, TWIST_MAP } from "./twist-definitions";
+import type { TwistType } from "./twist-definitions";
 
-export type TwistInventory = Record<TwistType, number>;
+// ----------------------------------------------------------------------------------
+// Helper: zorg dat blocks.twists bestaat in de user row
+// ----------------------------------------------------------------------------------
+function normalizeTwistInventory(row: any): Record<TwistType, number> {
+  const twists =
+    row?.blocks?.twists ??
+    {
+      galaxy: 0,
+      moneygun: 0,
+      immune: 0,
+      diamond_pistol: 0,
+      bomb: 0,
+      heal: 0,
+    };
 
-/**
- * Zorgt ervoor dat twists altijd bestaan in JSON.
- */
-export function normalizeTwists(raw: any): TwistInventory {
-  const clean: TwistInventory = {
-    galaxy: 0,
-    moneygun: 0,
-    immune: 0,
-    diamond_pistol: 0,
-    bomb: 0,
-    heal: 0,
+  return {
+    galaxy: twists.galaxy ?? 0,
+    moneygun: twists.moneygun ?? 0,
+    immune: twists.immune ?? 0,
+    diamond_pistol: twists.diamond_pistol ?? 0,
+    bomb: twists.bomb ?? 0,
+    heal: twists.heal ?? 0,
   };
+}
 
-  if (!raw || typeof raw !== "object") return clean;
+// ----------------------------------------------------------------------------------
+//  GET INVENTORY
+// ----------------------------------------------------------------------------------
+export async function getUserTwistInventory(
+  tiktokId: string
+): Promise<Record<TwistType, number>> {
+  const tid = BigInt(tiktokId);
 
-  for (const key of Object.keys(clean)) {
-    const t = key as TwistType;
-    clean[t] = Number(raw[t] ?? 0);
+  const { rows } = await pool.query(
+    `
+    SELECT blocks
+    FROM users
+    WHERE tiktok_id=$1
+    LIMIT 1
+    `,
+    [tid]
+  );
+
+  if (!rows[0]) {
+    return {
+      galaxy: 0,
+      moneygun: 0,
+      immune: 0,
+      diamond_pistol: 0,
+      bomb: 0,
+      heal: 0,
+    };
   }
 
-  return clean;
+  return normalizeTwistInventory(rows[0]);
 }
 
-/**
- * Haal inventory van gebruiker op.
- */
-export async function getTwistInventory(userId: bigint): Promise<TwistInventory> {
-  const r = await pool.query(
-    `SELECT twists FROM users WHERE tiktok_id=$1`,
-    [userId]
-  );
-
-  if (!r.rows[0]) return normalizeTwists({});
-  return normalizeTwists(r.rows[0].twists);
-}
-
-/**
- * Voeg 1 of meer twists toe.
- */
+// ----------------------------------------------------------------------------------
+//  ADD TWIST (gift aankoop of admin)
+// ----------------------------------------------------------------------------------
 export async function addTwistToUser(
-  userId: bigint,
-  twist: TwistType,
-  quantity = 1
+  tiktokId: string,
+  type: TwistType,
+  amount: number = 1
 ) {
-  const inv = await getTwistInventory(userId);
-  inv[twist] = (inv[twist] || 0) + quantity;
+  const tid = BigInt(tiktokId);
 
+  // Haal huidige inventory op
+  const inv = await getUserTwistInventory(tiktokId);
+  inv[type] = (inv[type] ?? 0) + amount;
+
+  // Update DB
   await pool.query(
-    `UPDATE users SET twists=$1 WHERE tiktok_id=$2`,
-    [inv, userId]
+    `
+    UPDATE users
+    SET blocks = jsonb_set(
+      COALESCE(blocks, '{}'::jsonb),
+      '{twists}',
+      $1::jsonb
+    )
+    WHERE tiktok_id=$2
+    `,
+    [JSON.stringify(inv), tid]
   );
-
-  return inv;
 }
 
-/**
- * Verbruik (consumeer) 1 twist.
- */
-export async function consumeTwist(
-  userId: bigint,
-  twist: TwistType
+// ----------------------------------------------------------------------------------
+//  CONSUME TWIST (bij !use of admin)
+// ----------------------------------------------------------------------------------
+export async function consumeTwistFromUser(
+  tiktokId: string,
+  type: TwistType
 ): Promise<boolean> {
-  const inv = await getTwistInventory(userId);
+  const inv = await getUserTwistInventory(tiktokId);
 
-  if ((inv[twist] || 0) <= 0) return false;
+  if ((inv[type] ?? 0) <= 0) return false;
 
-  inv[twist] = inv[twist] - 1;
+  inv[type] -= 1;
 
   await pool.query(
-    `UPDATE users SET twists=$1 WHERE tiktok_id=$2`,
-    [inv, userId]
+    `
+    UPDATE users
+    SET blocks = jsonb_set(
+      COALESCE(blocks, '{}'::jsonb),
+      '{twists}',
+      $1::jsonb
+    )
+    WHERE tiktok_id=$2
+    `,
+    [JSON.stringify(inv), BigInt(tiktokId)]
   );
 
   return true;
 }
 
-/**
- * Check of user twist bezit.
- */
-export async function hasTwist(
-  userId: bigint,
-  twist: TwistType
+// ----------------------------------------------------------------------------------
+//  CHECK OWNERSHIP
+// ----------------------------------------------------------------------------------
+export async function userHasTwist(
+  tiktokId: string,
+  type: TwistType
 ): Promise<boolean> {
-  const inv = await getTwistInventory(userId);
-  return (inv[twist] || 0) > 0;
+  const inv = await getUserTwistInventory(tiktokId);
+  return (inv[type] ?? 0) > 0;
 }
 
-/**
- * Verwijdert ALLE twist te goeden van ALLE users — wordt gebruikt
- * na het beëindigen van een game.
- */
-export async function clearAllTwists() {
-  await pool.query(`UPDATE users SET twists='{}'::jsonb`);
+// ----------------------------------------------------------------------------------
+//  CLEAR ALL TWISTS (end of game)
+// ----------------------------------------------------------------------------------
+export async function clearAllTwistsForUser(tiktokId: string) {
+  await pool.query(
+    `
+    UPDATE users
+    SET blocks = jsonb_set(
+      COALESCE(blocks, '{}'::jsonb),
+      '{twists}',
+      '{"galaxy":0,"moneygun":0,"immune":0,"diamond_pistol":0,"bomb":0,"heal":0}'::jsonb
+    )
+    WHERE tiktok_id=$1
+    `,
+    [BigInt(tiktokId)]
+  );
+}
+
+// ----------------------------------------------------------------------------------
+//  CLEAR INVENTORIES FOR ALL USERS (reset after game end)
+// ----------------------------------------------------------------------------------
+export async function clearTwistsForAllUsers() {
+  await pool.query(
+    `
+    UPDATE users
+    SET blocks = jsonb_set(
+      COALESCE(blocks, '{}'::jsonb),
+      '{twists}',
+      '{"galaxy":0,"moneygun":0,"immune":0,"diamond_pistol":0,"bomb":0,"heal":0}'
+    )
+    `
+  );
 }
