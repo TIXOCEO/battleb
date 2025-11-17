@@ -1,110 +1,114 @@
 // ============================================================================
-// twist-definitions.ts — Twist Configurations v1.0
+// twist-definitions.ts — Twist Type Definitions v1.0
 // ============================================================================
 //
-// Dit bestand definieert ALLE twists:
-//  - giftId: gebruikt voor detectie in gift-engine
-//  - giftName: naam zoals TikTok hem doorgeeft
-//  - diamonds: diamantwaarde van de gift
-//  - requiresTarget: sommige twists hebben een doelwit nodig
-//  - chatAliases: alle varianten die chat kan gebruiken (!use moneygun, !use mg)
+// Bevat:
+//  - TwistType enum
+//  - Definitie van alle twists
+//  - Aliases (!use moneygun, !use mg, !use gun, etc.)
+//  - Zoekfunctie findTwistByAlias()
+//  - Metadata nodig voor engines + admin tools
 //
 // ============================================================================
 
+
+// Alle twist types — core identifiers
 export type TwistType =
-  | "galaxy"
-  | "moneygun"
+  | "reverse_rank"
+  | "money_gun"
   | "immune"
   | "diamond_pistol"
   | "bomb"
   | "heal";
 
-export interface TwistDefinition {
-  giftId: number;
-  giftName: string;
-  diamonds: number;
-  requiresTarget: boolean;
-  chatAliases: string[];
-}
+// ---------------------------------------------
+// ALLE TWISTS MET COMPLETE METADATA
+// ---------------------------------------------
 
-/**
- * Hoofd mapping van alle twists.
- * Let op: giftId moet exact overeenkomen met TikTok gift-ID's.
- */
-export const TWIST_MAP: Record<TwistType, TwistDefinition> = {
-  galaxy: {
+export const TWIST_MAP: Record<
+  TwistType,
+  {
+    giftId: number;
+    giftName: string;
+    diamonds: number;
+    aliases: string[];
+    description: string;
+    targeted: boolean;        // moet er een @username doel zijn?
+    isOffensive: boolean;     // valt een speler direct aan?
+  }
+> = {
+  reverse_rank: {
     giftId: 11046,
     giftName: "Galaxy",
     diamonds: 1000,
-    requiresTarget: false,
-    chatAliases: ["galaxy", "sterrenstelsel", "reverse", "flip"],
+    aliases: ["galaxy", "reverse", "rr", "flip", "sterrenstelsel"],
+    description: "Draait de arena-ranglijst om op basis van diamonds.",
+    targeted: false,
+    isOffensive: false,
   },
 
-  moneygun: {
+  money_gun: {
     giftId: 7168,
     giftName: "Money Gun",
     diamonds: 500,
-    requiresTarget: true,
-    chatAliases: ["moneygun", "mg", "gun"],
+    aliases: ["moneygun", "mg", "gun", "elimineer"],
+    description: "Schiet een speler af — markeert als eliminated voor einde ronde.",
+    targeted: true,
+    isOffensive: true,
   },
 
   immune: {
     giftId: 14658,
     giftName: "Blooming Heart",
     diamonds: 1599,
-    requiresTarget: true,
-    chatAliases: ["immune", "immuun", "shield", "protect"],
+    aliases: ["heart", "immune", "shield", "protect", "immu", "immuun"],
+    description: "Geeft een speler immuniteit voor eliminatie.",
+    targeted: true,
+    isOffensive: false,
   },
 
   diamond_pistol: {
     giftId: 14768,
     giftName: "Diamond Gun",
     diamonds: 5000,
-    requiresTarget: true,
-    chatAliases: ["diamondpistol", "diamantpistool", "dp", "wipe"],
+    aliases: ["diamondpistol", "dp", "wipe", "diamantpistool"],
+    description: "Wiped ALLE spelers behalve het doelwit — einde ronde eliminatie.",
+    targeted: true,
+    isOffensive: true,
   },
 
   bomb: {
     giftId: 16101,
     giftName: "Space Dog",
     diamonds: 2500,
-    requiresTarget: false,
-    chatAliases: ["bomb", "bom", "boom"],
+    aliases: ["bomb", "dog", "explode", "bd", "bom"],
+    description: "Selecteert 1 willekeurige speler om te elimineren.",
+    targeted: false,
+    isOffensive: true,
   },
 
   heal: {
     giftId: 14210,
     giftName: "Galaxy Globe",
     diamonds: 1500,
-    requiresTarget: true,
-    chatAliases: ["heal", "revive", "hp", "reanimate"],
+    aliases: ["heal", "globe", "hg", "reanimate", "herstel"],
+    description: "Verwijdert 1 eliminatie-status van een speler.",
+    targeted: true,
+    isOffensive: false,
   },
 };
 
-/**
- * Vind twisttype op basis van gift-ID.
- */
-export function findTwistByGiftId(giftId: number): TwistType | null {
-  for (const key of Object.keys(TWIST_MAP) as TwistType[]) {
-    if (TWIST_MAP[key].giftId === giftId) return key;
-  }
-  return null;
-}
 
-/**
- * Vind twisttype op basis van chatwoord.
- * Hiermee werken alle varianten van !use commands:
- *  !use mg @user
- *  !use shield @user
- *  !use diamantpistool @user
- */
-export function findTwistByAlias(alias: string): TwistType | null {
-  const clean = alias.toLowerCase().trim();
+// ============================================================================
+// Zoekfunctie voor commando’s (!use moneygun @test)
+// ============================================================================
+
+export function findTwistByAlias(aliasRaw: string): TwistType | null {
+  const alias = aliasRaw.trim().toLowerCase();
 
   for (const key of Object.keys(TWIST_MAP) as TwistType[]) {
-    if (TWIST_MAP[key].chatAliases.includes(clean)) {
-      return key;
-    }
+    const t = TWIST_MAP[key];
+    if (t.aliases.includes(alias)) return key;
   }
 
   return null;
