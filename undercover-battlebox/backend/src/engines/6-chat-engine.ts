@@ -108,7 +108,7 @@ export function initChatEngine(conn: any) {
         }
 
         try {
-          await addToQueue(String(userId));
+          await addToQueue(String(userId), user.username);
         } catch (err: any) {
           emitLog({ type: "queue", message: err.message });
           return;
