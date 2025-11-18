@@ -1,18 +1,18 @@
 // ============================================================================
-// src/engines/1-connection.ts — v2.0 (Host-AutoDetect, Clean, Stable)
-// TikTok LIVE connector — haalt ECHTE host info uit 'connected' event
+// 1-connection.ts — v3.0 (Host-ID Enabled, Stable, Compact Logging)
+// TikTok LIVE connector — haalt ECHTE host_id + uniqueId bij "connected"
 // ============================================================================
 
 import { WebcastPushConnection } from "tiktok-live-connector";
+import pool, { getSetting, setSetting } from "../db";
 import { upsertIdentityFromLooseEvent } from "./2-user-engine";
-import pool, { getSetting } from "../db";
 import { refreshHostUsername } from "./3-gift-engine";
 
 // Actieve verbinding
 let activeConn: WebcastPushConnection | null = null;
 
-// Helper: sleep
-const wait = (ms: number) => new Promise(res => setTimeout(res, ms));
+// Helper
+const wait = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
 
 // ============================================================================
@@ -23,49 +23,48 @@ export async function startConnection(
   username: string,
   onConnected: () => void
 ): Promise<{ conn: WebcastPushConnection | null }> {
-
+  
   const cleanHost = username.replace(/^@+/, "").trim().toLowerCase();
 
   if (!cleanHost) {
-    console.error(`❌ Ongeldige host-invoer: "${username}"`);
+    console.error(`❌ Ongeldige host: "${username}"`);
     return { conn: null };
   }
 
-  console.log(`🔌 Verbinden met TikTok LIVE … @${cleanHost}`);
+  console.log(`🔌 Verbinden met TikTok LIVE… @${cleanHost}`);
 
   const conn = new WebcastPushConnection(cleanHost, {
     requestOptions: { timeout: 12000 },
     enableExtendedGiftInfo: true,
   });
 
-  // Retry tot 8x
+  // Retry 8x
   for (let i = 1; i <= 8; i++) {
     try {
       await conn.connect();
       console.log(`✔ Verbonden met livestream van @${cleanHost}`);
 
-      // ----------------------------------------------------------
-      // ON CONNECTED → HIER KOMT ECHTE HOST INFO VAN TIKTOK BINNEN
-      // ----------------------------------------------------------
+      // --------------------------------------------------------------------
+      // CONNECTED EVENT: HIER KOMT DE ECHTE HOST-ID VAN TIKTOK BINNEN
+      // --------------------------------------------------------------------
       conn.on("connected", async (info: any) => {
-        console.log("═══════════════ CONNECTED ═══════════════");
-        console.log(`BATTLEBOX VERBONDEN MET @${cleanHost}`);
-        console.log("TikTok geeft nu echte host data…");
-        console.log("══════════════════════════════════════════");
+        console.log("══════════ CONNECTED ══════════");
 
         try {
+          // ECHTE host ID zoeken in TikTok payload
           const hostId =
             info?.hostId ||
             info?.ownerId ||
             info?.roomIdOwner ||
-            info?.userId ||
             info?.user?.userId ||
+            info?.userId ||
             null;
 
           const hostUnique =
             info?.uniqueId ||
             info?.ownerUniqueId ||
             info?.user?.uniqueId ||
+            cleanHost ||
             null;
 
           const hostDisplay =
@@ -73,65 +72,53 @@ export async function startConnection(
             info?.ownerNickname ||
             info?.user?.nickname ||
             hostUnique ||
-            "Onbekende Host";
+            "Host";
 
-          console.log("🎯 TikTok HOST DETECTIE:", {
+          console.log("🎯 HOST DETECTIE:", {
             id: hostId,
             uniqueId: hostUnique,
             display: hostDisplay,
           });
 
           if (hostId && hostUnique) {
-            // Opslaan in settings
-            await pool.query(
-              `INSERT INTO settings (key, value)
-               VALUES ('host_id', $1)
-               ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-              [String(hostId)]
-            );
 
-            await pool.query(
-              `INSERT INTO settings (key, value)
-               VALUES ('host_username', $1)
-               ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-              [hostUnique]
-            );
+            // Save host_id
+            await setSetting("host_id", String(hostId));
 
-            // Immediate cache refresh
+            // Save username WITHOUT @
+            await setSetting("host_username", hostUnique.toLowerCase());
+
+            // refresh cache for gift-engine
             await refreshHostUsername();
 
-            // Registreren als user
+            // Register host in database users table
             await upsertIdentityFromLooseEvent({
               userId: String(hostId),
               uniqueId: hostUnique,
               nickname: hostDisplay,
             });
 
-            console.log("💾 HOST-AUTO-DETECTED → opgeslagen in DB + cache");
+            console.log("💾 HOST opgeslagen (host_id + username)");
           } else {
-            console.warn("⚠ TikTok gaf geen hostId / uniqueId terug!");
+            console.warn("⚠ TikTok gaf geen hostId/uniqueId terug!");
           }
         } catch (err: any) {
-          console.error("❌ Host-autodetect fout:", err.message || err);
+          console.error("❌ Host-detectie fout:", err?.message || err);
         }
 
         onConnected();
       });
 
-      // ----------------------------------------------------------
-      // Identity synchronisatie (alle events)
-      // ----------------------------------------------------------
       attachIdentityUpdaters(conn);
 
-      // Save active conn
       activeConn = conn;
       return { conn };
 
     } catch (err: any) {
-      console.error(`⛔ Verbinding mislukt (poging ${i}/8):`, err.message || err);
+      console.error(`⛔ Verbinding mislukt (poging ${i}/8):`, err?.message);
 
       if (i === 8) {
-        console.error(`⚠ @${cleanHost} lijkt offline → Engine in IDLE-modus`);
+        console.error(`⚠ @${cleanHost} lijkt offline → IDLE-modus`);
         return { conn: null };
       }
 
@@ -143,6 +130,7 @@ export async function startConnection(
 }
 
 
+
 // ============================================================================
 // STOP CONNECTION
 // ============================================================================
@@ -150,17 +138,16 @@ export async function startConnection(
 export async function stopConnection(
   conn?: WebcastPushConnection | null
 ): Promise<void> {
-
   const c = conn || activeConn;
   if (!c) return;
 
-  console.log("🔌 TikTok-verbinding sluiten…");
+  console.log("🔌 Verbreken TikTok-verbinding…");
 
   try {
     if (typeof c.disconnect === "function") await c.disconnect();
     else if (typeof (c as any).close === "function") await (c as any).close();
 
-    console.log("🛑 Verbinding succesvol gestopt.");
+    console.log("🛑 Verbinding verbroken.");
   } catch (err) {
     console.error("❌ stopConnection fout:", err);
   }
@@ -169,8 +156,9 @@ export async function stopConnection(
 }
 
 
+
 // ============================================================================
-// IDENTITY SYNC (alle TikTok events)
+// IDENTITY SYNC ENGINE
 // ============================================================================
 
 function attachIdentityUpdaters(conn: any) {
@@ -190,7 +178,7 @@ function attachIdentityUpdaters(conn: any) {
     "subscribe",
     "social",
     "liveRoomUser",
-    "enter",
+    "enter"
   ];
 
   for (const ev of events) {
@@ -199,17 +187,18 @@ function attachIdentityUpdaters(conn: any) {
     } catch {}
   }
 
+  // Gifts
   conn.on("gift", (g: any) => {
     update(g);
     if (g?.toUser || g?.receiver) update(g.toUser || g.receiver);
   });
 
+  // Battles
   conn.on("linkMicBattle", (d: any) => {
     if (Array.isArray(d?.battleUsers)) {
       for (const u of d.battleUsers) update(u);
     }
   });
 
-  console.log("👤 Identity engine actief (TikTok → users-table)");
+  console.log("👤 Identity engine actief (TikTok → users)");
 }
-
