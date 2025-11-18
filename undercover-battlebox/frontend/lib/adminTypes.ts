@@ -34,6 +34,7 @@ export interface ArenaState {
     roundDurationPre: number;
     roundDurationFinal: number;
     graceSeconds: number;
+    forceEliminations: boolean;
   };
   lastSortedAt: number;
 }
