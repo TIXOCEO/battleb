@@ -1,25 +1,31 @@
-// src/engines/2-user-engine.ts
-// USER ENGINE — versie 0.7.3 STABLE (BattleBox)
+// ============================================================================
+// 2-user-engine.ts — v1.0.1 (EmitLog, Host-ID Upgrade, Unknown→Known Fixes)
+// Undercover BattleBox — User Identity Core
+// ============================================================================
 //
-// Doelen:
-//  - Onbekend minimaliseren
-//  - Upgrades wanneer betere data binnenkomt
-//  - last_seen_at altijd bijwerken
-//  - Consistent met gift-engine, chat-engine, twist-engine & server
+// Functies:
+//  ✔ Houdt ALTIJD beste versie van username & display_name
+//  ✔ Updatet bij elk event last_seen_at
+//  ✔ Voorkomt Unknown spooknamen
+//  ✔ Detecteert upgrades → emitLog() + console.log()
+//  ✔ Werkt samen met host_id vanuit settings
 //
-// Gebruikte kolommen (users):
-// tiktok_id (bigint), display_name, username, last_seen_at,
-// diamonds_total, bp_total, is_fan, fan_expires_at
+// ============================================================================
 
-import pool from "../db";
+import pool, { getSetting } from "../db";
+import { emitLog } from "../server";
 
 export interface UserIdentity {
-  id: string;            // tiktok_id als string
-  display_name: string;  // nette naam voor logs / UI
-  username: string;      // zonder @, voor logica en matching
+  id: string;            // TikTok userId (string)
+  display_name: string;  // nette naam voor UI
+  username: string;      // zonder @
 }
 
-// Normalise username → altijd met @ in de database
+// ============================================================================
+// Helpers
+// ============================================================================
+
+// Normaliseert usernames → altijd met @ in database
 function normalizeHandle(uid?: string | null, fallback?: string | null): string {
   const raw =
     uid?.toString().trim() ||
@@ -28,7 +34,6 @@ function normalizeHandle(uid?: string | null, fallback?: string | null): string 
 
   if (!raw) return "";
 
-  // Haal leading @ weg, maak lowercase, verwijder rare chars
   const clean = raw
     .replace(/^@+/, "")
     .toLowerCase()
@@ -36,10 +41,10 @@ function normalizeHandle(uid?: string | null, fallback?: string | null): string 
 
   if (!clean) return "";
 
-  return clean.startsWith("@") ? clean : "@" + clean;
+  return "@" + clean;
 }
 
-// Clean displayname voor UI
+// display_name opschonen
 function cleanDisplay(v?: string | null): string | null {
   if (!v) return null;
   const t = v.trim();
@@ -48,12 +53,11 @@ function cleanDisplay(v?: string | null): string | null {
   return t;
 }
 
-/**
- * Centrale user-upsert:
- *  - Wordt aangeroepen door gift-engine, chat-engine, server/twists
- *  - Zorgt dat username & display_name zo goed mogelijk zijn
- *  - Past bestaande records aan als betere data binnenkomt
- */
+
+// ============================================================================
+// getOrUpdateUser() — centrale identity handler
+// ============================================================================
+
 export async function getOrUpdateUser(
   tiktok_id: string,
   nickname?: string,
@@ -69,12 +73,20 @@ export async function getOrUpdateUser(
 
   const tid = BigInt(tiktok_id);
 
-  // Nieuwe (mogelijke) waarden uit event
+  // Nieuwe data van TikTok event
   const newDisplay = cleanDisplay(nickname);
   const newUsernameFull = normalizeHandle(uniqueId, nickname);
-  const newUsernameClean = newUsernameFull.replace(/^@+/, "");
+  const newUsernameClean = newUsernameFull.replace(/^@/, "");
 
-  // Insert or update with UPSERT
+  // Check of deze user host is
+  const hostIdSetting = await getSetting("host_id");
+  const isHost = hostIdSetting && hostIdSetting === tiktok_id;
+
+  // Instellingen voor unknown fallback
+  const fallbackDisplay = `Onbekend#${tiktok_id.slice(-5)}`;
+  const fallbackUsername = `@onbekend${tiktok_id.slice(-5)}`;
+
+  // Database UPSERT
   await pool.query(
     `
     INSERT INTO users (
@@ -102,28 +114,85 @@ export async function getOrUpdateUser(
       END,
       last_seen_at = NOW()
     `,
-    [tid, newDisplay || `Onbekend#${tiktok_id.slice(-5)}`, newUsernameFull || `@onbekend${tiktok_id.slice(-5)}`]
+    [
+      tid,
+      newDisplay || fallbackDisplay,
+      newUsernameFull || fallbackUsername,
+    ]
   );
 
-  // Final lookup for clean return
+  // User terug ophalen
   const res = await pool.query(
     `SELECT display_name, username FROM users WHERE tiktok_id=$1 LIMIT 1`,
     [tid]
   );
 
-  const { display_name, username } = res.rows[0];
+  const row = res.rows[0] || {};
 
+  const finalDisplay = row.display_name || fallbackDisplay;
+  const finalUsername = (row.username || fallbackUsername).replace(/^@/, "");
+
+  // ------------------------------------------------------------------------
+  // Detecteer upgrades → stuur naar logs
+  // ------------------------------------------------------------------------
+
+  if (
+    newDisplay &&
+    newDisplay !== fallbackDisplay &&
+    newDisplay !== row.display_name
+  ) {
+    emitLog({
+      type: "user",
+      message: `Naam update: ${fallbackDisplay} → ${newDisplay}`,
+    });
+    console.log(
+      `👤 Display upgrade: ${fallbackDisplay} → ${newDisplay}`
+    );
+  }
+
+  if (
+    newUsernameFull &&
+    newUsernameFull !== fallbackUsername &&
+    newUsernameClean !== finalUsername
+  ) {
+    emitLog({
+      type: "user",
+      message: `Username update: ${fallbackUsername} → @${newUsernameClean}`,
+    });
+    console.log(
+      `👤 Username upgrade: ${fallbackUsername} → @${newUsernameClean}`
+    );
+  }
+
+  // ------------------------------------------------------------------------
+  // Host fix — als TikTok ID == host_id → username mag NOOIT "onbekend" zijn
+  // ------------------------------------------------------------------------
+  if (isHost && finalUsername.startsWith("onbekend")) {
+    console.log(`🏷 Host username hersteld → @${newUsernameClean}`);
+
+    await pool.query(
+      `
+      UPDATE users
+      SET username=$1
+      WHERE tiktok_id=$2
+      `,
+      [newUsernameFull || fallbackUsername, tid]
+    );
+  }
+
+  // Result terug
   return {
     id: tiktok_id,
-    display_name: display_name || `Onbekend#${tiktok_id.slice(-5)}`,
-    username: (username || "").replace(/^@+/, ""),
+    display_name: finalDisplay,
+    username: finalUsername,
   };
 }
 
-/**
- * upsertIdentityFromLooseEvent
- * Wordt gebruikt als er een willekeurig TikTok event binnenkomt
- */
+
+// ============================================================================
+// upsertIdentityFromLooseEvent()
+// ============================================================================
+
 export async function upsertIdentityFromLooseEvent(loose: any): Promise<void> {
   if (!loose) return;
 
