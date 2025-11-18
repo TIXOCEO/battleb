@@ -135,21 +135,28 @@ export function initGiftEngine(conn: any) {
     return;
   }
 
-  console.log("🎁 GIFT ENGINE v4.3 ON");
+  // ..bovenstuk van 3-gift-engine.ts blijft hetzelfde
+
+  console.log("🎁 GIFT ENGINE v4.3 LOADED WITH DEBUG");
 
   conn.on("gift", async (data: any) => {
-    const msgId = String(data.msgId ?? data.id ?? data.logId ?? "");
+    const raw = JSON.parse(JSON.stringify(data)); // deep clone for debugging
+    console.log("🔔 GIFT RAW:", raw); // Debug line
 
-    if (msgId && processedMsgIds.has(msgId)) return;
+    const msgId = String(data.msgId ?? data.id ?? data.logId ?? "");
+    if (msgId && processedMsgIds.has(msgId)) {
+      console.log(`⚠️ Duplicate gift ignored: ${msgId}`);
+      return;
+    }
     processedMsgIds.add(msgId);
 
     try {
-      const senderId =
-        data.user?.userId ||
-        data.sender?.userId ||
-        data.userId;
-
-      if (!senderId) return;
+      // Sender parsing
+      const senderId = data.user?.userId || data.sender?.userId || data.userId;
+      if (!senderId) {
+        console.warn("⚠️ No senderId in gift:", data);
+        return;
+      }
 
       const sender = await getOrUpdateUser(
         String(senderId),
@@ -158,6 +165,7 @@ export function initGiftEngine(conn: any) {
       );
 
       const senderUsername = sender.username.replace(/^@/, "");
+
       const rawDiamonds = Number(data.diamondCount || 0);
       if (rawDiamonds <= 0) return;
 
@@ -211,21 +219,24 @@ export function initGiftEngine(conn: any) {
 
       if (twistType) {
         await addTwistByGift(String(senderId), twistType);
+
         emitLog({
           type: "twist",
           message: `${sender.display_name} ontving twist: ${TWIST_MAP[twistType].giftName}`,
         });
       }
 
-      // HeartMe gift triggers fan club if host
+      // FANCLUB via HeartMe
       if (isHost && (data.giftName?.toLowerCase() === "heart me" || data.giftId === 5655)) {
         await activateFan(BigInt(senderId));
+
         emitLog({
           type: "gift",
           message: `${sender.display_name} werd FAN voor 24h ❤️`,
         });
       }
 
+      // Save gift in DB
       await pool.query(
         `
         INSERT INTO gifts (
@@ -255,7 +266,7 @@ export function initGiftEngine(conn: any) {
         message: `${sender.display_name} → ${receiver.display_name}: ${data.giftName} (${credited}💎)`,
       });
     } catch (err: any) {
-      console.error("GiftEngine ERROR:", err?.message || err);
+      console.error("❌ GiftEngine ERROR:", err?.message || err);
+      console.error("RAW EVENT:", raw);
     }
   });
-}
