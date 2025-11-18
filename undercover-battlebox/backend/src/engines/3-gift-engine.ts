@@ -1,18 +1,23 @@
 // ============================================================================
-// 3-gift-engine.ts — v4.8 (Host-ID Perfect, Compact Logs, Upgrade Detection)
+// 3-gift-engine.ts — v4.9 (Host-ID Perfect, Compact Debug, Upgrade Detection)
 // Undercover BattleBox — Gift + Twist Engine
 // ============================================================================
 //
 // Fixes & Features:
 // ✔ Host-detectie via host_id én host_username
-// ✔ Unknown→Known updates → emitLog + console
-// ✔ Compact logs, geen RAW spam
+// ✔ Host altijd via users-table geüpdatet zodra hij als receiver voorkomt
+// ✔ Unknown→Known updates → emitLog + console (sender + receiver)
+// ✔ Compact, maar gerichte UNKNOWN-debug (max 20 keer)
 // ✔ Twist-integratie 100% intact
 // ✔ Arena diamonds logic intact
 // ✔ Fan Club (HeartMe → 24h)
 // ✔ BigInt-safe
 // ✔ Geen duplicates
 //
+// Voor maximale werking:
+//  - 1-connection.ts moet bij "connected" event host_id + host_username in
+//    settings opslaan (host_id, host_username) en upsertIdentityFromLooseEvent
+//    voor de host aanroepen.
 // ============================================================================
 
 import pool, { getSetting } from "../db";
@@ -46,14 +51,29 @@ let HOST_ID_CACHE: string | null = null;
 // Host cache refresh
 // ============================================================================
 export async function refreshHostUsername() {
-  const h = (await getSetting("host_username")) || "";
-  HOST_USERNAME_CACHE = h.trim().replace("@", "").toLowerCase();
+  const dbHostUsername = (await getSetting("host_username")) || "";
+  const dbHostId = (await getSetting("host_id")) || null;
 
-  HOST_ID_CACHE = await getSetting("host_id");
+  HOST_USERNAME_CACHE = dbHostUsername.trim().replace("@", "").toLowerCase() || "";
+  HOST_ID_CACHE = dbHostId ? String(dbHostId) : null;
 
   console.log(
     `🔄 HOST REFRESH → username=@${HOST_USERNAME_CACHE || "-"} | id=${HOST_ID_CACHE || "-"}`
   );
+
+  if (HOST_USERNAME_CACHE && !HOST_ID_CACHE) {
+    console.warn(
+      "⚠ HOST WARNING: host_username is gezet, maar host_id ontbreekt. " +
+        "Zorg dat 1-connection.ts bij 'connected' zowel host_id als host_username opslaat."
+    );
+  }
+
+  if (!HOST_USERNAME_CACHE && HOST_ID_CACHE) {
+    console.warn(
+      "⚠ HOST WARNING: host_id is gezet, maar host_username is leeg. " +
+        "Admin settings zouden host_username ook moeten bevatten."
+    );
+  }
 }
 
 export async function initDynamicHost() {
@@ -72,8 +92,51 @@ const debugUserCache = new Map<
   { display_name: string; username: string }
 >();
 
+// UNKNOWN debug limiter
+let unknownDebugCount = 0;
+const UNKNOWN_DEBUG_LIMIT = 20;
+
+function debugUnknownUser(label: string, id: string, data: any) {
+  if (unknownDebugCount >= UNKNOWN_DEBUG_LIMIT) return;
+  unknownDebugCount++;
+
+  console.log(`🔍 UNKNOWN USER DEBUG [${label}]`, {
+    id,
+    from: {
+      user: data.user,
+      sender: data.sender,
+      toUser: data.toUser,
+      receiver: data.receiver,
+      receiverUserId: data.receiverUserId,
+      toUserId: data.toUserId,
+      giftId: data.giftId,
+      diamondCount: data.diamondCount,
+    },
+  });
+}
+
+// Helper om zowel sender als receiver updates te loggen
+function trackUserChange(tiktokIdStr: string, label: string, r: { display_name: string; username: string }) {
+  const prev = debugUserCache.get(tiktokIdStr);
+  if (!prev || prev.display_name !== r.display_name || prev.username !== r.username) {
+    debugUserCache.set(tiktokIdStr, {
+      display_name: r.display_name,
+      username: r.username,
+    });
+
+    const msg = `${label} update: ${tiktokIdStr} → ${r.display_name} (@${r.username})`;
+
+    emitLog({
+      type: "user",
+      message: msg,
+    });
+
+    console.log(`👤 ${msg}`);
+  }
+}
+
 // ============================================================================
-// Receiver resolver — nu met host_id matching
+// Receiver resolver — nu met host_id matching + user-updates
 // ============================================================================
 async function resolveReceiver(event: any) {
   const hostRaw = HOST_USERNAME_CACHE;
@@ -88,29 +151,68 @@ async function resolveReceiver(event: any) {
     null;
 
   const uniqueRaw = event.toUser?.uniqueId || event.receiver?.uniqueId || null;
-  const nickRaw = event.toUser?.nickname || event.receiver?.nickname || null;
+  const nickRaw =
+    event.toUser?.nickname ||
+    event.receiver?.nickname ||
+    event.toUser?.displayName ||
+    null;
 
   const uniqueNorm = uniqueRaw ? norm(uniqueRaw) : null;
   const nickNorm = nickRaw ? norm(nickRaw) : null;
 
+  console.log("🎯 resolveReceiver", {
+    hostUsername: hostRaw || "-",
+    hostId: hostId || "-",
+    eventId: eventId ? String(eventId) : null,
+    giftId: event.giftId,
+    uniqueRaw,
+    nickRaw,
+  });
+
   // --------------------------------------------------------------------------
-  // 1) Match op host_id → zawsze host
+  // 1) Match op host_id → altijd host
   // --------------------------------------------------------------------------
   if (hostId && eventId && String(eventId) === hostId) {
+    // Zorg dat host zelf ook netjes in users staat/updatet
+    const hostIdentity = await getOrUpdateUser(
+      hostId,
+      nickRaw || uniqueRaw || null,
+      uniqueRaw || null
+    );
+
+    trackUserChange(hostId, "HOST (receiver)", hostIdentity);
+
     return {
       id: hostId,
-      username: hostRaw,
-      display_name: nickRaw || uniqueRaw || hostRaw,
+      username: hostIdentity.username || hostRaw,
+      display_name: hostIdentity.display_name || nickRaw || uniqueRaw || hostRaw,
       role: "host" as const,
     };
   }
 
   // --------------------------------------------------------------------------
-  // 2) Match op uniqueId
+  // 2) Match op uniqueId (host_username matcht unieke id)
   // --------------------------------------------------------------------------
   if (uniqueNorm && hostRaw && uniqueNorm === hostRaw) {
+    // Probeer host te updaten als users-record bestaat
+    if (hostId) {
+      const hostIdentity = await getOrUpdateUser(
+        hostId,
+        nickRaw || uniqueRaw || null,
+        uniqueRaw || null
+      );
+      trackUserChange(hostId, "HOST (uniqueId)", hostIdentity);
+
+      return {
+        id: hostId,
+        username: hostIdentity.username || hostRaw,
+        display_name: hostIdentity.display_name || uniqueRaw || hostRaw,
+        role: "host" as const,
+      };
+    }
+
     return {
-      id: hostId,
+      id: null,
       username: hostRaw,
       display_name: uniqueRaw,
       role: "host" as const,
@@ -121,8 +223,24 @@ async function resolveReceiver(event: any) {
   // 3) Match op nickname bevat hostnaam
   // --------------------------------------------------------------------------
   if (nickNorm && hostRaw && nickNorm.includes(hostRaw)) {
+    if (hostId) {
+      const hostIdentity = await getOrUpdateUser(
+        hostId,
+        nickRaw || uniqueRaw || null,
+        uniqueRaw || null
+      );
+      trackUserChange(hostId, "HOST (nickname)", hostIdentity);
+
+      return {
+        id: hostId,
+        username: hostIdentity.username || hostRaw,
+        display_name: hostIdentity.display_name || nickRaw || hostRaw,
+        role: "host" as const,
+      };
+    }
+
     return {
-      id: hostId,
+      id: null,
       username: hostRaw,
       display_name: nickRaw,
       role: "host" as const,
@@ -141,23 +259,7 @@ async function resolveReceiver(event: any) {
       uniqueRaw || null
     );
 
-    // Detecteer updates
-    const prev = debugUserCache.get(tiktokIdStr);
-    if (!prev || prev.display_name !== r.display_name || prev.username !== r.username) {
-      debugUserCache.set(tiktokIdStr, {
-        display_name: r.display_name,
-        username: r.username,
-      });
-
-      emitLog({
-        type: "user",
-        message: `User update: ${tiktokIdStr} → ${r.display_name} (@${r.username})`,
-      });
-
-      console.log(
-        `👤 User update: ${tiktokIdStr} → ${r.display_name} (@${r.username})`
-      );
-    }
+    trackUserChange(tiktokIdStr, "RECEIVER", r);
 
     // Deze speler blijkt de host te zijn?
     if (hostRaw && norm(r.username) === hostRaw) {
@@ -178,11 +280,27 @@ async function resolveReceiver(event: any) {
   }
 
   // --------------------------------------------------------------------------
-  // 5) Fallback op hostRaw
+  // 5) Fallback op hostRaw (we weten niets, maar host is bekend)
   // --------------------------------------------------------------------------
   if (hostRaw) {
+    if (hostId) {
+      const hostIdentity = await getOrUpdateUser(
+        hostId,
+        nickRaw || uniqueRaw || null,
+        uniqueRaw || null
+      );
+      trackUserChange(hostId, "HOST (fallback)", hostIdentity);
+
+      return {
+        id: hostId,
+        username: hostIdentity.username || hostRaw,
+        display_name: hostIdentity.display_name || hostRaw,
+        role: "host" as const,
+      };
+    }
+
     return {
-      id: hostId,
+      id: null,
       username: hostRaw,
       display_name: hostRaw,
       role: "host" as const,
@@ -235,14 +353,19 @@ function calcDiamonds(data: any): number {
 // Core gift processor
 // ============================================================================
 async function processGiftEvent(data: any, source: string) {
-  console.log(`💠 Gift [${source}] id=${data.giftId} 💎=${data.diamondCount}`);
+  console.log(
+    `💠 Gift [${source}] giftId=${data.giftId} 💎=${data.diamondCount}`
+  );
 
   // Dedupe
   const msgId =
     data.msgId ?? data.id ?? data.logId ?? `${source}-${data.giftId}-${Date.now()}`;
   const key = String(msgId);
 
-  if (processedMsgIds.has(key)) return;
+  if (processedMsgIds.has(key)) {
+    console.log("⏭️ Duplicate gift ignored:", key);
+    return;
+  }
   processedMsgIds.add(key);
 
   try {
@@ -253,7 +376,10 @@ async function processGiftEvent(data: any, source: string) {
       data.userId ||
       data.senderUserId;
 
-    if (!senderId) return;
+    if (!senderId) {
+      console.warn("⚠ Geen senderId in gift-event → skip");
+      return;
+    }
 
     const sender = await getOrUpdateUser(
       String(senderId),
@@ -261,8 +387,13 @@ async function processGiftEvent(data: any, source: string) {
       data.user?.uniqueId || data.sender?.uniqueId || null
     );
 
+    trackUserChange(String(senderId), "SENDER", sender);
+
     const credited = calcDiamonds(data);
-    if (credited <= 0) return;
+    if (credited <= 0) {
+      console.log("ℹ Gift nog in streak / 0 diamonds → geen credit");
+      return;
+    }
 
     const receiver = await resolveReceiver(data);
     const isHost = receiver.role === "host";
@@ -270,6 +401,25 @@ async function processGiftEvent(data: any, source: string) {
     console.log(
       `🎁 ${sender.display_name} → ${receiver.display_name} (${data.giftName}) +${credited}💎`
     );
+
+    // Gerichte UNKNOWN debug (max 20x)
+    if (
+      (sender.display_name.startsWith("Onbekend#") ||
+        sender.username.startsWith("onbekend")) &&
+      unknownDebugCount < UNKNOWN_DEBUG_LIMIT
+    ) {
+      debugUnknownUser("sender", String(senderId), data);
+    }
+
+    if (
+      ((receiver.display_name.startsWith("Onbekend#") ||
+        (receiver.username || "").startsWith("onbekend") ||
+        receiver.display_name === "UNKNOWN") &&
+        unknownDebugCount < UNKNOWN_DEBUG_LIMIT) ||
+      (isHost && (!HOST_ID_CACHE || !HOST_USERNAME_CACHE))
+    ) {
+      debugUnknownUser("receiver", String(receiver.id || "null"), data);
+    }
 
     const gameId = getCurrentGameSessionId();
     const arena = getArena();
@@ -279,7 +429,7 @@ async function processGiftEvent(data: any, source: string) {
     const inGrace = arena.status === "grace" && now <= arena.graceEnd;
     const inRound = inActive || inGrace;
 
-    // Diamonds
+    // Diamonds altijd op sender
     await addDiamonds(BigInt(senderId), credited, "total");
     await addDiamonds(BigInt(senderId), credited, "stream");
     await addDiamonds(BigInt(senderId), credited, "current_round");
@@ -302,7 +452,9 @@ async function processGiftEvent(data: any, source: string) {
 
     if (twistType) {
       await addTwistByGift(String(senderId), twistType);
-      console.log(`🌀 Twist: ${sender.display_name} → ${TWIST_MAP[twistType].giftName}`);
+      console.log(
+        `🌀 Twist: ${sender.display_name} → ${TWIST_MAP[twistType].giftName}`
+      );
 
       emitLog({
         type: "twist",
@@ -352,7 +504,6 @@ async function processGiftEvent(data: any, source: string) {
       type: "gift",
       message: `${sender.display_name} → ${receiver.display_name}: ${data.giftName} (${credited}💎)`,
     });
-
   } catch (err: any) {
     console.error("❌ GiftEngine error:", err?.message || err);
   }
@@ -367,7 +518,7 @@ export function initGiftEngine(conn: any) {
     return;
   }
 
-  console.log("🎁 GiftEngine v4.8 actief");
+  console.log("🎁 GiftEngine v4.9 actief");
 
   // Kleine debug van inkomende events
   if (typeof conn.onAny === "function") {
