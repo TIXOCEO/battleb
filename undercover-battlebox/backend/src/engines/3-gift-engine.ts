@@ -1,5 +1,5 @@
 // ============================================================================
-// 3-gift-engine.ts — v4.2 (Danny Stable Build)
+// 3-gift-engine.ts — v4.3 (Danny Safe Build)
 // ============================================================================
 //
 // ✔ Twist-integratie (Galaxy, MoneyGun, Bomb, Immune, Heal, Diamond Pistol)
@@ -10,6 +10,7 @@
 // ✔ Game boundaries correct
 // ✔ No duplicates (msgId-ratelimiter)
 // ✔ Stable matcher met display_name en raw username
+// ✔ SAFE-NO-CONNECTION
 //
 // ============================================================================
 
@@ -30,8 +31,7 @@ import { addTwistByGift } from "./8-twist-engine";
 // HELPER: GAME SESSION ID (SAFE)
 // ============================================================================
 function getCurrentGameSessionId(): number | null {
-  // @ts-ignore patched in server.ts
-  return io.currentGameId ?? null;
+  return (io as any).currentGameId ?? null;
 }
 
 // ============================================================================
@@ -83,7 +83,6 @@ async function resolveReceiver(event: any) {
   const uniqueRaw =
     event.toUser?.uniqueId ||
     event.receiver?.uniqueId ||
-    event.receiverUniqueId ||
     null;
 
   const nickRaw =
@@ -159,7 +158,17 @@ async function activateFan(userId: bigint) {
 // GIFT ENGINE
 // ============================================================================
 export function initGiftEngine(conn: any) {
-  console.log("🎁 GIFT ENGINE v4.2 LOADED WITH TWISTS");
+  if (!conn) {
+    console.warn("⚠ initGiftEngine stond aan zonder koppeling → IDLE-modus");
+    return;
+  }
+
+  if (typeof conn.on !== "function") {
+    console.warn("⚠ Foute conn in initGiftEngine → IDLE-modus");
+    return;
+  }
+
+  console.log("🎁 GIFT ENGINE v4.3 LOADED WITH TWISTS");
 
   conn.on("gift", async (data: any) => {
     const msgId = String(data.msgId ?? data.id ?? data.logId ?? "");
@@ -287,6 +296,7 @@ export function initGiftEngine(conn: any) {
         type: "gift",
         message: `${sender.display_name} → ${receiver.display_name}: ${data.giftName} (${credited}💎)`,
       });
+
     } catch (err: any) {
       console.error("GiftEngine ERROR:", err?.message || err);
     }
