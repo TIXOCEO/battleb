@@ -1,5 +1,5 @@
 // ============================================================================
-// 3-gift-engine.ts — v4.4 (Danny Safe Build + Debug)
+// 3-gift-engine.ts — v4.4-FULL-SAFE (Danny Build, volledig origineel + fixes)
 // ============================================================================
 //
 // ✔ Twist-integratie (Galaxy, MoneyGun, Bomb, Immune, Heal, Diamond Pistol)
@@ -7,12 +7,13 @@
 // ✔ Support voor non-twist gifts (BP & diamonds)
 // ✔ Host-only HeartMe → Fan 24h
 // ✔ BigInt-safe
-// ✔ Game boundaries correct (alleen in actieve/grace ronde voor spelers)
-// ✔ Gifts naar host tellen apart mee (receiver_role = 'host')
+// ✔ Game boundaries correct (alleen tijdens live ronde)
+// ✔ Fallback gift detection via roomMessage
+// ✔ RAW full debugging
+// ✔ onAny event debugging
 // ✔ No duplicates (msgId-ratelimiter)
-// ✔ Stable matcher met display_name en raw username
-// ✔ Extra console-debug (RAW events, filters, fouten)
-// ✔ onAny-debug om te zien of gifts op ander event type binnenkomen
+// ✔ Username/display-name updates gedetecteerd
+// ✔ FIX: r.tiktok_id vervangen door echte TikTok ID
 //
 // ============================================================================
 
@@ -61,6 +62,7 @@ const processedMsgIds = new Set<string>();
 setInterval(() => processedMsgIds.clear(), 60_000);
 
 // Debug cache om username/display_name changes te loggen
+// KEY = echte TikTok ID (string)
 const debugUserCache = new Map<
   string,
   { display_name: string; username: string }
@@ -115,30 +117,32 @@ async function resolveReceiver(event: any) {
 
   // 3) We hebben een eventId → lookup in users
   if (eventId) {
+    const tiktokIdStr = String(eventId);
+
     const r = await getOrUpdateUser(
-      String(eventId),
+      tiktokIdStr,
       nickRaw || null,
       uniqueRaw || null
     );
 
     // Debug: log wanneer naam verandert / onbekend → bekend
-    const prev = debugUserCache.get(r.tiktok_id);
+    const prev = debugUserCache.get(tiktokIdStr);
     if (
       !prev ||
       prev.display_name !== r.display_name ||
       prev.username !== r.username
     ) {
-      debugUserCache.set(r.tiktok_id, {
+      debugUserCache.set(tiktokIdStr, {
         display_name: r.display_name,
         username: r.username,
       });
 
       emitLog({
         type: "system",
-        message: `User update: ${r.tiktok_id} → ${r.display_name} (${r.username})`,
+        message: `User update: tikTokId=${tiktokIdStr} → ${r.display_name} (${r.username})`,
       });
       console.log(
-        `🆕 USER RESOLVED/UPDATED: id=${r.tiktok_id} display="${r.display_name}" username="${r.username}"`
+        `🆕 USER RESOLVED/UPDATED: tikTokId=${tiktokIdStr} display="${r.display_name}" username="${r.username}"`
       );
     }
 
@@ -180,7 +184,9 @@ async function resolveReceiver(event: any) {
   };
 }
 
+// ============================================================================
 // FAN 24h (HeartMe)
+// ============================================================================
 async function activateFan(userId: bigint) {
   const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
@@ -249,7 +255,6 @@ async function processGiftEvent(data: any, source: string) {
     const giftType = Number(data.giftType || 0);
 
     // Zelfde berekening als oude engine:
-    // giftType === 1 → alleen bij repeatEnd crediten
     const credited =
       giftType === 1
         ? repeatEnd
@@ -347,7 +352,7 @@ async function processGiftEvent(data: any, source: string) {
       console.log(`❤️ HEART ME FAN: ${sender.display_name} → FAN 24h`);
     }
 
-    // ------------------------------
+      // ------------------------------
     // SAVE IN DATABASE
     // ------------------------------
     await pool.query(
@@ -384,6 +389,7 @@ async function processGiftEvent(data: any, source: string) {
     console.log(
       `✅ GIFT STORED: sender=${senderUsername}, receiver=${receiver.username} (${receiver.role}), gift="${data.giftName}", diamonds=${credited}, gameId=${gameId}`
     );
+
   } catch (err: any) {
     console.error("❌ GiftEngine ERROR:", err?.message || err);
     console.error("RAW EVENT (on error):", rawClone);
@@ -407,9 +413,10 @@ export function initGiftEngine(conn: any) {
 
   console.log("🎁 GIFT ENGINE v4.4 LOADED WITH DEBUG");
 
-  // Debug: log alle event types 1x (voor analyse of gifts via andere naam komen)
+  // Debug: log alle event types 1x (voor analyse of gifts via andere namen komen)
   if (typeof conn.onAny === "function") {
     let debugCount = 0;
+
     conn.onAny((eventName: string, eventData: any) => {
       if (debugCount < 20) {
         console.log("📡 onAny EVENT:", eventName, "→ sample:", {
@@ -418,10 +425,9 @@ export function initGiftEngine(conn: any) {
           keys: Object.keys(eventData || {}),
         });
         debugCount++;
+
         if (debugCount === 20) {
-          console.log(
-            "📡 onAny debug limit reached (20). Verdere events niet meer gelogd."
-          );
+          console.log("📡 onAny debug limit reached → verdere events niet meer gelogd");
         }
       }
     });
@@ -432,10 +438,35 @@ export function initGiftEngine(conn: any) {
     await processGiftEvent(data, "gift");
   });
 
-  // Sommige libraries sturen gifts via andere events → fallback
+  // Fallback: sommige libs sturen gifts via roomMessage
   conn.on("roomMessage", async (data: any) => {
     if (data && (data.giftId || data.diamondCount)) {
       await processGiftEvent(data, "roomMessage");
     }
   });
+
+  // Extra fallback: sommige libs sturen gift via member event
+  conn.on("member", async (data: any) => {
+    if (data?.giftId || data?.diamondCount) {
+      await processGiftEvent(data, "member");
+    }
+  });
+
+  // ULTI fallback: volledige dump bij speciale eigen event
+  conn.on("chat", (d: any) => {
+    if (d?._data?.giftId || d?._data?.diamondCount) {
+      processGiftEvent(d._data, "chat-hidden");
+    }
+  });
 }
+
+// ============================================================================
+// EXPORTS
+// ============================================================================
+
+export default {
+  initGiftEngine,
+  initDynamicHost,
+  refreshHostUsername,
+};
+
