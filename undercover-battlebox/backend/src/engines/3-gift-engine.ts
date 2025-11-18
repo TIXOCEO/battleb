@@ -1,42 +1,29 @@
 // ============================================================================
-// 3-gift-engine.ts — v5.0 (Danny Super Stable)
+// 3-gift-engine.ts — v4.3 (Danny Safe Build)
 // ============================================================================
-//
-// ✔ Twist mapping / Gift tracking
-// ✔ Host-only diamonds naar stats
-// ✔ Live debug logs @ emitLog
-// ✔ Danger zone per round type fixed
-// ✔ Resolves unknown users live + logs
-//
-// ============================================================================
-
 import pool, { getSetting } from "../db";
 import { getOrUpdateUser } from "./2-user-engine";
 import { addDiamonds, addBP } from "./4-points-engine";
 import { getArena, safeAddArenaDiamonds } from "./5-game-engine";
-import { emitLog, io, broadcastStats } from "../server";
-
+import { emitLog, io } from "../server";
 import { TWIST_MAP, TwistType } from "./twist-definitions";
 import { addTwistByGift } from "./8-twist-engine";
 
 // ============================================================================
-// GAME SESSION ID
+// Helpers
 // ============================================================================
-
 function getCurrentGameSessionId(): number | null {
   return (io as any).currentGameId ?? null;
 }
 
-// ============================================================================
-// NORMALIZER
-// ============================================================================
-
-const norm = (v: any) =>
-  (v || "").toString().trim().replace("@", "").toLowerCase().replace(/[^\p{L}\p{N}_]/gu, "");
-
-// ============================================================================
-// HOST CACHE
-// ============================================================================
+function norm(v: any) {
+  return (v || "")
+    .toString()
+    .trim()
+    .replace("@", "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}_]/gu, "");
+}
 
 let HOST_USERNAME_CACHE = "";
 
@@ -46,170 +33,218 @@ export async function initDynamicHost() {
 
 export async function refreshHostUsername() {
   const h = (await getSetting("host_username")) || "";
-  HOST_USERNAME_CACHE = norm(h);
+  HOST_USERNAME_CACHE = h.trim().replace("@", "").toLowerCase();
   console.log("🔄 HOST UPDATED:", HOST_USERNAME_CACHE || "(none)");
 }
-
-// ============================================================================
-// DUPLICATE FILTER
-// ============================================================================
 
 const processedMsgIds = new Set<string>();
 setInterval(() => processedMsgIds.clear(), 60_000);
 
-// ============================================================================
-// USER RESOLVER
-// ============================================================================
-
 async function resolveReceiver(event: any) {
-  const hostNorm = HOST_USERNAME_CACHE;
-  const incoming = {
-    id:
-      event.receiverUserId ||
-      event.toUserId ||
-      event.toUser?.userId ||
-      event.receiver?.userId ||
-      null,
-    username: norm(event.toUser?.uniqueId || event.receiver?.uniqueId || null),
-    display: event.toUser?.nickname || event.receiver?.nickname || "",
-  };
+  const hostRaw = HOST_USERNAME_CACHE;
 
-  if (incoming.username && incoming.username === hostNorm) {
-    return { id: null, username: hostNorm, display_name: incoming.display || hostNorm, role: "host" };
+  const eventId =
+    event.receiverUserId ||
+    event.toUserId ||
+    event.toUser?.userId ||
+    event.receiver?.userId ||
+    null;
+
+  const uniqueRaw =
+    event.toUser?.uniqueId ||
+    event.receiver?.uniqueId ||
+    null;
+
+  const nickRaw =
+    event.toUser?.nickname ||
+    event.receiver?.nickname ||
+    null;
+
+  const uniqueNorm = uniqueRaw ? norm(uniqueRaw) : null;
+  const nickNorm = nickRaw ? norm(nickRaw) : null;
+
+  if (uniqueNorm && hostRaw && uniqueNorm === hostRaw) {
+    return { id: null, username: hostRaw, display_name: uniqueRaw, role: "host" };
   }
 
-  if (incoming.id) {
-    const resolved = await getOrUpdateUser(String(incoming.id), incoming.display, incoming.username);
+  if (nickNorm && hostRaw && nickNorm.includes(hostRaw)) {
+    return { id: null, username: hostRaw, display_name: nickRaw, role: "host" };
+  }
+
+  if (eventId) {
+    const r = await getOrUpdateUser(
+      String(eventId),
+      nickRaw || null,
+      uniqueRaw || null
+    );
+
+    if (hostRaw && norm(r.username) === hostRaw) {
+      return {
+        id: r.id,
+        username: r.username.replace(/^@/, ""),
+        display_name: r.display_name,
+        role: "host",
+      };
+    }
+
     return {
-      id: resolved.id,
-      username: resolved.username.replace(/^@/, ""),
-      display_name: resolved.display_name,
-      role: resolved.username.replace(/^@/, "").toLowerCase() === hostNorm ? "host" : "speler",
+      id: r.id,
+      username: r.username.replace(/^@/, ""),
+      display_name: r.display_name,
+      role: "speler",
     };
   }
 
-  return { id: null, username: "", display_name: "UNKNOWN", role: "speler" };
+  if (hostRaw) {
+    return { id: null, username: hostRaw, display_name: hostRaw, role: "host" };
+  }
+
+  return {
+    id: null,
+    username: "",
+    display_name: "UNKNOWN",
+    role: "speler",
+  };
 }
 
-// ============================================================================
-// FANCLUB 24H — heart me gift
-// ============================================================================
-
 async function activateFan(userId: bigint) {
+  const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
   await pool.query(
     `
     UPDATE users
     SET is_fan = true,
-        fan_expires_at = NOW() + INTERVAL '24 hours'
-    WHERE tiktok_id = $1
+        fan_expires_at = $1
+    WHERE tiktok_id = $2
     `,
-    [userId]
+    [expires, userId]
   );
 }
 
 // ============================================================================
 // GIFT ENGINE
 // ============================================================================
-
 export function initGiftEngine(conn: any) {
-  if (!conn?.on) {
-    console.warn("❌ initGiftEngine misconfigured → IDLE");
+  if (!conn) {
+    console.warn("⚠ initGiftEngine zonder koppeling → IDLE-modus");
     return;
   }
 
-  console.log("🎁 GIFT ENGINE v5.0 ACTIVE");
+  if (typeof conn.on !== "function") {
+    console.warn("⚠ Foute conn in initGiftEngine → IDLE-modus");
+    return;
+  }
+
+  console.log("🎁 GIFT ENGINE v4.3 ON");
 
   conn.on("gift", async (data: any) => {
     const msgId = String(data.msgId ?? data.id ?? data.logId ?? "");
+
     if (msgId && processedMsgIds.has(msgId)) return;
     processedMsgIds.add(msgId);
 
     try {
-      const senderRawId =
+      const senderId =
         data.user?.userId ||
         data.sender?.userId ||
-        data.userId ||
-        null;
+        data.userId;
 
-      if (!senderRawId) return;
+      if (!senderId) return;
 
       const sender = await getOrUpdateUser(
-        String(senderRawId),
+        String(senderId),
         data.user?.nickname || data.sender?.nickname,
         data.user?.uniqueId || data.sender?.uniqueId
       );
 
-      // Live debug: user resolved
-      if (sender.display_name === "UNKNOWN" || sender.username === "UNKNOWN") {
-        emitLog({
-          type: "info",
-          message: `[RESOLVE_USER] ${senderRawId} → ${sender.display_name} (@${sender.username})`,
-        });
-      }
+      const senderUsername = sender.username.replace(/^@/, "");
+      const rawDiamonds = Number(data.diamondCount || 0);
+      if (rawDiamonds <= 0) return;
 
-      const giftDiamonds = Number(data.diamondCount || 0);
-      if (giftDiamonds <= 0) return;
+      const repeatEnd = !!data.repeatEnd;
+      const repeat = Number(data.repeatCount || 1);
+      const giftType = Number(data.giftType || 0);
 
-      const creditedDiamonds =
-        data.giftType === 1 && !data.repeatEnd
-          ? 0
-          : giftDiamonds * (data.repeatCount || 1);
+      const credited =
+        giftType === 1
+          ? repeatEnd
+            ? rawDiamonds * repeat
+            : 0
+          : rawDiamonds;
 
-      if (creditedDiamonds <= 0) return;
+      if (credited <= 0) return;
 
       const receiver = await resolveReceiver(data);
       const isHost = receiver.role === "host";
 
       const gameId = getCurrentGameSessionId();
+      const arena = getArena();
+      const now = Date.now();
+      const inActive = arena.status === "active" && now <= arena.roundCutoff;
+      const inGrace = arena.status === "grace" && now <= arena.graceEnd;
+      const inRound = inActive || inGrace;
+
       if (isHost && !gameId) return;
-      if (!isHost && getArena().status !== "active") return;
+      if (!isHost && !inRound) return;
 
-      // Database + stats update
-      await addDiamonds(BigInt(senderRawId), creditedDiamonds, "total");
+      // Diamonds / BP record
+      await addDiamonds(BigInt(senderId), credited, "total");
+      await addDiamonds(BigInt(senderId), credited, "stream");
+      await addDiamonds(BigInt(senderId), credited, "current_round");
+      const bpGain = credited * 0.2;
+      await addBP(BigInt(senderId), bpGain, "GIFT", sender.display_name);
 
-      const bpGain = creditedDiamonds * 0.2;
-      await addBP(BigInt(senderRawId), bpGain, "GIFT", sender.display_name);
-
-      if (!isHost && receiver.id) {
-        await safeAddArenaDiamonds(receiver.id.toString(), creditedDiamonds);
+      if (!isHost && receiver.id && inRound) {
+        await safeAddArenaDiamonds(receiver.id.toString(), credited);
       }
 
-      // Twist mapping
-      const twistType = Object.keys(TWIST_MAP).find(
-        (k) => TWIST_MAP[k as TwistType].giftId === data.giftId
-      );
+      // Check for twist gifts
+      const giftId = Number(data.giftId);
+      let twistType: TwistType | null = null;
+
+      for (const key of Object.keys(TWIST_MAP) as TwistType[]) {
+        if (TWIST_MAP[key].giftId === giftId) {
+          twistType = key;
+          break;
+        }
+      }
 
       if (twistType) {
-        await addTwistByGift(String(senderRawId), twistType as TwistType);
+        await addTwistByGift(String(senderId), twistType);
         emitLog({
           type: "twist",
-          message: `${sender.display_name} ontving twist: ${TWIST_MAP[twistType as TwistType].giftName}`,
+          message: `${sender.display_name} ontving twist: ${TWIST_MAP[twistType].giftName}`,
         });
       }
 
-      // Fanclub: Heart Me
+      // HeartMe gift triggers fan club if host
       if (isHost && (data.giftName?.toLowerCase() === "heart me" || data.giftId === 5655)) {
-        await activateFan(BigInt(senderRawId));
+        await activateFan(BigInt(senderId));
+        emitLog({
+          type: "gift",
+          message: `${sender.display_name} werd FAN voor 24h ❤️`,
+        });
       }
 
-      // Gift opslaan
       await pool.query(
         `
-        INSERT INTO gifts (giver_id, giver_username, giver_display_name,
-          receiver_id, receiver_username, receiver_display_name, receiver_role,
-          gift_name, diamonds, bp, game_id, created_at)
+        INSERT INTO gifts (
+          giver_id, giver_username, giver_display_name,
+          receiver_id, receiver_username, receiver_display_name,
+          receiver_role, gift_name, diamonds, bp, game_id, created_at
+        )
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
       `,
         [
-          BigInt(senderRawId),
-          sender.username.replace(/^@/, ""),
+          BigInt(senderId),
+          senderUsername,
           sender.display_name,
           receiver.id ? BigInt(receiver.id) : null,
           receiver.username,
           receiver.display_name,
           receiver.role,
           data.giftName || "unknown",
-          creditedDiamonds,
+          credited,
           bpGain,
           gameId,
         ]
@@ -217,14 +252,10 @@ export function initGiftEngine(conn: any) {
 
       emitLog({
         type: "gift",
-        message: `${sender.display_name} → ${receiver.display_name}: ${data.giftName} (${creditedDiamonds}💎)`,
+        message: `${sender.display_name} → ${receiver.display_name}: ${data.giftName} (${credited}💎)`,
       });
-
-      // Stats update
-      await broadcastStats();
     } catch (err: any) {
       console.error("GiftEngine ERROR:", err?.message || err);
     }
   });
-});
-
+}
