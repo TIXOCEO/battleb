@@ -1,4 +1,4 @@
-// src/server.ts — Undercover BattleBox Engine — v2.1 TWIST-READY (BUILD SAFE)
+// src/server.ts — Undercover BattleBox Engine — v2.2 (BUILD SAFE + SEARCH FIX)
 // Nu met:
 //  - Chat Engine (!join, !leave, !boost)
 //  - Boost-engine integratie (chat-only)
@@ -416,10 +416,11 @@ io.on("connection", async (socket: AdminSocket) => {
 
       const raw = data.username.trim().replace(/^@/, "");
 
+      // ❗ HIER OPGELOST: case-insensitive, exact match
       const userRes = await pool.query(
         `SELECT tiktok_id, display_name, username
          FROM users
-         WHERE username ILIKE $1 OR username ILIKE $2
+         WHERE LOWER(username) = LOWER($1) OR LOWER(username) = LOWER($2)
          LIMIT 1`,
         [raw, `@${raw}`]
       );
