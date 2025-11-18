@@ -1,5 +1,5 @@
 // src/engines/2-user-engine.ts
-// USER ENGINE — versie 0.7.2 STABLE (BattleBox)
+// USER ENGINE — versie 0.7.3 STABLE (BattleBox)
 //
 // Doelen:
 //  - Onbekend minimaliseren
@@ -9,7 +9,7 @@
 //
 // Gebruikte kolommen (users):
 // tiktok_id (bigint), display_name, username, last_seen_at,
-// diamonds_total, bp_total, is_fan, fan_expires_at, (optioneel: multiplier, blocks, etc.)
+// diamonds_total, bp_total, is_fan, fan_expires_at
 
 import pool from "../db";
 
@@ -69,78 +69,12 @@ export async function getOrUpdateUser(
 
   const tid = BigInt(tiktok_id);
 
-  // Huidige record ophalen
-  const existing = await pool.query<
-    { display_name: string | null; username: string | null }
-  >(
-    `
-    SELECT display_name, username
-    FROM users
-    WHERE tiktok_id = $1
-    LIMIT 1
-    `,
-    [tid]
-  );
-
   // Nieuwe (mogelijke) waarden uit event
   const newDisplay = cleanDisplay(nickname);
   const newUsernameFull = normalizeHandle(uniqueId, nickname);
   const newUsernameClean = newUsernameFull.replace(/^@+/, "");
 
-  // BESTAANDE USER → upgrade als er betere data is
-  if (existing.rows[0]) {
-    const { display_name, username } = existing.rows[0];
-
-    const wasUnknown =
-      (display_name || "").startsWith("Onbekend#") ||
-      (username || "").toLowerCase().startsWith("@onbekend");
-
-    const currentUsernameClean = (username || "").replace(/^@+/, "");
-
-    const needsUpgrade =
-      wasUnknown ||
-      (newDisplay && newDisplay !== display_name) ||
-      (newUsernameClean &&
-        newUsernameClean !== currentUsernameClean &&
-        newUsernameClean !== "");
-
-    if (needsUpgrade) {
-      await pool.query(
-        `
-        UPDATE users
-           SET display_name = $1,
-               username     = $2,
-               last_seen_at = NOW()
-         WHERE tiktok_id   = $3
-        `,
-        [
-          newDisplay || display_name || `Onbekend#${tiktok_id.slice(-5)}`,
-          newUsernameFull || username || `@onbekend${tiktok_id.slice(-5)}`,
-          tid,
-        ]
-      );
-    } else {
-      // Alleen last_seen_at bijwerken
-      await pool.query(
-        `UPDATE users SET last_seen_at = NOW() WHERE tiktok_id = $1`,
-        [tid]
-      );
-    }
-
-    return {
-      id: tiktok_id,
-      display_name:
-        newDisplay || display_name || `Onbekend#${tiktok_id.slice(-5)}`,
-      // Zonder @ teruggeven voor interne logica
-      username: (newUsernameFull || username || "@onbekend")
-        .replace(/^@+/, ""),
-    };
-  }
-
-  // NIEUWE USER
-  const finalDisplay = newDisplay || `Onbekend#${tiktok_id.slice(-5)}`;
-  const finalUsername = newUsernameFull || `@onbekend${tiktok_id.slice(-5)}`;
-
+  // Insert or update with UPSERT
   await pool.query(
     `
     INSERT INTO users (
@@ -153,23 +87,42 @@ export async function getOrUpdateUser(
       is_fan,
       fan_expires_at
     )
-    VALUES ($1,$2,$3,0,0,NOW(),false,NULL)
+    VALUES ($1, $2, $3, 0, 0, NOW(), false, NULL)
+    ON CONFLICT (tiktok_id)
+    DO UPDATE SET
+      display_name = CASE
+        WHEN users.display_name LIKE 'Onbekend#%' OR EXCLUDED.display_name IS DISTINCT FROM users.display_name
+        THEN EXCLUDED.display_name
+        ELSE users.display_name
+      END,
+      username = CASE
+        WHEN users.username LIKE '@onbekend%' OR EXCLUDED.username IS DISTINCT FROM users.username
+        THEN EXCLUDED.username
+        ELSE users.username
+      END,
+      last_seen_at = NOW()
     `,
-    [tid, finalDisplay, finalUsername]
+    [tid, newDisplay || `Onbekend#${tiktok_id.slice(-5)}`, newUsernameFull || `@onbekend${tiktok_id.slice(-5)}`]
   );
+
+  // Final lookup for clean return
+  const res = await pool.query(
+    `SELECT display_name, username FROM users WHERE tiktok_id=$1 LIMIT 1`,
+    [tid]
+  );
+
+  const { display_name, username } = res.rows[0];
 
   return {
     id: tiktok_id,
-    display_name: finalDisplay,
-    username: finalUsername.replace(/^@+/, ""),
+    display_name: display_name || `Onbekend#${tiktok_id.slice(-5)}`,
+    username: (username || "").replace(/^@+/, ""),
   };
 }
 
 /**
  * upsertIdentityFromLooseEvent
- * ----------------------------
  * Wordt gebruikt als er een willekeurig TikTok event binnenkomt
- * en je "gratis" de identity wilt bijwerken, zonder verdere logica.
  */
 export async function upsertIdentityFromLooseEvent(loose: any): Promise<void> {
   if (!loose) return;
