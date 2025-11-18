@@ -1,6 +1,6 @@
 // ============================================================================
-// src/engines/1-connection.ts — v1.25 (Crash-Safe / Idle Mode)
-// TikTok LIVE connector — NOOIT meer process.exit
+// src/engines/1-connection.ts — v1.26 (Crash-Safe / Idle Ready / Clean Disconnect)
+// TikTok LIVE connector — NOOIT meer process.exit en met NULL-checks
 // ============================================================================
 
 import { WebcastPushConnection } from "tiktok-live-connector";
@@ -19,6 +19,11 @@ export async function startConnection(
 ): Promise<{ conn: WebcastPushConnection | null }> {
   const host = username.replace(/^@+/, "").trim();
 
+  if (!host) {
+    console.error(`❌ Ongeldige host: "${username}"`);
+    return { conn: null };
+  }
+
   const conn = new WebcastPushConnection(host, {
     requestOptions: { timeout: 15000 },
     enableExtendedGiftInfo: true,
@@ -26,59 +31,54 @@ export async function startConnection(
 
   console.log("VERBINDEN MET TIKTOK… @" + host);
 
-  let connected = false;
-
   for (let i = 0; i < 8; i++) {
     try {
       await conn.connect();
       console.log(`✔ Verbonden met TikTok livestream van @${host}`);
-      connected = true;
-      break;
+
+      // OnConnected event listener
+      conn.on("connected", () => {
+        console.log("=".repeat(80));
+        console.log(`BATTLEBOX – VERBONDEN MET @${host}`);
+        console.log("Alle events worden nu verwerkt.");
+        console.log("=".repeat(80));
+        onConnected();
+      });
+
+      // Identity syncs
+      attachIdentityUpdaters(conn);
+
+      // Giftlist helper
+      (conn as any).getAvailableGifts = async () => {
+        try {
+          const giftsObj = (conn as any).availableGifts;
+          if (!giftsObj || typeof giftsObj !== "object") return [];
+          return Object.values(giftsObj);
+        } catch {
+          return [];
+        }
+      };
+
+      activeConn = conn;
+      return { conn };
     } catch (err: any) {
       console.error(
         `⛔ Verbinding mislukt (poging ${i + 1}/8):`,
         err?.message || err
       );
 
-      // laatste poging → stop connectie maar crash niet
       if (i === 7) {
         console.error(
-          `⚠ @${host} lijkt offline → TikTok-engine in IDLE-modus`
+          `⚠ @${host} is offline → Engine IDLE-modus (geen events)`
         );
         return { conn: null };
       }
 
-      // wacht en probeer opnieuw
-      await new Promise((res) => setTimeout(res, 7000));
+      await new Promise((res) => setTimeout(res, 7000)); // retry delay
     }
   }
 
-  if (!connected) return { conn: null };
-
-  conn.on("connected", () => {
-    console.log("=".repeat(80));
-    console.log(`BATTLEBOX – VERBONDEN MET @${host}`);
-    console.log("Alle events komen binnen — gift engine actief");
-    console.log("=".repeat(80));
-    onConnected();
-  });
-
-  // Identiteit-updates koppelen
-  attachIdentityUpdaters(conn);
-
-  // Gifts-lijst functie
-  (conn as any).getAvailableGifts = async () => {
-    try {
-      const giftsObj = (conn as any).availableGifts;
-      if (!giftsObj || typeof giftsObj !== "object") return [];
-      return Object.values(giftsObj);
-    } catch {
-      return [];
-    }
-  };
-
-  activeConn = conn;
-  return { conn };
+  return { conn: null };
 }
 
 // ============================================================================
@@ -93,13 +93,11 @@ export async function stopConnection(
 
   try {
     console.log("🔌 TikTok verbinding wordt afgesloten…");
-
     if (typeof c.disconnect === "function") {
       await c.disconnect();
     } else if (typeof (c as any).close === "function") {
       await (c as any).close();
     }
-
     console.log("🛑 TikTok verbinding gestopt.");
   } catch (err) {
     console.error("❌ Fout bij stopConnection:", err);
@@ -113,17 +111,27 @@ export async function stopConnection(
 // ============================================================================
 
 function attachIdentityUpdaters(conn: any) {
+  if (!conn || typeof conn.on !== "function") return;
+
   const update = (d: any) =>
     upsertIdentityFromLooseEvent(d?.user || d?.sender || d);
 
-  conn.on("chat", update);
-  conn.on("like", update);
-  conn.on("follow", update);
-  conn.on("social", update);
-  conn.on("member", update);
-  conn.on("subscribe", update);
-  conn.on("moderator", update);
-  conn.on("liveRoomUser", update);
+  const events = [
+    "chat",
+    "like",
+    "follow",
+    "social",
+    "member",
+    "subscribe",
+    "moderator",
+    "liveRoomUser",
+  ];
+
+  events.forEach((event) => {
+    try {
+      conn.on(event, update);
+    } catch {}
+  });
 
   conn.on("gift", (d: any) => {
     update(d);
