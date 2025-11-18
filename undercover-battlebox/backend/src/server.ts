@@ -42,7 +42,7 @@ import {
 import { getQueue, addToQueue } from "./queue";
 import { initChatEngine } from "./engines/6-chat-engine";
 import { applyBoost } from "./engines/7-boost-engine";
-import { parseUseCommand } from "./engines/8-twist-engine";
+import { parseUseCommand, useTwist } from "./engines/8-twist-engine";
 import { initAdminTwistEngine } from "./engines/9-admin-twist-engine";
 import { getOrUpdateUser } from "./engines/2-user-engine";
 
@@ -326,9 +326,10 @@ io.on("connection", async (socket: AdminSocket) => {
     ack({ users: res.rows });
   });
 
-  // GENERIEKE HANDLER
+  // BASIS HANDLER
   const handle = async (action: string, data: any, ack: Function) => {
     try {
+      // SETTINGS
       if (action === "getSettings") {
         return ack({
           success: true,
@@ -382,7 +383,14 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // SETTING UPDATE
+      // Admin-triggered twist
+      if (action === "triggerTwist") {
+        const { twist, target, display_name } = data;
+        await useTwist("admin", display_name, twist, target);
+        return ack({ success: true });
+      }
+
+      // Settings bijwerken
       if (action === "updateSettings") {
         await updateArenaSettings({
           roundDurationPre: Number(data?.roundDurationPre),
@@ -433,45 +441,6 @@ io.on("connection", async (socket: AdminSocket) => {
           emitArena();
           emitLog({ type: "elim", message: `${display_name} geëlimineerd` });
           break;
-
-        case "removeFromQueue":
-          await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [
-            tiktok_id,
-          ]);
-          await emitQueue();
-          emitLog({
-            type: "elim",
-            message: `${display_name} uit queue verwijderd`,
-          });
-          break;
-
-        case "promoteUser":
-          await applyBoost(String(tiktok_id), 1, display_name);
-          await emitQueue();
-          emitLog({
-            type: "booster",
-            message: `${display_name} handmatig gepromoveerd (+1)`,
-          });
-          break;
-
-        case "demoteUser":
-          await pool.query(
-            `UPDATE queue SET boost_spots = GREATEST(boost_spots - 1, 0)
-             WHERE user_tiktok_id=$1`,
-            [tiktok_id]
-          );
-          await emitQueue();
-          emitLog({
-            type: "booster",
-            message: `${display_name} handmatig gedemoveerd (-1)`,
-          });
-          break;
-
-        default:
-          return ack({
-            success: false,
-            message: `Onbekende actie: ${action}`,
-          });
       }
 
       return ack({ success: true });
@@ -491,13 +460,13 @@ io.on("connection", async (socket: AdminSocket) => {
   socket.on("admin:stopGame", (d, ack) => handle("stopGame", d, ack));
   socket.on("admin:startRound", (d, ack) => handle("startRound", d, ack));
   socket.on("admin:endRound", (d, ack) => handle("endRound", d, ack));
-  socket.on("admin:updateSettings", (d, ack) => handle("updateSettings", d, ack));
+  socket.on("admin:triggerTwist", (d, ack) => handle("triggerTwist", d, ack));
+  socket.on("admin:updateSettings", (d, ack) =>
+    handle("updateSettings", d, ack)
+  );
   socket.on("admin:addToArena", (d, ack) => handle("addToArena", d, ack));
   socket.on("admin:addToQueue", (d, ack) => handle("addToQueue", d, ack));
   socket.on("admin:eliminate", (d, ack) => handle("eliminate", d, ack));
-  socket.on("admin:removeFromQueue", (d, ack) => handle("removeFromQueue", d, ack));
-  socket.on("admin:promoteUser", (d, ack) => handle("promoteUser", d, ack));
-  socket.on("admin:demoteUser", (d, ack) => handle("demoteUser", d, ack));
 });
 
 // ───────────────────────────────────────────
