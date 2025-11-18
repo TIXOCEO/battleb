@@ -1,14 +1,15 @@
 // ============================================================================
-// 5-GAME-ENGINE.ts — Arena Engine v2.7 (Danny Stable, Twist-Ready)
+// 5-GAME-ENGINE.ts — Arena Engine v2.9 (Danny Ultra Stable, Twist-Ready)
 // ----------------------------------------------------------------------------
-// FIXES:
-// - Ronde stopt correct in grace-modus
-// - Eliminaties worden gehandhaafd
-// - Nieuwe ronde alleen als alle pending eliminations afgehandeld zijn
-// - Search werkt via socket (geen HTTP 404)
+// ENHANCEMENTS:
+// - Position logic: Only the bottom group is danger (in quarter)
+// - Fix for wrong #2 dangerAssignment
+// - Full pause on pending eliminations (forceEliminations)
+// - Twist-compatible with boosters, immune, and dynamic position updates
+// - Integrated logs + arena emit for real-time dashboard
 // ============================================================================
 
-import { io } from "../server";
+import { io, emitLog } from "../server";
 import pool from "../db";
 
 // =======================================
@@ -27,9 +28,9 @@ export type PositionStatus =
 interface Player {
   id: string;
   display_name: string;
-  username: string;       
+  username: string;
   diamonds: number;
-  boosters: string[];     
+  boosters: string[];
   status: "alive" | "eliminated";
   joined_at: number;
   positionStatus?: PositionStatus;
@@ -141,46 +142,22 @@ function updatePositionStatuses(): void {
   const p = arena.players;
   if (!p.length) return;
 
-  if (arena.status === "idle") {
-    for (const pl of p) {
-      pl.positionStatus = pl.boosters.includes("immune") ? "immune" : "active";
-    }
-    return;
-  }
-
-  const groups: { diamonds: number; members: Player[] }[] = [];
-  let batch: Player[] = [p[0]];
-
-  for (let i = 1; i < p.length; i++) {
-    if (p[i].diamonds === p[i - 1].diamonds) {
-      batch.push(p[i]);
-    } else {
-      groups.push({ diamonds: batch[0].diamonds, members: [...batch] });
-      batch = [p[i]];
-    }
-  }
-  groups.push({ diamonds: batch[0].diamonds, members: [...batch] });
-
-  const lastGroup = groups[groups.length - 1];
-  const endangered = new Set<string>();
-  const doomed = new Set<string>();
-
-  if (arena.status === "active") {
-    lastGroup.members.forEach(pl => endangered.add(pl.id));
-  }
-
-  if (arena.status === "grace" || arena.status === "ended") {
-    lastGroup.members.forEach(pl => doomed.add(pl.id));
-  }
+  // Only bottom group is danger (quarter), elimination in grace
+  const scores = [...new Set(p.map(pl => pl.diamonds))].sort((a, b) => b - a);
+  const lowest = scores[scores.length - 1];
 
   for (const pl of p) {
     let status: PositionStatus = "active";
 
-    if (doomed.has(pl.id)) status = "elimination";
-    else if (endangered.has(pl.id)) status = "danger";
-
     if (pl.boosters.includes("immune")) {
       status = "immune";
+    } else if (arena.status === "active" && pl.diamonds === lowest) {
+      status = "danger";
+    } else if (
+      (arena.status === "grace" || arena.status === "ended") &&
+      pl.diamonds === lowest
+    ) {
+      status = "elimination";
     }
 
     pl.positionStatus = status;
@@ -215,6 +192,7 @@ export function arenaJoin(
   };
 
   arena.players.push(pl);
+  emitLog({ type: "arena", message: `${display_name} toegevoegd aan arena` });
   recomputePositions();
   emitArena();
   return true;
@@ -222,6 +200,7 @@ export function arenaJoin(
 
 export function arenaLeave(tiktok_id: string): void {
   arena.players = arena.players.filter(p => p.id !== tiktok_id);
+  emitLog({ type: "arena", message: `Speler ${tiktok_id} verlaten arena` });
   recomputePositions();
   emitArena();
 }
@@ -234,11 +213,11 @@ export async function arenaClear(): Promise<void> {
     );
   }
 
+  emitLog({ type: "system", message: `Arena volledig geleegd` });
   arena.players = [];
   arena.round = 0;
   arena.status = "idle";
   arena.isRunning = false;
-
   recomputePositions();
   emitArena();
 }
@@ -252,6 +231,7 @@ export async function safeAddArenaDiamonds(id: string, amount: number): Promise<
   if (!pl) return;
 
   pl.diamonds += Number(amount);
+  emitLog({ type: "gift", message: `${pl.display_name} ontving ${amount} 💎 (arena)` });
   recomputePositions();
   emitArena();
 }
@@ -263,9 +243,13 @@ export async function safeAddArenaDiamonds(id: string, amount: number): Promise<
 let roundTick: NodeJS.Timeout | null = null;
 
 export function startRound(type: RoundType): boolean {
-  if (arena.settings.forceEliminations && 
+  if (arena.settings.forceEliminations &&
       arena.players.some(p => p.positionStatus === "elimination")) {
-    return false; // Er zijn nog pending eliminaties
+    emitLog({
+      type: "error",
+      message: `Kan geen ronde starten: pending eliminaties`,
+    });
+    return false;
   }
 
   if (arena.status !== "idle" && arena.status !== "ended") return false;
@@ -286,8 +270,14 @@ export function startRound(type: RoundType): boolean {
   arena.roundCutoff = arena.roundStartTime + duration * 1000;
   arena.graceEnd = arena.roundCutoff + arena.settings.graceSeconds * 1000;
 
-  // Reset diamonds
-  arena.players.forEach(pl => (pl.diamonds = 0));
+  for (const p of arena.players) {
+    p.diamonds = 0;
+  }
+
+  emitLog({
+    type: "arena",
+    message: `Nieuwe ronde gestart (#${arena.round}) type: ${type}`,
+  });
 
   recomputePositions();
   emitArena();
@@ -310,6 +300,11 @@ function tick() {
       arena.status = "grace";
       arena.isRunning = false;
       arena.timeLeft = 0;
+
+      emitLog({
+        type: "arena",
+        message: `Grace-periode (${arena.settings.graceSeconds}s) gestart`,
+      });
 
       recomputePositions();
       emitArena();
@@ -346,6 +341,11 @@ export function endRound(): void {
     .map(p => p.id);
 
   if (arena.settings.forceEliminations && doomed.length > 0) {
+    emitLog({
+      type: "system",
+      message: `Ronde beëindigd met pending eliminaties (${doomed.length})`,
+    });
+
     arena.status = "ended";
     arena.isRunning = false;
     arena.timeLeft = 0;
@@ -360,10 +360,14 @@ export function endRound(): void {
     return;
   }
 
-  // No eliminations → complete round
   arena.status = "idle";
   arena.isRunning = false;
   arena.timeLeft = 0;
+
+  emitLog({
+    type: "arena",
+    message: `Ronde afgerond (#${arena.round})`,
+  });
 
   emitArena();
   io.emit("round:end", {
