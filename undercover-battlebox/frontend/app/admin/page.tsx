@@ -69,14 +69,19 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     const socket = getAdminSocket();
 
-    socket.on("updateArena", (data: ArenaState) => setArena(data));
+    socket.on("updateArena", (data: ArenaState) => {
+      setArena(data);
+    });
+
     socket.on("updateQueue", (d: any) => {
       setQueue(d.entries ?? []);
       setQueueOpen(d.open ?? true);
     });
+
     socket.on("log", (l: LogEntry) =>
       setLogs((prev) => [l, ...prev].slice(0, 200))
     );
+
     socket.on("initialLogs", (d: LogEntry[]) => setLogs(d.slice(0, 200)));
     socket.on("streamStats", (s: StreamStats) => setStreamStats(s));
     socket.on("streamLeaderboard", (e: LeaderboardEntry[]) =>
@@ -91,11 +96,9 @@ export default function AdminDashboardPage() {
     socket.on("round:start", (d: any) =>
       setStatus(`▶️ Ronde gestart (${d.type}) — ${d.duration}s`)
     );
-
     socket.on("round:grace", (d: any) =>
       setStatus(`⏳ Grace-periode actief (${d.grace}s)`)
     );
-
     socket.on("round:end", () => setStatus("⛔ Ronde beëindigd"));
 
     return () => {
@@ -138,9 +141,11 @@ export default function AdminDashboardPage() {
   const emitAdmin = (event: string, payload?: any) => {
     const socket = getAdminSocket();
     setStatus(`Bezig met ${event}...`);
-    socket.emit(event, payload || {}, (res: AdminAckResponse) =>
-      setStatus(res.success ? "✅ Uitgevoerd" : `❌ ${res.message}`)
-    );
+    socket.emit(event, payload || {}, (res: AdminAckResponse) => {
+      setStatus(
+        res?.success ? "✅ Uitgevoerd" : `❌ ${res?.message ?? "Geen antwoord"}`
+      );
+    });
   };
 
   const emitAdminWithUser = (event: string, target?: string) => {
@@ -151,9 +156,11 @@ export default function AdminDashboardPage() {
     const formatted = uname.startsWith("@") ? uname : `@${uname}`;
     setStatus(`Bezig met ${event}...`);
 
-    socket.emit(event, { username: formatted }, (res: AdminAckResponse) =>
-      setStatus(res.success ? "✅ Uitgevoerd" : `❌ ${res.message}`)
-    );
+    socket.emit(event, { username: formatted }, (res: AdminAckResponse) => {
+      setStatus(
+        res?.success ? "✅ Uitgevoerd" : `❌ ${res?.message ?? "Geen antwoord"}`
+      );
+    });
   };
 
   const fmt = (n: number) =>
@@ -162,6 +169,7 @@ export default function AdminDashboardPage() {
   const players = useMemo(() => arena?.players ?? [], [arena]);
 
   const colorForPosition = (p: any) => {
+    if (!arena?.isRunning) return "bg-gray-50 border-gray-200";
     switch (p.positionStatus) {
       case "immune":
         return "bg-green-100 border-green-300";
@@ -210,15 +218,16 @@ export default function AdminDashboardPage() {
   }, [typing]);
 
   const applyAutoFill = (u: SearchUser) => {
-    setUsername(u.username);
-    setTwistUser(u.username);
-    setTwistTarget(u.username);
-    setTyping("");
+    const formatted = u.username.startsWith("@") ? u.username : `@${u.username}`;
+    setUsername(formatted);
+    setTwistUser(formatted);
+    setTwistTarget(formatted);
+    setTyping(formatted);
     setSearchResults([]);
     setShowResults(false);
   };
 
-  // ============================================================
+// ============================================================
   // RENDER UI
   // ============================================================
   return (
@@ -270,18 +279,14 @@ export default function AdminDashboardPage() {
             <div className="text-xs text-gray-600 mb-1">Ronde type</div>
             <div className="flex gap-2 flex-wrap">
               <button
-                onClick={() =>
-                  emitAdmin("admin:startRound", { type: "quarter" })
-                }
+                onClick={() => emitAdmin("admin:startRound", { type: "quarter" })}
                 className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full text-xs"
               >
                 Start voorronde
               </button>
 
               <button
-                onClick={() =>
-                  emitAdmin("admin:startRound", { type: "finale" })
-                }
+                onClick={() => emitAdmin("admin:startRound", { type: "finale" })}
                 className="px-3 py-1.5 bg-gray-900 text-white rounded-full text-xs"
               >
                 Start finale
@@ -360,19 +365,15 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* STATUS */}
       {status && (
         <div className="mb-4 text-sm text-center bg-amber-50 border border-amber-200 text-amber-800 rounded-xl py-2">
           {status}
         </div>
       )}
 
-      {/* ============================================================
-          ARENA + QUEUE WEERGAVE
-      ============================================================ */}
-
+      {/* ARENA + QUEUE */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* ARENA */}
+        {/* Arena */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Arena</h2>
           <p className="text-sm text-gray-500 mb-4">
@@ -384,9 +385,7 @@ export default function AdminDashboardPage() {
               players.map((p, idx) => (
                 <div
                   key={p.id}
-                  className={`rounded-lg p-3 border text-sm shadow ${colorForPosition(
-                    p
-                  )}`}
+                  className={`rounded-lg p-3 border text-sm shadow ${colorForPosition(p)}`}
                 >
                   <div className="flex justify-between items-center">
                     <span className="font-bold">#{idx + 1}</span>
@@ -428,7 +427,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* WACHTRIJ */}
+        {/* Queue */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Wachtrij</h2>
           <p className="text-sm text-gray-500 mb-3">
@@ -445,99 +444,72 @@ export default function AdminDashboardPage() {
           </p>
 
           {queue.length ? (
-            queue.map((q) => {
-              const badges: JSX.Element[] = [];
-
-              if (q.is_vip) {
-                badges.push(
-                  <span
-                    key="vip"
-                    className="px-2 py-0.5 text-[10px] rounded-full bg-yellow-200 text-yellow-900 border border-yellow-400"
-                  >
-                    VIP
-                  </span>
-                );
-              }
-
-              if (q.is_fan && !q.is_vip) {
-                badges.push(
-                  <span
-                    key="fan"
-                    className="px-2 py-0.5 text-[10px] rounded-full bg-blue-100 text-blue-700 border border-blue-300"
-                  >
-                    Fan
-                  </span>
-                );
-              }
-
-              if (q.priorityDelta > 0) {
-                badges.push(
-                  <span
-                    key="boost"
-                    className="px-2 py-0.5 text-[10px] rounded-full bg-purple-100 text-purple-700 border border-purple-300"
-                  >
-                    Boost +{q.priorityDelta}
-                  </span>
-                );
-              }
-
-              return (
-                <div
-                  key={q.tiktok_id}
-                  className="rounded-lg border border-gray-200 bg-gray-50 p-2 mb-2 text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div>
-                    <div className="font-semibold text-gray-900">
-                      {q.display_name} (@{q.username})
-                    </div>
-
-                    <div className="flex flex-wrap gap-1 mt-1">{badges}</div>
-
-                    <div className="mt-1 text-xs text-gray-500">
-                      #{q.position} • {q.reason}
-                    </div>
+            queue.map((q) => (
+              <div
+                key={q.tiktok_id}
+                className="rounded-lg border border-gray-200 bg-gray-50 p-2 mb-2 text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div>
+                  <div className="font-semibold text-gray-900">
+                    {q.display_name} (@{q.username})
                   </div>
 
-                  <div className="flex gap-1 mt-2 sm:mt-0 justify-end">
-                    <button
-                      onClick={() =>
-                        emitAdmin("admin:boostUser", { username: q.username })
-                      }
-                      className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
-                    >
-                      ▲
-                    </button>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {q.is_vip && (
+                      <span className="px-2 py-0.5 text-[10px] rounded-full bg-yellow-200 text-yellow-900 border border-yellow-400">
+                        VIP
+                      </span>
+                    )}
+                    {q.is_fan && !q.is_vip && (
+                      <span className="px-2 py-0.5 text-[10px] rounded-full bg-blue-100 text-blue-700 border border-blue-300">
+                        Fan
+                      </span>
+                    )}
+                    {q.priorityDelta > 0 && (
+                      <span className="px-2 py-0.5 text-[10px] rounded-full bg-purple-100 text-purple-700 border border-purple-300">
+                        Boost +{q.priorityDelta}
+                      </span>
+                    )}
+                  </div>
 
-                    <button
-                      onClick={() =>
-                        emitAdmin("admin:demoteUser", { username: q.username })
-                      }
-                      className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
-                    >
-                      ▼
-                    </button>
-
-                    <button
-                      onClick={() =>
-                        emitAdminWithUser("admin:addToArena", q.username)
-                      }
-                      className="px-2 py-1 rounded-full border border-[#ff4d4f] text-[#ff4d4f]"
-                    >
-                      → Arena
-                    </button>
-
-                    <button
-                      onClick={() =>
-                        emitAdminWithUser("admin:removeFromQueue", q.username)
-                      }
-                      className="px-2 py-1 rounded-full border border-red-300 text-red-700 bg-red-50"
-                    >
-                      ✕
-                    </button>
+                  <div className="mt-1 text-xs text-gray-500">
+                    #{q.position} • {q.reason}
                   </div>
                 </div>
-              );
-            })
+
+                <div className="flex gap-1 mt-2 sm:mt-0 justify-end">
+                  <button
+                    onClick={() => emitAdmin("admin:boostUser", { username: q.username })}
+                    className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
+                  >
+                    ▲
+                  </button>
+
+                  <button
+                    onClick={() => emitAdmin("admin:demoteUser", { username: q.username })}
+                    className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
+                  >
+                    ▼
+                  </button>
+
+                  <button
+                    onClick={() => emitAdminWithUser("admin:addToArena", q.username)}
+                    className="px-2 py-1 rounded-full border border-[#ff4d4f] text-[#ff4d4f]"
+                  >
+                    → Arena
+                  </button>
+
+                  <button
+                    onClick={() =>
+                      emitAdminWithUser("admin:removeFromQueue", q.username)
+                    }
+                    className="px-2 py-1 rounded-full border border-red-300 text-red-700 bg-red-50"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            ))
           ) : (
             <div className="text-sm text-gray-500 italic">
               Wachtrij is leeg.
@@ -548,7 +520,7 @@ export default function AdminDashboardPage() {
 
       {/* LEADERBOARD & STATS */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-        {/* LEADERBOARD */}
+        {/* Leaderboard */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Leaderboard</h2>
           <p className="text-xs text-gray-500 mb-3">Per spel – spelers</p>
@@ -580,7 +552,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* STATS */}
+        {/* Stats */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Stream stats</h2>
           <p className="text-xs text-gray-500 mb-3">
