@@ -1,4 +1,4 @@
-// src/server.ts — Undercover BattleBox Engine — v2.2 (BUILD SAFE + SEARCH FIX)
+// src/server.ts — Undercover BattleBox Engine — v2.3 (BUILD SAFE + SEARCH FIX + IDLE PATCH)
 // Nu met:
 //  - Chat Engine (!join, !leave, !boost)
 //  - Boost-engine integratie (chat-only)
@@ -9,6 +9,7 @@
 //  - Admin promote/demote in wachtrij
 //  - Twist-engine integratie (!use ...)
 //  - Admin-twist-engine integratie
+//  - SAFE-IDLE: geen crash als host offline is
 
 import express from "express";
 import http from "http";
@@ -266,39 +267,50 @@ async function restartTikTokConnection() {
     console.log("🔄 TikTok opnieuw verbinden →", host);
 
     const { conn } = await startConnection(host, () => {});
+
+    // ✅ SAFE-IDLE PATCH: als host offline is → geen crash, engine idle
+    if (!conn) {
+      console.log(`⚠ @${host} lijkt offline → TikTok-engine in IDLE-modus`);
+      tiktokConn = null;
+      emitLog({
+        type: "warn",
+        message: `TikTok-host @${host} offline — engine in IDLE (geen gifts/chat)`,
+      });
+      return;
+    }
+
     tiktokConn = conn;
 
+    // Alleen initialiseren als er echt een connection is
     initGiftEngine(conn);
     initChatEngine(conn);
 
-    if (conn) {
-      conn.on("chat", async (msg: any) => {
-        try {
-          const senderId =
-            msg.user?.userId ||
-            msg.sender?.userId ||
-            msg.userId ||
-            msg.uid;
+    conn.on("chat", async (msg: any) => {
+      try {
+        const senderId =
+          msg.user?.userId ||
+          msg.sender?.userId ||
+          msg.userId ||
+          msg.uid;
 
-          if (!senderId) return;
+        if (!senderId) return;
 
-          const rawText = msg.comment || msg.text || msg.content || "";
-          const text = rawText.toString().trim();
+        const rawText = msg.comment || msg.text || msg.content || "";
+        const text = rawText.toString().trim();
 
-          if (!text.toLowerCase().startsWith("!use ")) return;
+        if (!text.toLowerCase().startsWith("!use ")) return;
 
-          const sender = await getOrUpdateUser(
-            String(senderId),
-            msg.user?.nickname || msg.sender?.nickname,
-            msg.user?.uniqueId || msg.sender?.uniqueId
-          );
+        const sender = await getOrUpdateUser(
+          String(senderId),
+          msg.user?.nickname || msg.sender?.nickname,
+          msg.user?.uniqueId || msg.sender?.uniqueId
+        );
 
-          await parseUseCommand(sender.id, sender.display_name, text);
-        } catch (err: any) {
-          console.error("Twist chat handler error:", err?.message || err);
-        }
-      });
-    }
+        await parseUseCommand(sender.id, sender.display_name, text);
+      } catch (err: any) {
+        console.error("Twist chat handler error:", err?.message || err);
+      }
+    });
 
   } catch (err) {
     console.error("❌ TikTok reconnect error:", err);
@@ -416,7 +428,7 @@ io.on("connection", async (socket: AdminSocket) => {
 
       const raw = data.username.trim().replace(/^@/, "");
 
-      // ❗ HIER OPGELOST: case-insensitive, exact match
+      // Case-insensitive exact match
       const userRes = await pool.query(
         `SELECT tiktok_id, display_name, username
          FROM users
@@ -553,39 +565,49 @@ initDB().then(async () => {
   if (host) {
     console.log("Connecting TikTok with saved host:", host);
     const { conn } = await startConnection(host, () => {});
+
+    // ✅ SAFE-IDLE PATCH ook hier bij eerste boot
+    if (!conn) {
+      console.log(`⚠ @${host} lijkt offline → TikTok-engine in IDLE-modus`);
+      tiktokConn = null;
+      emitLog({
+        type: "warn",
+        message: `TikTok-host @${host} offline bij startup — engine in IDLE`,
+      });
+      return;
+    }
+
     tiktokConn = conn;
 
     initGiftEngine(conn);
     initChatEngine(conn);
 
-    if (conn) {
-      conn.on("chat", async (msg: any) => {
-        try {
-          const senderId =
-            msg.user?.userId ||
-            msg.sender?.userId ||
-            msg.userId ||
-            msg.uid;
+    conn.on("chat", async (msg: any) => {
+      try {
+        const senderId =
+          msg.user?.userId ||
+          msg.sender?.userId ||
+          msg.userId ||
+          msg.uid;
 
-          if (!senderId) return;
+        if (!senderId) return;
 
-          const rawText = msg.comment || msg.text || msg.content || "";
-          const text = rawText.toString().trim();
+        const rawText = msg.comment || msg.text || msg.content || "";
+        const text = rawText.toString().trim();
 
-          if (!text.toLowerCase().startsWith("!use ")) return;
+        if (!text.toLowerCase().startsWith("!use ")) return;
 
-          const sender = await getOrUpdateUser(
-            String(senderId),
-            msg.user?.nickname || msg.sender?.nickname,
-            msg.user?.uniqueId || msg.sender?.uniqueId
-          );
+        const sender = await getOrUpdateUser(
+          String(senderId),
+          msg.user?.nickname || msg.sender?.nickname,
+          msg.user?.uniqueId || msg.sender?.uniqueId
+        );
 
-          await parseUseCommand(sender.id, sender.display_name, text);
-        } catch (err: any) {
-          console.error("Twist chat handler error:", err?.message || err);
-        }
-      });
-    }
+        await parseUseCommand(sender.id, sender.display_name, text);
+      } catch (err: any) {
+        console.error("Twist chat handler error:", err?.message || err);
+      }
+    });
   } else {
     console.log("⚠ Geen host ingesteld — wacht op admin:setHost");
   }
