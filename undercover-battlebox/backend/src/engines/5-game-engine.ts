@@ -1,11 +1,11 @@
 // ============================================================================
-// 5-GAME-ENGINE.ts — Arena Engine v2.4 TWIST-READY
+// 5-GAME-ENGINE.ts — Arena Engine v2.5 (Danny Stable, Twist-Ready)
 // ----------------------------------------------------------------------------
 // - Unlimited spelers
-// - Tie-groups, danger, elimination, force mode
-// - Immunity type is nu ACTIEF via boosters ("immune")
-// - getArena() geeft ECHTE player-objecten terug (twist-engine kan muteren)
-// - Geen recursion tussen getArena / emitArena
+// - Danger/elimination werkt alleen bij actieve of grace fase
+// - Immunity override werkt via boosters
+// - UI sync: live statuses blijven consistent
+// - Idle-fase toont ALLE spelers als "active"
 // ============================================================================
 
 import { io } from "../server";
@@ -22,17 +22,17 @@ export type PositionStatus =
   | "active"
   | "danger"
   | "elimination"
-  | "immune"; // nu echt gebruikt
+  | "immune";
 
 interface Player {
   id: string;
   display_name: string;
-  username: string;             // zonder @ in arena
+  username: string;       
   diamonds: number;
-  boosters: string[];           // bevat o.a. "immune"
+  boosters: string[];     
   status: "alive" | "eliminated";
   joined_at: number;
-  positionStatus?: PositionStatus; // visuele status voor UI
+  positionStatus?: PositionStatus;
 }
 
 interface ArenaSettings {
@@ -92,13 +92,6 @@ const arena: Arena = {
 // ============================================================================
 
 async function loadArenaSettingsFromDB(): Promise<void> {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    )
-  `);
-
   const { rows } = await pool.query(`
     SELECT key, value FROM settings
     WHERE key IN ('roundDurationPre','roundDurationFinal','graceSeconds','forceEliminations')
@@ -114,30 +107,19 @@ async function loadArenaSettingsFromDB(): Promise<void> {
   };
 }
 
-async function saveArenaSettingsToDB(s: Partial<ArenaSettings>): Promise<void> {
+export async function updateArenaSettings(s: Partial<ArenaSettings>) {
   arena.settings = { ...arena.settings, ...s };
 
-  const rows: [string, string][] = [
-    ["roundDurationPre", String(arena.settings.roundDurationPre)],
-    ["roundDurationFinal", String(arena.settings.roundDurationFinal)],
-    ["graceSeconds", String(arena.settings.graceSeconds)],
-    ["forceEliminations", arena.settings.forceEliminations ? "true" : "false"],
-  ];
-
-  for (const [k, v] of rows) {
+  for (const key of Object.keys(arena.settings) as (keyof ArenaSettings)[]) {
     await pool.query(
       `INSERT INTO settings(key,value)
        VALUES ($1,$2)
        ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value`,
-      [k, v]
+      [key, String(arena.settings[key])]
     );
   }
 
   emitArena();
-}
-
-export async function updateArenaSettings(s: Partial<ArenaSettings>) {
-  await saveArenaSettingsToDB(s);
 }
 
 export function getArenaSettings(): ArenaSettings {
@@ -155,26 +137,30 @@ function sortPlayers(): void {
   arena.lastSortedAt = Date.now();
 }
 
-// POSITION LOGICA — met immunity override
 function updatePositionStatuses(): void {
   const p = arena.players;
-  if (p.length === 0) {
+  if (!p.length) return;
+
+  if (arena.status === "idle") {
+    // In idle, iedereen actief
+    for (const pl of p) {
+      pl.positionStatus = pl.boosters.includes("immune") ? "immune" : "active";
+    }
     return;
   }
 
-  // Tie-groups bepalen o.b.v. diamonds
   const groups: { diamonds: number; members: Player[] }[] = [];
-  let current: Player[] = [p[0]];
+  let batch: Player[] = [p[0]];
 
   for (let i = 1; i < p.length; i++) {
     if (p[i].diamonds === p[i - 1].diamonds) {
-      current.push(p[i]);
+      batch.push(p[i]);
     } else {
-      groups.push({ diamonds: current[0].diamonds, members: [...current] });
-      current = [p[i]];
+      groups.push({ diamonds: batch[0].diamonds, members: [...batch] });
+      batch = [p[i]];
     }
   }
-  groups.push({ diamonds: current[0].diamonds, members: [...current] });
+  groups.push({ diamonds: batch[0].diamonds, members: [...batch] });
 
   const lastGroup = groups[groups.length - 1];
   const endangered = new Set<string>();
@@ -182,7 +168,9 @@ function updatePositionStatuses(): void {
 
   if (arena.status === "active") {
     lastGroup.members.forEach(pl => endangered.add(pl.id));
-  } else if (arena.status === "grace" || arena.status === "ended") {
+  }
+
+  if (arena.status === "grace" || arena.status === "ended") {
     lastGroup.members.forEach(pl => doomed.add(pl.id));
   }
 
@@ -192,8 +180,6 @@ function updatePositionStatuses(): void {
     if (doomed.has(pl.id)) status = "elimination";
     else if (endangered.has(pl.id)) status = "danger";
 
-    // Immunity override: als speler "immune" booster heeft,
-    // dan tonen we deze status ongeacht danger/elimination
     if (pl.boosters.includes("immune")) {
       status = "immune";
     }
@@ -202,7 +188,6 @@ function updatePositionStatuses(): void {
   }
 }
 
-// ALLEEN intern: herbereken ranking + posities
 function recomputePositions(): void {
   sortPlayers();
   updatePositionStatuses();
@@ -222,7 +207,6 @@ export function arenaJoin(
   const pl: Player = {
     id: tiktok_id,
     display_name,
-    // in arena altijd username zonder @ voor UI & filters
     username: username.replace(/^@+/, ""),
     diamonds: 0,
     boosters: [],
@@ -238,10 +222,7 @@ export function arenaJoin(
 }
 
 export function arenaLeave(tiktok_id: string): void {
-  const idx = arena.players.findIndex(p => p.id === tiktok_id);
-  if (idx === -1) return;
-
-  arena.players.splice(idx, 1);
+  arena.players = arena.players.filter(p => p.id !== tiktok_id);
   recomputePositions();
   emitArena();
 }
@@ -256,20 +237,15 @@ export async function arenaClear(): Promise<void> {
 
   arena.players = [];
   arena.round = 0;
-  arena.type = "quarter";
   arena.status = "idle";
-  arena.timeLeft = 0;
   arena.isRunning = false;
-  arena.roundStartTime = 0;
-  arena.roundCutoff = 0;
-  arena.graceEnd = 0;
 
   recomputePositions();
   emitArena();
 }
 
 // ============================================================================
-// SAFE DIAMOND ADD (voor Gift Engine)
+// SAFE DIAMOND ADD
 // ============================================================================
 
 export async function safeAddArenaDiamonds(id: string, amount: number): Promise<void> {
@@ -287,107 +263,85 @@ export async function safeAddArenaDiamonds(id: string, amount: number): Promise<
 
 let roundTick: NodeJS.Timeout | null = null;
 
-function getDurationForType(type: RoundType): number {
-  return type === "finale"
-    ? arena.settings.roundDurationFinal
-    : arena.settings.roundDurationPre;
-}
-
 export function startRound(type: RoundType): boolean {
-  // ForceEliminations: als er nog "elimination" posities zijn, niet starten
-  if (arena.settings.forceEliminations) {
-    const eliminationExists = arena.players.some(
-      p => p.positionStatus === "elimination"
-    );
-    if (eliminationExists) {
-      return false;
-    }
+  if (arena.settings.forceEliminations &&
+      arena.players.some(p => p.positionStatus === "elimination")) {
+    return false;
   }
 
   if (arena.status === "active" || arena.status === "grace") return false;
   if (arena.players.length < 1) return false;
 
-  arena.round += 1;
+  arena.round++;
   arena.type = type;
 
-  const secs = getDurationForType(type);
-  arena.timeLeft = secs;
+  const duration = type === "finale"
+    ? arena.settings.roundDurationFinal
+    : arena.settings.roundDurationPre;
+
   arena.status = "active";
   arena.isRunning = true;
+  arena.timeLeft = duration;
 
   arena.roundStartTime = Date.now();
-  arena.roundCutoff = arena.roundStartTime + secs * 1000;
+  arena.roundCutoff = arena.roundStartTime + duration * 1000;
   arena.graceEnd = arena.roundCutoff + arena.settings.graceSeconds * 1000;
 
-  for (const pl of arena.players) {
-    pl.diamonds = 0;
-    // status blijft "alive" — twist-engine kan status zelf togglen
-  }
+  arena.players.forEach(pl => (pl.diamonds = 0));
 
   recomputePositions();
   emitArena();
-
-  io.emit("round:start", {
-    round: arena.round,
-    type: arena.type,
-    duration: secs,
-  });
+  io.emit("round:start", { round: arena.round, type, duration });
 
   if (roundTick) clearInterval(roundTick);
-
-  roundTick = setInterval(() => {
-    const now = Date.now();
-
-    if (arena.status === "active") {
-      const left = Math.max(0, Math.ceil((arena.roundCutoff - now) / 1000));
-      arena.timeLeft = left;
-
-      if (left <= 0) {
-        arena.status = "grace";
-        arena.isRunning = false;
-        arena.timeLeft = 0;
-
-        recomputePositions();
-        emitArena();
-
-        io.emit("round:grace", {
-          round: arena.round,
-          grace: arena.settings.graceSeconds,
-        });
-      } else {
-        recomputePositions();
-        emitArena();
-      }
-      return;
-    }
-
-    if (arena.status === "grace") {
-      if (now >= arena.graceEnd) {
-        endRound();
-      } else {
-        recomputePositions();
-        emitArena();
-      }
-      return;
-    }
-
-    if (arena.status === "ended" || arena.status === "idle") {
-      if (roundTick) clearInterval(roundTick);
-      roundTick = null;
-    }
-  }, 1000);
+  roundTick = setInterval(tick, 1000);
 
   return true;
 }
 
-// ============================================================================
-// END ROUND
-// ============================================================================
+function tick() {
+  const now = Date.now();
+
+  if (arena.status === "active") {
+    const left = Math.max(0, Math.ceil((arena.roundCutoff - now) / 1000));
+    arena.timeLeft = left;
+
+    if (left <= 0) {
+      arena.status = "grace";
+      arena.isRunning = false;
+      arena.timeLeft = 0;
+
+      recomputePositions();
+      emitArena();
+      io.emit("round:grace", {
+        round: arena.round,
+        grace: arena.settings.graceSeconds,
+      });
+    } else {
+      recomputePositions();
+      emitArena();
+    }
+    return;
+  }
+
+  if (arena.status === "grace") {
+    if (now >= arena.graceEnd) {
+      endRound();
+    } else {
+      recomputePositions();
+      emitArena();
+    }
+    return;
+  }
+
+  if (arena.status === "ended" || arena.status === "idle") {
+    if (roundTick) clearInterval(roundTick);
+    roundTick = null;
+  }
+}
 
 export function endRound(): void {
   if (arena.settings.forceEliminations) {
-    // Doomed = spelers met positionStatus "elimination"
-    // Immunes krijgen sowieso nooit "elimination" door override.
     const doomed = arena.players
       .filter(p => p.positionStatus === "elimination")
       .map(p => p.id);
@@ -397,13 +351,10 @@ export function endRound(): void {
       arena.isRunning = false;
       arena.timeLeft = 0;
 
-      recomputePositions();
       emitArena();
-
       io.emit("round:end", {
         round: arena.round,
         type: arena.type,
-        top3: getTop3(),
         pendingEliminations: doomed,
       });
       return;
@@ -414,13 +365,10 @@ export function endRound(): void {
   arena.isRunning = false;
   arena.timeLeft = 0;
 
-  recomputePositions();
   emitArena();
-
   io.emit("round:end", {
     round: arena.round,
     type: arena.type,
-    top3: getTop3(),
     pendingEliminations: [],
   });
 
@@ -428,34 +376,15 @@ export function endRound(): void {
   roundTick = null;
 }
 
-function getTop3() {
-  const sorted = [...arena.players];
-  return sorted.slice(0, 3).map((p) => ({
-    id: p.id,
-    display_name: p.display_name,
-    username: p.username,
-    diamonds: p.diamonds,
-  }));
-}
-
 // ============================================================================
 // SNAPSHOT + EMIT
 // ============================================================================
 
-/**
- * getArena()
- * ----------
- * Geeft een **live snapshot** terug:
- *  - players zijn ECHTE Player-objecten (geen clone)
- *  - twist-engine mag hierop muteren (status, boosters, order via splice)
- *  - settings, times, etc zijn read-only in praktijk
- */
 export function getArena() {
-  // Zorg dat ranking & positionStatus altijd up-to-date zijn
   recomputePositions();
 
   return {
-    players: arena.players, // dezelfde array / objecten als intern
+    players: arena.players,
     round: arena.round,
     type: arena.type,
     status: arena.status,
@@ -481,4 +410,4 @@ export async function initGame() {
   await loadArenaSettingsFromDB();
   recomputePositions();
   emitArena();
-    }
+}
