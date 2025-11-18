@@ -1,11 +1,11 @@
 // ============================================================================
-// 5-GAME-ENGINE.ts — Arena Engine v2.5 (Danny Stable, Twist-Ready)
+// 5-GAME-ENGINE.ts — Arena Engine v2.7 (Danny Stable, Twist-Ready)
 // ----------------------------------------------------------------------------
-// - Unlimited spelers
-// - Danger/elimination werkt alleen bij actieve of grace fase
-// - Immunity override werkt via boosters
-// - UI sync: live statuses blijven consistent
-// - Idle-fase toont ALLE spelers als "active"
+// FIXES:
+// - Ronde stopt correct in grace-modus
+// - Eliminaties worden gehandhaafd
+// - Nieuwe ronde alleen als alle pending eliminations afgehandeld zijn
+// - Search werkt via socket (geen HTTP 404)
 // ============================================================================
 
 import { io } from "../server";
@@ -142,7 +142,6 @@ function updatePositionStatuses(): void {
   if (!p.length) return;
 
   if (arena.status === "idle") {
-    // In idle, iedereen actief
     for (const pl of p) {
       pl.positionStatus = pl.boosters.includes("immune") ? "immune" : "active";
     }
@@ -264,12 +263,12 @@ export async function safeAddArenaDiamonds(id: string, amount: number): Promise<
 let roundTick: NodeJS.Timeout | null = null;
 
 export function startRound(type: RoundType): boolean {
-  if (arena.settings.forceEliminations &&
+  if (arena.settings.forceEliminations && 
       arena.players.some(p => p.positionStatus === "elimination")) {
-    return false;
+    return false; // Er zijn nog pending eliminaties
   }
 
-  if (arena.status === "active" || arena.status === "grace") return false;
+  if (arena.status !== "idle" && arena.status !== "ended") return false;
   if (arena.players.length < 1) return false;
 
   arena.round++;
@@ -287,6 +286,7 @@ export function startRound(type: RoundType): boolean {
   arena.roundCutoff = arena.roundStartTime + duration * 1000;
   arena.graceEnd = arena.roundCutoff + arena.settings.graceSeconds * 1000;
 
+  // Reset diamonds
   arena.players.forEach(pl => (pl.diamonds = 0));
 
   recomputePositions();
@@ -341,27 +341,27 @@ function tick() {
 }
 
 export function endRound(): void {
-  if (arena.settings.forceEliminations) {
-    const doomed = arena.players
-      .filter(p => p.positionStatus === "elimination")
-      .map(p => p.id);
+  const doomed = arena.players
+    .filter(p => p.positionStatus === "elimination")
+    .map(p => p.id);
 
-    if (doomed.length > 0) {
-      arena.status = "ended";
-      arena.isRunning = false;
-      arena.timeLeft = 0;
+  if (arena.settings.forceEliminations && doomed.length > 0) {
+    arena.status = "ended";
+    arena.isRunning = false;
+    arena.timeLeft = 0;
 
-      emitArena();
-      io.emit("round:end", {
-        round: arena.round,
-        type: arena.type,
-        pendingEliminations: doomed,
-      });
-      return;
-    }
+    emitArena();
+    io.emit("round:end", {
+      round: arena.round,
+      type: arena.type,
+      pendingEliminations: doomed,
+      top3: getTopPlayers(3),
+    });
+    return;
   }
 
-  arena.status = "ended";
+  // No eliminations → complete round
+  arena.status = "idle";
   arena.isRunning = false;
   arena.timeLeft = 0;
 
@@ -370,10 +370,23 @@ export function endRound(): void {
     round: arena.round,
     type: arena.type,
     pendingEliminations: [],
+    top3: getTopPlayers(3),
   });
 
   if (roundTick) clearInterval(roundTick);
   roundTick = null;
+}
+
+function getTopPlayers(n: number) {
+  return [...arena.players]
+    .sort((a, b) => b.diamonds - a.diamonds)
+    .slice(0, n)
+    .map(p => ({
+      id: p.id,
+      display_name: p.display_name,
+      username: p.username,
+      diamonds: p.diamonds,
+    }));
 }
 
 // ============================================================================
