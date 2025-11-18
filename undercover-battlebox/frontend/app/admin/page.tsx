@@ -99,7 +99,9 @@ export default function AdminDashboardPage() {
     socket.on("round:grace", (d: any) =>
       setStatus(`⏳ Grace-periode actief (${d.grace}s)`)
     );
-    socket.on("round:end", () => setStatus("⛔ Ronde beëindigd"));
+    socket.on("round:end", () =>
+      setStatus("⛔ Ronde beëindigd — voer eliminaties uit")
+    );
 
     return () => {
       socket.off("updateArena");
@@ -150,7 +152,7 @@ export default function AdminDashboardPage() {
 
   const emitAdminWithUser = (event: string, target?: string) => {
     const socket = getAdminSocket();
-    const uname = target || username;
+    const uname = target || username || typing;
     if (!uname.trim()) return;
 
     const formatted = uname.startsWith("@") ? uname : `@${uname}`;
@@ -169,7 +171,11 @@ export default function AdminDashboardPage() {
   const players = useMemo(() => arena?.players ?? [], [arena]);
 
   const colorForPosition = (p: any) => {
-    if (!arena?.isRunning) return "bg-gray-50 border-gray-200";
+    // In idle: gewoon neutraal tonen
+    if (!arena || arena.status === "idle") {
+      return "bg-gray-50 border-gray-200";
+    }
+
     switch (p.positionStatus) {
       case "immune":
         return "bg-green-100 border-green-300";
@@ -183,7 +189,27 @@ export default function AdminDashboardPage() {
   };
 
   // ============================================================
-  // AUTOCOMPLETE — search via socket first, then HTTP fallback
+  // ROUND STATE HELPERS (voor knoppen & waarschuwingen)
+  // ============================================================
+  const arenaStatus = arena?.status ?? "idle";
+
+  const hasDoomed =
+    players?.some((p: any) => p.positionStatus === "elimination") ?? false;
+
+  const canStartRound =
+    !!arena &&
+    (arenaStatus === "idle" || arenaStatus === "ended") &&
+    !hasDoomed;
+
+  const canStopRound = arenaStatus === "active";
+  const canGraceEnd = arenaStatus === "grace";
+  const needsElimination =
+    (arena?.settings?.forceEliminations ?? true) &&
+    arenaStatus === "ended" &&
+    hasDoomed;
+
+  // ============================================================
+  // AUTOCOMPLETE — alleen via socket (geen HTTP fallback meer)
   // ============================================================
   useEffect(() => {
     if (!typing.trim() || typing.length < 2) {
@@ -191,24 +217,14 @@ export default function AdminDashboardPage() {
       return;
     }
 
-    const run = async () => {
+    const run = () => {
       const socket = getAdminSocket();
 
       socket.emit(
         "admin:searchUsers",
         { query: typing },
-        async (res: { users: SearchUser[] }) => {
-          if (res.users?.length) {
-            setSearchResults(res.users);
-            return;
-          }
-
-          // fallback HTTP
-          const http = await fetch(
-            `/admin/searchUsers?query=${encodeURIComponent(typing)}`
-          );
-          const json = await http.json();
-          setSearchResults(json.users || []);
+        (res: { users: SearchUser[] }) => {
+          setSearchResults(res?.users || []);
         }
       );
     };
@@ -227,7 +243,7 @@ export default function AdminDashboardPage() {
     setShowResults(false);
   };
 
-// ============================================================
+  // ============================================================
   // RENDER UI
   // ============================================================
   return (
@@ -254,7 +270,7 @@ export default function AdminDashboardPage() {
         </div>
       </header>
 
-      {/* SPELBESTURING */}
+            {/* SPELBESTURING */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="flex flex-col gap-3">
           <div className="text-sm font-semibold">Spelbesturing</div>
@@ -262,43 +278,64 @@ export default function AdminDashboardPage() {
           <div className="flex gap-2 flex-wrap">
             <button
               onClick={() => emitAdmin("admin:startGame")}
-              className="px-3 py-1.5 bg-green-600 text-white rounded-full text-xs"
+              disabled={gameSession.active}
+              className={`px-3 py-1.5 rounded-full text-xs ${
+                gameSession.active
+                  ? "bg-gray-400 text-white cursor-not-allowed"
+                  : "bg-green-600 text-white"
+              }`}
             >
               Start spel
             </button>
 
             <button
               onClick={() => emitAdmin("admin:stopGame")}
-              className="px-3 py-1.5 bg-yellow-500 text-white rounded-full text-xs"
+              disabled={!gameSession.active}
+              className={`px-3 py-1.5 rounded-full text-xs ${
+                !gameSession.active
+                  ? "bg-gray-400 text-white cursor-not-allowed"
+                  : "bg-yellow-500 text-white"
+              }`}
             >
               Stop spel
             </button>
           </div>
 
           <div>
-            <div className="text-xs text-gray-600 mb-1">Ronde type</div>
+            <div className="text-xs text-gray-600 mb-1">Ronde acties</div>
             <div className="flex gap-2 flex-wrap">
               <button
-                onClick={() => emitAdmin("admin:startRound", { type: "quarter" })}
-                className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full text-xs"
+                onClick={() =>
+                  emitAdmin("admin:startRound", { type: "quarter" })
+                }
+                disabled={!canStartRound}
+                className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full text-xs disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
                 Start voorronde
               </button>
 
               <button
                 onClick={() => emitAdmin("admin:startRound", { type: "finale" })}
-                className="px-3 py-1.5 bg-gray-900 text-white rounded-full text-xs"
+                disabled={!canStartRound}
+                className="px-3 py-1.5 bg-gray-900 text-white rounded-full text-xs disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
                 Start finale
               </button>
 
               <button
                 onClick={() => emitAdmin("admin:endRound")}
-                className="px-3 py-1.5 bg-red-600 text-white rounded-full text-xs"
+                disabled={!canStopRound && !canGraceEnd}
+                className="px-3 py-1.5 bg-red-600 text-white rounded-full text-xs disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
                 Stop ronde
               </button>
             </div>
+
+            {needsElimination && (
+              <p className="mt-2 text-xs text-red-600">
+                ⚠ Eerst alle eliminaties uitvoeren!
+              </p>
+            )}
           </div>
         </div>
 
@@ -341,21 +378,21 @@ export default function AdminDashboardPage() {
 
             <div className="flex gap-2 text-xs">
               <button
-                onClick={() => emitAdminWithUser("admin:addToArena", username)}
+                onClick={() => emitAdminWithUser("admin:addToArena")}
                 className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full"
               >
                 → Arena
               </button>
 
               <button
-                onClick={() => emitAdminWithUser("admin:addToQueue", username)}
+                onClick={() => emitAdminWithUser("admin:addToQueue")}
                 className="px-3 py-1.5 bg-gray-800 text-white rounded-full"
               >
                 → Queue
               </button>
 
               <button
-                onClick={() => emitAdminWithUser("admin:eliminate", username)}
+                onClick={() => emitAdminWithUser("admin:eliminate")}
                 className="px-3 py-1.5 bg-red-600 text-white rounded-full"
               >
                 Elimineer
@@ -377,7 +414,9 @@ export default function AdminDashboardPage() {
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Arena</h2>
           <p className="text-sm text-gray-500 mb-4">
-            {arena ? `Ronde #${arena.round} • ${arena.type}` : "Geen ronde actief"}
+            {arena
+              ? `Ronde #${arena.round} • ${arena.type} • ${arena.status}`
+              : "Geen ronde actief"}
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -385,7 +424,9 @@ export default function AdminDashboardPage() {
               players.map((p, idx) => (
                 <div
                   key={p.id}
-                  className={`rounded-lg p-3 border text-sm shadow ${colorForPosition(p)}`}
+                  className={`rounded-lg p-3 border text-sm shadow ${colorForPosition(
+                    p
+                  )}`}
                 >
                   <div className="flex justify-between items-center">
                     <span className="font-bold">#{idx + 1}</span>
@@ -479,21 +520,27 @@ export default function AdminDashboardPage() {
 
                 <div className="flex gap-1 mt-2 sm:mt-0 justify-end">
                   <button
-                    onClick={() => emitAdmin("admin:boostUser", { username: q.username })}
+                    onClick={() =>
+                      emitAdminWithUser("admin:promoteUser", q.username)
+                    }
                     className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
                   >
                     ▲
                   </button>
 
                   <button
-                    onClick={() => emitAdmin("admin:demoteUser", { username: q.username })}
+                    onClick={() =>
+                      emitAdminWithUser("admin:demoteUser", q.username)
+                    }
                     className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
                   >
                     ▼
                   </button>
 
                   <button
-                    onClick={() => emitAdminWithUser("admin:addToArena", q.username)}
+                    onClick={() =>
+                      emitAdminWithUser("admin:addToArena", q.username)
+                    }
                     className="px-2 py-1 rounded-full border border-[#ff4d4f] text-[#ff4d4f]"
                   >
                     → Arena
@@ -511,9 +558,7 @@ export default function AdminDashboardPage() {
               </div>
             ))
           ) : (
-            <div className="text-sm text-gray-500 italic">
-              Wachtrij is leeg.
-            </div>
+            <div className="text-sm text-gray-500 italic">Wachtrij is leeg.</div>
           )}
         </div>
       </section>
@@ -547,7 +592,9 @@ export default function AdminDashboardPage() {
                 </div>
               ))
             ) : (
-              <div className="text-sm text-gray-500 italic">Geen data beschikbaar.</div>
+              <div className="text-sm text-gray-500 italic">
+                Geen data beschikbaar.
+              </div>
             )}
           </div>
         </div>
@@ -562,7 +609,9 @@ export default function AdminDashboardPage() {
           <div className="text-sm space-y-1">
             <div className="flex justify-between">
               <span className="text-gray-600">Game ID</span>
-              <span className="font-semibold">{gameSession.gameId ?? "–"}</span>
+              <span className="font-semibold">
+                {gameSession.gameId ?? "–"}
+              </span>
             </div>
 
             <div className="flex justify-between">
@@ -575,7 +624,10 @@ export default function AdminDashboardPage() {
             <div className="flex justify-between">
               <span className="text-gray-600">Speler diamonds</span>
               <span className="font-semibold">
-                {streamStats ? fmt(streamStats.totalPlayerDiamonds) : "0"} 💎
+                {streamStats
+                  ? fmt(streamStats.totalPlayerDiamonds)
+                  : "0"}{" "}
+                💎
               </span>
             </div>
 
@@ -706,6 +758,8 @@ export default function AdminDashboardPage() {
                     ? "bg-red-50 text-red-700"
                     : log.type === "join"
                     ? "bg-green-50 text-green-700"
+                    : log.type === "twist"
+                    ? "bg-purple-50 text-purple-700"
                     : "bg-blue-50 text-blue-700"
                 }`}
               >
@@ -726,7 +780,7 @@ export default function AdminDashboardPage() {
       </section>
 
       <footer className="mt-4 text-xs text-gray-400 text-center">
-        BattleBox Engine v3.1 Danny Stable
+        BattleBox Engine v3.2 – Danny Stable
       </footer>
     </main>
   );
