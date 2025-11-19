@@ -4,6 +4,17 @@ import React, { useEffect, useState } from "react";
 import { getAdminSocket } from "@/lib/socketClient";
 import type { AdminAckResponse } from "@/lib/adminTypes";
 
+// Sanitizer: verwijder alles behalve geldige TikTok characters
+function sanitizeHost(input: string): string {
+  if (!input) return "";
+  return input
+    .trim()
+    .replace(/^@+/, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]/g, "")     // ONLY TikTok-valid characters
+    .slice(0, 30);                     // Max 30 chars
+}
+
 type ArenaSettings = {
   roundDurationPre: number;
   roundDurationFinal: number;
@@ -44,7 +55,7 @@ export default function SettingsPage() {
       setSettings((prev) => ({ ...prev, ...s }));
 
     const handleHost = (h: string) => {
-      const clean = h?.trim() || "";
+      const clean = sanitizeHost(h || "");
       setCurrentHost(clean);
 
       // alleen initial sync
@@ -63,12 +74,12 @@ export default function SettingsPage() {
         if (res.settings) setSettings(res.settings);
 
         if (typeof res.host === "string") {
-          setCurrentHost(res.host);
-          setHostUsername(res.host);
+          const clean = sanitizeHost(res.host);
+          setCurrentHost(clean);
+          setHostUsername(clean);
         }
 
         setGameActive(!!res.gameActive);
-
         setConnected(true);
       } else {
         setStatus(`❌ ${res?.message || "Kon settings niet laden"}`);
@@ -95,17 +106,22 @@ export default function SettingsPage() {
   // ───────────────────────────────────────────────
   const updateHost = () => {
     if (gameActive) {
-      setStatus("❌ Host kan niet worden gewijzigd tijdens een actief spel");
+      setStatus("❌ Host kan niet worden gewijzigd tijdens actief spel");
       return;
     }
 
-    if (!hostUsername.trim()) return;
+    const sanitized = sanitizeHost(hostUsername);
+
+    if (!sanitized) {
+      setStatus("❌ Ongeldige TikTok gebruikersnaam");
+      return;
+    }
 
     const socket = getAdminSocket();
 
     socket.emit(
       "admin:setHost",
-      { username: hostUsername.trim().replace(/^@/, "") },
+      { username: sanitized },
       (res: AdminAckResponse) => {
         setStatus(
           res.success ? "✔ Host opgeslagen" : `❌ ${res.message}`
@@ -177,10 +193,14 @@ export default function SettingsPage() {
           type="text"
           value={hostUsername}
           disabled={gameActive}
-          onChange={(e) => setHostUsername(e.target.value)}
+          onChange={(e) => {
+            const clean = sanitizeHost(e.target.value);
+            setHostUsername(clean);
+          }}
           className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1 ${
             gameActive ? "bg-gray-100 cursor-not-allowed" : ""
           }`}
+          maxLength={30}
         />
 
         <button
@@ -207,7 +227,6 @@ export default function SettingsPage() {
         <h2 className="text-lg font-semibold mb-3">Game instellingen</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-
           <div>
             <label className="text-xs text-gray-600">Voorronde (sec)</label>
             <input
@@ -255,7 +274,6 @@ export default function SettingsPage() {
               className="w-full border border-gray-300 rounded-lg px-2 py-1 text-sm"
             />
           </div>
-
         </div>
 
         {/* FORCE ELIMINATIONS */}
