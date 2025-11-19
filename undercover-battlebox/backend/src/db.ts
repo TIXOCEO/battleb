@@ -1,4 +1,7 @@
-// src/db.ts — v1.1 Settings-Enabled
+// ============================================================================
+// db.ts — v2.0 FINAL MERGED
+// Volledige tabelstructuren behouden + settings
+// ============================================================================
 
 import { Pool } from "pg";
 
@@ -17,11 +20,15 @@ export async function initDB() {
       tiktok_id TEXT UNIQUE NOT NULL,
       username TEXT NOT NULL,
       display_name TEXT DEFAULT '',
-      bp_daily INTEGER DEFAULT 0,
+      diamonds_total DOUBLE PRECISION DEFAULT 0,
       bp_total DOUBLE PRECISION DEFAULT 0,
+      bp_daily INTEGER DEFAULT 0,
       streak INTEGER DEFAULT 0,
       badges TEXT[] DEFAULT '{}',
-      blocks JSONB DEFAULT '{"queue": false, "twists": false, "boosters": false}'
+      blocks JSONB DEFAULT '{"queue":false,"twists":false,"boosters":false}',
+      last_seen_at TIMESTAMPTZ DEFAULT NOW(),
+      is_fan BOOLEAN DEFAULT false,
+      fan_expires_at TIMESTAMP NULL
     );
   `);
 
@@ -34,7 +41,6 @@ export async function initDB() {
     );
   `);
 
-  // NEW: Settings
   await pool.query(`
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
@@ -42,12 +48,12 @@ export async function initDB() {
     );
   `);
 
-  // Default settings if missing
   const defaults: [string, string][] = [
     ["host_username", ""],
+    ["host_id", ""],
     ["roundDurationPre", "180"],
     ["roundDurationFinal", "300"],
-    ["graceSeconds", "5"],
+    ["graceSeconds", "5"]
   ];
 
   for (const [key, value] of defaults) {
@@ -60,7 +66,6 @@ export async function initDB() {
   }
 }
 
-// Helpers
 export async function getSetting(key: string): Promise<string | null> {
   const r = await pool.query(`SELECT value FROM settings WHERE key=$1`, [key]);
   return r.rows[0]?.value ?? null;
