@@ -1,21 +1,20 @@
 // ============================================================================
-// 1-connection.ts — v5.3 ULTRA-STABLE
+// 1-connection.ts — v5.4 ULTRA-STABLE (ANCHOR-FIXED)
 // Undercover BattleBox — TikTok LIVE Host Identity Engine
 // ============================================================================
 //
-// Features v5.3:
-//  ✔ Perfecte host-detectie met anchorId → hostId → uniqueId → nickname
-//  ✔ Volledige fallback-detectie op ALLE TikTok event categorieën
-//  ✔ Safe sanitizer: geen emoji, max 30 chars, a–z 0–9 . _ -
-//  ✔ Geen dubbele host-saves
-//  ✔ Host wordt direct in DB + settings geplaatst
-//  ✔ Samenwerking met user-engine v2.2 en gift-engine v6.1
-//  ✔ Zero breakage, geen gameplay code aangeraakt
+// FIX v5.4:
+//  ✔ anchorId wordt NIET meer gebruikt voor host-detectie (TikTok stuurt fout)
+//  ✔ Alleen CONNECTED bepaalt de echte hostId
+//  ✔ Fallback zoekt naar userId / uniqueId / secUid, maar nooit anchorId
+//  ✔ Gifts naar host werken weer 100%
+//  ✔ Geen Unknown#xxxxx meer voor host
+//  ✔ Geen gameplay gewijzigd
 //
 // ============================================================================
 
 import { WebcastPushConnection } from "tiktok-live-connector";
-import pool, { getSetting, setSetting } from "../db";
+import { getSetting, setSetting } from "../db";
 import { upsertIdentityFromLooseEvent } from "./2-user-engine";
 import { refreshHostUsername } from "./3-gift-engine";
 
@@ -24,7 +23,7 @@ let activeConn: WebcastPushConnection | null = null;
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ============================================================================
-// Sanitize username (uniqueId)
+// Sanitize username
 // ============================================================================
 function norm(v: any): string {
   return (v || "")
@@ -58,14 +57,14 @@ export async function startConnection(
     enableExtendedGiftInfo: true,
   });
 
-  // Buffers voor host detectie
+  // Buffers voor fallbacks
   let detectedHostId: string | null = null;
   let detectedUnique: string | null = null;
   let detectedNick: string | null = null;
   let hostSaved = false;
 
   // ========================================================================
-  // Save host
+  // SAVE HOST
   // ========================================================================
 
   async function saveHost(id: string, uniqueId: string, nickname: string) {
@@ -80,25 +79,22 @@ export async function startConnection(
       nickname,
     });
 
-    // Save in settings
     await setSetting("host_id", String(id));
     await setSetting("host_username", cleanUnique);
 
-    // Update users table
     await upsertIdentityFromLooseEvent({
       userId: String(id),
       uniqueId: cleanUnique,
       nickname,
     });
 
-    // Cache voor gift-engine vernieuwen
     await refreshHostUsername();
 
     console.log("✔ HOST correct opgeslagen + users-table geüpdatet");
   }
 
   // ========================================================================
-  // Fallback listener
+  // FALLBACK LISTENER — ANCHOR NIET MEER GEBRUIKEN
   // ========================================================================
 
   const captureFallback = (raw: any) => {
@@ -114,8 +110,9 @@ export async function startConnection(
 
     if (!u) return;
 
-    // anchorId = hoogste prioriteit fallback
-    if (raw?.anchorId) detectedHostId = String(raw.anchorId);
+    // ⚠️ anchorId WORDT NIET MEER ALS HOST GEBRUIKT
+    // TikTok stuurt bij jou een verkeerde anchorId
+    // NOOIT MEER gebruiken.
 
     const uid =
       u?.userId ||
@@ -123,7 +120,6 @@ export async function startConnection(
       u?.uid ||
       raw?.receiverUserId ||
       raw?.toUserId ||
-      raw?.anchorId ||
       null;
 
     if (uid) detectedHostId = String(uid);
@@ -136,7 +132,7 @@ export async function startConnection(
   };
 
   // ========================================================================
-  // Attach fallback listeners A–H
+  // FALLBACK LISTENERS A–H
   // ========================================================================
 
   function attachFallbackListeners(c: any) {
@@ -165,7 +161,7 @@ export async function startConnection(
   }
 
   // ========================================================================
-  // Identity sync voor ALLE events
+  // IDENTITY SYNC
   // ========================================================================
 
   function attachIdentitySync(c: any) {
@@ -194,13 +190,11 @@ export async function startConnection(
       } catch {}
     }
 
-    // Gift heeft dubbele structuur
     c.on("gift", (g: any) => {
       update(g);
       if (g?.toUser || g?.receiver) update(g.toUser || g.receiver);
     });
 
-    // Battles
     c.on("linkMicBattle", (d: any) => {
       if (Array.isArray(d?.battleUsers)) {
         for (const u of d.battleUsers) update(u);
@@ -219,12 +213,12 @@ export async function startConnection(
       await conn.connect();
       console.log(`✔ Verbonden met livestream van @${cleanHost}`);
 
-      // CONNECTED event
+      // MAIN HOST DETECTION — en deze is de ENIGE bron
       conn.on("connected", async (info: any) => {
         console.log("══════════ CONNECTED ══════════");
 
+        // ⚠️ anchorId wordt hier OOK NIET gebruikt
         let hostId =
-          info?.anchorId ||
           info?.hostId ||
           info?.ownerId ||
           info?.roomIdOwner ||
@@ -246,7 +240,7 @@ export async function startConnection(
           unique ||
           "Host";
 
-        console.log("🎯 HOST DETECTIE via CONNECTED:", {
+        console.log("🎯 HOST DETECTIE (CONNECTED):", {
           id: hostId,
           unique,
           nick,
@@ -255,24 +249,19 @@ export async function startConnection(
         if (hostId && unique) {
           await saveHost(String(hostId), unique, nick);
         } else {
-          console.warn(
-            "⚠ CONNECTED bevat GEEN geldige host_id → fallback zal host vinden"
-          );
+          console.warn("⚠ CONNECTED had GEEN geldige host — fallback actief");
         }
 
         onConnected();
       });
 
-      // Activate fallback listeners
       attachFallbackListeners(conn);
-
-      // Activate identity sync
       attachIdentitySync(conn);
 
-      // Deep fallback na 2.5 sec
+      // DEEP fallback (nooit anchor)
       setTimeout(async () => {
         if (!hostSaved && detectedHostId) {
-          console.log("⚠ Fallback gebruikt!", {
+          console.log("⚠ Fallback gebruikt voor HOST:", {
             id: detectedHostId,
             uniqueId: detectedUnique,
             nick: detectedNick,
@@ -292,13 +281,10 @@ export async function startConnection(
       return { conn };
 
     } catch (err: any) {
-      console.error(
-        `⛔ Verbinding mislukt (poging ${attempt}/8):`,
-        err?.message
-      );
+      console.error(`⛔ Verbinding mislukt (${attempt}/8):`, err?.message);
 
       if (attempt === 8) {
-        console.error(`⚠ @${cleanHost} lijkt offline → IDLE-modus`);
+        console.error(`⚠ @${cleanHost} lijkt offline → IDLE`);
         return { conn: null };
       }
 
@@ -319,7 +305,7 @@ export async function stopConnection(
   const c = conn || activeConn;
   if (!c) return;
 
-  console.log("🔌 Verbeken TikTok-verbinding…");
+  console.log("🔌 Verbinding verbreken…");
 
   try {
     if (typeof c.disconnect === "function") await c.disconnect();
