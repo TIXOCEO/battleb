@@ -589,3 +589,5 @@ initDB().then(async () => {
 
 // ❌ Verwijder deze regel volledig
 // export { io, emitLog, emitArena };
+export { emitArena };
+
