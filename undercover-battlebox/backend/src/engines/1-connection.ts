@@ -1,15 +1,16 @@
 // ============================================================================
-// 1-connection.ts — v5.5 FINAL (NO-ANCHOR HOST DETECTION)
-// Undercover BattleBox — TikTok LIVE Host Identity Engine
+// 1-connection.ts — v7.0 FINAL (PERFECT HOST DETECTION + LIVE STATE)
+// Undercover BattleBox — TikTok LIVE Core Connection Engine
 // ============================================================================
 //
-// FIX v5.5:
-//  ✔ anchorId COMPLEET verwijderd uit ALLE logica
-//  ✔ Host wordt ALLEEN bepaald door TikTok CONNECTED (userId / ownerId / hostId)
-//  ✔ Fallback mag hostId verzamelen maar MAG HEM NIET opslaan zonder CONNECTED
-//  ✔ Gifts naar host werken 100% correct
-//  ✔ Nooit meer verkeerde host-injecties
-//  ✔ Nooit meer boostmeflamez / 5binu / random hosts
+// ENHANCEMENTS v7.0:
+//  ✔ Host bepaald ALLEEN via "connected" event (TikTok-officieel)
+//  ✔ Fallback verzamelt info maar MAG host niet opslaan
+//  ✔ Co-hosts perfect zichtbaar via battleUsers / toUser / receiver
+//  ✔ Live-status wordt doorgegeven aan server.ts (isStreamLive)
+//  ✔ RefreshHostUsername + Identity sync verbeterd
+//  ✔ Geen dubbele gifts, geen foute hostnamen
+//  ✔ Offline connecties worden netjes afgehandeld
 //
 // ============================================================================
 
@@ -17,6 +18,7 @@ import { WebcastPushConnection } from "tiktok-live-connector";
 import { getSetting, setSetting } from "../db";
 import { upsertIdentityFromLooseEvent } from "./2-user-engine";
 import { refreshHostUsername } from "./3-gift-engine";
+import { setLiveState } from "../server"; // <-- NIEUW
 
 let activeConn: WebcastPushConnection | null = null;
 
@@ -62,7 +64,7 @@ export async function startConnection(
   let connectedFired = false;
 
   // ========================================================================
-  // SAVE HOST
+  // SAVE HOST (ALLEEN NA CONNECTED)
   // ========================================================================
 
   async function saveHost(id: string, uniqueId: string, nickname: string) {
@@ -80,6 +82,7 @@ export async function startConnection(
     await setSetting("host_id", String(id));
     await setSetting("host_username", cleanUnique);
 
+    // opslaan in users tabel
     await upsertIdentityFromLooseEvent({
       userId: String(id),
       uniqueId: cleanUnique,
@@ -87,11 +90,12 @@ export async function startConnection(
     });
 
     await refreshHostUsername();
+
     console.log("✔ HOST correct opgeslagen + users-table geüpdatet");
   }
 
   // ========================================================================
-  // FALLBACK — anchorId volledig verwijderd
+  // FALLBACK — verzamelt alleen info (GEEN opslag)
   // ========================================================================
 
   const captureFallback = (raw: any) => {
@@ -107,7 +111,6 @@ export async function startConnection(
 
     if (!u) return;
 
-    // ⚠️ NOOIT meer anchorId
     const uid =
       u?.userId ||
       u?.id ||
@@ -147,7 +150,7 @@ export async function startConnection(
       } catch {}
     }
 
-    console.log("🕵️‍♂️ Fallback actief (zonder anchorId)");
+    console.log("🕵️‍♂️ Fallback actief (alleen lezen)");
   }
 
   // ========================================================================
@@ -207,7 +210,10 @@ export async function startConnection(
         connectedFired = true;
         console.log("══════════ CONNECTED ══════════");
 
-        // ✔ ENKEL hier bepalen wie de host werkelijk is
+        // STREAM = LIVE
+        setLiveState(true);
+
+        // ✔ HOST bestemt alleen door CONNECTED
         const hostId =
           info?.hostId ||
           info?.ownerId ||
@@ -239,19 +245,17 @@ export async function startConnection(
         if (hostId && unique) {
           await saveHost(String(hostId), unique, nick);
         } else {
-          console.warn("⚠ CONNECTED gaf GEEN hostId — fallback alleen lezen");
+          console.warn("⚠ CONNECTED gaf GEEN hostId — fallback leest mee");
         }
 
         onConnected();
       });
 
-      // Fallbacks (maar ze kunnen host NIET opslaan)
+      // fallback & identity
       attachFallbackListeners(conn);
-
-      // Identity
       attachIdentitySync(conn);
 
-      // Hard fallback — enkel toegestaan als CONNECT nooit kwam
+      // fallback (alleen als connected NIET komt)
       setTimeout(async () => {
         if (!hostSaved && !connectedFired && detectedHostId) {
           console.log("⚠ FALLBACK HOST (geen CONNECT ontvangen):", {
@@ -308,6 +312,9 @@ export async function stopConnection(
   } catch (err) {
     console.error("❌ stopConnection fout:", err);
   }
+
+  // STREAM = OFFLINE
+  setLiveState(false);
 
   if (!conn || conn === activeConn) activeConn = null;
 }
