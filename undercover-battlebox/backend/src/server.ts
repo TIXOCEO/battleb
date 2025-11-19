@@ -586,3 +586,8 @@ initDB().then(async () => {
     console.log("⚠ Geen host ingesteld — wacht op admin:setHost");
   }
 });
+
+// ============================================================================
+// EXPORTS (FIXED)
+// ============================================================================
+export { io, emitLog, emitArena };
