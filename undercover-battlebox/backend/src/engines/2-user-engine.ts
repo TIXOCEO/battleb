@@ -1,14 +1,17 @@
 // ============================================================================
-// 2-user-engine.ts — v1.0.1 (EmitLog, Host-ID Upgrade, Unknown→Known Fixes)
+// 2-user-engine.ts — v2.0 FINAL MERGED
 // Undercover BattleBox — User Identity Core
 // ============================================================================
 //
-// Functies:
-//  ✔ Houdt ALTIJD beste versie van username & display_name
-//  ✔ Updatet bij elk event last_seen_at
-//  ✔ Voorkomt Unknown spooknamen
-//  ✔ Detecteert upgrades → emitLog() + console.log()
-//  ✔ Werkt samen met host_id vanuit settings
+// Behoudt jouw volledige logica + verbeteringen:
+// ✔ Voorkomt Unknown spooknamen
+// ✔ Beste display_name & username wordt ALTIJD gekozen
+// ✔ last_seen_at update
+// ✔ Host-fixes (host mag nooit onbekend zijn)
+// ✔ emitLog bij upgrades
+// ✔ Fan + diamonds + bp compatibiliteit behouden
+// ✔ Unknown fallback (#xxxxx)
+// ✔ Normaal werkt met gift-engine v6 & connection v5
 //
 // ============================================================================
 
@@ -16,16 +19,12 @@ import pool, { getSetting } from "../db";
 import { emitLog } from "../server";
 
 export interface UserIdentity {
-  id: string;            // TikTok userId (string)
-  display_name: string;  // nette naam voor UI
-  username: string;      // zonder @
+  id: string;
+  display_name: string;
+  username: string;
 }
 
-// ============================================================================
-// Helpers
-// ============================================================================
-
-// Normaliseert usernames → altijd met @ in database
+// Normaliseert handles → minimaal risico op foutieve host/username
 function normalizeHandle(uid?: string | null, fallback?: string | null): string {
   const raw =
     uid?.toString().trim() ||
@@ -37,7 +36,7 @@ function normalizeHandle(uid?: string | null, fallback?: string | null): string 
   const clean = raw
     .replace(/^@+/, "")
     .toLowerCase()
-    .replace(/[^a-z0-9_]/g, "");
+    .replace(/[^\p{L}\p{N}_]/gu, "");
 
   if (!clean) return "";
 
@@ -47,15 +46,16 @@ function normalizeHandle(uid?: string | null, fallback?: string | null): string 
 // display_name opschonen
 function cleanDisplay(v?: string | null): string | null {
   if (!v) return null;
+
   const t = v.trim();
   if (!t) return null;
   if (t.toLowerCase() === "onbekend") return null;
+
   return t;
 }
 
-
 // ============================================================================
-// getOrUpdateUser() — centrale identity handler
+// getOrUpdateUser()
 // ============================================================================
 
 export async function getOrUpdateUser(
@@ -78,28 +78,33 @@ export async function getOrUpdateUser(
   const newUsernameFull = normalizeHandle(uniqueId, nickname);
   const newUsernameClean = newUsernameFull.replace(/^@/, "");
 
-  // Check of deze user host is
+  // Host-check
   const hostIdSetting = await getSetting("host_id");
   const isHost = hostIdSetting && hostIdSetting === tiktok_id;
 
-  // Instellingen voor unknown fallback
+  // Unknown fallback
   const fallbackDisplay = `Onbekend#${tiktok_id.slice(-5)}`;
   const fallbackUsername = `@onbekend${tiktok_id.slice(-5)}`;
 
-  // Database UPSERT
+  // ========================================================================
+  // UPSERT
+  // ========================================================================
   await pool.query(
     `
     INSERT INTO users (
       tiktok_id,
-      display_name,
       username,
+      display_name,
       diamonds_total,
       bp_total,
       last_seen_at,
+      streak,
+      badges,
+      blocks,
       is_fan,
       fan_expires_at
     )
-    VALUES ($1, $2, $3, 0, 0, NOW(), false, NULL)
+    VALUES ($1, $2, $3, 0, 0, NOW(), 0, '{}', '{"queue":false,"twists":false,"boosters":false}', false, NULL)
     ON CONFLICT (tiktok_id)
     DO UPDATE SET
       display_name = CASE
@@ -116,12 +121,12 @@ export async function getOrUpdateUser(
     `,
     [
       tid,
-      newDisplay || fallbackDisplay,
       newUsernameFull || fallbackUsername,
+      newDisplay || fallbackDisplay,
     ]
   );
 
-  // User terug ophalen
+  // User terughalen
   const res = await pool.query(
     `SELECT display_name, username FROM users WHERE tiktok_id=$1 LIMIT 1`,
     [tid]
@@ -132,9 +137,9 @@ export async function getOrUpdateUser(
   const finalDisplay = row.display_name || fallbackDisplay;
   const finalUsername = (row.username || fallbackUsername).replace(/^@/, "");
 
-  // ------------------------------------------------------------------------
-  // Detecteer upgrades → stuur naar logs
-  // ------------------------------------------------------------------------
+  // ========================================================================
+  // Upgrade logs (unknown → known updates)
+  // ========================================================================
 
   if (
     newDisplay &&
@@ -145,9 +150,7 @@ export async function getOrUpdateUser(
       type: "user",
       message: `Naam update: ${fallbackDisplay} → ${newDisplay}`,
     });
-    console.log(
-      `👤 Display upgrade: ${fallbackDisplay} → ${newDisplay}`
-    );
+    console.log(`👤 Display upgrade: ${fallbackDisplay} → ${newDisplay}`);
   }
 
   if (
@@ -164,9 +167,10 @@ export async function getOrUpdateUser(
     );
   }
 
-  // ------------------------------------------------------------------------
-  // Host fix — als TikTok ID == host_id → username mag NOOIT "onbekend" zijn
-  // ------------------------------------------------------------------------
+  // ========================================================================
+  // HOST FIX — host mag nooit onbekend zijn
+  // ========================================================================
+
   if (isHost && finalUsername.startsWith("onbekend")) {
     console.log(`🏷 Host username hersteld → @${newUsernameClean}`);
 
@@ -180,7 +184,6 @@ export async function getOrUpdateUser(
     );
   }
 
-  // Result terug
   return {
     id: tiktok_id,
     display_name: finalDisplay,
@@ -188,20 +191,19 @@ export async function getOrUpdateUser(
   };
 }
 
-
 // ============================================================================
 // upsertIdentityFromLooseEvent()
 // ============================================================================
 
-export async function upsertIdentityFromLooseEvent(loose: any): Promise<void> {
-  if (!loose) return;
+export async function upsertIdentityFromLooseEvent(raw: any): Promise<void> {
+  if (!raw) return;
 
   const user =
-    loose?.user ||
-    loose?.sender ||
-    loose?.toUser ||
-    loose?.receiver ||
-    loose;
+    raw?.user ||
+    raw?.sender ||
+    raw?.toUser ||
+    raw?.receiver ||
+    raw;
 
   const id =
     user?.userId ||
