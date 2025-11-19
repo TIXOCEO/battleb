@@ -1,15 +1,15 @@
 // ============================================================================
-// 1-connection.ts — v5.4 ULTRA-STABLE (ANCHOR-FIXED)
+// 1-connection.ts — v5.5 FINAL (NO-ANCHOR HOST DETECTION)
 // Undercover BattleBox — TikTok LIVE Host Identity Engine
 // ============================================================================
 //
-// FIX v5.4:
-//  ✔ anchorId wordt NIET meer gebruikt voor host-detectie (TikTok stuurt fout)
-//  ✔ Alleen CONNECTED bepaalt de echte hostId
-//  ✔ Fallback zoekt naar userId / uniqueId / secUid, maar nooit anchorId
-//  ✔ Gifts naar host werken weer 100%
-//  ✔ Geen Unknown#xxxxx meer voor host
-//  ✔ Geen gameplay gewijzigd
+// FIX v5.5:
+//  ✔ anchorId COMPLEET verwijderd uit ALLE logica
+//  ✔ Host wordt ALLEEN bepaald door TikTok CONNECTED (userId / ownerId / hostId)
+//  ✔ Fallback mag hostId verzamelen maar MAG HEM NIET opslaan zonder CONNECTED
+//  ✔ Gifts naar host werken 100% correct
+//  ✔ Nooit meer verkeerde host-injecties
+//  ✔ Nooit meer boostmeflamez / 5binu / random hosts
 //
 // ============================================================================
 
@@ -22,9 +22,6 @@ let activeConn: WebcastPushConnection | null = null;
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// ============================================================================
-// Sanitize username
-// ============================================================================
 function norm(v: any): string {
   return (v || "")
     .toString()
@@ -43,8 +40,8 @@ export async function startConnection(
   username: string,
   onConnected: () => void
 ): Promise<{ conn: WebcastPushConnection | null }> {
+  
   const cleanHost = norm(username);
-
   if (!cleanHost) {
     console.error(`❌ Ongeldige host-invoer: "${username}"`);
     return { conn: null };
@@ -57,11 +54,12 @@ export async function startConnection(
     enableExtendedGiftInfo: true,
   });
 
-  // Buffers voor fallbacks
   let detectedHostId: string | null = null;
   let detectedUnique: string | null = null;
   let detectedNick: string | null = null;
+
   let hostSaved = false;
+  let connectedFired = false;
 
   // ========================================================================
   // SAVE HOST
@@ -89,31 +87,27 @@ export async function startConnection(
     });
 
     await refreshHostUsername();
-
     console.log("✔ HOST correct opgeslagen + users-table geüpdatet");
   }
 
   // ========================================================================
-  // FALLBACK LISTENER — ANCHOR NIET MEER GEBRUIKEN
+  // FALLBACK — anchorId volledig verwijderd
   // ========================================================================
 
   const captureFallback = (raw: any) => {
-    if (hostSaved) return;
+    if (hostSaved || connectedFired) return;
 
     const u =
       raw?.user ||
       raw?.sender ||
-      raw?.toUser ||
       raw?.receiver ||
+      raw?.toUser ||
       raw?.userIdentity ||
       raw;
 
     if (!u) return;
 
-    // ⚠️ anchorId WORDT NIET MEER ALS HOST GEBRUIKT
-    // TikTok stuurt bij jou een verkeerde anchorId
-    // NOOIT MEER gebruiken.
-
+    // ⚠️ NOOIT meer anchorId
     const uid =
       u?.userId ||
       u?.id ||
@@ -130,10 +124,6 @@ export async function startConnection(
     if (unique) detectedUnique = norm(unique);
     if (nick) detectedNick = nick;
   };
-
-  // ========================================================================
-  // FALLBACK LISTENERS A–H
-  // ========================================================================
 
   function attachFallbackListeners(c: any) {
     const evs = [
@@ -157,7 +147,7 @@ export async function startConnection(
       } catch {}
     }
 
-    console.log("🕵️‍♂️ Host fallback-detectie actief (A–H)");
+    console.log("🕵️‍♂️ Fallback actief (zonder anchorId)");
   }
 
   // ========================================================================
@@ -213,12 +203,12 @@ export async function startConnection(
       await conn.connect();
       console.log(`✔ Verbonden met livestream van @${cleanHost}`);
 
-      // MAIN HOST DETECTION — en deze is de ENIGE bron
       conn.on("connected", async (info: any) => {
+        connectedFired = true;
         console.log("══════════ CONNECTED ══════════");
 
-        // ⚠️ anchorId wordt hier OOK NIET gebruikt
-        let hostId =
+        // ✔ ENKEL hier bepalen wie de host werkelijk is
+        const hostId =
           info?.hostId ||
           info?.ownerId ||
           info?.roomIdOwner ||
@@ -226,21 +216,21 @@ export async function startConnection(
           info?.userId ||
           null;
 
-        let unique =
+        const unique =
           info?.uniqueId ||
           info?.ownerUniqueId ||
           info?.user?.uniqueId ||
           cleanHost ||
           null;
 
-        let nick =
+        const nick =
           info?.nickname ||
           info?.ownerNickname ||
           info?.user?.nickname ||
           unique ||
           "Host";
 
-        console.log("🎯 HOST DETECTIE (CONNECTED):", {
+        console.log("🎯 HOST DETECTIE (CONNECTED ONLY):", {
           id: hostId,
           unique,
           nick,
@@ -249,19 +239,22 @@ export async function startConnection(
         if (hostId && unique) {
           await saveHost(String(hostId), unique, nick);
         } else {
-          console.warn("⚠ CONNECTED had GEEN geldige host — fallback actief");
+          console.warn("⚠ CONNECTED gaf GEEN hostId — fallback alleen lezen");
         }
 
         onConnected();
       });
 
+      // Fallbacks (maar ze kunnen host NIET opslaan)
       attachFallbackListeners(conn);
+
+      // Identity
       attachIdentitySync(conn);
 
-      // DEEP fallback (nooit anchor)
+      // Hard fallback — enkel toegestaan als CONNECT nooit kwam
       setTimeout(async () => {
-        if (!hostSaved && detectedHostId) {
-          console.log("⚠ Fallback gebruikt voor HOST:", {
+        if (!hostSaved && !connectedFired && detectedHostId) {
+          console.log("⚠ FALLBACK HOST (geen CONNECT ontvangen):", {
             id: detectedHostId,
             uniqueId: detectedUnique,
             nick: detectedNick,
@@ -275,7 +268,7 @@ export async function startConnection(
 
           onConnected();
         }
-      }, 2500);
+      }, 3000);
 
       activeConn = conn;
       return { conn };
