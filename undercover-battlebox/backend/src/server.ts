@@ -587,7 +587,5 @@ initDB().then(async () => {
   }
 });
 
-// ============================================================================
-// EXPORTS (FIXED)
-// ============================================================================
-export { io, emitLog, emitArena };
+// ❌ Verwijder deze regel volledig
+// export { io, emitLog, emitArena };
