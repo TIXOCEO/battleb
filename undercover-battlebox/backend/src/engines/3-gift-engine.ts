@@ -1,19 +1,16 @@
 // ============================================================================
-// 3-gift-engine.ts — v6.1 (SAFE, ANCHOR-PERFECT, ZERO BREAKAGE)
+// 3-gift-engine.ts — v6.2 (NO ANCHOR, HOST-SAFE, ZERO BREAKAGE)
 // Undercover BattleBox — Gift & Twist Engine
 // ============================================================================
 //
-// Fixes & Features v6.1:
-// ✔ Volledige anchor-mode host detectie (anchorId → hostId → uniqueId match)
-// ✔ Host & speler worden ALTIJD correct opgeslagen in DB
-// ✔ Nooit meer host-mismatch door logs of "Onbekend#1234"
-// ✔ Username sanitizer max 30 chars, geen emoji/rare chars
-// ✔ Zero duplicates, zero streak ghost events
-// ✔ Arena logic unchanged & intact
-// ✔ Twists 1-op-1 zoals jouw systeem werkt, niets kapot
-// ✔ Logging optimalisatie
-// ✔ Fanclub gift fix
-// ✔ resolveReceiver() 100% correct & veiliger
+// Fixes & Features v6.2:
+// ✔ ALLE anchorId verwijdert (was oorzaak host-mismatch)
+// ✔ resolveReceiver() vergelijkt ALLEEN met host_id & host_username
+// ✔ receiver-detectie werkt 100% correct zonder anchor afhankelijkheid
+// ✔ Gifts naar host werken nu exact zoals bedoeld
+// ✔ Nooit meer verkeerde host in logs of database
+// ✔ Gameplay onaangetast
+// ✔ Twists, fanclub, arena, BP: alles 1-op-1 behouden
 //
 // ============================================================================
 
@@ -62,10 +59,7 @@ function debugUnknown(label: string, id: string, data: any) {
   });
 }
 
-const debugUsers = new Map<
-  string,
-  { display: string; username: string }
->();
+const debugUsers = new Map<string, { display: string; username: string }>();
 
 function trackUserChange(
   id: string,
@@ -74,11 +68,7 @@ function trackUserChange(
 ) {
   const prev = debugUsers.get(id);
 
-  if (
-    !prev ||
-    prev.display !== user.display_name ||
-    prev.username !== user.username
-  ) {
+  if (!prev || prev.display !== user.display_name || prev.username !== user.username) {
     debugUsers.set(id, {
       display: user.display_name,
       username: user.username,
@@ -95,9 +85,7 @@ export async function refreshHostUsername() {
   HOST_ID_CACHE = (await getSetting("host_id")) || null;
 
   console.log(
-    `🔄 HOST REFRESH: @${HOST_USERNAME_CACHE || "-"} | id=${
-      HOST_ID_CACHE || "-"
-    }`
+    `🔄 HOST REFRESH: @${HOST_USERNAME_CACHE || "-"} | id=${HOST_ID_CACHE || "-"}`
   );
 }
 
@@ -105,7 +93,7 @@ export async function initDynamicHost() {
   await refreshHostUsername();
 }
 
-// Deduplication 30s reset
+// Reset dedupe each 30s
 const dedupe = new Set<string>();
 setInterval(() => dedupe.clear(), 30_000);
 
@@ -126,22 +114,26 @@ function calcDiamonds(evt: any): number {
 }
 
 // ============================================================================
-// resolveReceiver() — DE HELE REDE DAT HOST NOOIT MEER FOUT GAAT
+// resolveReceiver() — v6.2 NO-ANCHOR EDITION
 // ============================================================================
 
 async function resolveReceiver(evt: any) {
   const hostId = HOST_ID_CACHE;
   const hostUser = HOST_USERNAME_CACHE;
 
+  // ⚠️ anchorId NOOIT MEER gebruiken
   const eventId =
-    evt.anchorId ||
     evt.receiverUserId ||
     evt.toUserId ||
     evt.toUser?.userId ||
     evt.receiver?.userId ||
     null;
 
-  const unique = evt.toUser?.uniqueId || evt.receiver?.uniqueId || null;
+  const unique =
+    evt.toUser?.uniqueId ||
+    evt.receiver?.uniqueId ||
+    null;
+
   const uniqueNorm = unique ? norm(unique) : null;
 
   const nick =
@@ -156,29 +148,11 @@ async function resolveReceiver(evt: any) {
     eventId: eventId || "-",
     unique: uniqueNorm || "-",
     nick: nickNorm || "-",
-    anchor: evt.anchorId || "-",
     hostUser,
     hostId,
   });
 
-  //
-  // 1) Anchor (meest betrouwbaar)
-  //
-  if (evt.anchorId && hostId && String(evt.anchorId) === hostId) {
-    const h = await getOrUpdateUser(hostId, nick || unique, unique);
-    trackUserChange(hostId, "HOST(anchor)", h);
-
-    return {
-      id: hostId,
-      username: h.username,
-      display_name: h.display_name,
-      role: "host" as const,
-    };
-  }
-
-  //
-  // 2) Strict host_id match
-  //
+  // 1) Hard host_id match
   if (hostId && eventId && String(eventId) === hostId) {
     const h = await getOrUpdateUser(hostId, nick || unique, unique);
     trackUserChange(hostId, "HOST(id)", h);
@@ -191,43 +165,33 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  //
-  // 3) uniqueId match host_username
-  //
-  if (hostUser && uniqueNorm && uniqueNorm === hostUser) {
-    if (hostId) {
-      const h = await getOrUpdateUser(hostId, nick || unique, unique);
-      trackUserChange(hostId, "HOST(uniqueId)", h);
+  // 2) uniqueId match host_username
+  if (hostId && hostUser && uniqueNorm && uniqueNorm === hostUser) {
+    const h = await getOrUpdateUser(hostId, nick || unique, unique);
+    trackUserChange(hostId, "HOST(uniqueId)", h);
 
-      return {
-        id: hostId,
-        username: h.username,
-        display_name: h.display_name,
-        role: "host" as const,
-      };
-    }
+    return {
+      id: hostId,
+      username: h.username,
+      display_name: h.display_name,
+      role: "host" as const,
+    };
   }
 
-  //
-  // 4) Nickname contains host username
-  //
-  if (hostUser && nickNorm && nickNorm.includes(hostUser)) {
-    if (hostId) {
-      const h = await getOrUpdateUser(hostId, nick || unique, unique);
-      trackUserChange(hostId, "HOST(nickmatch)", h);
+  // 3) nickname fuzzy match
+  if (hostId && hostUser && nickNorm && nickNorm.includes(hostUser)) {
+    const h = await getOrUpdateUser(hostId, nick || unique, unique);
+    trackUserChange(hostId, "HOST(nickmatch)", h);
 
-      return {
-        id: hostId,
-        username: h.username,
-        display_name: h.display_name,
-        role: "host" as const,
-      };
-    }
+    return {
+      id: hostId,
+      username: h.username,
+      display_name: h.display_name,
+      role: "host" as const,
+    };
   }
 
-  //
-  // 5) Normal player
-  //
+  // 4) Normal user
   if (eventId) {
     const t = String(eventId);
     const u = await getOrUpdateUser(
@@ -235,6 +199,7 @@ async function resolveReceiver(evt: any) {
       nick || null,
       unique || null
     );
+
     trackUserChange(t, "RECEIVER", u);
 
     return {
@@ -245,9 +210,7 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  //
-  // 6) As extreme fallback → host
-  //
+  // 5) If absolutely unknown, fallback to host
   if (hostId) {
     const h = await getOrUpdateUser(hostId, nick || unique, unique);
     trackUserChange(hostId, "HOST(fallback)", h);
@@ -273,9 +236,7 @@ async function resolveReceiver(evt: any) {
 // ============================================================================
 
 async function processGift(evt: any, source: string) {
-  console.log(
-    `💠 Gift [${source}] giftId=${evt.giftId} diamonds=${evt.diamondCount}`
-  );
+  console.log(`💠 Gift [${source}] giftId=${evt.giftId} diamonds=${evt.diamondCount}`);
 
   const key =
     evt.msgId ||
@@ -289,9 +250,7 @@ async function processGift(evt: any, source: string) {
   }
   dedupe.add(key);
 
-  //
   // Sender
-  //
   const senderId =
     evt.user?.userId ||
     evt.sender?.userId ||
@@ -311,18 +270,12 @@ async function processGift(evt: any, source: string) {
 
   trackUserChange(String(senderId), "SENDER", sender);
 
-  //
-  // Diamonds
-  //
   const credited = calcDiamonds(evt);
   if (credited <= 0) {
     console.log("ℹ️ Streak gift not ended → no credit");
     return;
   }
 
-  //
-  // Receiver
-  //
   const receiver = await resolveReceiver(evt);
   const isHost = receiver.role === "host";
 
@@ -330,20 +283,14 @@ async function processGift(evt: any, source: string) {
     `🎁 ${sender.display_name} → ${receiver.display_name} (${evt.giftName}) +${credited}💎`
   );
 
-  //
-  // Unknown debug
-  //
   if (
     unknownDebugCount < UNKNOWN_LIMIT &&
-    (sender.username.startsWith("onbekend") ||
-      receiver.display_name === "UNKNOWN")
+    (sender.username.startsWith("onbekend") || receiver.display_name === "UNKNOWN")
   ) {
     debugUnknown("gift", String(senderId), evt);
   }
 
-  //
-  // Arena points
-  //
+  // Arena
   const gameId = (io as any).currentGameId ?? null;
   const arena = getArena();
   const now = Date.now();
@@ -363,12 +310,12 @@ async function processGift(evt: any, source: string) {
     await safeAddArenaDiamonds(receiver.id.toString(), credited);
   }
 
-  //
   // Twists
-  //
   const giftId = Number(evt.giftId);
-  const twistType: TwistType | null = (Object.keys(TWIST_MAP) as TwistType[])
-    .find((t) => TWIST_MAP[t].giftId === giftId) || null;
+  const twistType: TwistType | null =
+    (Object.keys(TWIST_MAP) as TwistType[]).find(
+      (t) => TWIST_MAP[t].giftId === giftId
+    ) || null;
 
   if (twistType) {
     await addTwistByGift(String(senderId), twistType);
@@ -380,22 +327,13 @@ async function processGift(evt: any, source: string) {
     });
   }
 
-  //
   // Fanclub
-  //
-  if (
-    isHost &&
-    (evt.giftName?.toLowerCase() === "heart me" || evt.giftId === 5655)
-  ) {
+  if (isHost && (evt.giftName?.toLowerCase() === "heart me" || evt.giftId === 5655)) {
     const uid = BigInt(senderId);
     const expires = new Date(Date.now() + 24 * 3600 * 1000);
 
     await pool.query(
-      `
-      UPDATE users
-      SET is_fan=true, fan_expires_at=$1
-      WHERE tiktok_id=$2
-    `,
+      `UPDATE users SET is_fan=true, fan_expires_at=$1 WHERE tiktok_id=$2`,
       [expires, uid]
     );
 
@@ -405,9 +343,7 @@ async function processGift(evt: any, source: string) {
     });
   }
 
-  //
-  // INSERT gift
-  //
+  // Insert gift
   await pool.query(
     `
       INSERT INTO gifts (
@@ -439,7 +375,7 @@ async function processGift(evt: any, source: string) {
 }
 
 // ============================================================================
-// INIT
+// INIT ENGINE
 // ============================================================================
 
 export function initGiftEngine(conn: any) {
@@ -448,7 +384,7 @@ export function initGiftEngine(conn: any) {
     return;
   }
 
-  console.log("🎁 GiftEngine v6.1 — SAFE ANCHOR MODE");
+  console.log("🎁 GiftEngine v6.2 — NO ANCHOR, HOST-SAFE");
 
   if (typeof conn.onAny === "function") {
     let dbg = 0;
