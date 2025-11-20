@@ -165,3 +165,27 @@ export async function upsertUser(tiktok_id: string, username: string, display_na
     );
 }
 
+// ============================================================================
+// COMPATIBILITY WRAPPER — getOrUpdateUser()
+// Voor gift-engine, chat-engine en queue-engine
+// ============================================================================
+export async function getOrUpdateUser(
+    tiktokId: string,
+    displayName?: string | null,
+    username?: string | null
+) {
+    const id = String(tiktokId);
+
+    // Eerst proberen op te halen
+    const existing = await getUserByTikTokId(id);
+    if (existing) return existing;
+
+    // Aanmaken indien niet bestaand
+    await upsertUser(
+        id,
+        username || existing?.username || "unknown",
+        displayName || existing?.display_name || "Onbekend"
+    );
+
+    return await getUserByTikTokId(id);
+}
