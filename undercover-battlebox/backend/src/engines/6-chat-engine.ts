@@ -114,7 +114,7 @@ export function initChatEngine(conn: any) {
       const tag = isVip ? "[VIP] " : fan ? "[FAN] " : "";
 
       // Host logic
-      const hostId = getHostId();
+      const hostId = getHardHostId();
       const isHost = hostId && String(hostId) === String(userId);
 
       // =====================================================================
