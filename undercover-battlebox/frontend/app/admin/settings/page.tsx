@@ -71,17 +71,18 @@ export default function SettingsPage() {
 
       if (res.settings) setSettings(res.settings);
 
-      if (typeof res.host === "string") {
-        const cleanUser = sanitizeHostUsername(res.host);
-        setCurrentHostUser(cleanUser);
-        setHostUsername(cleanUser);
-      }
+if (res.host?.username) {
+  const cleanUser = sanitizeHostUsername(res.host.username);
+  setCurrentHostUser(cleanUser);
+  setHostUsername(cleanUser);
+}
 
-      if (res.host?.id || res.hostId) {
-        const cleanId = sanitizeHostId(String(res.host.id || res.hostId));
-        setCurrentHostId(cleanId);
-        setHostId(cleanId);
-      }
+if (res.host?.id) {
+  const cleanId = sanitizeHostId(String(res.host.id));
+  setCurrentHostId(cleanId);
+  setHostId(cleanId);
+}
+
 
       setGameActive(!!res.gameActive);
       setConnected(true);
