@@ -88,7 +88,7 @@ export async function upsertIdentityFromLooseEvent(raw: any) {
   const { id, username, display } = extractIdentity(raw);
   if (!id) return;
 
-  const hostId = getHostId();
+  const hostId = getHardHostId();
   const isHost = hostId && String(hostId) === id;
 
   const cleanUsername = username || "unknown";
@@ -154,7 +154,7 @@ export async function upsertUser(
   const cleanUser = normUsername(username);
   const cleanDisp = normDisplay(display_name);
 
-  const hostId = getHostId();
+  const hostId = getHardHostId();
   const isHost = hostId && String(hostId) === tiktok_id;
 
   // Hard Host Lock — tijdens livestream GEEN username-update
