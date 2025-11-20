@@ -173,6 +173,9 @@ export { emitArena }; // export fix
 // ============================================================================
 // STREAM STATS
 // ============================================================================
+let currentGameId: number | null = null;
+(io as any).currentGameId = null;
+
 export async function broadcastStats() {
   if (!currentGameId) return;
 
@@ -205,9 +208,6 @@ export async function broadcastStats() {
 // ============================================================================
 // GAME SESSION MANAGEMENT
 // ============================================================================
-let currentGameId: number | null = null;
-(io as any).currentGameId = null;
-
 async function loadActiveGame() {
   const res = await pool.query(`
     SELECT id
@@ -300,6 +300,8 @@ async function hardResetGame() {
     active: false,
     gameId: null,
   });
+
+  await broadcastStats();
 }
 
 // ============================================================================
