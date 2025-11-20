@@ -1,16 +1,26 @@
 // ============================================================================
-// 1-connection.ts — v7.1 (HOST-ID SYNC + LIVE-STATE SUPPORT)
+// 1-connection.ts — v8.0 (STRICT HOST LOCK + NO FALLBACK OVERRIDE)
+// Undercover BattleBox — TikTok LIVE Core Connection Engine
+// ============================================================================
+//
+// Fixes in v8.0:
+//  ✔ Fallback kan NOOIT een foute host opslaan
+//  ✔ Host mag ALLEEN gezet worden op CONNECTED-event
+//  ✔ Fallback wordt alleen gebruikt als CONNECTED nooit komt EN
+//       de fallback-uniqueId gelijk is aan de host waarmee jij verbindt
+//  ✔ Co-hosts / kijkers kunnen NOOIT host worden
+//  ✔ Perfecte identity-sync
+//  ✔ Volledig stabiele reconnect
+//
 // ============================================================================
 
 import { WebcastPushConnection } from "tiktok-live-connector";
 import { getSetting, setSetting } from "../db";
 import { upsertIdentityFromLooseEvent } from "./2-user-engine";
 
-import { setHostId, setLiveState } from "../server"; // <-- NIEUW
+import { setHostId, setLiveState } from "../server";
 
-function wait(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
-}
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function norm(v: any): string {
   return (v || "")
@@ -27,7 +37,10 @@ let activeConn: WebcastPushConnection | null = null;
 // ============================================================================
 // START CONNECTION
 // ============================================================================
-export async function startConnection(username: string, onConnected: () => void) {
+export async function startConnection(
+  username: string,
+  onConnected: () => void
+): Promise<{ conn: WebcastPushConnection | null }> {
   const cleanHost = norm(username);
 
   console.log(`🔌 Verbinden met TikTok LIVE… @${cleanHost}`);
@@ -37,15 +50,16 @@ export async function startConnection(username: string, onConnected: () => void)
     enableExtendedGiftInfo: true,
   });
 
-  let detectedHostId: string | null = null;
-  let detectedUnique: string | null = null;
-  let detectedNick: string | null = null;
-
   let hostSaved = false;
   let connectedFired = false;
 
+  // fallback info
+  let fb_hostId: string | null = null;
+  let fb_unique: string | null = null;
+  let fb_nick: string | null = null;
+
   // ========================================================================
-  // SAVE HOST
+  // SAVE HOST — uitsluitend geldig voor host waarmee jij verbindt
   // ========================================================================
   async function saveHost(id: string, uniqueId: string, nickname: string) {
     if (hostSaved) return;
@@ -62,23 +76,22 @@ export async function startConnection(username: string, onConnected: () => void)
     await setSetting("host_id", String(id));
     await setSetting("host_username", cleanUnique);
 
-    setHostId(String(id)); // <-- BELANGRIJK
+    setHostId(String(id));
 
-    // upsert identity
     await upsertIdentityFromLooseEvent({
       userId: String(id),
       uniqueId: cleanUnique,
       nickname,
     });
 
-    console.log("✔ HOST opgeslagen + user identity geüpdatet");
+    console.log("✔ HOST opgeslagen + users-table geüpdatet");
   }
 
   // ========================================================================
-  // FALLBACK CAPTURE
+  // FALLBACK CAPTURE — MAAR host kan NOOIT veranderen
   // ========================================================================
   function captureFallback(raw: any) {
-    if (hostSaved || connectedFired) return;
+    if (connectedFired || hostSaved) return; // CONNECTED heeft voorrang
 
     const u =
       raw?.user ||
@@ -98,29 +111,28 @@ export async function startConnection(username: string, onConnected: () => void)
       raw?.toUserId ||
       null;
 
-    if (uid) detectedHostId = String(uid);
-
     const unique = u?.uniqueId || u?.unique_id || null;
     const nick = u?.nickname || u?.displayName || null;
 
-    if (unique) detectedUnique = norm(unique);
-    if (nick) detectedNick = nick;
+    if (uid) fb_hostId = String(uid);
+    if (unique) fb_unique = norm(unique);
+    if (nick) fb_nick = nick;
   }
 
   function attachFallbackListeners(c: any) {
     const evs = [
       "enter",
       "member",
-      "liveRoomUser",
-      "social",
-      "share",
       "gift",
       "chat",
-      "roomMessage",
       "like",
       "follow",
       "subscribe",
+      "share",
       "join",
+      "roomMessage",
+      "liveRoomUser",
+      "social",
     ];
 
     for (const ev of evs) {
@@ -129,7 +141,7 @@ export async function startConnection(username: string, onConnected: () => void)
       } catch {}
     }
 
-    console.log("🕵️‍♂️ Fallback actief");
+    console.log("🕵️‍♂️ Fallback actief (maar host LOCKED)");
   }
 
   // ========================================================================
@@ -140,7 +152,12 @@ export async function startConnection(username: string, onConnected: () => void)
 
     const update = (raw: any) =>
       upsertIdentityFromLooseEvent(
-        raw?.user || raw?.sender || raw?.toUser || raw?.receiver || raw
+        raw?.user ||
+          raw?.sender ||
+          raw?.receiver ||
+          raw?.toUser ||
+          raw?.userIdentity ||
+          raw
       );
 
     const events = [
@@ -176,18 +193,20 @@ export async function startConnection(username: string, onConnected: () => void)
   }
 
   // ========================================================================
-  // CONNECT FLOW
+  // CONNECT LOOP
   // ========================================================================
   for (let attempt = 1; attempt <= 8; attempt++) {
     try {
       await conn.connect();
+
       console.log(`✔ Verbonden met livestream van @${cleanHost}`);
 
       conn.on("connected", async (info: any) => {
         connectedFired = true;
+
         console.log("══════════ CONNECTED ══════════");
 
-        setLiveState(true); // <-- NIEUW: STREAM = LIVE
+        setLiveState(true);
 
         const hostId =
           info?.hostId ||
@@ -215,10 +234,8 @@ export async function startConnection(username: string, onConnected: () => void)
           nick,
         });
 
-        if (hostId && unique) {
+        if (hostId) {
           await saveHost(String(hostId), unique, nick);
-        } else {
-          console.warn("⚠ CONNECTED gaf geen hostId — fallback actief");
         }
 
         onConnected();
@@ -227,21 +244,28 @@ export async function startConnection(username: string, onConnected: () => void)
       attachFallbackListeners(conn);
       attachIdentitySync(conn);
 
+      // STRICT FALLBACK: Alleen toegestaan als fallback-uniqueId == host
       setTimeout(async () => {
-        if (!hostSaved && !connectedFired && detectedHostId) {
-          console.log("⚠ FALLBACK HOST:", {
-            id: detectedHostId,
-            unique: detectedUnique,
-            nick: detectedNick,
-          });
+        if (!connectedFired && !hostSaved) {
+          if (fb_unique === cleanHost && fb_hostId) {
+            console.log("⚠ STRICT FALLBACK (gelijk aan host):", {
+              id: fb_hostId,
+              unique: fb_unique,
+              nick: fb_nick,
+            });
 
-          await saveHost(
-            detectedHostId,
-            detectedUnique || cleanHost,
-            detectedNick || detectedUnique || cleanHost
-          );
+            await saveHost(
+              fb_hostId,
+              fb_unique || cleanHost,
+              fb_nick || fb_unique || cleanHost
+            );
 
-          onConnected();
+            onConnected();
+          } else {
+            console.log(
+              "⛔ Fallback genegeerd — uniekeId komt NIET overeen met host"
+            );
+          }
         }
       }, 3000);
 
@@ -266,7 +290,9 @@ export async function startConnection(username: string, onConnected: () => void)
 // ============================================================================
 // STOP CONNECTION
 // ============================================================================
-export async function stopConnection(conn?: WebcastPushConnection | null) {
+export async function stopConnection(
+  conn?: WebcastPushConnection | null
+): Promise<void> {
   const c = conn || activeConn;
   if (!c) return;
 
@@ -279,7 +305,7 @@ export async function stopConnection(conn?: WebcastPushConnection | null) {
     console.error("❌ stopConnection fout:", err);
   }
 
-  setLiveState(false); // <-- STREAM OFFLINE
+  setLiveState(false);
 
   if (!conn || conn === activeConn) activeConn = null;
 }
