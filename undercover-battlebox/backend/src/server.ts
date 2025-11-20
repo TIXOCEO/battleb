@@ -1,5 +1,6 @@
 // ============================================================================
-// server.ts — Undercover BattleBox — v3.7 (LIVE-STATE + HOST-ID READY)
+// server.ts — Undercover BattleBox — v4.0 FINAL
+// STREAM-LIVE ENGINE + HOST-ID SYNC + FAN-COMPAT + FULL GIFT v8.0 SUPPORT
 // ============================================================================
 
 import express from "express";
@@ -11,7 +12,7 @@ import dotenv from "dotenv";
 import pool, { getSetting, setSetting } from "./db";
 import { initDB } from "./db";
 
-// ---- Engines ---------------------------------------------------------------
+// ----- Engines ---------------------------------------------------------------
 import { startConnection, stopConnection } from "./engines/1-connection";
 
 import {
@@ -39,14 +40,13 @@ import { applyBoost } from "./engines/7-boost-engine";
 import { useTwist } from "./engines/8-twist-engine";
 import { initAdminTwistEngine } from "./engines/9-admin-twist-engine";
 
-dotenv.config();
-
 // ============================================================================
-// HOST + LIVE STATE
+// GLOBAL STREAM STATE (CENTRAL)
 // ============================================================================
 let streamLive = false;
 let cachedHostId: string | null = null;
 
+// Exposed to all engines
 export function setLiveState(v: boolean) {
   streamLive = v;
 }
@@ -64,10 +64,12 @@ export function getHostId() {
 }
 
 // ============================================================================
-// CONSTANTEN
+// ENV + CONSTANTEN
 // ============================================================================
+dotenv.config();
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "supersecret123";
 
+// sanitize host username before connecting
 function sanitizeHost(input: string): string {
   if (!input) return "";
   return input
@@ -78,21 +80,22 @@ function sanitizeHost(input: string): string {
     .slice(0, 30);
 }
 
-// EXPRESS SERVER --------------------------------------------------------------
+// ============================================================================
+// EXPRESS & SOCKET.IO
+// ============================================================================
 const app = express();
 app.use(cors());
 app.use(express.json());
 const server = http.createServer(app);
 
-// ============================================================================
-// SOCKET.IO
-// ============================================================================
 export const io = new Server(server, {
   cors: { origin: "*" },
   path: "/socket.io",
 });
 
-// TYPES
+// ============================================================================
+// LOG BUFFER (ADMIN DASHBOARD)
+// ============================================================================
 type LogEntry = {
   id: string;
   timestamp: string;
@@ -100,34 +103,9 @@ type LogEntry = {
   message: string;
 };
 
-type StreamStats = {
-  totalPlayers: number;
-  totalPlayerDiamonds: number;
-  totalHostDiamonds: number;
-};
-
-type GameSession = {
-  active: boolean;
-  gameId: number | null;
-  startedAt?: string | null;
-  endedAt?: string | null;
-};
-
-// ============================================================================
-// GLOBAL STATE
-// ============================================================================
-let currentGameId: number | null = null;
-(io as any).currentGameId = null;
-
-let tiktokConn: any = null;
-let reconnectLock = false;
-
 const logBuffer: LogEntry[] = [];
 const LOG_MAX = 500;
 
-// ============================================================================
-// LOGGING
-// ============================================================================
 export function emitLog(entry: Partial<LogEntry>) {
   const log: LogEntry = {
     id: entry.id ?? Date.now().toString(),
@@ -157,9 +135,9 @@ export async function emitQueue() {
 }
 
 // ============================================================================
-// STREAM STATS
+// STREAM STATS (host diamonds / player diamonds)
 // ============================================================================
-export async function broadcastStats() {
+async function broadcastStats() {
   if (!currentGameId) return;
 
   const res = await pool.query(
@@ -167,10 +145,13 @@ export async function broadcastStats() {
       SELECT
         COUNT(DISTINCT CASE WHEN receiver_role IN ('speler','cohost')
           THEN receiver_id END) AS total_players,
+
         COALESCE(SUM(CASE WHEN receiver_role IN ('speler','cohost')
           THEN diamonds ELSE 0 END), 0) AS total_player_diamonds,
+
         COALESCE(SUM(CASE WHEN receiver_role = 'host'
           THEN diamonds ELSE 0 END), 0) AS total_host_diamonds
+
       FROM gifts
       WHERE game_id = $1
     `,
@@ -178,23 +159,23 @@ export async function broadcastStats() {
   );
 
   const row = res.rows[0] || {};
-  const stats: StreamStats = {
+
+  io.emit("streamStats", {
     totalPlayers: Number(row.total_players || 0),
     totalPlayerDiamonds: Number(row.total_player_diamonds || 0),
     totalHostDiamonds: Number(row.total_host_diamonds || 0),
-  };
-
-  io.emit("streamStats", stats);
+  });
 }
 
 // ============================================================================
 // GAME SESSION MANAGEMENT
 // ============================================================================
+let currentGameId: number | null = null;
+(io as any).currentGameId = null;
+
 async function loadActiveGame() {
   const res = await pool.query(
-    `SELECT id, started_at, ended_at FROM games
-     WHERE status='running'
-     ORDER BY id DESC LIMIT 1`
+    `SELECT id FROM games WHERE status='running' ORDER BY id DESC LIMIT 1`
   );
 
   if (res.rows[0]) {
@@ -209,8 +190,7 @@ async function loadActiveGame() {
 
 async function startNewGame() {
   const res = await pool.query(
-    `INSERT INTO games (status) VALUES ('running')
-     RETURNING id, started_at`
+    `INSERT INTO games (status) VALUES ('running') RETURNING id, started_at`
   );
 
   currentGameId = res.rows[0].id;
@@ -233,12 +213,19 @@ async function stopCurrentGame() {
   if (!currentGameId) return;
 
   const res = await pool.query(
-    `UPDATE games SET status='ended', ended_at=NOW()
-     WHERE id=$1 RETURNING ended_at`,
+    `
+      UPDATE games
+      SET status='ended', ended_at=NOW()
+      WHERE id=$1
+      RETURNING ended_at
+    `,
     [currentGameId]
   );
 
-  emitLog({ type: "system", message: `Spel beëindigd (#${currentGameId})` });
+  emitLog({
+    type: "system",
+    message: `Spel beëindigd (#${currentGameId})`,
+  });
 
   io.emit("gameSession", {
     active: false,
@@ -253,7 +240,7 @@ async function stopCurrentGame() {
 }
 
 // ============================================================================
-// ADMIN AUTH
+// ADMIN SOCKET AUTH
 // ============================================================================
 interface AdminSocket extends Socket {
   isAdmin?: boolean;
@@ -268,8 +255,11 @@ io.use((socket: AdminSocket, next) => {
 });
 
 // ============================================================================
-// STABIELE TIKTOK RECONNECT
+// ULTRA STABLE RECONNECT
 // ============================================================================
+let tiktokConn: any = null;
+let reconnectLock = false;
+
 async function restartTikTokConnection() {
   if (reconnectLock) return;
   reconnectLock = true;
@@ -282,7 +272,7 @@ async function restartTikTokConnection() {
       tiktokConn = null;
     }
 
-    const host = sanitizeHost((await getSetting("host_username")) || "");
+    const host = sanitizeHost(await getSetting("host_username"));
 
     if (!host) {
       reconnectLock = false;
@@ -323,6 +313,7 @@ io.on("connection", async (socket: AdminSocket) => {
   console.log("ADMIN CONNECT:", socket.id);
   emitLog({ type: "system", message: "Admin dashboard verbonden" });
 
+  // INITIAL PUSH
   socket.emit("initialLogs", logBuffer);
   socket.emit("updateArena", getArena());
   socket.emit("updateQueue", {
@@ -331,8 +322,7 @@ io.on("connection", async (socket: AdminSocket) => {
   });
   socket.emit("settings", getArenaSettings());
 
-  const savedHost = sanitizeHost((await getSetting("host_username")) || "");
-  socket.emit("host", savedHost);
+  socket.emit("host", sanitizeHost(await getSetting("host_username")));
 
   socket.emit("gameSession", {
     active: currentGameId !== null,
@@ -341,30 +331,34 @@ io.on("connection", async (socket: AdminSocket) => {
 
   initAdminTwistEngine(socket);
 
-  const handle = async (action: string, data: any, ack: Function) => {
+  async function handle(action: any, data: any, ack: Function) {
     try {
       console.log("[ADMIN ACTION]", action, data);
 
+      // --------------------------------------------------------------------------------
+      // GET SETTINGS
+      // --------------------------------------------------------------------------------
       if (action === "getSettings") {
         return ack({
           success: true,
           settings: getArenaSettings(),
-          host: sanitizeHost((await getSetting("host_username")) || ""),
+          host: sanitizeHost(await getSetting("host_username")),
           gameActive: currentGameId !== null,
         });
       }
 
+      // --------------------------------------------------------------------------------
+      // SET HOST
+      // --------------------------------------------------------------------------------
       if (action === "setHost") {
         if (currentGameId) {
           return ack({
             success: false,
-            message: "Host kan niet worden gewijzigd tijdens actief spel.",
+            message: "Host kan niet worden gewijzigd tijdens een actief spel.",
           });
         }
 
-        const raw = data?.username || "";
-        const clean = sanitizeHost(raw);
-
+        const clean = sanitizeHost(data?.username);
         if (!clean) {
           return ack({
             success: false,
@@ -388,6 +382,9 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
+      // --------------------------------------------------------------------------------
+      // GAME START/STOP
+      // --------------------------------------------------------------------------------
       if (action === "startGame") {
         if (currentGameId)
           return ack({ success: false, message: "Er draait al een spel." });
@@ -404,6 +401,9 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
+      // --------------------------------------------------------------------------------
+      // ROUNDED
+      // --------------------------------------------------------------------------------
       if (action === "startRound") {
         const ok = startRound(data?.type || "quarter");
 
@@ -411,7 +411,7 @@ io.on("connection", async (socket: AdminSocket) => {
           return ack({
             success: false,
             message:
-              "Start ronde geweigerd (status onjuist, te weinig spelers of open eliminaties).",
+              "Start ronde geweigerd (status/condities niet correct).",
           });
         }
 
@@ -423,6 +423,9 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
+      // --------------------------------------------------------------------------------
+      // UPDATE SETTINGS
+      // --------------------------------------------------------------------------------
       if (action === "updateSettings") {
         await updateArenaSettings({
           roundDurationPre: Number(data?.roundDurationPre),
@@ -435,11 +438,11 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
+      // --------------------------------------------------------------------------------
+      // USER LOOKUP
+      // --------------------------------------------------------------------------------
       if (!data?.username) {
-        return ack({
-          success: false,
-          message: "username is verplicht.",
-        });
+        return ack({ success: false, message: "username is verplicht." });
       }
 
       const queryUser = sanitizeHost(data.username);
@@ -464,6 +467,9 @@ io.on("connection", async (socket: AdminSocket) => {
 
       const { tiktok_id, display_name, username } = res.rows[0];
 
+      // --------------------------------------------------------------------------------
+      // ARENA / QUEUE ADMIN ACTIONS
+      // --------------------------------------------------------------------------------
       switch (action) {
         case "addToArena":
           arenaJoin(String(tiktok_id), display_name, username);
@@ -478,7 +484,7 @@ io.on("connection", async (socket: AdminSocket) => {
         case "addToQueue":
           await addToQueue(String(tiktok_id), username);
           await emitQueue();
-          emitLog({ type: "join", message: `${display_name} → queue` });
+          emitLog({ type: "queue", message: `${display_name} → queue` });
           break;
 
         case "eliminate":
@@ -504,7 +510,7 @@ io.on("connection", async (socket: AdminSocket) => {
           await emitQueue();
           emitLog({
             type: "booster",
-            message: `${display_name} gepromoveerd (+1)`,
+            message: `${display_name} +1 boost`,
           });
           break;
 
@@ -520,7 +526,7 @@ io.on("connection", async (socket: AdminSocket) => {
           await emitQueue();
           emitLog({
             type: "booster",
-            message: `${display_name} gedemoveerd (-1)`,
+            message: `${display_name} -1 boost`,
           });
           break;
 
@@ -544,9 +550,9 @@ io.on("connection", async (socket: AdminSocket) => {
         message: err.message || "Server error",
       });
     }
-  };
+  }
 
-  // register socket events
+  // REGISTER ALL SOCKET EVENTS
   socket.on("admin:getSettings", (d, ack) => handle("getSettings", d, ack));
   socket.on("admin:setHost", (d, ack) => handle("setHost", d, ack));
   socket.on("admin:startGame", (d, ack) => handle("startGame", d, ack));
@@ -573,11 +579,11 @@ initDB().then(async () => {
   });
 
   initGame();
-  await loadActiveGame();
 
+  await loadActiveGame();
   await initDynamicHost();
 
-  const host = sanitizeHost((await getSetting("host_username")) || "");
+  const host = sanitizeHost(await getSetting("host_username"));
 
   if (!host) {
     console.log("⚠ Geen host ingesteld — wacht op admin:setHost");
@@ -609,4 +615,7 @@ initDB().then(async () => {
   }
 });
 
+// ============================================================================
+// EXPORTS
+// ============================================================================
 export { emitArena };
