@@ -1,7 +1,8 @@
 // ============================================================================
-// 1-connection.ts — v9.0 FINAL
+// 1-connection.ts — v10.0 HARD HOST LOCK
 // Undercover BattleBox — TikTok LIVE Core Connection Engine
-// STRICT HOST LOCK + AUTO HOST-ID RECOVERY + NO MIS-HOSTS EVER AGAIN
+// STRICT ADMIN-HOST → No mis-hosts. No fallback overrides. Ever.
+// Identity-sync preserved. Fallback only used if verified == admin host.
 // ============================================================================
 
 import { WebcastPushConnection } from "tiktok-live-connector";
@@ -24,7 +25,7 @@ function norm(v: any): string {
 let activeConn: WebcastPushConnection | null = null;
 
 // ============================================================================
-// START CONNECTION
+// START CONNECTION (STRICT HOST LOCK)
 // ============================================================================
 export async function startConnection(
   username: string,
@@ -42,17 +43,18 @@ export async function startConnection(
   let hostSaved = false;
   let connectedFired = false;
 
-  // fallback capture buffers
+  // fallback buffers (maar alleen geldig als match met admin host)
   let fb_hostId: string | null = null;
   let fb_unique: string | null = null;
   let fb_nick: string | null = null;
 
   // ========================================================================
-  // SAVE HOST (Only the *real* host)
+  // SAVE HOST — ONLY THE REAL ADMIN HOST
   // ========================================================================
   async function saveHost(id: string, uniqueId: string, nickname: string) {
     if (!id) return;
-    if (hostSaved) return;
+    if (hostSaved) return; // nooit dubbel opslaan
+
     hostSaved = true;
 
     const cleanUnique = norm(uniqueId);
@@ -63,28 +65,28 @@ export async function startConnection(
       nickname,
     });
 
-    // Save in DB
+    // Opslaan in DB
     await setSetting("host_id", String(id));
     await setSetting("host_username", cleanUnique);
 
-    // Save in server runtime
+    // Opslaan in memory
     setHostId(String(id));
 
-    // Ensure users table has clean entry
+    // TikTok identity sync
     await upsertIdentityFromLooseEvent({
       userId: String(id),
       uniqueId: cleanUnique,
       nickname,
     });
 
-    console.log("✔ HOST is definitief opgeslagen & users-table up-to-date");
+    console.log("✔ HOST definitief vastgelegd (HARD LOCK)");
   }
 
   // ========================================================================
-  // FALLBACK CAPTURE (but cannot override a connected host)
+  // FALLBACK DETECTIE — maar mag host NIET vervangen
   // ========================================================================
   function captureFallback(raw: any) {
-    if (connectedFired || hostSaved) return; // CONNECTED = always stronger than fallback
+    if (connectedFired || hostSaved) return;
 
     const u =
       raw?.user ||
@@ -134,11 +136,11 @@ export async function startConnection(
       } catch {}
     }
 
-    console.log("🕵️‍♂️ Fallback actief (host wordt NOOIT vervangen)");
+    console.log("🕵️‍♂️ Fallback actief (zonder host override)");
   }
 
   // ========================================================================
-  // IDENTITY SYNC — full automatic cleanup
+  // IDENTITY SYNC (zoals origineel, niets weggehaald)
   // ========================================================================
   function attachIdentitySync(c: any) {
     if (!c || typeof c.on !== "function") return;
@@ -154,7 +156,7 @@ export async function startConnection(
       );
     };
 
-    const events = [
+    const baseEvents = [
       "chat",
       "like",
       "follow",
@@ -166,7 +168,7 @@ export async function startConnection(
       "enter",
     ];
 
-    for (const ev of events) {
+    for (const ev of baseEvents) {
       try {
         c.on(ev, update);
       } catch {}
@@ -174,7 +176,8 @@ export async function startConnection(
 
     c.on("gift", (g: any) => {
       update(g);
-      if (g?.toUser || g?.receiver) update(g.toUser || g.receiver);
+      if (g?.toUser) update(g.toUser);
+      if (g?.receiver) update(g.receiver);
     });
 
     c.on("linkMicBattle", (d: any) => {
@@ -187,7 +190,7 @@ export async function startConnection(
   }
 
   // ========================================================================
-  // CONNECT LOOP
+  // CONNECT LOOP (8 pogingen)
   // ========================================================================
   for (let attempt = 1; attempt <= 8; attempt++) {
     try {
@@ -238,11 +241,13 @@ export async function startConnection(
       attachFallbackListeners(conn);
       attachIdentitySync(conn);
 
-      // STRICT fallback → allowed only if fallback unique == host
+      // ====================================================================
+      // STRICT FALLBACK: alleen als fallback uniqueId == ADMIN HOST
+      // ====================================================================
       setTimeout(async () => {
         if (!connectedFired && !hostSaved) {
           if (fb_unique === cleanHost && fb_hostId) {
-            console.log("⚠ STRICT FALLBACK (host verified):", {
+            console.log("⚠ STRICT FALLBACK (verified host):", {
               id: fb_hostId,
               unique: fb_unique,
               nick: fb_nick,
@@ -256,14 +261,15 @@ export async function startConnection(
 
             onConnected();
           } else {
-            console.log("⛔ Fallback genegeerd — uniekeId ≠ host");
+            console.log(
+              "⛔ Fallback genegeerd — uniqueId voldoet niet aan admin host"
+            );
           }
         }
       }, 3000);
 
       activeConn = conn;
       return { conn };
-
     } catch (err: any) {
       console.error(`⛔ Verbinding mislukt (${attempt}/8):`, err?.message);
 
