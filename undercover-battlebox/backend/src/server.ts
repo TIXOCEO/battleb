@@ -161,7 +161,7 @@ async function broadcastStats() {
         COALESCE(SUM(CASE WHEN receiver_role IN ('speler','cohost')
           THEN diamonds ELSE 0 END), 0) AS total_player_diamonds,
 
-        COALESCE(SUM(CASE WHEN receiver_role='host'
+        COALESCE(SUM(CASE WHEN LOWER(receiver_role) = 'host'
           THEN diamonds ELSE 0 END), 0) AS total_host_diamonds
       FROM gifts
       WHERE game_id = $1
