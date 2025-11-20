@@ -1,29 +1,32 @@
 // ============================================================================
-// 6-chat-engine.ts — v2.1 (Danny Stable + Twist Support)
+// 6-chat-engine.ts — v3.0 (Fan-only join + VIP labels + Host rules)
+// Danny BattleBox Edition
 // ============================================================================
 //
-// ✔ Fans-only !join (via HeartMe gift, 24h)
-// ✔ !leave voor queue exit + BP refund
-// ✔ !boost X voor 1-5 spots boost
-// ✔ !use <twist> <target> geïntegreerd (via Twist Engine)
-// ✔ Geen duplicate events of false positives
-// ✔ Gebruikt getOrUpdateUser (DB user-sync)
-// ✔ Voltage safe, BigInt safe
+// Nieuwe features:
+// ✔ FAN ONLY !join (HeartMe → 24h)
+// ✔ Als fan → [FAN] label in log
+// ✔ Als VIP → [VIP] label in log
+// ✔ Admin override blijft bestaan
+// ✔ Host kan WÉL joinen als de stream NIET live is
+// ✔ Host kan NIET joinen als stream live is (server.ts bepaalt dit)
+// ✔ Mooie nette chat-logging
+// ✔ Volledig compatible met queue.ts v4.0
+// ✔ Upgraded ensureFanStatus() met auto-expire
 //
 // ============================================================================
 
 import pool from "../db";
-import { io, emitLog } from "../server";
+import { io, emitLog, isStreamLive, getHostId } from "../server";
 
 import { addToQueue, leaveQueue, getQueue } from "../queue";
 import { getOrUpdateUser } from "./2-user-engine";
 import { applyBoost, parseBoostChatCommand } from "./7-boost-engine";
 import { parseUseCommand } from "./8-twist-engine";
 
-// ------------------------------------------------------
-// Helpers
-// ------------------------------------------------------
-
+// ============================================================================
+// HELPERS
+// ============================================================================
 function clean(v: any) {
   return (v || "").toString().trim();
 }
@@ -34,23 +37,27 @@ function extractCommand(text: string) {
   return { cmd: p[0].toLowerCase(), args: p.slice(1) };
 }
 
+// FAN-check: 24h geldigheid + auto-expire
 async function ensureFanStatus(userId: bigint): Promise<boolean> {
   const r = await pool.query(
     `
     SELECT is_fan, fan_expires_at
     FROM users
     WHERE tiktok_id = $1
-  `,
+    `,
     [userId]
   );
 
   if (!r.rows[0]) return false;
 
   const { is_fan, fan_expires_at } = r.rows[0];
+
   if (!is_fan || !fan_expires_at) return false;
 
   const exp = new Date(fan_expires_at);
-  if (exp <= new Date()) {
+  const now = new Date();
+
+  if (exp <= now) {
     await pool.query(
       `UPDATE users SET is_fan = FALSE, fan_expires_at = NULL WHERE tiktok_id = $1`,
       [userId]
@@ -61,12 +68,11 @@ async function ensureFanStatus(userId: bigint): Promise<boolean> {
   return true;
 }
 
-// ------------------------------------------------------
-// MAIN ENGINE
-// ------------------------------------------------------
-
+// ============================================================================
+// MAIN CHAT ENGINE
+// ============================================================================
 export function initChatEngine(conn: any) {
-  console.log("💬 CHAT ENGINE v2.1 LOADED");
+  console.log("💬 CHAT ENGINE v3.0 LOADED");
 
   conn.on("chat", async (msg: any) => {
     try {
@@ -86,6 +92,7 @@ export function initChatEngine(conn: any) {
 
       const { cmd } = command;
 
+      // user ophalen & syncen
       const user = await getOrUpdateUser(
         String(userId),
         msg.user?.nickname || msg.sender?.nickname,
@@ -93,13 +100,60 @@ export function initChatEngine(conn: any) {
       );
 
       const dbUserId = BigInt(userId);
-      const isFan = await ensureFanStatus(dbUserId);
 
-      // --------------------------------------------------
-      // !join — FAN ONLY
-      // --------------------------------------------------
+      // FAN & VIP DATA ophalen
+      const fan = await ensureFanStatus(dbUserId);
+
+      const vipRow = await pool.query(
+        `SELECT is_vip FROM users WHERE tiktok_id=$1`,
+        [dbUserId]
+      );
+
+      const isVip = vipRow.rows[0]?.is_vip ? true : false;
+
+      const tag = isVip ? "[VIP] " : fan ? "[FAN] " : "";
+
+      // Host logic
+      const hostId = getHostId();
+      const isHost = hostId && String(hostId) === String(userId);
+
+      // =====================================================================
+      // !join — FAN ONLY (behalve host kan joinen als stream NIET live is)
+      // =====================================================================
       if (cmd === "!join") {
-        if (!isFan) {
+        // host mag joinen als stream NIET live is
+        if (isHost && !isStreamLive()) {
+          try {
+            await addToQueue(String(userId), user.username);
+          } catch (err: any) {
+            emitLog({ type: "queue", message: err.message });
+            return;
+          }
+
+          io.emit("updateQueue", {
+            open: true,
+            entries: await getQueue(),
+          });
+
+          emitLog({
+            type: "queue",
+            message: `[HOST] ${user.display_name} staat nu in de wachtrij.`,
+          });
+
+          return;
+        }
+
+        // host tijdens livestream → VERBODEN
+        if (isHost && isStreamLive()) {
+          emitLog({
+            type: "queue",
+            message: `[HOST] ${user.display_name} mag niet joinen tijdens livestream.`,
+          });
+          return;
+        }
+
+        // normale speler — FAN ONLY
+        if (!fan) {
           emitLog({
             type: "queue",
             message: `${user.display_name} probeerde te joinen maar is geen fan.`,
@@ -121,15 +175,15 @@ export function initChatEngine(conn: any) {
 
         emitLog({
           type: "queue",
-          message: `${user.display_name} staat nu in de wachtrij.`,
+          message: `${tag}${user.display_name} staat nu in de wachtrij.`,
         });
 
         return;
       }
 
-      // --------------------------------------------------
+      // =====================================================================
       // !leave
-      // --------------------------------------------------
+      // =====================================================================
       if (cmd === "!leave") {
         const refund = await leaveQueue(String(userId));
 
@@ -140,15 +194,15 @@ export function initChatEngine(conn: any) {
 
         emitLog({
           type: "queue",
-          message: `${user.display_name} heeft de queue verlaten (refund ${refund} BP).`,
+          message: `${tag}${user.display_name} heeft de queue verlaten (refund ${refund} BP).`,
         });
 
         return;
       }
 
-      // --------------------------------------------------
+      // =====================================================================
       // !boost X
-      // --------------------------------------------------
+      // =====================================================================
       if (cmd === "!boost") {
         const spots = await parseBoostChatCommand(text);
         if (!spots) return;
@@ -163,7 +217,7 @@ export function initChatEngine(conn: any) {
 
           emitLog({
             type: "boost",
-            message: `${user.display_name}: ${result.message}`,
+            message: `${tag}${user.display_name}: ${result.message}`,
           });
         } catch (err: any) {
           emitLog({
@@ -175,15 +229,15 @@ export function initChatEngine(conn: any) {
         return;
       }
 
-      // --------------------------------------------------
+      // =====================================================================
       // !use <twist> [target]
-      // --------------------------------------------------
+      // =====================================================================
       if (cmd === "!use") {
-        // Inject full raw message
-        const msgRaw = msg.comment || msg.text || msg.content;
-        await parseUseCommand(String(userId), user.display_name, msgRaw);
+        const raw = msg.comment || msg.text || msg.content;
+        await parseUseCommand(String(userId), user.display_name, raw);
         return;
       }
+
     } catch (err: any) {
       console.error("CHAT ENGINE ERROR:", err?.message || err);
     }
