@@ -69,9 +69,6 @@ export async function startConnection(
     await setSetting("host_id", String(id));
     await setSetting("host_username", cleanUnique);
 
-    // Opslaan in memory
-    setHostId(String(id));
-
     // TikTok identity sync
     await upsertIdentityFromLooseEvent({
       userId: String(id),
