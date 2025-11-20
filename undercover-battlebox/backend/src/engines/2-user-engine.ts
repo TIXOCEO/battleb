@@ -1,12 +1,14 @@
 // ============================================================================
-// 2-user-engine.ts — v10.1 FINAL
+// 2-user-engine.ts — v10.2 FINAL
 // Identity Engine + TikTok Universal Normalizer + HARD HOST LOCK (OPTIE B)
 // ============================================================================
 //
-// ✔ Geen UNKNOWN meer
+// ✔ Geen UNKNOWN meer (voor host als jij 'm hebt ingesteld)
 // ✔ Extractor vangt ALLE TikTok structuren (gift/chat/fallback)
-// ✔ Hard host lock: tijdens livestream GEEN username updates
-// ✔ Buiten livestream wél username update toegestaan
+// ✔ Hard host lock: tijdens livestream GEEN username-wijzigingen door TikTok
+// ✔ Buiten livestream wél username-update toegestaan
+// ✔ Tijdens livestream: host-row wordt wél aangemaakt/geüpdatet, maar
+//   username blijft altijd de "locked" variant (of bestaande uit DB)
 // ✔ Displayname wordt ALTIJD live geüpdatet
 // ✔ BigInt veilig
 // ✔ Snelle upsert (1 query)
@@ -15,7 +17,11 @@
 // ============================================================================
 
 import pool from "../db";
-import { isStreamLive, getHardHostId } from "../server";
+import {
+  isStreamLive,
+  getHardHostId,
+  getHardHostUsername,
+} from "../server";
 
 // ============================================================================
 // NORMALIZERS
@@ -96,48 +102,6 @@ function extractIdentity(raw: any) {
 }
 
 // ============================================================================
-// UPSERT IDENTITY (main entrypoint from gift/chat engines)
-// ============================================================================
-export async function upsertIdentityFromLooseEvent(raw: any) {
-  const { id, username, display } = extractIdentity(raw);
-  if (!id) return;
-
-  const hostId = getHardHostId();
-  const isHost = hostId && String(hostId) === id;
-
-  const cleanUsername = username || "unknown";
-  const cleanDisplay = display || "Onbekend";
-
-  // HARD HOST LOCK (OPTIE B)
-  // Tijdens livestream MAG host GEEN username-update krijgen
-  if (isHost && isStreamLive()) {
-    await pool.query(
-      `
-      UPDATE users
-      SET display_name = $1,
-          last_seen_at = NOW()
-      WHERE tiktok_id = $2
-      `,
-      [cleanDisplay, big(id)]
-    );
-    return;
-  }
-
-  // Normale users (of host buiten livestream)
-  await pool.query(
-    `
-      INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at)
-      VALUES ($1, $2, $3, NOW(), NOW())
-      ON CONFLICT (tiktok_id) DO UPDATE SET
-        username = EXCLUDED.username,
-        display_name = EXCLUDED.display_name,
-        last_seen_at = NOW()
-    `,
-    [big(id), cleanUsername, cleanDisplay]
-  );
-}
-
-// ============================================================================
 // USER GETTERS
 // ============================================================================
 export async function getUserByTikTokId(id: string) {
@@ -158,6 +122,73 @@ export async function getUserByUsername(username: string) {
 }
 
 // ============================================================================
+// UPSERT IDENTITY (main entrypoint from gift/chat engines)
+// ============================================================================
+export async function upsertIdentityFromLooseEvent(raw: any) {
+  const { id, username, display } = extractIdentity(raw);
+  if (!id) return;
+
+  const hostId = getHardHostId();
+  const lockedHostUsername = getHardHostUsername
+    ? getHardHostUsername()
+    : "";
+  const isHost = hostId && String(hostId) === id;
+
+  const cleanDisplay = display || "Onbekend";
+  let cleanUsername = username || "unknown";
+
+  // Als dit de host is: voorkom dat "unknown" of lege waardes ooit de
+  // locked username overschrijven. Gebruik in volgorde:
+  // 1) bestaande username in DB
+  // 2) locked host username uit server.ts (settings/admin)
+  // 3) username uit event (als die niet leeg is)
+  if (isHost) {
+    const existing = await getUserByTikTokId(id);
+
+    if (existing?.username) {
+      cleanUsername = existing.username;
+    } else if (lockedHostUsername) {
+      cleanUsername = normUsername(lockedHostUsername);
+    } else if (username) {
+      cleanUsername = username;
+    } else {
+      cleanUsername = "unknown";
+    }
+  }
+
+  // HARD HOST LOCK (OPTIE B)
+  // Tijdens livestream MAG host GEEN username-update krijgen vanuit TikTok.
+  // We zorgen wél dat de row bestaat en dat display_name live meeloopt.
+  if (isHost && isStreamLive()) {
+    await pool.query(
+      `
+      INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at)
+      VALUES ($1, $2, $3, NOW(), NOW())
+      ON CONFLICT (tiktok_id) DO UPDATE SET
+        -- username NIET updaten hier: hard lock
+        display_name = EXCLUDED.display_name,
+        last_seen_at = NOW()
+      `,
+      [big(id), cleanUsername, cleanDisplay]
+    );
+    return;
+  }
+
+  // Normale users (of host buiten livestream → mag username wel updaten)
+  await pool.query(
+    `
+      INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at)
+      VALUES ($1, $2, $3, NOW(), NOW())
+      ON CONFLICT (tiktok_id) DO UPDATE SET
+        username = EXCLUDED.username,
+        display_name = EXCLUDED.display_name,
+        last_seen_at = NOW()
+    `,
+    [big(id), cleanUsername, cleanDisplay]
+  );
+}
+
+// ============================================================================
 // DIRECT UPSERT — called manually (arena, queue, admin)
 // ============================================================================
 export async function upsertUser(
@@ -169,23 +200,36 @@ export async function upsertUser(
   const cleanDisp = normDisplay(display_name);
 
   const hostId = getHardHostId();
+  const lockedHostUsername = getHardHostUsername
+    ? getHardHostUsername()
+    : "";
   const isHost = hostId && String(hostId) === tiktok_id;
 
   // HARD HOST LOCK (OPTIE B)
+  // Zelfde principe als hierboven: tijdens livestream geen username-wijziging
+  // door TikTok / runtime, maar wél row aanmaken en display_name updaten.
   if (isHost && isStreamLive()) {
+    const existing = await getUserByTikTokId(tiktok_id);
+
+    const finalUsername =
+      existing?.username ||
+      (lockedHostUsername ? normUsername(lockedHostUsername) : cleanUser);
+
     await pool.query(
       `
-      UPDATE users
-      SET display_name=$1,
-          last_seen_at=NOW()
-      WHERE tiktok_id=$2
-    `,
-      [cleanDisp, big(tiktok_id)]
+      INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at)
+      VALUES ($1, $2, $3, NOW(), NOW())
+      ON CONFLICT (tiktok_id) DO UPDATE SET
+        -- username NIET updaten tijdens livestream
+        display_name = EXCLUDED.display_name,
+        last_seen_at = NOW()
+      `,
+      [big(tiktok_id), finalUsername, cleanDisp]
     );
     return;
   }
 
-  // Normal upsert
+  // Normal upsert (niet-host of host buiten livestream)
   await pool.query(
     `
       INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at)
