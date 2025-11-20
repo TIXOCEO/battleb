@@ -179,8 +179,8 @@ export async function getQueue(): Promise<QueueEntry[]> {
 
   // Enhanced sort: VIP > FAN > BOOST > joined_at
   items.sort((a, b) => {
-    if (a.is_vip !== b.is_vip) return b.is_vip - a.is_vip;
-    if (a.is_fan !== b.is_fan) return b.is_fan - a.is_fan;
+    if (a.is_vip !== b.is_vip) return Number(b.is_vip) - Number(a.is_vip);
+    if (a.is_fan !== b.is_fan) return Number(b.is_fan) - Number(a.is_fan);
     if (a.priorityDelta !== b.priorityDelta) return b.priorityDelta - a.priorityDelta;
 
     return new Date(a.joined_at).getTime() - new Date(b.joined_at).getTime();
