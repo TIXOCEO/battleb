@@ -1,23 +1,12 @@
 // ============================================================================
-// 1-connection.ts — v8.0 (STRICT HOST LOCK + NO FALLBACK OVERRIDE)
+// 1-connection.ts — v9.0 FINAL
 // Undercover BattleBox — TikTok LIVE Core Connection Engine
-// ============================================================================
-//
-// Fixes in v8.0:
-//  ✔ Fallback kan NOOIT een foute host opslaan
-//  ✔ Host mag ALLEEN gezet worden op CONNECTED-event
-//  ✔ Fallback wordt alleen gebruikt als CONNECTED nooit komt EN
-//       de fallback-uniqueId gelijk is aan de host waarmee jij verbindt
-//  ✔ Co-hosts / kijkers kunnen NOOIT host worden
-//  ✔ Perfecte identity-sync
-//  ✔ Volledig stabiele reconnect
-//
+// STRICT HOST LOCK + AUTO HOST-ID RECOVERY + NO MIS-HOSTS EVER AGAIN
 // ============================================================================
 
 import { WebcastPushConnection } from "tiktok-live-connector";
 import { getSetting, setSetting } from "../db";
 import { upsertIdentityFromLooseEvent } from "./2-user-engine";
-
 import { setHostId, setLiveState } from "../server";
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -53,15 +42,16 @@ export async function startConnection(
   let hostSaved = false;
   let connectedFired = false;
 
-  // fallback info
+  // fallback capture buffers
   let fb_hostId: string | null = null;
   let fb_unique: string | null = null;
   let fb_nick: string | null = null;
 
   // ========================================================================
-  // SAVE HOST — uitsluitend geldig voor host waarmee jij verbindt
+  // SAVE HOST (Only the *real* host)
   // ========================================================================
   async function saveHost(id: string, uniqueId: string, nickname: string) {
+    if (!id) return;
     if (hostSaved) return;
     hostSaved = true;
 
@@ -73,25 +63,28 @@ export async function startConnection(
       nickname,
     });
 
+    // Save in DB
     await setSetting("host_id", String(id));
     await setSetting("host_username", cleanUnique);
 
+    // Save in server runtime
     setHostId(String(id));
 
+    // Ensure users table has clean entry
     await upsertIdentityFromLooseEvent({
       userId: String(id),
       uniqueId: cleanUnique,
       nickname,
     });
 
-    console.log("✔ HOST opgeslagen + users-table geüpdatet");
+    console.log("✔ HOST is definitief opgeslagen & users-table up-to-date");
   }
 
   // ========================================================================
-  // FALLBACK CAPTURE — MAAR host kan NOOIT veranderen
+  // FALLBACK CAPTURE (but cannot override a connected host)
   // ========================================================================
   function captureFallback(raw: any) {
-    if (connectedFired || hostSaved) return; // CONNECTED heeft voorrang
+    if (connectedFired || hostSaved) return; // CONNECTED = always stronger than fallback
 
     const u =
       raw?.user ||
@@ -141,16 +134,16 @@ export async function startConnection(
       } catch {}
     }
 
-    console.log("🕵️‍♂️ Fallback actief (maar host LOCKED)");
+    console.log("🕵️‍♂️ Fallback actief (host wordt NOOIT vervangen)");
   }
 
   // ========================================================================
-  // IDENTITY SYNC
+  // IDENTITY SYNC — full automatic cleanup
   // ========================================================================
   function attachIdentitySync(c: any) {
     if (!c || typeof c.on !== "function") return;
 
-    const update = (raw: any) =>
+    const update = (raw: any) => {
       upsertIdentityFromLooseEvent(
         raw?.user ||
           raw?.sender ||
@@ -159,6 +152,7 @@ export async function startConnection(
           raw?.userIdentity ||
           raw
       );
+    };
 
     const events = [
       "chat",
@@ -244,11 +238,11 @@ export async function startConnection(
       attachFallbackListeners(conn);
       attachIdentitySync(conn);
 
-      // STRICT FALLBACK: Alleen toegestaan als fallback-uniqueId == host
+      // STRICT fallback → allowed only if fallback unique == host
       setTimeout(async () => {
         if (!connectedFired && !hostSaved) {
           if (fb_unique === cleanHost && fb_hostId) {
-            console.log("⚠ STRICT FALLBACK (gelijk aan host):", {
+            console.log("⚠ STRICT FALLBACK (host verified):", {
               id: fb_hostId,
               unique: fb_unique,
               nick: fb_nick,
@@ -262,9 +256,7 @@ export async function startConnection(
 
             onConnected();
           } else {
-            console.log(
-              "⛔ Fallback genegeerd — uniekeId komt NIET overeen met host"
-            );
+            console.log("⛔ Fallback genegeerd — uniekeId ≠ host");
           }
         }
       }, 3000);
@@ -309,3 +301,7 @@ export async function stopConnection(
 
   if (!conn || conn === activeConn) activeConn = null;
 }
+
+// ============================================================================
+// END FILE
+// ============================================================================
