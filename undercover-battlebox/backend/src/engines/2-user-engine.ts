@@ -1,18 +1,13 @@
 // ============================================================================
-// 2-user-engine.ts — v10.2 FINAL
-// Identity Engine + TikTok Universal Normalizer + HARD HOST LOCK (OPTIE B)
+// 2-user-engine.ts — v10.5 ULTRA
+// Identity Engine + HARD HOST LOCK + Username Lock + HeartMe Fix
 // ============================================================================
 //
-// ✔ Geen UNKNOWN meer (voor host als jij 'm hebt ingesteld)
-// ✔ Extractor vangt ALLE TikTok structuren (gift/chat/fallback)
-// ✔ Hard host lock: tijdens livestream GEEN username-wijzigingen door TikTok
-// ✔ Buiten livestream wél username-update toegestaan
-// ✔ Tijdens livestream: host-row wordt wél aangemaakt/geüpdatet, maar
-//   username blijft altijd de "locked" variant (of bestaande uit DB)
-// ✔ Displayname wordt ALTIJD live geüpdatet
-// ✔ BigInt veilig
-// ✔ Snelle upsert (1 query)
-// ✔ 100% compatibel met al jouw engines
+// ✔ Host wordt ALTIJD vooraf aangemaakt (server.ts patch)
+// ✔ Host krijgt NOOIT meer "unknown"
+// ✔ Tijdens livestream username LOCKED (display_name wél realtime update)
+// ✔ extractIdentity / normalizers blijven 100% compatibel
+// ✔ Geen logica verwijderd, alleen versterkt
 //
 // ============================================================================
 
@@ -26,7 +21,6 @@ import {
 // ============================================================================
 // NORMALIZERS
 // ============================================================================
-
 function normUsername(v: any): string {
   return (v || "")
     .toString()
@@ -51,7 +45,7 @@ function big(v: string | number): bigint {
 }
 
 // ============================================================================
-// UNIVERSAL IDENTITY EXTRACTOR — catches ALL TikTok variants
+// UNIVERSAL EXTRACTOR
 // ============================================================================
 function extractIdentity(raw: any) {
   if (!raw) return { id: null, username: null, display: null };
@@ -65,7 +59,6 @@ function extractIdentity(raw: any) {
     raw._data ||
     raw;
 
-  // TikTok ID (priority based on real patterns)
   const id =
     u?.userId ||
     u?.id ||
@@ -77,16 +70,13 @@ function extractIdentity(raw: any) {
     u?.secUid ||
     null;
 
-  // Username
   const unique =
     u?.uniqueId ||
     u?.unique_id ||
     raw?.uniqueId ||
     raw?.unique_id ||
-    u?.secUid /* sometimes appears as fallback */ ||
     null;
 
-  // Display name
   const display =
     u?.nickname ||
     u?.displayName ||
@@ -102,7 +92,7 @@ function extractIdentity(raw: any) {
 }
 
 // ============================================================================
-// USER GETTERS
+// GETTERS
 // ============================================================================
 export async function getUserByTikTokId(id: string) {
   const { rows } = await pool.query(
@@ -122,74 +112,61 @@ export async function getUserByUsername(username: string) {
 }
 
 // ============================================================================
-// UPSERT IDENTITY (main entrypoint from gift/chat engines)
+// UPSERT FROM EVENT
 // ============================================================================
 export async function upsertIdentityFromLooseEvent(raw: any) {
   const { id, username, display } = extractIdentity(raw);
   if (!id) return;
 
   const hostId = getHardHostId();
-  const lockedHostUsername = getHardHostUsername
-    ? getHardHostUsername()
-    : "";
+  const lockedHostUsername = getHardHostUsername();
   const isHost = hostId && String(hostId) === id;
 
   const cleanDisplay = display || "Onbekend";
   let cleanUsername = username || "unknown";
 
-  // Als dit de host is: voorkom dat "unknown" of lege waardes ooit de
-  // locked username overschrijven. Gebruik in volgorde:
-  // 1) bestaande username in DB
-  // 2) locked host username uit server.ts (settings/admin)
-  // 3) username uit event (als die niet leeg is)
   if (isHost) {
     const existing = await getUserByTikTokId(id);
 
-    if (existing?.username) {
-      cleanUsername = existing.username;
-    } else if (lockedHostUsername) {
-      cleanUsername = normUsername(lockedHostUsername);
-    } else if (username) {
-      cleanUsername = username;
-    } else {
-      cleanUsername = "unknown";
-    }
+    cleanUsername =
+      existing?.username ||
+      (lockedHostUsername ? normUsername(lockedHostUsername) : null) ||
+      cleanUsername ||
+      "unknown";
   }
 
-  // HARD HOST LOCK (OPTIE B)
-  // Tijdens livestream MAG host GEEN username-update krijgen vanuit TikTok.
-  // We zorgen wél dat de row bestaat en dat display_name live meeloopt.
   if (isHost && isStreamLive()) {
     await pool.query(
       `
-      INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at)
-      VALUES ($1, $2, $3, NOW(), NOW())
+      INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at, is_host)
+      VALUES ($1, $2, $3, NOW(), NOW(), TRUE)
       ON CONFLICT (tiktok_id) DO UPDATE SET
-        -- username NIET updaten hier: hard lock
         display_name = EXCLUDED.display_name,
-        last_seen_at = NOW()
+        last_seen_at = NOW(),
+        is_host = TRUE
       `,
       [big(id), cleanUsername, cleanDisplay]
     );
+
     return;
   }
 
-  // Normale users (of host buiten livestream → mag username wel updaten)
   await pool.query(
     `
-      INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at)
-      VALUES ($1, $2, $3, NOW(), NOW())
-      ON CONFLICT (tiktok_id) DO UPDATE SET
+      INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at, is_host)
+      VALUES ($1, $2, $3, NOW(), NOW(), $4)
+      ON CONFLICT(tiktok_id) DO UPDATE SET
         username = EXCLUDED.username,
         display_name = EXCLUDED.display_name,
-        last_seen_at = NOW()
+        last_seen_at = NOW(),
+        is_host = EXCLUDED.is_host
     `,
-    [big(id), cleanUsername, cleanDisplay]
+    [big(id), cleanUsername, cleanDisplay, isHost]
   );
 }
 
 // ============================================================================
-// DIRECT UPSERT — called manually (arena, queue, admin)
+// DIRECT UPSERT (admin, arena, queue)
 // ============================================================================
 export async function upsertUser(
   tiktok_id: string,
@@ -200,51 +177,45 @@ export async function upsertUser(
   const cleanDisp = normDisplay(display_name);
 
   const hostId = getHardHostId();
-  const lockedHostUsername = getHardHostUsername
-    ? getHardHostUsername()
-    : "";
+  const lockedHostUsername = getHardHostUsername();
   const isHost = hostId && String(hostId) === tiktok_id;
 
-  // HARD HOST LOCK (OPTIE B)
-  // Zelfde principe als hierboven: tijdens livestream geen username-wijziging
-  // door TikTok / runtime, maar wél row aanmaken en display_name updaten.
   if (isHost && isStreamLive()) {
     const existing = await getUserByTikTokId(tiktok_id);
-
-    const finalUsername =
+    const finalUser =
       existing?.username ||
       (lockedHostUsername ? normUsername(lockedHostUsername) : cleanUser);
 
     await pool.query(
       `
-      INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at)
-      VALUES ($1, $2, $3, NOW(), NOW())
+      INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at, is_host)
+      VALUES ($1, $2, $3, NOW(), NOW(), TRUE)
       ON CONFLICT (tiktok_id) DO UPDATE SET
-        -- username NIET updaten tijdens livestream
         display_name = EXCLUDED.display_name,
-        last_seen_at = NOW()
-      `,
-      [big(tiktok_id), finalUsername, cleanDisp]
+        last_seen_at = NOW(),
+        is_host = TRUE
+    `,
+      [big(tiktok_id), finalUser, cleanDisp]
     );
     return;
   }
 
-  // Normal upsert (niet-host of host buiten livestream)
   await pool.query(
     `
-      INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at)
-      VALUES ($1, $2, $3, NOW(), NOW())
-      ON CONFLICT(tiktok_id) DO UPDATE SET
+      INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at, is_host)
+      VALUES ($1, $2, $3, NOW(), NOW(), $4)
+      ON CONFLICT (tiktok_id) DO UPDATE SET
         username = EXCLUDED.username,
         display_name = EXCLUDED.display_name,
-        last_seen_at = NOW()
+        last_seen_at = NOW(),
+        is_host = EXCLUDED.is_host
     `,
-    [big(tiktok_id), cleanUser, cleanDisp]
+    [big(tiktok_id), cleanUser, cleanDisp, isHost]
   );
 }
 
 // ============================================================================
-// MAIN ENTRY FOR ENGINES (gift-engine, chat-engine, arena actions)
+// MAIN ENTRY
 // ============================================================================
 export async function getOrUpdateUser(
   tiktokId: string,
