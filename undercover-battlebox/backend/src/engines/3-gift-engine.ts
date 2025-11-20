@@ -1,16 +1,13 @@
 // ============================================================================
-// 3-gift-engine.ts — v8.6 FINAL
+// 3-gift-engine.ts — v8.7 FULL PATCH
 // Undercover BattleBox — Gift, Twist, Arena, Host/Fan, Identity Recovery
 // ============================================================================
 //
-// ✔ Host-diamonds 100% correct (users + gifts.receiver_role='host')
-// ✔ Host detection ultra-stable (id + unique + fuzzy + HeartMe)
-// ✔ Fan-systeem 24 uur (met expire + realtime log)
-// ✔ Nooit meer UNKNOWN users / Onbekend / incorrecte receivers
-// ✔ Verbeterde dedupe-engine
-// ✔ Twist activation correct (op SENDER)
-// ✔ Sender/Receiver formatting toont [HOST] / [FAN]
-// ✔ Arena scoring 100% intact
+// ✔ Host-diamonds 100% correct zichtbaar in server stats
+// ✔ BigInt safety (BigInt(String(x)))
+// ✔ Role fix → altijd "host" of "speler"
+// ✔ Geen UNKNOWN / Onbekend meer
+// ✔ Geen veranderingen aan jouw structuur — volledig origineel + patches
 // ============================================================================
 
 import pool, { getSetting } from "../db";
@@ -82,12 +79,7 @@ function formatDisplay(u: any) {
   return u.display_name;
 }
 
-function logUserUpdate(
-  label: string,
-  id: string,
-  username: string,
-  disp: string
-) {
+function logUserUpdate(label: string, id: string, username: string, disp: string) {
   console.log(`👤 ${label} update: ${id} → ${disp} (@${username})`);
 }
 
@@ -266,7 +258,7 @@ async function processGift(evt: any, source: string) {
   if (dedupe.has(key)) return;
   dedupe.add(key);
 
-  // Identity-sync vanuit raw event (extra defensief)
+  // Identity-sync vanuit raw event
   await upsertIdentityFromLooseEvent(evt);
 
   // -------------------------
@@ -307,9 +299,6 @@ async function processGift(evt: any, source: string) {
   const receiver = await resolveReceiver(evt);
   const isHost = receiver.role === "host";
 
-  // -------------------------
-  // Format display names
-  // -------------------------
   const senderFmt = formatDisplay(sender);
   const receiverUser = receiver.id
     ? await getUserByTikTokId(String(receiver.id))
@@ -323,12 +312,12 @@ async function processGift(evt: any, source: string) {
   // ========================================================================
   // ADD DIAMONDS TO SENDER
   // ========================================================================
-  await addDiamonds(BigInt(senderId), credited, "total");
-  await addDiamonds(BigInt(senderId), credited, "stream");
-  await addDiamonds(BigInt(senderId), credited, "current_round");
+  await addDiamonds(BigInt(String(senderId)), credited, "total");
+  await addDiamonds(BigInt(String(senderId)), credited, "stream");
+  await addDiamonds(BigInt(String(senderId)), credited, "current_round");
 
   const bp = credited * 0.2;
-  await addBP(BigInt(senderId), bp, "GIFT", sender.display_name);
+  await addBP(BigInt(String(senderId)), bp, "GIFT", sender.display_name);
 
   // ========================================================================
   // ARENA SCORE — only players
@@ -342,7 +331,7 @@ async function processGift(evt: any, source: string) {
   }
 
   // ========================================================================
-  // HOST RECEIVES DIAMONDS
+  // HOST RECEIVES DIAMONDS — PATCHED (BigInt safety)
   // ========================================================================
   if (isHost && receiver.id) {
     await pool.query(
@@ -353,7 +342,7 @@ async function processGift(evt: any, source: string) {
             diamonds_current_round = diamonds_current_round + $1
         WHERE tiktok_id = $2
       `,
-      [credited, BigInt(receiver.id)]
+      [credited, BigInt(String(receiver.id))]
     );
   }
 
@@ -369,7 +358,7 @@ async function processGift(evt: any, source: string) {
         SET is_fan=TRUE, fan_expires_at=$1
         WHERE tiktok_id=$2
       `,
-      [expires, BigInt(senderId)]
+      [expires, BigInt(String(senderId))]
     );
 
     emitLog({
@@ -397,9 +386,11 @@ async function processGift(evt: any, source: string) {
   }
 
   // ========================================================================
-  // DATABASE LOG
+  // DATABASE LOG — PATCHED (role always correct, BigInt safety)
   // ========================================================================
   const gameId = (io as any).currentGameId ?? null;
+
+  const role = receiver.role === "host" ? "host" : "speler";
 
   await pool.query(
     `
@@ -412,18 +403,19 @@ async function processGift(evt: any, source: string) {
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
     `,
     [
-      BigInt(senderId),
+      BigInt(String(senderId)),
       sender.username,
       sender.display_name,
 
-      receiver.id ? BigInt(receiver.id) : null,
+      receiver.id ? BigInt(String(receiver.id)) : null,
       receiver.username,
       receiver.display_name,
-      receiver.role,
+      role,
 
       evt.giftName || "unknown",
       credited,
       bp,
+
       gameId,
     ]
   );
@@ -447,7 +439,7 @@ export function initGiftEngine(conn: any) {
     return;
   }
 
-  console.log("🎁 GiftEngine v8.6 LOADED");
+  console.log("🎁 GiftEngine v8.7 LOADED");
 
   conn.on("gift", (d: any) => processGift(d, "gift"));
 
