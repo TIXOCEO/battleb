@@ -17,7 +17,7 @@
 // ============================================================================
 
 import pool from "../db";
-import { io, emitLog, isStreamLive, getHostId } from "../server";
+import { io, emitLog, isStreamLive, getHardHostId } from "../server";
 
 import { addToQueue, leaveQueue, getQueue } from "../queue";
 import { getOrUpdateUser } from "./2-user-engine";
