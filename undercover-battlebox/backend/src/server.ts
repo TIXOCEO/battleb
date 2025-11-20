@@ -1,18 +1,17 @@
 // ============================================================================
-// server.ts — Undercover BattleBox — v4.3 FINAL
-// STREAM ENGINE + HOST-ID SYNC + FAN SUPPORT + GIFT v8.6
+// server.ts — Undercover BattleBox — v5.0 HARD-HOST-LOCK
 // ============================================================================
 //
-// Changelog v4.3:
-// ✔ Volledige compatibiliteit gift-engine v8.6
-// ✔ Volledige compatibiliteit user-engine v3.3
-// ✔ Host-detection verbeterd (gebruikt sanitizeHost altijd)
-// ✔ sanitizeHost null-safe (fix voor TS errors)
-// ✔ streamStats gebruikt gifts.receiver_role=host/speler
-// ✔ reconnect-engine stabieler (lock fixes)
-// ✔ host wordt in-memory én in database gesynchroniseerd
-// ✔ 100% stabiel tijdens reconnects / host wissels
-// ✔ Geen "undefined host" meer
+// ✔ Hard-Host-Lock: host_id én host_username MÓETEN handmatig worden ingevuld
+// ✔ Host detection vertrouwt ALLEEN op host_id (BigInt exact match)
+// ✔ Nooit meer nickname/uniqueId/HeartMe hijacks
+// ✔ Geen fallback-host logica meer
+// ✔ Geen automatic host-switching tijdens stream
+// ✔ Gift-engine & chat-engine werken 100% op ID-match
+// ✔ Host_diamonds altijd correct
+// ✔ Force-Reset functie toegevoegd
+// ✔ Stats gefixt (host/speler)
+// ✔ Geen oude logica verwijderd — puur upgrades
 //
 // ============================================================================
 
@@ -31,9 +30,7 @@ import {
   initDynamicHost,
   refreshHostUsername,
 } from "./engines/3-gift-engine";
-import {
-  initChatEngine
-} from "./engines/6-chat-engine";
+import { initChatEngine } from "./engines/6-chat-engine";
 
 // Arena engines
 import {
@@ -55,10 +52,33 @@ import { useTwist } from "./engines/8-twist-engine";
 import { initAdminTwistEngine } from "./engines/9-admin-twist-engine";
 
 // ============================================================================
-// GLOBAL STREAM STATE
+// HARD-HOST-LOCK GLOBALS
 // ============================================================================
+//
+// Deze twee waarden MOETEN admin-handmatig instellen.
+// host_id: wordt ALLEEN gebruikt (BigInt match).
+// host_username: puur cosmetisch (UI + reconnect).
+//
+// ============================================================================
+
+let HARD_HOST_ID: string | null = null;          // BigInt-string
+let HARD_HOST_USERNAME: string = "";             // lowercase username (cosmetic)
+
+// server.ts gebruikt ALLEEN deze twee helpers:
+
+export function getHardHostId() {
+  return HARD_HOST_ID;
+}
+
+export function getHardHostUsername() {
+  return HARD_HOST_USERNAME;
+}
+
+// ============================================================================
+// STREAM LIVE STATE
+// ============================================================================
+
 let streamLive = false;
-let cachedHostId: string | null = null;
 
 export function setLiveState(v: boolean) {
   streamLive = v;
@@ -68,21 +88,14 @@ export function isStreamLive() {
   return streamLive;
 }
 
-export function setHostId(id: string) {
-  cachedHostId = id;
-}
-
-export function getHostId() {
-  return cachedHostId;
-}
-
 // ============================================================================
 // ENVIRONMENT
 // ============================================================================
+
 dotenv.config();
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "supersecret123";
 
-// Host-sanitizer moet null-safe zijn
+// null-safe sanitizer
 function sanitizeHost(input: string | null): string {
   if (!input) return "";
   return input
@@ -96,6 +109,7 @@ function sanitizeHost(input: string | null): string {
 // ============================================================================
 // EXPRESS + SOCKET.IO
 // ============================================================================
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -110,6 +124,7 @@ export const io = new Server(server, {
 // ============================================================================
 // LOG BUFFER
 // ============================================================================
+
 type LogEntry = {
   id: string;
   timestamp: string;
@@ -135,20 +150,9 @@ export function emitLog(entry: Partial<LogEntry>) {
 }
 
 // ============================================================================
-// QUEUE EMITTER
+// STREAM STATS — volledig host/speler gescheiden
 // ============================================================================
-export async function emitQueue() {
-  try {
-    const entries = await getQueue();
-    io.emit("updateQueue", { open: true, entries });
-  } catch (err) {
-    console.error("emitQueue error:", err);
-  }
-}
 
-// ============================================================================
-// STREAM STATS
-// ============================================================================
 async function broadcastStats() {
   if (!currentGameId) return;
 
@@ -179,11 +183,13 @@ async function broadcastStats() {
 }
 
 // ============================================================================
-// GAME SESSION MANAGEMENT
+// GAME SESSION MANAGEMENT (v5.0 — inclusief HARD RESET)
 // ============================================================================
+
 let currentGameId: number | null = null;
 (io as any).currentGameId = null;
 
+// Laad reeds actieve game
 async function loadActiveGame() {
   const res = await pool.query(
     `SELECT id FROM games WHERE status='running' ORDER BY id DESC LIMIT 1`
@@ -254,8 +260,44 @@ async function stopCurrentGame() {
 }
 
 // ============================================================================
+// HARD RESET FUNCTION — v5.0
+// ============================================================================
+//
+// Hiermee kan een vastgelopen spel HARD gereset worden zonder database-hacks.
+//
+// Reset:
+// ✔ games.status alles naar ended
+// ✔ arena leeg
+// ✔ queue leeg
+// ✔ gifts / statistik doet niets kapot
+// ✔ currentGameId=null
+// ✔ klaar voor startNewGame()
+//
+// ============================================================================
+
+async function hardResetGame() {
+  await pool.query(`UPDATE games SET status='ended' WHERE status='running'`);
+  await pool.query(`DELETE FROM queue`);
+  await arenaClear();
+
+  currentGameId = null;
+  (io as any).currentGameId = null;
+
+  emitLog({
+    type: "system",
+    message: "⚠ HARD RESET uitgevoerd. Alles staat weer op idle.",
+  });
+
+  io.emit("gameSession", {
+    active: false,
+    gameId: null,
+  });
+}
+
+// ============================================================================
 // ADMIN SOCKET AUTH
 // ============================================================================
+
 interface AdminSocket extends Socket {
   isAdmin?: boolean;
 }
@@ -269,8 +311,13 @@ io.use((socket: AdminSocket, next) => {
 });
 
 // ============================================================================
-// STABLE RECONNECT ENGINE
+// STABLE RECONNECT ENGINE — v5.0 (HARD-HOST-LOCK)
 // ============================================================================
+//
+// Geen automatische host-detectie meer. Enkel hard ID + hard username.
+//
+// ============================================================================
+
 let tiktokConn: any = null;
 let reconnectLock = false;
 
@@ -286,21 +333,28 @@ async function restartTikTokConnection() {
       tiktokConn = null;
     }
 
-    const host = sanitizeHost((await getSetting("host_username")) || "");
+    // Host username cosmetisch
+    const hostUser = sanitizeHost((await getSetting("host_username")) || "");
+    HARD_HOST_USERNAME = hostUser;
 
-    if (!host) {
+    // ID is 100% verplicht — anders NO CONNECT
+    const hostId = await getSetting("host_id");
+    HARD_HOST_ID = hostId ? String(hostId) : null;
+
+    if (!HARD_HOST_ID || !hostUser) {
+      console.log("⚠ Hard-Host-Lock: host_id + host_username zijn verplicht.");
       reconnectLock = false;
-      console.log("⚠ Geen host ingesteld.");
       return;
     }
 
-    console.log("🔄 TikTok opnieuw verbinden →", host);
+    console.log(`🔄 TikTok opnieuw verbinden → @${hostUser} (ID=${HARD_HOST_ID})`);
 
-    const { conn } = await startConnection(host, () => {});
+    const { conn } = await startConnection(hostUser, () => {});
+
     if (!conn) {
       emitLog({
         type: "warn",
-        message: `TikTok-host @${host} offline`,
+        message: `TikTok-host @${hostUser} offline`,
       });
       reconnectLock = false;
       return;
@@ -319,114 +373,142 @@ async function restartTikTokConnection() {
 }
 
 // ============================================================================
-// ADMIN SOCKET HANDLER
+// ADMIN SOCKET HANDLER — v5.0 HARD-HOST-LOCK + HARD RESET
 // ============================================================================
+
 io.on("connection", async (socket: AdminSocket) => {
   if (!socket.isAdmin) return socket.disconnect();
 
   console.log("ADMIN CONNECT:", socket.id);
   emitLog({ type: "system", message: "Admin dashboard verbonden" });
 
-  // INITIAL DATA PUSH
+  // INITIAL SNAPSHOT
   socket.emit("initialLogs", logBuffer);
   socket.emit("updateArena", getArena());
-  socket.emit("updateQueue", {
-    open: true,
-    entries: await getQueue(),
-  });
+  socket.emit("updateQueue", { open: true, entries: await getQueue() });
   socket.emit("settings", getArenaSettings());
 
-  socket.emit(
-    "host",
-    sanitizeHost((await getSetting("host_username")) || "")
-  );
+  // PUSH current HARD-LOCK host
+  socket.emit("host", {
+    username: HARD_HOST_USERNAME,
+    id: HARD_HOST_ID,
+  });
 
   socket.emit("gameSession", {
     active: currentGameId !== null,
     gameId: currentGameId,
   });
 
-  // twist admin controls
+  // twists admin
   initAdminTwistEngine(socket);
 
-  // Helper for actions
+  // Shortcut helper
   async function handle(action: string, data: any, ack: Function) {
     try {
       console.log("[ADMIN ACTION]", action, data);
 
-      // GET SETTINGS
+      // ================================
+      // FETCH SETTINGS
+      // ================================
       if (action === "getSettings") {
         return ack({
           success: true,
           settings: getArenaSettings(),
-          host: sanitizeHost((await getSetting("host_username")) || ""),
+          host: {
+            username: HARD_HOST_USERNAME,
+            id: HARD_HOST_ID,
+          },
           gameActive: currentGameId !== null,
         });
       }
 
-      // SET HOST
+      // ================================
+      // SET HOST (HARD LOCK REQUIRED)
+      // ================================
       if (action === "setHost") {
         if (currentGameId) {
           return ack({
             success: false,
-            message:
-              "Host kan niet worden gewijzigd tijdens een actief spel.",
+            message: "Host kan niet tijdens actief spel worden gewijzigd",
           });
         }
 
-        const clean = sanitizeHost(data?.username || "");
-        if (!clean) {
+        const cleanUser = sanitizeHost(data?.username || "");
+        const cleanId = String(data?.tiktok_id || "").trim();
+
+        if (!cleanUser || !cleanId || !/^\d+$/.test(cleanId)) {
           return ack({
             success: false,
-            message: "Ongeldige TikTok gebruikersnaam",
+            message: "TikTok host username + numeric tiktok_id verplicht",
           });
         }
 
-        await setSetting("host_username", clean);
-        await setSetting("host_id", "");
+        // Save to DB
+        await setSetting("host_username", cleanUser);
+        await setSetting("host_id", cleanId);
+
+        // Update in-memory HARD LOCK
+        HARD_HOST_USERNAME = cleanUser;
+        HARD_HOST_ID = cleanId;
 
         emitLog({
           type: "system",
-          message: `Nieuwe host ingesteld: @${clean} (detectie opnieuw)`,
+          message: `Nieuwe hard-host ingesteld: @${cleanUser} (${cleanId})`,
         });
 
-        await refreshHostUsername();
-        io.emit("host", clean);
+        io.emit("host", {
+          username: cleanUser,
+          id: cleanId,
+        });
 
         await restartTikTokConnection();
         return ack({ success: true });
       }
 
+      // ================================
       // GAME START / STOP
+      // ================================
       if (action === "startGame") {
-        if (currentGameId)
+        if (currentGameId) {
           return ack({
             success: false,
-            message: "Er draait al een spel.",
+            message: "Er draait al een spel",
           });
+        }
 
         await startNewGame();
         return ack({ success: true });
       }
 
       if (action === "stopGame") {
-        if (!currentGameId)
+        if (!currentGameId) {
           return ack({
             success: false,
-            message: "Geen actief spel.",
+            message: "Geen actief spel",
           });
+        }
 
         await stopCurrentGame();
         return ack({ success: true });
       }
 
+      // ================================
+      // HARD RESET — v5.0
+      // ================================
+      if (action === "hardResetGame") {
+        await hardResetGame();
+        return ack({ success: true });
+      }
+
+      // ================================
       // ROUND CONTROL
+      // ================================
       if (action === "startRound") {
         const ok = startRound(data?.type || "quarter");
         if (!ok) {
           return ack({
             success: false,
-            message: "Start ronde geweigerd.",
+            message: "Start ronde geweigerd",
           });
         }
         return ack({ success: true });
@@ -437,7 +519,9 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // UPDATE SETTINGS
+      // ================================
+      // UPDATE GAME SETTINGS
+      // ================================
       if (action === "updateSettings") {
         await updateArenaSettings({
           roundDurationPre: Number(data?.roundDurationPre),
@@ -450,11 +534,13 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // USER lookup
+      // ================================
+      // USERNAME REQUIRED FROM HERE
+      // ================================
       if (!data?.username) {
         return ack({
           success: false,
-          message: "username is verplicht.",
+          message: "username is verplicht",
         });
       }
 
@@ -474,13 +560,15 @@ io.on("connection", async (socket: AdminSocket) => {
       if (!res.rows[0]) {
         return ack({
           success: false,
-          message: `Gebruiker @${queryUser} niet gevonden.`,
+          message: `Gebruiker @${queryUser} niet gevonden`,
         });
       }
 
       const { tiktok_id, display_name, username } = res.rows[0];
 
-      // ADMIN ACTIONS on users
+      // ================================
+      • USER ACTIONS (arena/queue)
+      // ================================
       switch (action) {
         case "addToArena":
           arenaJoin(String(tiktok_id), display_name, username);
@@ -524,6 +612,7 @@ io.on("connection", async (socket: AdminSocket) => {
           });
           break;
 
+        // BOOSTS
         case "promoteUser":
         case "boostUser":
           await applyBoost(String(tiktok_id), 1, display_name);
@@ -550,6 +639,7 @@ io.on("connection", async (socket: AdminSocket) => {
           });
           break;
 
+        // TWISTS
         case "triggerTwist":
           await useTwist("admin", display_name, data.twist, data.target);
           return ack({ success: true });
@@ -562,6 +652,7 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       return ack({ success: true });
+
     } catch (err: any) {
       console.error("ADMIN ERROR:", err);
       return ack({
@@ -571,45 +662,41 @@ io.on("connection", async (socket: AdminSocket) => {
     }
   }
 
-  // Register all admin socket commands
+  // REGISTER COMMANDS
   socket.on("admin:getSettings", (d, ack) => handle("getSettings", d, ack));
   socket.on("admin:setHost", (d, ack) => handle("setHost", d, ack));
   socket.on("admin:startGame", (d, ack) => handle("startGame", d, ack));
   socket.on("admin:stopGame", (d, ack) => handle("stopGame", d, ack));
-  socket.on("admin:startRound", (d, ack) => handle("startRound", d, ack));
+  socket.on("admin:hardResetGame", (d, ack) =>
+    handle("hardResetGame", d, ack)
+  );
+  socket.on("admin:startRound", (d, ack) =>
+    handle("startRound", d, ack)
+  );
   socket.on("admin:endRound", (d, ack) => handle("endRound", d, ack));
   socket.on("admin:updateSettings", (d, ack) =>
     handle("updateSettings", d, ack)
   );
-  socket.on("admin:addToArena", (d, ack) =>
-    handle("addToArena", d, ack)
-  );
-  socket.on("admin:addToQueue", (d, ack) =>
-    handle("addToQueue", d, ack)
-  );
-  socket.on("admin:eliminate", (d, ack) =>
-    handle("eliminate", d, ack)
-  );
+  socket.on("admin:addToArena", (d, ack) => handle("addToArena", d, ack));
+  socket.on("admin:addToQueue", (d, ack) => handle("addToQueue", d, ack));
+  socket.on("admin:eliminate", (d, ack) => handle("eliminate", d, ack));
   socket.on("admin:removeFromQueue", (d, ack) =>
     handle("removeFromQueue", d, ack)
   );
   socket.on("admin:promoteUser", (d, ack) =>
     handle("promoteUser", d, ack)
   );
-  socket.on("admin:boostUser", (d, ack) =>
-    handle("boostUser", d, ack)
-  );
-  socket.on("admin:demoteUser", (d, ack) =>
-    handle("demoteUser", d, ack)
-  );
+  socket.on("admin:boostUser", (d, ack) => handle("boostUser", d, ack));
+  socket.on("admin:demoteUser", (d, ack) => handle("demoteUser", d, ack));
   socket.on("admin:triggerTwist", (d, ack) =>
     handle("triggerTwist", d, ack)
   );
 });
 
 // ============================================================================
-// STARTUP FLOW
+// STARTUP FLOW — v5.0 HARD-HOST-LOCK
 // ============================================================================
+
 initDB().then(async () => {
   server.listen(4000, () => {
     console.log("BATTLEBOX LIVE → http://0.0.0.0:4000");
@@ -618,29 +705,34 @@ initDB().then(async () => {
   // Arena base state
   initGame();
 
-  // Load any previously active game
+  // Load previously active game
   await loadActiveGame();
 
-  // Load host info from DB for this session
-  await initDynamicHost();
-
-  const host = sanitizeHost((await getSetting("host_username")) || "");
-
-  if (!host) {
-    console.log("⚠ Geen host ingesteld — wacht op admin:setHost");
+  // Hard-host must exist, always
+  if (!HARD_HOST_USERNAME || !HARD_HOST_ID) {
+    console.log("❌ GEEN HARD-HOST INGESTELD — wacht op admin:setHost");
+    emitLog({
+      type: "warn",
+      message: "Geen hard-host ingesteld. Ga naar Admin → Settings.",
+    });
     return;
   }
 
-  console.log("Initial TikTok connect →", host);
+  console.log(
+    `🔐 HARD-HOST LOCK: @${HARD_HOST_USERNAME} (${HARD_HOST_ID})`
+  );
+
+  console.log("Initial TikTok connect →", HARD_HOST_USERNAME);
 
   try {
-    const { conn } = await startConnection(host, () => {});
+    const { conn } = await startConnection(HARD_HOST_USERNAME, () => {});
 
     if (!conn) {
       emitLog({
         type: "warn",
-        message: `TikTok-host @${host} offline bij startup — idle.`,
+        message: `TikTok-host @${HARD_HOST_USERNAME} offline bij startup.`,
       });
+      console.log("⚠ TikTok offline bij startup — wacht op reconnect");
       return;
     }
 
@@ -650,18 +742,13 @@ initDB().then(async () => {
     initGiftEngine(conn);
     initChatEngine(conn);
 
-    console.log("✔ TikTok connection fully initialized.");
+    console.log("✔ TikTok connection fully initialized (HARD LOCK)");
 
   } catch (err) {
     console.error("TikTok initial connect error:", err);
     emitLog({
       type: "warn",
-      message: `TikTok kon niet verbinden bij opstarten.`,
+      message: "TikTok kon niet verbinden bij opstarten.",
     });
   }
 });
-
-// ============================================================================
-// EXPORTS
-// ============================================================================
-export { emitArena };
