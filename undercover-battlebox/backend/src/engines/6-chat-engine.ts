@@ -1,18 +1,15 @@
 // ============================================================================
-// 6-chat-engine.ts — v3.0 (Fan-only join + VIP labels + Host rules)
-// Danny BattleBox Edition
+// 6-chat-engine.ts — v10.1 FINAL
+// FAN+VIP chat engine + HARD HOST LOCK + Zero-Unknown identity
 // ============================================================================
 //
-// Nieuwe features:
-// ✔ FAN ONLY !join (HeartMe → 24h)
-// ✔ Als fan → [FAN] label in log
-// ✔ Als VIP → [VIP] label in log
-// ✔ Admin override blijft bestaan
-// ✔ Host kan WÉL joinen als de stream NIET live is
-// ✔ Host kan NIET joinen als stream live is (server.ts bepaalt dit)
-// ✔ Mooie nette chat-logging
-// ✔ Volledig compatible met queue.ts v4.0
-// ✔ Upgraded ensureFanStatus() met auto-expire
+// ✔ Gebruikt nieuwe identity engine (2-user-engine v10.1)
+// ✔ Host username blijft stabiel tijdens livestream
+// ✔ Displayname updates realtime
+// ✔ FAN alleen join
+// ✔ VIP label
+// ✔ !join / !leave / !boost / !use
+// ✔ Perfecte queue integratie
 //
 // ============================================================================
 
@@ -27,6 +24,7 @@ import { parseUseCommand } from "./8-twist-engine";
 // ============================================================================
 // HELPERS
 // ============================================================================
+
 function clean(v: any) {
   return (v || "").toString().trim();
 }
@@ -37,30 +35,21 @@ function extractCommand(text: string) {
   return { cmd: p[0].toLowerCase(), args: p.slice(1) };
 }
 
-// FAN-check: 24h geldigheid + auto-expire
-async function ensureFanStatus(userId: bigint): Promise<boolean> {
+async function ensureFanStatus(id: bigint): Promise<boolean> {
   const r = await pool.query(
-    `
-    SELECT is_fan, fan_expires_at
-    FROM users
-    WHERE tiktok_id = $1
-    `,
-    [userId]
+    `SELECT is_fan, fan_expires_at FROM users WHERE tiktok_id=$1`,
+    [id]
   );
-
   if (!r.rows[0]) return false;
 
   const { is_fan, fan_expires_at } = r.rows[0];
-
   if (!is_fan || !fan_expires_at) return false;
 
   const exp = new Date(fan_expires_at);
-  const now = new Date();
-
-  if (exp <= now) {
+  if (exp <= new Date()) {
     await pool.query(
-      `UPDATE users SET is_fan = FALSE, fan_expires_at = NULL WHERE tiktok_id = $1`,
-      [userId]
+      `UPDATE users SET is_fan=FALSE, fan_expires_at=NULL WHERE tiktok_id=$1`,
+      [id]
     );
     return false;
   }
@@ -72,17 +61,26 @@ async function ensureFanStatus(userId: bigint): Promise<boolean> {
 // MAIN CHAT ENGINE
 // ============================================================================
 export function initChatEngine(conn: any) {
-  console.log("💬 CHAT ENGINE v3.0 LOADED");
+  console.log("💬 CHAT ENGINE v10.1 LOADED");
 
   conn.on("chat", async (msg: any) => {
     try {
-      const userId =
-        msg.user?.userId ||
-        msg.sender?.userId ||
-        msg.userId ||
-        msg.uid;
+      const rawUser =
+        msg.user ||
+        msg.sender ||
+        msg.userIdentity ||
+        msg._data ||
+        msg;
 
-      if (!userId) return;
+      const uid =
+        rawUser?.userId ||
+        rawUser?.id ||
+        rawUser?.uid ||
+        msg.userId ||
+        msg.senderUserId ||
+        null;
+
+      if (!uid) return;
 
       const text = clean(msg.comment || msg.text || msg.content);
       if (!text.startsWith("!")) return;
@@ -92,48 +90,43 @@ export function initChatEngine(conn: any) {
 
       const { cmd } = command;
 
-      // user ophalen & syncen
+      // identity sync
       const user = await getOrUpdateUser(
-        String(userId),
-        msg.user?.nickname || msg.sender?.nickname,
-        msg.user?.uniqueId || msg.sender?.uniqueId
+        String(uid),
+        rawUser?.nickname,
+        rawUser?.uniqueId
       );
 
-      const dbUserId = BigInt(userId);
+      const userId = BigInt(uid);
+      const hostId = getHardHostId();
+      const isHost = hostId && String(hostId) === String(uid);
 
-      // FAN & VIP DATA ophalen
-      const fan = await ensureFanStatus(dbUserId);
+      // FAN / VIP
+      const isFan = await ensureFanStatus(userId);
 
       const vipRow = await pool.query(
         `SELECT is_vip FROM users WHERE tiktok_id=$1`,
-        [dbUserId]
+        [userId]
       );
 
-      const isVip = vipRow.rows[0]?.is_vip ? true : false;
+      const isVip = !!vipRow.rows[0]?.is_vip;
+      const tag = isVip ? "[VIP] " : isFan ? "[FAN] " : "";
 
-      const tag = isVip ? "[VIP] " : fan ? "[FAN] " : "";
-
-      // Host logic
-      const hostId = getHardHostId();
-      const isHost = hostId && String(hostId) === String(userId);
-
-      // =====================================================================
-      // !join — FAN ONLY (behalve host kan joinen als stream NIET live is)
-      // =====================================================================
+      // ================================
+      // !join
+      // ================================
       if (cmd === "!join") {
-        // host mag joinen als stream NIET live is
-        if (isHost && !isStreamLive()) {
-          try {
-            await addToQueue(String(userId), user.username);
-          } catch (err: any) {
-            emitLog({ type: "queue", message: err.message });
+        if (isHost) {
+          if (isStreamLive()) {
+            emitLog({
+              type: "queue",
+              message: `[HOST] ${user.display_name} mag niet joinen tijdens livestream.`,
+            });
             return;
           }
 
-          io.emit("updateQueue", {
-            open: true,
-            entries: await getQueue(),
-          });
+          await addToQueue(String(uid), user.username);
+          io.emit("updateQueue", { open: true, entries: await getQueue() });
 
           emitLog({
             type: "queue",
@@ -143,17 +136,7 @@ export function initChatEngine(conn: any) {
           return;
         }
 
-        // host tijdens livestream → VERBODEN
-        if (isHost && isStreamLive()) {
-          emitLog({
-            type: "queue",
-            message: `[HOST] ${user.display_name} mag niet joinen tijdens livestream.`,
-          });
-          return;
-        }
-
-        // normale speler — FAN ONLY
-        if (!fan) {
+        if (!isFan) {
           emitLog({
             type: "queue",
             message: `${user.display_name} probeerde te joinen maar is geen fan.`,
@@ -161,17 +144,8 @@ export function initChatEngine(conn: any) {
           return;
         }
 
-        try {
-          await addToQueue(String(userId), user.username);
-        } catch (err: any) {
-          emitLog({ type: "queue", message: err.message });
-          return;
-        }
-
-        io.emit("updateQueue", {
-          open: true,
-          entries: await getQueue(),
-        });
+        await addToQueue(String(uid), user.username);
+        io.emit("updateQueue", { open: true, entries: await getQueue() });
 
         emitLog({
           type: "queue",
@@ -181,16 +155,12 @@ export function initChatEngine(conn: any) {
         return;
       }
 
-      // =====================================================================
+      // ================================
       // !leave
-      // =====================================================================
+      // ================================
       if (cmd === "!leave") {
-        const refund = await leaveQueue(String(userId));
-
-        io.emit("updateQueue", {
-          open: true,
-          entries: await getQueue(),
-        });
+        const refund = await leaveQueue(String(uid));
+        io.emit("updateQueue", { open: true, entries: await getQueue() });
 
         emitLog({
           type: "queue",
@@ -200,15 +170,15 @@ export function initChatEngine(conn: any) {
         return;
       }
 
-      // =====================================================================
-      // !boost X
-      // =====================================================================
+      // ================================
+      // !boost x
+      // ================================
       if (cmd === "!boost") {
         const spots = await parseBoostChatCommand(text);
         if (!spots) return;
 
         try {
-          const result = await applyBoost(String(userId), spots, user.display_name);
+          const result = await applyBoost(String(uid), spots, user.display_name);
 
           io.emit("updateQueue", {
             open: true,
@@ -219,27 +189,27 @@ export function initChatEngine(conn: any) {
             type: "boost",
             message: `${tag}${user.display_name}: ${result.message}`,
           });
+
         } catch (err: any) {
-          emitLog({
-            type: "boost",
-            message: err.message,
-          });
+          emitLog({ type: "boost", message: err.message });
         }
 
         return;
       }
 
-      // =====================================================================
-      // !use <twist> [target]
-      // =====================================================================
+      // ================================
+      // !use <twist>
+      // ================================
       if (cmd === "!use") {
-        const raw = msg.comment || msg.text || msg.content;
-        await parseUseCommand(String(userId), user.display_name, raw);
+        await parseUseCommand(
+          String(uid),
+          user.display_name,
+          msg.comment || msg.text || msg.content
+        );
         return;
       }
-
     } catch (err: any) {
-      console.error("CHAT ENGINE ERROR:", err?.message || err);
+      console.error("CHAT ERROR:", err);
     }
   });
 }
