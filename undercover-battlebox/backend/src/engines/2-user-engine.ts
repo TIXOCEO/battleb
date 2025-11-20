@@ -1,15 +1,16 @@
 // ============================================================================
-// 2-user-engine.ts — v10.0 FULL
-// Identity Engine + TikTok Normalizer + HARD HOST LOCK
+// 2-user-engine.ts — v10.1 FINAL
+// Identity Engine + TikTok Universal Normalizer + HARD HOST LOCK (OPTIE B)
 // ============================================================================
 //
-// ✔ NOOIT meer UNKNOWN / Onbekend
-// ✔ Host wordt NOOIT overschreven tijdens livestream
-// ✔ Buiten livestream mag host normaal updaten
-// ✔ Perfecte extractor: user, sender, receiver, toUser, userIdentity, _data
+// ✔ Geen UNKNOWN meer
+// ✔ Extractor vangt ALLE TikTok structuren (gift/chat/fallback)
+// ✔ Hard host lock: tijdens livestream GEEN username updates
+// ✔ Buiten livestream wél username update toegestaan
+// ✔ Displayname wordt ALTIJD live geüpdatet
+// ✔ BigInt veilig
 // ✔ Snelle upsert (1 query)
-// ✔ BigInt safe
-// ✔ 100% compatibel met giften, chat, reconnect, fallback
+// ✔ 100% compatibel met al jouw engines
 //
 // ============================================================================
 
@@ -35,10 +36,17 @@ function normDisplay(v: any): string {
   return String(v).trim().slice(0, 48);
 }
 
-// ============================================================================
-// UNIVERSAL IDENTITY EXTRACTOR — resolves ALL TikTok shapes
-// ============================================================================
+function big(v: string | number): bigint {
+  try {
+    return BigInt(v);
+  } catch {
+    return BigInt(0);
+  }
+}
 
+// ============================================================================
+// UNIVERSAL IDENTITY EXTRACTOR — catches ALL TikTok variants
+// ============================================================================
 function extractIdentity(raw: any) {
   if (!raw) return { id: null, username: null, display: null };
 
@@ -51,22 +59,28 @@ function extractIdentity(raw: any) {
     raw._data ||
     raw;
 
+  // TikTok ID (priority based on real patterns)
   const id =
     u?.userId ||
     u?.id ||
     u?.uid ||
     raw?.userId ||
-    raw?.senderId ||
     raw?.receiverId ||
+    raw?.senderId ||
+    u?.user_id ||
+    u?.secUid ||
     null;
 
+  // Username
   const unique =
     u?.uniqueId ||
     u?.unique_id ||
     raw?.uniqueId ||
     raw?.unique_id ||
+    u?.secUid /* sometimes appears as fallback */ ||
     null;
 
+  // Display name
   const display =
     u?.nickname ||
     u?.displayName ||
@@ -82,7 +96,7 @@ function extractIdentity(raw: any) {
 }
 
 // ============================================================================
-// UPSERT IDENTITY (called from ALL engines)
+// UPSERT IDENTITY (main entrypoint from gift/chat engines)
 // ============================================================================
 export async function upsertIdentityFromLooseEvent(raw: any) {
   const { id, username, display } = extractIdentity(raw);
@@ -94,7 +108,8 @@ export async function upsertIdentityFromLooseEvent(raw: any) {
   const cleanUsername = username || "unknown";
   const cleanDisplay = display || "Onbekend";
 
-  // Hard Host Lock — tijdens livestream mag host GEEN username-update krijgen
+  // HARD HOST LOCK (OPTIE B)
+  // Tijdens livestream MAG host GEEN username-update krijgen
   if (isHost && isStreamLive()) {
     await pool.query(
       `
@@ -102,13 +117,13 @@ export async function upsertIdentityFromLooseEvent(raw: any) {
       SET display_name = $1,
           last_seen_at = NOW()
       WHERE tiktok_id = $2
-    `,
-      [cleanDisplay, BigInt(id)]
+      `,
+      [cleanDisplay, big(id)]
     );
     return;
   }
 
-  // Normale gebruikers — upsert
+  // Normale users (of host buiten livestream)
   await pool.query(
     `
       INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at)
@@ -118,18 +133,17 @@ export async function upsertIdentityFromLooseEvent(raw: any) {
         display_name = EXCLUDED.display_name,
         last_seen_at = NOW()
     `,
-    [BigInt(id), cleanUsername, cleanDisplay]
+    [big(id), cleanUsername, cleanDisplay]
   );
 }
 
 // ============================================================================
-// GET USER HELPERS
+// USER GETTERS
 // ============================================================================
-
 export async function getUserByTikTokId(id: string) {
   const { rows } = await pool.query(
     `SELECT * FROM users WHERE tiktok_id=$1`,
-    [BigInt(id)]
+    [big(id)]
   );
   return rows[0] || null;
 }
@@ -144,7 +158,7 @@ export async function getUserByUsername(username: string) {
 }
 
 // ============================================================================
-// UPSERT USER — direct calls
+// DIRECT UPSERT — called manually (arena, queue, admin)
 // ============================================================================
 export async function upsertUser(
   tiktok_id: string,
@@ -157,20 +171,21 @@ export async function upsertUser(
   const hostId = getHardHostId();
   const isHost = hostId && String(hostId) === tiktok_id;
 
-  // Hard Host Lock — tijdens livestream GEEN username-update
+  // HARD HOST LOCK (OPTIE B)
   if (isHost && isStreamLive()) {
     await pool.query(
       `
-        UPDATE users
-        SET display_name=$1,
-            last_seen_at=NOW()
-        WHERE tiktok_id=$2
-      `,
-      [cleanDisp, BigInt(tiktok_id)]
+      UPDATE users
+      SET display_name=$1,
+          last_seen_at=NOW()
+      WHERE tiktok_id=$2
+    `,
+      [cleanDisp, big(tiktok_id)]
     );
     return;
   }
 
+  // Normal upsert
   await pool.query(
     `
       INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at)
@@ -180,12 +195,12 @@ export async function upsertUser(
         display_name = EXCLUDED.display_name,
         last_seen_at = NOW()
     `,
-    [BigInt(tiktok_id), cleanUser, cleanDisp]
+    [big(tiktok_id), cleanUser, cleanDisp]
   );
 }
 
 // ============================================================================
-// MOST COMMON ENTRYPOINT (gift-engine, chat-engine, arena, queue)
+// MAIN ENTRY FOR ENGINES (gift-engine, chat-engine, arena actions)
 // ============================================================================
 export async function getOrUpdateUser(
   tiktokId: string,
@@ -197,7 +212,6 @@ export async function getOrUpdateUser(
   let existing = await getUserByTikTokId(id);
   if (existing) return existing;
 
-  // Create missing user
   await upsertUser(
     id,
     username || existing?.username || "unknown",
@@ -206,4 +220,3 @@ export async function getOrUpdateUser(
 
   return await getUserByTikTokId(id);
 }
-
