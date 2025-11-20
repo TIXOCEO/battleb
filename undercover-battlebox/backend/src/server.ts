@@ -1,5 +1,5 @@
 // ============================================================================
-// server.ts — Undercover BattleBox — v4.0 FINAL
+// server.ts — Undercover BattleBox — v4.1 FIXED
 // STREAM-LIVE ENGINE + HOST-ID SYNC + FAN-COMPAT + FULL GIFT v8.0 SUPPORT
 // ============================================================================
 
@@ -46,7 +46,6 @@ import { initAdminTwistEngine } from "./engines/9-admin-twist-engine";
 let streamLive = false;
 let cachedHostId: string | null = null;
 
-// Exposed to all engines
 export function setLiveState(v: boolean) {
   streamLive = v;
 }
@@ -69,8 +68,8 @@ export function getHostId() {
 dotenv.config();
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "supersecret123";
 
-// sanitize host username before connecting
-function sanitizeHost(input: string): string {
+// sanitize host username before connecting (now safe for null)
+function sanitizeHost(input: string | null): string {
   if (!input) return "";
   return input
     .trim()
@@ -94,7 +93,7 @@ export const io = new Server(server, {
 });
 
 // ============================================================================
-// LOG BUFFER (ADMIN DASHBOARD)
+// LOG BUFFER
 // ============================================================================
 type LogEntry = {
   id: string;
@@ -135,7 +134,7 @@ export async function emitQueue() {
 }
 
 // ============================================================================
-// STREAM STATS (host diamonds / player diamonds)
+// STREAM STATS
 // ============================================================================
 async function broadcastStats() {
   if (!currentGameId) return;
@@ -145,13 +144,10 @@ async function broadcastStats() {
       SELECT
         COUNT(DISTINCT CASE WHEN receiver_role IN ('speler','cohost')
           THEN receiver_id END) AS total_players,
-
         COALESCE(SUM(CASE WHEN receiver_role IN ('speler','cohost')
           THEN diamonds ELSE 0 END), 0) AS total_player_diamonds,
-
         COALESCE(SUM(CASE WHEN receiver_role = 'host'
           THEN diamonds ELSE 0 END), 0) AS total_host_diamonds
-
       FROM gifts
       WHERE game_id = $1
     `,
@@ -255,7 +251,7 @@ io.use((socket: AdminSocket, next) => {
 });
 
 // ============================================================================
-// ULTRA STABLE RECONNECT
+// STABLE RECONNECT
 // ============================================================================
 let tiktokConn: any = null;
 let reconnectLock = false;
@@ -272,7 +268,7 @@ async function restartTikTokConnection() {
       tiktokConn = null;
     }
 
-    const host = sanitizeHost(await getSetting("host_username"));
+    const host = sanitizeHost((await getSetting("host_username")) || "");
 
     if (!host) {
       reconnectLock = false;
@@ -313,7 +309,7 @@ io.on("connection", async (socket: AdminSocket) => {
   console.log("ADMIN CONNECT:", socket.id);
   emitLog({ type: "system", message: "Admin dashboard verbonden" });
 
-  // INITIAL PUSH
+  // INITIAL DATA
   socket.emit("initialLogs", logBuffer);
   socket.emit("updateArena", getArena());
   socket.emit("updateQueue", {
@@ -322,7 +318,7 @@ io.on("connection", async (socket: AdminSocket) => {
   });
   socket.emit("settings", getArenaSettings());
 
-  socket.emit("host", sanitizeHost(await getSetting("host_username")));
+  socket.emit("host", sanitizeHost((await getSetting("host_username")) || ""));
 
   socket.emit("gameSession", {
     active: currentGameId !== null,
@@ -335,21 +331,17 @@ io.on("connection", async (socket: AdminSocket) => {
     try {
       console.log("[ADMIN ACTION]", action, data);
 
-      // --------------------------------------------------------------------------------
       // GET SETTINGS
-      // --------------------------------------------------------------------------------
       if (action === "getSettings") {
         return ack({
           success: true,
           settings: getArenaSettings(),
-          host: sanitizeHost(await getSetting("host_username")),
+          host: sanitizeHost((await getSetting("host_username")) || ""),
           gameActive: currentGameId !== null,
         });
       }
 
-      // --------------------------------------------------------------------------------
       // SET HOST
-      // --------------------------------------------------------------------------------
       if (action === "setHost") {
         if (currentGameId) {
           return ack({
@@ -358,7 +350,7 @@ io.on("connection", async (socket: AdminSocket) => {
           });
         }
 
-        const clean = sanitizeHost(data?.username);
+        const clean = sanitizeHost(data?.username || "");
         if (!clean) {
           return ack({
             success: false,
@@ -382,9 +374,7 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // --------------------------------------------------------------------------------
-      // GAME START/STOP
-      // --------------------------------------------------------------------------------
+      // START/STOP GAME
       if (action === "startGame") {
         if (currentGameId)
           return ack({ success: false, message: "Er draait al een spel." });
@@ -401,17 +391,14 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // --------------------------------------------------------------------------------
-      // ROUNDED
-      // --------------------------------------------------------------------------------
+      // ROUNDS
       if (action === "startRound") {
         const ok = startRound(data?.type || "quarter");
 
         if (!ok) {
           return ack({
             success: false,
-            message:
-              "Start ronde geweigerd (status/condities niet correct).",
+            message: "Start ronde geweigerd.",
           });
         }
 
@@ -423,9 +410,7 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // --------------------------------------------------------------------------------
       // UPDATE SETTINGS
-      // --------------------------------------------------------------------------------
       if (action === "updateSettings") {
         await updateArenaSettings({
           roundDurationPre: Number(data?.roundDurationPre),
@@ -438,14 +423,15 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // --------------------------------------------------------------------------------
       // USER LOOKUP
-      // --------------------------------------------------------------------------------
       if (!data?.username) {
-        return ack({ success: false, message: "username is verplicht." });
+        return ack({
+          success: false,
+          message: "username is verplicht.",
+        });
       }
 
-      const queryUser = sanitizeHost(data.username);
+      const queryUser = sanitizeHost(data.username || "");
 
       const res = await pool.query(
         `
@@ -467,9 +453,7 @@ io.on("connection", async (socket: AdminSocket) => {
 
       const { tiktok_id, display_name, username } = res.rows[0];
 
-      // --------------------------------------------------------------------------------
-      // ARENA / QUEUE ADMIN ACTIONS
-      // --------------------------------------------------------------------------------
+      // ADMIN ACTIONS
       switch (action) {
         case "addToArena":
           arenaJoin(String(tiktok_id), display_name, username);
@@ -484,13 +468,19 @@ io.on("connection", async (socket: AdminSocket) => {
         case "addToQueue":
           await addToQueue(String(tiktok_id), username);
           await emitQueue();
-          emitLog({ type: "queue", message: `${display_name} → queue` });
+          emitLog({
+            type: "queue",
+            message: `${display_name} → queue`,
+          });
           break;
 
         case "eliminate":
           arenaLeave(String(tiktok_id));
           emitArena();
-          emitLog({ type: "elim", message: `${display_name} geëlimineerd` });
+          emitLog({
+            type: "elim",
+            message: `${display_name} geëlimineerd`,
+          });
           break;
 
         case "removeFromQueue":
@@ -552,7 +542,7 @@ io.on("connection", async (socket: AdminSocket) => {
     }
   }
 
-  // REGISTER ALL SOCKET EVENTS
+  // SOCKET REGISTRATIE
   socket.on("admin:getSettings", (d, ack) => handle("getSettings", d, ack));
   socket.on("admin:setHost", (d, ack) => handle("setHost", d, ack));
   socket.on("admin:startGame", (d, ack) => handle("startGame", d, ack));
@@ -583,7 +573,7 @@ initDB().then(async () => {
   await loadActiveGame();
   await initDynamicHost();
 
-  const host = sanitizeHost(await getSetting("host_username"));
+  const host = sanitizeHost((await getSetting("host_username")) || "");
 
   if (!host) {
     console.log("⚠ Geen host ingesteld — wacht op admin:setHost");
@@ -616,6 +606,6 @@ initDB().then(async () => {
 });
 
 // ============================================================================
-// EXPORTS
+// EXPORT
 // ============================================================================
 export { emitArena };
