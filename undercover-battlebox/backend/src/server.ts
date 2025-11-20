@@ -173,7 +173,7 @@ export { emitArena }; // export fix
 // ============================================================================
 // STREAM STATS
 // ============================================================================
-async function broadcastStats() {
+export async function broadcastStats() {
   if (!currentGameId) return;
 
   const res = await pool.query(
