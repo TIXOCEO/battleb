@@ -14,7 +14,7 @@
 // ============================================================================
 
 import pool from "../db";
-import { isStreamLive, getHostId } from "../server";
+import { isStreamLive, getHardHostId } from "../server";
 
 // ============================================================================
 // NORMALIZERS
