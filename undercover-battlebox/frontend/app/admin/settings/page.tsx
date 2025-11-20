@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { getAdminSocket } from "@/lib/socketClient";
 import type { AdminAckResponse } from "@/lib/adminTypes";
 
@@ -51,6 +51,12 @@ export default function SettingsPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [gameActive, setGameActive] = useState(false);
 
+  // Track whether user typed in hostId manually (blocks auto-override)
+  const manualHostIdEdit = useRef(false);
+
+  // Reference to ID input for label click
+  const hostIdInputRef = useRef<HTMLInputElement | null>(null);
+
   // ---------------------------------------------------------------------
   // INIT SOCKET
   // ---------------------------------------------------------------------
@@ -71,8 +77,8 @@ export default function SettingsPage() {
         setHostUsername(cleanUser);
       }
 
-      if (res.hostId) {
-        const cleanId = sanitizeHostId(String(res.hostId));
+      if (res.host?.id || res.hostId) {
+        const cleanId = sanitizeHostId(String(res.host.id || res.hostId));
         setCurrentHostId(cleanId);
         setHostId(cleanId);
       }
@@ -84,14 +90,11 @@ export default function SettingsPage() {
     socket.on("connect", () => setConnected(true));
     socket.on("disconnect", () => setConnected(false));
 
-    socket.on("host", (h: string) => {
-      const clean = sanitizeHostUsername(h || "");
-      setCurrentHostUser(clean);
-    });
-
-    socket.on("hostId", (id: string) => {
-      const clean = sanitizeHostId(id || "");
-      setCurrentHostId(clean);
+    socket.on("host", (h: any) => {
+      const cleanUser = sanitizeHostUsername(h?.username || "");
+      const cleanId = sanitizeHostId(String(h?.id || ""));
+      setCurrentHostUser(cleanUser);
+      setCurrentHostId(cleanId);
     });
 
     socket.on("settings", (s: ArenaSettings) =>
@@ -107,10 +110,44 @@ export default function SettingsPage() {
       socket.off("disconnect");
       socket.off("settings");
       socket.off("host");
-      socket.off("hostId");
       socket.off("gameSession");
     };
   }, []);
+
+  // ---------------------------------------------------------------------
+  // AUTO TIKTOK-ID LOOKUP BASED ON USERNAME
+  // ---------------------------------------------------------------------
+  useEffect(() => {
+    if (!hostUsername) return;
+    if (manualHostIdEdit.current) return; // stop auto updates if manually edited
+
+    let cancelled = false;
+
+    const timer = setTimeout(async () => {
+      try {
+        setHostId("..."); // UI loading indicator
+
+        const res = await fetch(`/api/tiktok-id/${hostUsername}`);
+        const json = await res.json();
+
+        if (cancelled) return;
+
+        if (json.success && json.tiktok_id) {
+          setHostId(String(json.tiktok_id));
+        } else {
+          // Keep field empty → user can manually type
+          setHostId("");
+        }
+      } catch {
+        if (!cancelled) setHostId("");
+      }
+    }, 400);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [hostUsername]);
 
   // ---------------------------------------------------------------------
   // HOST OPSLAAN
@@ -138,6 +175,9 @@ export default function SettingsPage() {
         setStatus(
           res.success ? "✔ Host succesvol opgeslagen" : `❌ ${res.message}`
         );
+        if (res.success) {
+          manualHostIdEdit.current = false; // reset manual override
+        }
       }
     );
   };
@@ -206,21 +246,31 @@ export default function SettingsPage() {
           type="text"
           maxLength={30}
           value={hostUsername}
-          onChange={(e) =>
-            setHostUsername(sanitizeHostUsername(e.target.value))
-          }
           disabled={gameActive}
+          onChange={(e) => {
+            manualHostIdEdit.current = false; // allow auto lookup
+            setHostUsername(sanitizeHostUsername(e.target.value));
+          }}
           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
         />
 
         {/* Nieuwe host ID */}
-        <label className="text-xs text-gray-600">Nieuwe TikTok ID</label>
+        <label
+          className="text-xs text-gray-600 cursor-pointer"
+          onClick={() => hostIdInputRef.current?.focus()}
+        >
+          Nieuwe TikTok ID (klikken = focus)
+        </label>
         <input
           type="text"
+          ref={hostIdInputRef}
           maxLength={32}
           value={hostId}
-          onChange={(e) => setHostId(sanitizeHostId(e.target.value))}
           disabled={gameActive}
+          onChange={(e) => {
+            manualHostIdEdit.current = true; // user takes control
+            setHostId(sanitizeHostId(e.target.value));
+          }}
           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3 font-mono"
         />
 
