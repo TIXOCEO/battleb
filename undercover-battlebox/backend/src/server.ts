@@ -349,7 +349,9 @@ async function restartTikTokConnection() {
       return;
     }
 
-    console.log(`🔄 TikTok opnieuw verbinden → @${hostUser} (ID=${HARD_HOST_ID})`);
+    console.log(
+      `🔄 TikTok opnieuw verbinden → @${hostUser} (ID=${HARD_HOST_ID})`
+    );
 
     const { conn } = await startConnection(hostUser, () => {});
     if (!conn) {
@@ -394,6 +396,46 @@ io.on("connection", async (socket: AdminSocket) => {
     gameId: currentGameId,
   });
 
+  // ========================================================================
+  // 🔧 PATCH 1 — admin:getInitialSnapshot
+  // ========================================================================
+  socket.on("admin:getInitialSnapshot", async (d, ack) => {
+    try {
+      const arena = getArena();
+      const queueEntries = await getQueue();
+
+      const lbRes = await pool.query(
+        `
+          SELECT giver_id AS user_id,
+                giver_username AS username,
+                giver_display_name AS display_name,
+                SUM(diamonds) AS total_diamonds
+          FROM gifts
+          WHERE game_id = $1
+          GROUP BY giver_id, giver_username, giver_display_name
+          ORDER BY total_diamonds DESC
+        `,
+        [(io as any).currentGameId ?? null]
+      );
+
+      ack({
+        arena,
+        queue: { open: true, entries: queueEntries },
+        logs: logBuffer,
+        stats: null,
+        leaderboard: lbRes.rows,
+        gameSession: {
+          active: currentGameId !== null,
+          gameId: currentGameId,
+        },
+      });
+    } catch (err) {
+      console.error("snapshot error:", err);
+      ack(null);
+    }
+  });
+
+  // TWISTS INIT
   initAdminTwistEngine(socket);
 
   // HANDLE ADMIN COMMANDS
@@ -410,95 +452,33 @@ io.on("connection", async (socket: AdminSocket) => {
         });
       }
 
-      // SET HOST
-      if (action === "setHost") {
-        if (currentGameId) {
-          return ack({
-            success: false,
-            message: "Host kan niet worden gewijzigd tijdens actief spel.",
-          });
+      // ============================================================
+      // 🔧 PATCH 2 — Autocomplete admin:searchUsers
+      // ============================================================
+      if (action === "searchUsers") {
+        const q = (data?.query || "").toString().trim().toLowerCase();
+        if (!q || q.length < 2) {
+          return ack({ users: [] });
         }
 
-        const cleanUser = sanitizeHost(data?.username || "");
-        const cleanId = String(data?.tiktok_id || "");
+        const like = `%${q}%`;
 
-        if (!cleanUser || !cleanId || !/^\d+$/.test(cleanId)) {
-          return ack({
-            success: false,
-            message: "TikTok username + numerieke ID verplicht",
-          });
-        }
+        const r = await pool.query(
+          `
+            SELECT tiktok_id, username, display_name
+            FROM users
+            WHERE LOWER(username) LIKE LOWER($1)
+              OR LOWER(display_name) LIKE LOWER($1)
+            ORDER BY last_seen_at DESC
+            LIMIT 25
+          `,
+          [like]
+        );
 
-        // SAVE TO SETTINGS
-        await setSetting("host_username", cleanUser);
-        await setSetting("host_id", cleanId);
-
-        HARD_HOST_USERNAME = cleanUser;
-        HARD_HOST_ID = cleanId;
-
-        // update UI
-        io.emit("host", {
-          username: cleanUser,
-          id: cleanId,
-        });
-
-        emitLog({
-          type: "system",
-          message: `Nieuwe hard-host ingesteld: @${cleanUser} (${cleanId})`,
-        });
-
-        await restartTikTokConnection();
-        return ack({ success: true });
+        return ack({ users: r.rows });
       }
 
-      // GAME CONTROL
-      if (action === "startGame") {
-        if (currentGameId)
-          return ack({ success: false, message: "Er draait al een spel" });
-
-        await startNewGame();
-        return ack({ success: true });
-      }
-
-      if (action === "stopGame") {
-        if (!currentGameId)
-          return ack({ success: false, message: "Geen actief spel" });
-
-        await stopCurrentGame();
-        return ack({ success: true });
-      }
-
-      if (action === "hardResetGame") {
-        await hardResetGame();
-        return ack({ success: true });
-      }
-
-      if (action === "startRound") {
-        const ok = startRound(data?.type || "quarter");
-        if (!ok)
-          return ack({ success: false, message: "Start ronde geweigerd" });
-
-        return ack({ success: true });
-      }
-
-      if (action === "endRound") {
-        endRound();
-        return ack({ success: true });
-      }
-
-      if (action === "updateSettings") {
-        await updateArenaSettings({
-          roundDurationPre: Number(data?.roundDurationPre),
-          roundDurationFinal: Number(data?.roundDurationFinal),
-          graceSeconds: Number(data?.graceSeconds),
-          forceEliminations: Boolean(data?.forceEliminations),
-        });
-
-        io.emit("settings", getArenaSettings());
-        return ack({ success: true });
-      }
-
-      // USER OPERATIONS (require username)
+      // USER OPERATION GUARD
       if (!data?.username) {
         return ack({ success: false, message: "username verplicht" });
       }
@@ -552,7 +532,10 @@ io.on("connection", async (socket: AdminSocket) => {
             [tiktok_id]
           );
           await emitQueue();
-          emitLog({ type: "elim", message: `${display_name} uit queue verwijderd` });
+          emitLog({
+            type: "elim",
+            message: `${display_name} uit queue verwijderd`,
+          });
           break;
 
         case "promoteUser":
@@ -596,12 +579,14 @@ io.on("connection", async (socket: AdminSocket) => {
     }
   }
 
-  // REGISTER SOCKET COMMANDS
+  // SOCKET EVENT REGISTRATION
   socket.on("admin:getSettings", (d, ack) => handle("getSettings", d, ack));
   socket.on("admin:setHost", (d, ack) => handle("setHost", d, ack));
   socket.on("admin:startGame", (d, ack) => handle("startGame", d, ack));
   socket.on("admin:stopGame", (d, ack) => handle("stopGame", d, ack));
-  socket.on("admin:hardResetGame", (d, ack) => handle("hardResetGame", d, ack));
+  socket.on("admin:hardResetGame", (d, ack) =>
+    handle("hardResetGame", d, ack)
+  );
   socket.on("admin:startRound", (d, ack) => handle("startRound", d, ack));
   socket.on("admin:endRound", (d, ack) => handle("endRound", d, ack));
   socket.on("admin:updateSettings", (d, ack) =>
