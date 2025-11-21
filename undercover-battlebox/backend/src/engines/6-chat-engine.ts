@@ -1,5 +1,5 @@
 // ============================================================================
-// 6-chat-engine.ts — v10.1 (logic = v3.0)
+// 6-chat-engine.ts — v10.1 ULTRA FINAL
 // Fan-only join + VIP labels + Host rules + HARD HOST LOCK
 // ============================================================================
 
@@ -71,7 +71,13 @@ export function initChatEngine(conn: any) {
 
       if (!userId) return;
 
-      const text = clean(msg.comment || msg.text || msg.content);
+      const rawText =
+        msg.comment ||
+        msg.text ||
+        msg.content ||
+        "";
+
+      const text = clean(rawText);
       if (!text.startsWith("!")) return;
 
       const command = extractCommand(text);
@@ -88,14 +94,14 @@ export function initChatEngine(conn: any) {
 
       const dbUserId = BigInt(userId);
 
-      // FAN & VIP DATA ophalen
+      // FAN status
       const fan = await ensureFanStatus(dbUserId);
 
+      // VIP status
       const vipRow = await pool.query(
         `SELECT is_vip FROM users WHERE tiktok_id=$1`,
         [dbUserId]
       );
-
       const isVip = vipRow.rows[0]?.is_vip ? true : false;
 
       const tag = isVip ? "[VIP] " : fan ? "[FAN] " : "";
@@ -105,9 +111,10 @@ export function initChatEngine(conn: any) {
       const isHost = hostId && String(hostId) === String(userId);
 
       // =====================================================================
-      // !join — FAN ONLY (behalve host kan joinen als stream NIET live is)
+      // !join — FAN ONLY (behalve host mag joinen als stream NIET live is)
       // =====================================================================
       if (cmd === "!join") {
+
         // host mag joinen als stream NIET live is
         if (isHost && !isStreamLive()) {
           try {
@@ -130,7 +137,7 @@ export function initChatEngine(conn: any) {
           return;
         }
 
-        // host tijdens livestream → VERBODEN
+        // host tijdens livestream → verboden
         if (isHost && isStreamLive()) {
           emitLog({
             type: "queue",
@@ -139,7 +146,7 @@ export function initChatEngine(conn: any) {
           return;
         }
 
-        // normale speler — FAN ONLY
+        // normale speler → FAN ONLY
         if (!fan) {
           emitLog({
             type: "queue",
@@ -195,7 +202,11 @@ export function initChatEngine(conn: any) {
         if (!spots) return;
 
         try {
-          const result = await applyBoost(String(userId), spots, user.display_name);
+          const result = await applyBoost(
+            String(userId),
+            spots,
+            user.display_name
+          );
 
           io.emit("updateQueue", {
             open: true,
@@ -220,8 +231,11 @@ export function initChatEngine(conn: any) {
       // !use <twist> [target]
       // =====================================================================
       if (cmd === "!use") {
-        const raw = msg.comment || msg.text || msg.content;
-        await parseUseCommand(String(userId), user.display_name, raw);
+        await parseUseCommand(
+          String(userId),
+          user.display_name,
+          rawText
+        );
         return;
       }
 
