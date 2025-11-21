@@ -400,7 +400,7 @@ export async function restartTikTokConnection(force = false) {
 
     const { conn } = await startConnection(
       HARD_HOST_USERNAME,
-      (err: any) => {
+      () => {
         if (!err) return;
         const msg = String(err?.message || err || "");
         console.log("⛔ TikTok stream error:", msg);
