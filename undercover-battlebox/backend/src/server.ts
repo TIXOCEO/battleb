@@ -690,29 +690,36 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // ------------------------------
-      // SEARCH USERS
-      // ------------------------------
-      if (action === "searchUsers") {
-        const q = (data?.query || "").toString().trim().toLowerCase();
-        if (!q || q.length < 2) return ack({ users: [] });
+// ------------------------------
+// SEARCH USERS — ULTRA FIX
+// ------------------------------
+if (action === "searchUsers") {
+  const q = (data?.query || "").toString().trim().toLowerCase();
 
-        const like = `%${q}%`;
+  if (!q || q.length < 2) return ack({ users: [] });
 
-        const r = await pool.query(
-          `
-            SELECT tiktok_id, username, display_name
-            FROM users
-            WHERE LOWER(username) LIKE LOWER($1)
-               OR LOWER(display_name) LIKE LOWER($1)
-            ORDER BY last_seen_at DESC
-            LIMIT 25
-          `,
-          [like]
-        );
+  // Zoek op username + display_name + partial match
+  const like = `%${q}%`;
 
-        return ack({ users: r.rows });
-      }
+  const r = await pool.query(
+    `
+    SELECT 
+      tiktok_id,
+      username,
+      display_name
+    FROM users
+    WHERE 
+      LOWER(username) LIKE LOWER($1)
+      OR LOWER(display_name) LIKE LOWER($1)
+    ORDER BY last_seen_at DESC NULLS LAST
+    LIMIT 25
+    `,
+    [like]
+  );
+
+  return ack({ users: r.rows });
+}
+
 
       // =====================================================================
       // ALLES HIERONDER VEREIST username
@@ -724,24 +731,43 @@ io.on("connection", async (socket: AdminSocket) => {
         });
       }
 
-      const queryUser = sanitizeHost(data.username);
+// ULTRA username normalizer
+const queryUser = data.username
+  .replace("@", "")
+  .trim()
+  .toLowerCase();
 
-      const res = await pool.query(
-        `
-          SELECT tiktok_id, display_name, username
-          FROM users
-          WHERE LOWER(username)=LOWER($1)
-          LIMIT 1
-        `,
-        [queryUser]
-      );
+// probeer eerst exact match
+let res = await pool.query(
+  `
+    SELECT tiktok_id, display_name, username
+    FROM users
+    WHERE LOWER(username)=LOWER($1)
+    LIMIT 1
+  `,
+  [queryUser]
+);
 
-      if (!res.rows[0]) {
-        return ack({
-          success: false,
-          message: `Gebruiker @${queryUser} niet gevonden`,
-        });
-      }
+// fallback: LIKE search
+if (!res.rows.length) {
+  res = await pool.query(
+    `
+      SELECT tiktok_id, display_name, username
+      FROM users
+      WHERE LOWER(username) LIKE LOWER($1)
+      ORDER BY last_seen_at DESC NULLS LAST
+      LIMIT 1
+    `,
+    [`%${queryUser}%`]
+  );
+}
+
+if (!res.rows.length) {
+  return ack({
+    success: false,
+    message: `Gebruiker @${queryUser} niet gevonden`,
+  });
+}
 
       const { tiktok_id, display_name, username } = res.rows[0];
 
@@ -809,25 +835,32 @@ io.on("connection", async (socket: AdminSocket) => {
           });
           break;
 
-        // NEW — TWIST EXECUTE (inventory-based MODEL A)
-        case "useTwist":
-          await useTwist(
-            String(tiktok_id),
-            display_name,
-            data.twist,
-            data.target
-          );
-          await broadcastRoundLeaderboard();
-          return ack({ success: true });
+// =====================================================================
+// NEW — TWIST EXECUTE (inventory-based MODEL A)
+// =====================================================================
+case "useTwist":
+  await useTwist(
+    String(tiktok_id),
+    display_name,
+    data.twist,
+    data.target
+  );
 
-        // NEW — TWIST GIVE (voegt stuk toe aan inventory)
-        case "giveTwist":
-          await giveTwistToUser(String(tiktok_id), data.twist);
-          emitLog({
-            type: "twist",
-            message: `ADMIN gaf twist '${data.twist}' → ${display_name}`,
-          });
-          return ack({ success: true });
+  await broadcastRoundLeaderboard();
+  return ack({ success: true });
+
+// =====================================================================
+// NEW — TWIST GIVE (voegt stuk toe aan inventory)
+// =====================================================================
+case "giveTwist":
+  await giveTwistToUser(String(tiktok_id), data.twist);
+
+  emitLog({
+    type: "twist",
+    message: `ADMIN gaf twist '${data.twist}' → ${display_name}`,
+  });
+
+  return ack({ success: true });
 
         default:
           return ack({
