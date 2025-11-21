@@ -1,16 +1,19 @@
 // ============================================================================
-// 3-gift-engine.ts — v10.5 ULTRA + HEART-ME-FIX
+// 3-gift-engine.ts — v10.5 ULTRA FINAL
 // Undercover BattleBox — HARD HOST LOCK Edition
 // ============================================================================
 //
-// ✔ Volledige hard-host-binding via ID + username (geen fuzzy matches)
-// ✔ Sender nooit meer "Onbekend"
-// ✔ Receiver nooit meer "Onbekend"
-// ✔ Host ONLY via ID/uniqueId — nooit meer verkeerde HOST
+// ✔ Hard-host-binding via ID + username
+// ✔ Sender nooit meer onbekend
+// ✔ Receiver nooit meer onbekend
+// ✔ Host alleen via ID/uniqueId (nooit via display name)
 // ✔ [HOST] tag 100% correct
-// ✔ ⭐ [FAN] tag werkt nu ALTIJD direct bij Heart Me
-// ✔ Heart Me gedetecteerd op ALLE giftId varianten (5655, 7934, 9967, 5630)
-// ✔ Scoring, arena, BP, twists volledig intact
+// ✔ [FAN] direct actief bij Heart Me (alle varianten)
+// ✔ Heart Me giftId detection: 5655, 7934, 5630, 9967 + naam fallback
+// ✔ Scoring perfect
+// ✔ Arena perfect
+// ✔ Twists perfect
+// ✔ Zero regressies
 //
 // ============================================================================
 
@@ -71,9 +74,8 @@ function now() {
 function formatDisplay(u: any) {
   if (!u) return "Onbekend";
 
-  if ((u as any).is_host) return `${u.display_name} [HOST]`;
   if (String(u.tiktok_id) === HOST_ID) return `${u.display_name} [HOST]`;
-
+  if ((u as any).is_host) return `${u.display_name} [HOST]`;
   if (u.is_fan) return `${u.display_name} [FAN]`;
 
   return u.display_name;
@@ -157,7 +159,7 @@ function extractSender(evt: any) {
 }
 
 // ============================================================================
-// DIAMOND CALC (battle-tested)
+// DIAMOND CALCULATOR
 // ============================================================================
 function calcDiamonds(evt: any): number {
   const base = Number(evt.diamondCount || evt.diamond || 0);
@@ -167,16 +169,13 @@ function calcDiamonds(evt: any): number {
   const final = !!evt.repeatEnd;
   const type = Number(evt.giftType || 0);
 
-  // Streak gifts
-  if (type === 1) {
-    return final ? base * repeat : 0;
-  }
+  if (type === 1) return final ? base * repeat : 0;
 
   return base;
 }
 
 // ============================================================================
-// RECEIVER RESOLVER — HARD HOST LOCK
+// RECEIVER — HARD HOST LOCK
 // ============================================================================
 async function resolveReceiver(evt: any) {
   const directId =
@@ -193,7 +192,7 @@ async function resolveReceiver(evt: any) {
 
   const un = unique ? norm(unique) : null;
 
-  // 1️⃣ ID → host
+  // ID → host
   if (HOST_ID && directId && String(directId) === HOST_ID) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     logUserUpdate("HOST(id)", HOST_ID, h.username, h.display_name);
@@ -205,7 +204,7 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  // 2️⃣ uniqueId → host
+  // uniqueId → host
   if (HOST_ID && HOST_USERNAME && un === HOST_USERNAME) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     logUserUpdate("HOST(unique)", HOST_ID, h.username, h.display_name);
@@ -217,7 +216,7 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  // 3️⃣ normale speler
+  // Normale speler
   if (directId) {
     const u = await getOrUpdateUser(String(directId), null, null);
     logUserUpdate("RECEIVER", String(directId), u.username, u.display_name);
@@ -229,7 +228,7 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  // 4️⃣ fallback → host
+  // fallback = host
   if (HOST_ID) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     logUserUpdate("HOST(fallback)", HOST_ID, h.username, h.display_name);
@@ -245,14 +244,9 @@ async function resolveReceiver(evt: any) {
 }
 
 // ============================================================================
-// HEART ME DETECTOR — v10.5 ULTRA
+// HEART ME DETECTOR
 // ============================================================================
-const HEART_ME_GIFT_IDS = new Set([
-  5655,  // officiële Heart Me
-  7934,  // variant 1 — TikTok nieuwe ID
-  5630,  // variant 2 — oudere client
-  9967,  // variant 3 — fallback / regionaal
-]);
+const HEART_ME_GIFT_IDS = new Set([5655, 7934, 5630, 9967]);
 
 function isHeartMeGift(evt: any): boolean {
   const gid = Number(evt.giftId);
@@ -278,10 +272,10 @@ async function processGift(evt: any, source: string) {
   if (dedupe.has(key)) return;
   dedupe.add(key);
 
-  // IDENTITY SYNC
+  // Identity sync (unified extractor)
   await upsertIdentityFromLooseEvent(evt);
 
-  // SENDER
+  // Sender
   const S = extractSender(evt);
   if (!S.id) {
     console.warn("⚠ Gift zonder sender ID — skip");
@@ -291,22 +285,20 @@ async function processGift(evt: any, source: string) {
   const sender = await getOrUpdateUser(S.id, S.nick, S.unique);
   await cleanupFan(sender.tiktok_id);
 
-  // DIAMONDS
+  // Diamonds
   const credited = calcDiamonds(evt);
   if (credited <= 0) return;
 
-  // RECEIVER
+  // Receiver
   const receiver = await resolveReceiver(evt);
   const isHost = receiver.role === "host";
 
-  // Extra DB fetch
+  // Fetch receiver db-row
   const receiverUser = receiver.id
     ? await getUserByTikTokId(String(receiver.id))
     : null;
 
-  if (receiverUser) {
-    (receiverUser as any).is_host = isHost;
-  }
+  if (receiverUser) (receiverUser as any).is_host = isHost;
 
   if (HOST_ID && String(sender.tiktok_id) === HOST_ID) {
     (sender as any).is_host = true;
@@ -315,28 +307,17 @@ async function processGift(evt: any, source: string) {
   const senderFmt = formatDisplay(sender);
   const receiverFmt = formatDisplay(receiverUser);
 
-  console.log(
-    `🎁 ${senderFmt} → ${receiverFmt} (${evt.giftName}) +${credited}💎`
-  );
+  console.log(`🎁 ${senderFmt} → ${receiverFmt} (${evt.giftName}) +${credited}💎`);
 
-  // SENDER diamond updates
+  // Sender diamonds
   await addDiamonds(BigInt(String(sender.tiktok_id)), credited, "total");
   await addDiamonds(BigInt(String(sender.tiktok_id)), credited, "stream");
-  await addDiamonds(
-    BigInt(String(sender.tiktok_id)),
-    credited,
-    "current_round"
-  );
+  await addDiamonds(BigInt(String(sender.tiktok_id)), credited, "current_round");
 
   const bp = credited * 0.2;
-  await addBP(
-    BigInt(String(sender.tiktok_id)),
-    bp,
-    "GIFT",
-    sender.display_name
-  );
+  await addBP(BigInt(String(sender.tiktok_id)), bp, "GIFT", sender.display_name);
 
-  // ARENA DIAMONDS (niet voor host)
+  // Arena
   const arena = getArena();
   const active = arena.status === "active" && now() <= arena.roundCutoff;
   const grace = arena.status === "grace" && now() <= arena.graceEnd;
@@ -345,31 +326,29 @@ async function processGift(evt: any, source: string) {
     await safeAddArenaDiamonds(String(receiver.id), credited);
   }
 
-  // HOST RECEIVER DIAMOND UPDATES
+  // Host receiver diamonds
   if (isHost && receiver.id) {
     await pool.query(
       `
-        UPDATE users
-        SET diamonds_total = diamonds_total + $1,
-            diamonds_stream = diamonds_stream + $1,
-            diamonds_current_round = diamonds_current_round + $1
-        WHERE tiktok_id = $2
-      `,
+      UPDATE users
+      SET diamonds_total = diamonds_total + $1,
+          diamonds_stream = diamonds_stream + $1,
+          diamonds_current_round = diamonds_current_round + $1
+      WHERE tiktok_id = $2
+    `,
       [credited, BigInt(String(receiver.id))]
     );
   }
 
-  // ========================================================================
-  // FANCLUB (HeartMe ONLY, inclusief nieuwe gift IDs)
-  // ========================================================================
+  // FAN — only Heart Me
   if (isHost && isHeartMeGift(evt)) {
     const expires = new Date(now() + 24 * 3600 * 1000);
 
     await pool.query(
       `
-        UPDATE users
-        SET is_fan=TRUE, fan_expires_at=$1
-        WHERE tiktok_id=$2
+      UPDATE users
+      SET is_fan=TRUE, fan_expires_at=$1
+      WHERE tiktok_id=$2
       `,
       [expires, BigInt(String(sender.tiktok_id))]
     );
@@ -379,11 +358,10 @@ async function processGift(evt: any, source: string) {
       message: `${sender.display_name} is nu [FAN] voor 24 uur ❤️`,
     });
 
-    // direct badge actief maken in-memory
     (sender as any).is_fan = true;
   }
 
-  // TWISTS — unchanged
+  // TWISTS
   const giftId = Number(evt.giftId);
   const twistType: TwistType | null =
     (Object.keys(TWIST_MAP) as TwistType[]).find(
@@ -398,19 +376,19 @@ async function processGift(evt: any, source: string) {
     });
   }
 
-  // DATABASE LOG
+  // Database log
   const gameId = (io as any).currentGameId ?? null;
 
   await pool.query(
     `
-      INSERT INTO gifts (
-        giver_id, giver_username, giver_display_name,
-        receiver_id, receiver_username, receiver_display_name,
-        receiver_role, gift_name, diamonds, bp,
-        game_id, created_at
-      )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
-    `,
+    INSERT INTO gifts (
+      giver_id, giver_username, giver_display_name,
+      receiver_id, receiver_username, receiver_display_name,
+      receiver_role, gift_name, diamonds, bp,
+      game_id, created_at
+    )
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
+  `,
     [
       BigInt(String(sender.tiktok_id)),
       sender.username,
@@ -428,10 +406,10 @@ async function processGift(evt: any, source: string) {
     ]
   );
 
-  // STATS UPDATE
+  // Stats update
   await broadcastStats();
 
-  // REALTIME LOG OUTPUT
+  // Realtime log
   emitLog({
     type: "gift",
     message: `${senderFmt} → ${receiverFmt}: ${evt.giftName} (+${credited}💎)`,
@@ -439,7 +417,7 @@ async function processGift(evt: any, source: string) {
 }
 
 // ============================================================================
-// INIT ENGINE
+// INIT GIFT ENGINE
 // ============================================================================
 export function initGiftEngine(conn: any) {
   if (!conn || typeof conn.on !== "function") {
@@ -450,17 +428,17 @@ export function initGiftEngine(conn: any) {
   console.log("🎁 GiftEngine v10.5 ULTRA LOADED");
 
   conn.on("gift", (d: any) => processGift(d, "gift"));
-  conn.on("roomMessage", (d: any) => {
-    if (d?.giftId || d?.diamondCount) processGift(d, "roomMessage");
-  });
-  conn.on("member", (d: any) => {
-    if (d?.giftId || d?.diamondCount) processGift(d, "member");
-  });
-  conn.on("chat", (d: any) => {
-    if (d?._data?.giftId || d?._data?.diamondCount) {
-      processGift(d._data, "chat-hidden");
-    }
-  });
+  conn.on("roomMessage", (d: any) =>
+    d?.giftId || d?.diamondCount ? processGift(d, "roomMessage") : null
+  );
+  conn.on("member", (d: any) =>
+    d?.giftId || d?.diamondCount ? processGift(d, "member") : null
+  );
+  conn.on("chat", (d: any) =>
+    d?._data?.giftId || d?._data?.diamondCount
+      ? processGift(d._data, "chat-hidden")
+      : null
+  );
 }
 
 // ============================================================================
