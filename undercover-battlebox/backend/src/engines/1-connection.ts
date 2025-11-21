@@ -1,9 +1,11 @@
 // ============================================================================
-// 1-connection.ts — v11.0 PROXY SIGN EDITION
+// 1-connection.ts — v11.1 PROXY SIGN EDITION (SAFE TYPES)
 // Undercover BattleBox — TikTok LIVE Core Connection Engine
 // Replaces WebcastPushConnection with Sign-Proxy + Native WS Adapter
-// No game logic touched. No identity logic touched. No fallback overrides.
 // ============================================================================
+
+// --- FIX 1: Types voor ws (anders TS klaagt) -------------------------------
+declare module "ws";
 
 import WebSocket from "ws";
 import { getSetting, setSetting } from "../db";
@@ -28,29 +30,43 @@ function norm(v: any): string {
 let activeConn: any = null;
 
 // ============================================================================
-// SIGN PROXY CALLER
+// SIGN PROXY CALLER (typesafe)
 // ============================================================================
-async function getSignedUrl(cleanHost: string) {
+
+interface SignProxyResponse {
+  signedUrl: string;
+  userAgent?: string;
+  cookies?: string;
+}
+
+async function getSignedUrl(cleanHost: string): Promise<SignProxyResponse | null> {
   try {
-    const res = await fetch(
-      "https://battlebox-sign-proxy.onrender.com/sign",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: cleanHost })
-      }
-    );
+    const res = await fetch("https://battlebox-sign-proxy.onrender.com/sign", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: cleanHost }),
+    });
 
     if (!res.ok) throw new Error("Proxy sign server returned error");
 
-    const json = await res.json();
+    const json = (await res.json()) as unknown;
 
-    if (!json.signedUrl) throw new Error("Proxy did not return signedUrl");
+    // --- FIX 2: json unknown → typed check -------------------
+    if (
+      typeof json !== "object" ||
+      json === null ||
+      !("signedUrl" in json) ||
+      typeof (json as any).signedUrl !== "string"
+    ) {
+      throw new Error("Proxy returned invalid structure");
+    }
+
+    const j = json as any;
 
     return {
-      signedUrl: json.signedUrl,
-      userAgent: json.userAgent || "Mozilla/5.0",
-      cookies: json.cookies || ""
+      signedUrl: j.signedUrl,
+      userAgent: typeof j.userAgent === "string" ? j.userAgent : "Mozilla/5.0",
+      cookies: typeof j.cookies === "string" ? j.cookies : "",
     };
   } catch (err: any) {
     console.error("❌ Sign proxy error:", err?.message);
@@ -59,7 +75,7 @@ async function getSignedUrl(cleanHost: string) {
 }
 
 // ============================================================================
-// WS ADAPTER
+// WS ADAPTER — TikTok Custom Event Mapper
 // ============================================================================
 
 class BattleboxTikTokWS {
@@ -74,9 +90,8 @@ class BattleboxTikTokWS {
   }
 
   emit(event: string, data: any) {
-    if (this.handlers[event]) {
-      for (const fn of this.handlers[event]) fn(data);
-    }
+    const list = this.handlers[event];
+    if (list) for (const fn of list) fn(data);
   }
 
   connect(): Promise<void> {
@@ -88,40 +103,39 @@ class BattleboxTikTokWS {
         resolve();
       });
 
-      this.ws.on("message", (buf: any) => {
+      this.ws.on("message", (buf: WebSocket.RawData) => {
         try {
-          const msg = JSON.parse(buf.toString());
+          const s = buf.toString();
+          const msg = JSON.parse(s);
+
+          const payload = msg?.data || msg;
           const type = msg?.type || "";
 
           switch (type) {
             case "webcastGiftMessage":
-              this.emit("gift", msg?.data || msg);
+              this.emit("gift", payload);
               break;
-
             case "webcastChatMessage":
-              this.emit("chat", msg?.data || msg);
+              this.emit("chat", payload);
               break;
-
             case "webcastMemberMessage":
-              this.emit("member", msg?.data || msg);
+              this.emit("member", payload);
               break;
-
             case "webcastRoomMessage":
-              this.emit("roomMessage", msg?.data || msg);
+              this.emit("roomMessage", payload);
               break;
-
             default:
               break;
           }
 
-          upsertIdentityFromLooseEvent(msg?.data || msg);
-
-        } catch (e) {
-          // ignore decode errors
+          upsertIdentityFromLooseEvent(payload);
+        } catch {
+          // ignore wrong formats
         }
       });
 
-      this.ws.on("error", (e) => {
+      // --- FIX 3: type voor (e) toevoegen -------------------
+      this.ws.on("error", (e: Error) => {
         reject(e);
       });
 
@@ -143,6 +157,7 @@ class BattleboxTikTokWS {
 // ============================================================================
 // START CONNECTION (STRICT HOST LOCK)
 // ============================================================================
+
 export async function startConnection(
   username: string,
   onConnected: () => void
@@ -154,8 +169,8 @@ export async function startConnection(
   let hostSaved = false;
 
   async function saveHost(id: string, uniqueId: string, nickname: string) {
-    if (!id) return;
     if (hostSaved) return;
+    if (!id) return;
 
     hostSaved = true;
     const cleanUnique = norm(uniqueId);
@@ -174,11 +189,11 @@ export async function startConnection(
     console.log("✔ HOST definitief vastgelegd (HARD LOCK)");
   }
 
-  // FETCH SIGNED URL
+  // CALL SIGN PROXY
   const sign = await getSignedUrl(cleanHost);
 
   if (!sign) {
-    console.log("❌ Geen signedUrl → host lijkt offline");
+    console.log("❌ Geen signedUrl via proxy → host lijkt offline");
     return { conn: null };
   }
 
@@ -198,7 +213,7 @@ export async function startConnection(
       conn.on("connected", async () => {
         setLiveState(true);
 
-        // PROXY geeft host info meestal mee in append
+        // signing-proxy geeft *nog* geen hostId → placeholder
         await saveHost("0", cleanHost, cleanHost);
 
         onConnected();
