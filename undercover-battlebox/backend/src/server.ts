@@ -550,20 +550,37 @@ io.on("connection", async (socket: AdminSocket) => {
       let stats = null;
 
       if (currentGameId) {
-        const res = await pool.query(
-          `
-          SELECT
-            COUNT(DISTINCT CASE WHEN receiver_role IN ('speler','cohost')
-              THEN receiver_id END) AS total_players,
-            COALESCE(SUM(CASE WHEN receiver_role IN ('speler','cohost')
-              THEN diamonds ELSE 0 END), 0) AS total_player_diamonds,
-            COALESCE(SUM(CASE WHEN receiver_role = 'host')
-              THEN diamonds ELSE 0 END), 0) AS total_host_diamonds
-          FROM gifts
-          WHERE game_id = $1
-        `,
-          [currentGameId]
-        );
+const res = await pool.query(`
+  SELECT
+    COUNT(
+      DISTINCT CASE
+        WHEN receiver_role IN ('speler','cohost')
+        THEN receiver_id
+      END
+    ) AS total_players,
+
+    COALESCE(
+      SUM(
+        CASE
+          WHEN receiver_role IN ('speler','cohost') THEN diamonds
+          ELSE 0
+        END
+      ), 0
+    ) AS total_player_diamonds,
+
+    COALESCE(
+      SUM(
+        CASE
+          WHEN receiver_role = 'host' THEN diamonds
+          ELSE 0
+        END
+      ), 0
+    ) AS total_host_diamonds
+
+  FROM gifts
+  WHERE game_id = $1
+`, [currentGameId]);
+
 
         const row = res.rows[0] || {};
         stats = {
