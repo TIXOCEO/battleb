@@ -4,9 +4,6 @@
 // Replaces WebcastPushConnection with Sign-Proxy + Native WS Adapter
 // ============================================================================
 
-// --- FIX 1: Types voor ws (anders TS klaagt) -------------------------------
-declare module "ws";
-
 import WebSocket from "ws";
 import { getSetting, setSetting } from "../db";
 import { upsertIdentityFromLooseEvent } from "./2-user-engine";
