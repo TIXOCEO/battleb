@@ -1,5 +1,5 @@
 // ============================================================================
-// server.ts — Undercover BattleBox — v5.4 ULTRA FIXED
+// server.ts — Undercover BattleBox — v5.5 ULTRA RECONNECT
 // HARD-HOST-LOCK + Username-Lock (OPTIE B) + TikTok ID Lookup + Engine Fixes
 // ============================================================================
 
@@ -318,40 +318,118 @@ io.use((socket: AdminSocket, next) => {
 });
 
 // ============================================================================
-// RECONNECT ENGINE
+// ULTRA RECONNECT ENGINE v3.0
 // ============================================================================
+
 let tiktokConn: any = null;
 let reconnectLock = false;
 
-async function restartTikTokConnection() {
+// health monitor
+let lastEventAt = Date.now();
+let healthInterval: NodeJS.Timeout | null = null;
+
+// wordt door gift-engine / chat-engine aangeroepen
+export function markTikTokEvent() {
+  lastEventAt = Date.now();
+}
+
+async function fullyDisconnect() {
+  try {
+    if (tiktokConn) {
+      await stopConnection(tiktokConn);
+    }
+  } catch (err) {
+    console.log("⚠ stopConnection error:", err);
+  }
+  tiktokConn = null;
+}
+
+function startHealthMonitor() {
+  if (healthInterval) return;
+
+  healthInterval = setInterval(async () => {
+    const diff = Date.now() - lastEventAt;
+
+    // langer dan 20s geen enkel event → vermoedelijk vastgelopen stream
+    if (diff > 20000) {
+      console.log("🛑 HEALTH MONITOR: geen TikTok events >20s → RECONNECT");
+      await restartTikTokConnection(true);
+    }
+  }, 12000);
+}
+
+export async function restartTikTokConnection(force = false) {
   if (reconnectLock) return;
   reconnectLock = true;
 
   try {
-    if (tiktokConn) {
-      try {
-        await stopConnection(tiktokConn);
-      } catch {}
-      tiktokConn = null;
-    }
+    console.log("🔄 RECONNECT ENGINE: start…");
 
-    const hostUser = sanitizeHost(await getSetting("host_username"));
-    const hostId = await getSetting("host_id");
+    // hard disconnect huidige connectie
+    await fullyDisconnect();
 
-    HARD_HOST_USERNAME = hostUser;
-    HARD_HOST_ID = hostId ? String(hostId) : null;
+    const confUser = sanitizeHost(await getSetting("host_username"));
+    const confId = await getSetting("host_id");
 
-    if (!HARD_HOST_ID || !hostUser) {
-      console.log("⚠ Hard-Host-Lock: host_id + host_username verplicht.");
+    HARD_HOST_USERNAME = confUser || "";
+    HARD_HOST_ID = confId ? String(confId) : null;
+
+    if (!HARD_HOST_USERNAME || !HARD_HOST_ID) {
+      console.log("❌ GEEN HARD-HOST INGESTELD — wacht op admin:setHost");
+      emitLog({
+        type: "warn",
+        message: "Geen hard-host ingesteld. Ga naar Admin → Settings.",
+      });
+
+      io.emit("streamStats", {
+        totalPlayers: 0,
+        totalPlayerDiamonds: 0,
+        totalHostDiamonds: 0,
+      });
+
       reconnectLock = false;
       return;
     }
 
-    console.log(`🔄 TikTok opnieuw verbinden → @${hostUser} (ID=${HARD_HOST_ID})`);
+    console.log(
+      `🔐 HARD-HOST LOCK: @${HARD_HOST_USERNAME} (${HARD_HOST_ID})`
+    );
+    console.log(
+      `🔌 Verbinden met TikTok LIVE… @${HARD_HOST_USERNAME}`
+    );
 
-    const { conn } = await startConnection(hostUser, () => {});
+    const { conn } = await startConnection(
+      HARD_HOST_USERNAME,
+      (err: any) => {
+        if (!err) return;
+        const msg = String(err?.message || err || "");
+        console.log("⛔ TikTok stream error:", msg);
+
+        if (
+          msg.includes("504") ||
+          msg.toLowerCase().includes("webcast") ||
+          msg.toLowerCase().includes("invalid url")
+        ) {
+          console.log("⚠ Webcast/504/URL error → auto reconnect in 3s");
+          setTimeout(() => {
+            restartTikTokConnection(true);
+          }, 3000);
+        }
+      }
+    );
+
     if (!conn) {
-      emitLog({ type: "warn", message: `TikTok-host @${hostUser} offline` });
+      emitLog({
+        type: "warn",
+        message: `TikTok-host @${HARD_HOST_USERNAME} offline`,
+      });
+
+      io.emit("streamStats", {
+        totalPlayers: 0,
+        totalPlayerDiamonds: 0,
+        totalHostDiamonds: 0,
+      });
+
       reconnectLock = false;
       return;
     }
@@ -360,9 +438,38 @@ async function restartTikTokConnection() {
 
     initGiftEngine(conn);
     initChatEngine(conn);
+
     await refreshHostUsername();
+
+    // health monitor aan
+    startHealthMonitor();
+    markTikTokEvent();
+
+    // stats na (re)connect
+    if (currentGameId) {
+      await broadcastStats();
+    } else {
+      io.emit("streamStats", {
+        totalPlayers: 0,
+        totalPlayerDiamonds: 0,
+        totalHostDiamonds: 0,
+      });
+    }
+
+    console.log("✔ TikTok connection fully initialized (HARD LOCK)");
   } catch (err) {
     console.error("TikTok reconnect error:", err);
+
+    emitLog({
+      type: "warn",
+      message: "TikTok kon niet verbinden.",
+    });
+
+    io.emit("streamStats", {
+      totalPlayers: 0,
+      totalPlayerDiamonds: 0,
+      totalHostDiamonds: 0,
+    });
   }
 
   reconnectLock = false;
@@ -525,6 +632,9 @@ io.on("connection", async (socket: AdminSocket) => {
           type: "system",
           message: `Nieuwe hard-host ingesteld: @${un} (${id})`,
         });
+
+        // direct harde reconnect zodat gifts/chat naar nieuwe host gaan
+        await restartTikTokConnection(true);
 
         return ack({ success: true });
       }
@@ -740,70 +850,6 @@ initDB().then(async () => {
   initGame();
   await loadActiveGame();
 
-  const confUser = sanitizeHost(await getSetting("host_username"));
-  const confId = await getSetting("host_id");
-
-  HARD_HOST_USERNAME = confUser || "";
-  HARD_HOST_ID = confId ? String(confId) : null;
-
-  if (!HARD_HOST_USERNAME || !HARD_HOST_ID) {
-    console.log("❌ GEEN HARD-HOST INGESTELD — wacht op admin:setHost");
-    emitLog({
-      type: "warn",
-      message: "Geen hard-host ingesteld. Ga naar Admin → Settings.",
-    });
-    return;
-  }
-
-  console.log(`🔐 HARD-HOST LOCK: @${HARD_HOST_USERNAME} (${HARD_HOST_ID})`);
-
-  try {
-    const { conn } = await startConnection(HARD_HOST_USERNAME, () => {});
-    if (!conn) {
-      emitLog({
-        type: "warn",
-        message: `TikTok-host @${HARD_HOST_USERNAME} offline bij startup`,
-      });
-
-      io.emit("streamStats", {
-        totalPlayers: 0,
-        totalPlayerDiamonds: 0,
-        totalHostDiamonds: 0,
-      });
-
-      return;
-    }
-
-    tiktokConn = conn;
-
-    initGiftEngine(conn);
-    initChatEngine(conn);
-
-    await refreshHostUsername();
-
-    if (currentGameId) {
-      await broadcastStats();
-    } else {
-      io.emit("streamStats", {
-        totalPlayers: 0,
-        totalPlayerDiamonds: 0,
-        totalHostDiamonds: 0,
-      });
-    }
-
-    console.log("✔ TikTok connection fully initialized (HARD LOCK)");
-  } catch (err) {
-    console.error("TikTok initial connect error:", err);
-
-    emitLog({
-      type: "warn",
-      message: "TikTok kon niet verbinden bij opstarten.",
-    });
-
-    io.emit("streamStats", {
-      totalPlayers: 0,
-      totalPlayerDiamonds: 0,
-      totalHostDiamonds: 0,
-    });
-  }
+  // Gebruik dezelfde ULTRA reconnect engine ook bij startup
+  await restartTikTokConnection(true);
 });
