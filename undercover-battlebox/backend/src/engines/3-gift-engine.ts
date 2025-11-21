@@ -1,5 +1,5 @@
 // ============================================================================
-// 3-gift-engine.ts — v10.4 ULTRA
+// 3-gift-engine.ts — v10.4 ULTRA + FAN-FIX
 // Undercover BattleBox — HARD HOST LOCK Edition
 // ============================================================================
 //
@@ -8,7 +8,7 @@
 // ✔ Receiver nooit meer "Onbekend"
 // ✔ Host ONLY matched via ID/uniqueId (geen nickname-fuzz)
 // ✔ [HOST] tag in alle gift-logs waar host receiver is
-// ✔ [FAN] tag als is_fan = true
+// ✔ [FAN] tag als is_fan = true (nu alleen bij Heart Me, niet bij Rose)
 // ✔ Host diamond scoring 100% juist + streamStats live update
 // ✔ Arena scoring, twists, fanclub intact
 //
@@ -73,7 +73,7 @@ function formatDisplay(u: any) {
   if (!u) return "Onbekend";
 
   // v10.4: hard override voor host
-  if (u.is_host) return `${u.display_name} [HOST]`;
+  if ((u as any).is_host) return `${u.display_name} [HOST]`;
 
   const isHost = HOST_ID && String(u.tiktok_id) === HOST_ID;
   const isFan = Boolean(u.is_fan);
@@ -152,7 +152,7 @@ function extractSender(evt: any) {
     raw?.nickname ||
     raw?.displayName ||
     evt.nickname ||
-    raw?.nickName ||
+   raw?.nickName ||
     null;
 
   return {
@@ -357,23 +357,29 @@ async function processGift(evt: any, source: string) {
     );
   }
 
-  // FANCLUB — HeartMe (giftId 5655)
+  // ========================================================================
+  // FANCLUB — HeartMe ONLY (giftId 5655 + naam "Heart Me")
+  // ========================================================================
   if (isHost && evt.giftId === 5655) {
-    const expires = new Date(now() + 24 * 3600 * 1000);
+    const giftName = (evt.giftName || "").toString().toLowerCase().trim();
 
-    await pool.query(
-      `
-        UPDATE users
-        SET is_fan=TRUE, fan_expires_at=$1
-        WHERE tiktok_id=$2
-      `,
-      [expires, BigInt(String(sender.tiktok_id))]
-    );
+    if (giftName === "heart me" || giftName === "heartme") {
+      const expires = new Date(now() + 24 * 3600 * 1000);
 
-    emitLog({
-      type: "fan",
-      message: `${sender.display_name} is nu [FAN] voor 24 uur ❤️`,
-    });
+      await pool.query(
+        `
+          UPDATE users
+          SET is_fan=TRUE, fan_expires_at=$1
+          WHERE tiktok_id=$2
+        `,
+        [expires, BigInt(String(sender.tiktok_id))]
+      );
+
+      emitLog({
+        type: "fan",
+        message: `${sender.display_name} is nu [FAN] voor 24 uur ❤️`,
+      });
+    }
   }
 
   // TWISTS
