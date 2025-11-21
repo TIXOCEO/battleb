@@ -1,10 +1,11 @@
 // ============================================================================
-// 3-gift-engine.ts — v10.8 ULTRA PATCH (Danny Stable)
-// FIXES: Gift Not Triggering • Receiver Lock • Round Diamonds Reliability
-// STRICT HEART ME • Twist Inventory MODEL A • No Logic Removed
+// 3-gift-engine.ts — v10.9 ULTRA PATCH (Danny Stable)
+// FIXED: TikTok proxy fields • Deep identity sync • Receiver-lock hard patch
+// STRICT HEART ME • Twist Inventory MODEL A • Arena-round sync guaranteed
 // ============================================================================
 
 import pool, { getSetting } from "../db";
+
 import {
   getOrUpdateUser,
   getUserByTikTokId,
@@ -12,6 +13,7 @@ import {
 } from "./2-user-engine";
 
 import { addDiamonds, addBP } from "./4-points-engine";
+
 import {
   getArena,
   safeAddArenaDiamonds,
@@ -46,7 +48,7 @@ export async function refreshHostUsername() {
 
 
 // ============================================================================
-// SMALL UTILS
+// UTILS
 // ============================================================================
 const dedupe = new Set<string>();
 setInterval(() => dedupe.clear(), 25000);
@@ -75,7 +77,7 @@ function formatDisplay(u: any) {
 
 
 // ============================================================================
-// FAN EXPIRE CHECK
+// FAN EXPIRATION CHECK
 // ============================================================================
 async function cleanupFan(id: string) {
   const r = await pool.query(
@@ -100,9 +102,10 @@ async function cleanupFan(id: string) {
 
 
 // ============================================================================
-// SENDER EXTRACTOR (STABIELER GEMAAKT)
+// SENDER EXTRACTOR — ULTRA ROBUST (TikTok proxy variations supported)
 // ============================================================================
 function extractSender(evt: any) {
+  // Euler/TikTok proxy sometimes wraps event in {data:{}}
   const raw =
     evt.user ||
     evt.sender ||
@@ -110,6 +113,7 @@ function extractSender(evt: any) {
     evt.msgUser ||
     evt.userIdentity ||
     evt._data ||
+    evt?.data ||
     evt;
 
   return {
@@ -120,6 +124,7 @@ function extractSender(evt: any) {
       evt.userId ||
       evt.senderUserId ||
       null,
+
     unique: norm(
       raw?.uniqueId ||
       raw?.unique_id ||
@@ -127,6 +132,7 @@ function extractSender(evt: any) {
       evt.unique_id ||
       null
     ),
+
     nick:
       raw?.nickname ||
       raw?.displayName ||
@@ -138,7 +144,7 @@ function extractSender(evt: any) {
 
 
 // ============================================================================
-// DIAMOND CALCULATOR — unchanged but stabilized
+// DIAMOND CALCULATOR
 // ============================================================================
 function calcDiamonds(evt: any): number {
   const base = Number(evt.diamondCount || evt.diamond || 0);
@@ -155,7 +161,7 @@ function calcDiamonds(evt: any): number {
 
 
 // ============================================================================
-// RECEIVER — ULTRA FIXED (TikTok changed fields sometimes to null)
+// RECEIVER — ULTRA FIX: covers all TikTok/Euler variations
 // ============================================================================
 async function resolveReceiver(evt: any) {
   const directId =
@@ -163,6 +169,7 @@ async function resolveReceiver(evt: any) {
     evt.toUserId ||
     evt.toUser?.userId ||
     evt.receiver?.userId ||
+    evt?.data?.receiverUserId ||
     null;
 
   const unique =
@@ -190,13 +197,12 @@ async function resolveReceiver(evt: any) {
     return { id: u.tiktok_id, username: u.username, display_name: u.display_name, role: "speler" };
   }
 
-  // FALLBACK naar host (TikTok bug)
+  // Fallback to host if TikTok doesn't send receiver
   if (HOST_ID) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
   }
 
-  // echt fallback
   return { id: null, username: "", display_name: "UNKNOWN", role: "speler" };
 }
 
@@ -212,29 +218,28 @@ function isHeartMeGift(evt: any): boolean {
   return HEART_ME_GIFT_IDS.has(Number(evt.giftId));
 }
 
-// ============================================================================
-// MAIN PROCESSOR — v10.8 ULTRA PATCH
-// Gifts komen 100% door • geen dubbele events • stabielere fields
-// ============================================================================
 
+// ============================================================================
+// MAIN PROCESSOR — ULTRA PATCH (Stable, Proxy-friendly)
+// ============================================================================
 async function processGift(evt: any, source: string) {
   try {
     console.log(`💠 Gift[${source}] ${evt.giftId}`);
 
-    // --- DEDUPE KEY (uitgebreid → voorkomt dubbele gifts maar laat echte events door)
+    // ----- DEDUPE KEY -----
     const key =
       evt.msgId ||
       evt.logId ||
       evt.eventId ||
-      `${source}-${evt.giftId}-${evt.timestamp}-${evt.user?.userId}`;
+      `${source}-${evt.giftId}-${evt.timestamp}-${evt?.user?.userId}`;
 
     if (dedupe.has(key)) return;
     dedupe.add(key);
 
-    // --- identity update
+    // ----- identity update -----
     await upsertIdentityFromLooseEvent(evt);
 
-    // --- SENDER
+    // ----- SENDER -----
     const S = extractSender(evt);
     if (!S.id) return console.warn("⚠ Gift zonder sender ID — SKIP");
 
@@ -244,7 +249,7 @@ async function processGift(evt: any, source: string) {
     const diamonds = calcDiamonds(evt);
     if (diamonds <= 0) return;
 
-    // --- RECEIVER (ULTRA LOCK)
+    // ----- RECEIVER -----
     const receiver = await resolveReceiver(evt);
     const isHostReceiver = receiver.role === "host";
 
@@ -259,7 +264,7 @@ async function processGift(evt: any, source: string) {
     const senderFmt = formatDisplay(sender);
     const receiverFmt = formatDisplay(receiverUser);
 
-    // --- ROUND & ARENA STATUS
+    // ----- ARENA STATUS -----
     const arena = getArena();
     const nowMs = now();
 
@@ -268,7 +273,6 @@ async function processGift(evt: any, source: string) {
       (arena.status === "grace" && nowMs <= arena.graceEnd);
 
     const is_round_gift = inRound && !isHostReceiver;
-
     const round_active = arena.status === "active";
 
     console.log(
@@ -286,14 +290,14 @@ async function processGift(evt: any, source: string) {
     await addBP(BigInt(sender.tiktok_id), bp, "GIFT", sender.display_name);
 
     // ========================================================================
-    // 2. ARENA DIAMONDS — only during round, only to players
+    // 2. ARENA ROUND DIAMONDS
     // ========================================================================
     if (receiver.id && is_round_gift) {
       await safeAddArenaDiamonds(String(receiver.id), diamonds);
     }
 
     // ========================================================================
-    // 3. HOST RECEIVER LOGIC (unchanged but stabilized)
+    // 3. HOST RECEIVER LOGIC
     // ========================================================================
     if (isHostReceiver && receiver.id) {
       await pool.query(
@@ -328,7 +332,7 @@ async function processGift(evt: any, source: string) {
     }
 
     // ========================================================================
-    // 5. TWIST DETECTION VIA GIFT (MODEL A)
+    // 5. TWIST VIA GIFT (MODEL A)
     // ========================================================================
     const giftId = Number(evt.giftId);
     const twistType =
@@ -336,7 +340,6 @@ async function processGift(evt: any, source: string) {
         (t) => TWIST_MAP[t].giftId === giftId
       ) || null;
 
-    // Support voor nieuwe twist gifting
     if (twistType) {
       await addTwistByGift(String(sender.tiktok_id), twistType);
 
@@ -391,14 +394,11 @@ async function processGift(evt: any, source: string) {
     );
 
     // ========================================================================
-    // 7. UPDATE LIVE UI (stats + leaderboard)
+    // 7. UPDATE UI
     // ========================================================================
     await broadcastStats();
     await broadcastRoundLeaderboard();
 
-    // ========================================================================
-    // 8. LOG IT
-    // ========================================================================
     emitLog({
       type: "gift",
       message: `${senderFmt} → ${receiverFmt}: ${evt.giftName} (+${diamonds}💎)`,
@@ -411,7 +411,7 @@ async function processGift(evt: any, source: string) {
 
 
 // ============================================================================
-// INIT ENGINE — Forward-compatible with TikTok API changes
+// ENGINE INIT (Proxy-Friendly)
 // ============================================================================
 export function initGiftEngine(conn: any) {
   if (!conn || typeof conn.on !== "function") {
@@ -419,18 +419,23 @@ export function initGiftEngine(conn: any) {
     return;
   }
 
-  console.log("🎁 GiftEngine v10.8 ULTRA PATCH LOADED");
+  console.log("🎁 GiftEngine v10.9 ULTRA PATCH LOADED");
 
+  // core TikTok gift
   conn.on("gift", (d: any) => processGift(d, "gift"));
 
+  // roomMessage sometimes carries gift payload
   conn.on("roomMessage", (d: any) => {
-    if (d?.giftId || d?.diamondCount) processGift(d, "roomMessage");
+    if (d?.giftId || d?.diamondCount || d?.data?.giftId)
+      processGift(d?.data || d, "roomMessage");
   });
 
+  // member sometimes carries 'entry gift'
   conn.on("member", (d: any) => {
     if (d?.giftId || d?.diamondCount) processGift(d, "member");
   });
 
+  // chat wrapper gift
   conn.on("chat", (d: any) => {
     if (d?._data?.giftId || d?._data?.diamondCount)
       processGift(d._data, "chat-hidden");
