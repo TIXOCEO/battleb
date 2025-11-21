@@ -30,12 +30,7 @@ let activeConn: any = null;
 async function getSignedUrl(cleanHost: string) {
   try {
     const res = await fetch(
-      "https://battlebox-sign-proxy.onrender.com/sign",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: cleanHost })
-      }
+      `https://battlebox-sign-proxy.onrender.com/sign?username=${cleanHost}`
     );
 
     if (!res.ok) throw new Error("Proxy sign server returned error");
