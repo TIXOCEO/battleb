@@ -35,6 +35,7 @@ import { getQueue, addToQueue } from "./queue";
 import { applyBoost } from "./engines/7-boost-engine";
 import { useTwist } from "./engines/8-twist-engine";
 import { initAdminTwistEngine } from "./engines/9-admin-twist-engine";
+import { giveTwistToUser } from "./engines/twist-inventory";
 
 // ============================================================================
 // HARD HOST LOCK
@@ -169,6 +170,7 @@ export async function emitQueue() {
 }
 
 export { emitArena };
+
 // ============================================================================
 // STREAM STATS + ROUND LEADERBOARD
 // ============================================================================
@@ -488,6 +490,7 @@ export async function restartTikTokConnection(force = false) {
 
   reconnectLock = false;
 }
+
 // ============================================================================
 // ADMIN SOCKET HANDLER
 // ============================================================================
@@ -597,12 +600,12 @@ io.on("connection", async (socket: AdminSocket) => {
     }
   });
 
-  // TWIST EVENT INIT (volledig werkend, maar vervangen door nieuwe events)
+  // TWIST EVENT INIT (blijft beschikbaar voor oude routes)
   initAdminTwistEngine(socket);
 
   // ========================================================================
-  // ADMIN COMMAND HANDLER (VERVANGEN / UITGEBREID)
-  // ============================================================================
+  // ADMIN COMMAND HANDLER
+  // ========================================================================
   async function handle(action: string, data: any, ack: Function) {
     try {
       console.log("[ADMIN ACTION]", action, data);
@@ -688,7 +691,7 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       // ------------------------------
-      // SEARCH USERS — FIXED
+      // SEARCH USERS
       // ------------------------------
       if (action === "searchUsers") {
         const q = (data?.query || "").toString().trim().toLowerCase();
@@ -806,7 +809,7 @@ io.on("connection", async (socket: AdminSocket) => {
           });
           break;
 
-        // NEW FIX — TWIST EXECUTE
+        // NEW — TWIST EXECUTE (inventory-based MODEL A)
         case "useTwist":
           await useTwist(
             String(tiktok_id),
@@ -814,9 +817,10 @@ io.on("connection", async (socket: AdminSocket) => {
             data.twist,
             data.target
           );
+          await broadcastRoundLeaderboard();
           return ack({ success: true });
 
-        // NEW FIX — TWIST GIVE
+        // NEW — TWIST GIVE (voegt stuk toe aan inventory)
         case "giveTwist":
           await giveTwistToUser(String(tiktok_id), data.twist);
           emitLog({
@@ -870,7 +874,7 @@ io.on("connection", async (socket: AdminSocket) => {
   socket.on("admin:boostUser", (d, ack) => handle("boostUser", d, ack));
   socket.on("admin:demoteUser", (d, ack) => handle("demoteUser", d, ack));
 
-  // TWISTS (NEW)
+  // TWISTS (NEW routes voor jouw Admin UI)
   socket.on("admin:useTwist", (d, ack) => handle("useTwist", d, ack));
   socket.on("admin:giveTwist", (d, ack) => handle("giveTwist", d, ack));
 });
