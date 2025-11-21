@@ -8,8 +8,8 @@
 // ✔ Receiver nooit meer onbekend
 // ✔ Host alleen via ID/uniqueId (nooit via display name)
 // ✔ [HOST] tag 100% correct
-// ✔ [FAN] direct actief bij Heart Me (alle varianten)
-// ✔ Heart Me giftId detection: 5655, 7934, 5630, 9967 + naam fallback
+// ✔ [FAN] direct actief bij Heart Me
+// ✔ Heart Me detection: eerst giftName 'Heart Me', anders fallback op giftId 7934
 // ✔ Scoring perfect
 // ✔ Arena perfect
 // ✔ Twists perfect
@@ -88,7 +88,6 @@ function logUserUpdate(label: string, id: string, username: string, disp: string
 // ============================================================================
 // FAN EXPIRE CLEANUP
 // ============================================================================
-
 async function cleanupFan(id: string) {
   const r = await pool.query(
     `SELECT is_fan, fan_expires_at FROM users WHERE tiktok_id=$1`,
@@ -244,16 +243,22 @@ async function resolveReceiver(evt: any) {
 }
 
 // ============================================================================
-// HEART ME DETECTOR
+// HEART ME DETECTOR (naam → id 7934 fallback ONLY)
 // ============================================================================
-const HEART_ME_GIFT_IDS = new Set([5655, 7934, 5630, 9967]);
+
+// alleen fallback ID
+const HEART_ME_GIFT_IDS = new Set([7934]);
 
 function isHeartMeGift(evt: any): boolean {
-  const gid = Number(evt.giftId);
-  if (HEART_ME_GIFT_IDS.has(gid)) return true;
-
+  // 1️⃣ PRIORITEIT: giftName "Heart Me"
   const name = (evt.giftName || "").toString().trim().toLowerCase();
-  return name === "heart me" || name === "heartme" || name === "heart-me";
+  if (name === "heart me" || name === "heartme" || name === "heart-me") {
+    return true;
+  }
+
+  // 2️⃣ FALLBACK: giftId 7934
+  const gid = Number(evt.giftId);
+  return HEART_ME_GIFT_IDS.has(gid);
 }
 
 // ============================================================================
@@ -335,12 +340,12 @@ async function processGift(evt: any, source: string) {
           diamonds_stream = diamonds_stream + $1,
           diamonds_current_round = diamonds_current_round + $1
       WHERE tiktok_id = $2
-    `,
+      `,
       [credited, BigInt(String(receiver.id))]
     );
   }
 
-  // FAN — only Heart Me
+  // FAN — alleen Heart Me (naam → id 7934 fallback)
   if (isHost && isHeartMeGift(evt)) {
     const expires = new Date(now() + 24 * 3600 * 1000);
 
@@ -388,7 +393,7 @@ async function processGift(evt: any, source: string) {
       game_id, created_at
     )
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
-  `,
+    `,
     [
       BigInt(String(sender.tiktok_id)),
       sender.username,
