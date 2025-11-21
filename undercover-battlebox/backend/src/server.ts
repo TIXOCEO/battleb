@@ -1,7 +1,7 @@
 // ============================================================================
-// server.ts — Undercover BattleBox — v6.0 ULTRA ROUND-LEADERBOARD FINAL
+// server.ts — Undercover BattleBox — v6.1 ULTRA FIXED
 // HARD-HOST-LOCK + TikTok Live Auto-Reconnect + Username Fix +
-// Leaderboard (only ROUND diamonds) + Live Refresh
+// Leaderboard (only ROUND diamonds) + Live Refresh + admin:searchUsers FIX
 // ============================================================================
 
 import express from "express";
@@ -177,10 +177,6 @@ export { emitArena };
 let currentGameId: number | null = null;
 (io as any).currentGameId = null;
 
-/**
- * Nieuw: leaderboard alleen op basis van ronde-diamonds (is_round_gift = true)
- * Dit is wat je wilde voor de admin UI.
- */
 export async function broadcastRoundLeaderboard() {
   if (!currentGameId) {
     io.emit("streamLeaderboard", []);
@@ -600,9 +596,8 @@ io.on("connection", async (socket: AdminSocket) => {
     }
   });
 
-  // TWIST EVENT INIT (blijft beschikbaar voor oude routes)
+  // oude twist engine compat
   initAdminTwistEngine(socket);
-
   // ========================================================================
   // ADMIN COMMAND HANDLER
   // ========================================================================
@@ -690,39 +685,33 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-// ------------------------------
-// SEARCH USERS — ULTRA FIX
-// ------------------------------
-if (action === "searchUsers") {
-  const q = (data?.query || "").toString().trim().toLowerCase();
+      // ------------------------------
+      // SEARCH USERS — FINAL FIX
+      // ------------------------------
+      if (action === "searchUsers") {
+        const q = (data?.query || "").trim().toLowerCase();
 
-  if (!q || q.length < 2) return ack({ users: [] });
+        if (!q || q.length < 2) return ack({ users: [] });
 
-  // Zoek op username + display_name + partial match
-  const like = `%${q}%`;
+        const like = `%${q}%`;
 
-  const r = await pool.query(
-    `
-    SELECT 
-      tiktok_id,
-      username,
-      display_name
-    FROM users
-    WHERE 
-      LOWER(username) LIKE LOWER($1)
-      OR LOWER(display_name) LIKE LOWER($1)
-    ORDER BY last_seen_at DESC NULLS LAST
-    LIMIT 25
-    `,
-    [like]
-  );
+        const r = await pool.query(
+          `
+          SELECT tiktok_id, username, display_name
+          FROM users
+          WHERE LOWER(username) LIKE LOWER($1)
+             OR LOWER(display_name) LIKE LOWER($1)
+          ORDER BY last_seen_at DESC NULLS LAST
+          LIMIT 25
+        `,
+          [like]
+        );
 
-  return ack({ users: r.rows });
-}
-
+        return ack({ users: r.rows });
+      }
 
       // =====================================================================
-      // ALLES HIERONDER VEREIST username
+      // ALL ACTIONS BELOW REQUIRE username
       // =====================================================================
       if (!data?.username) {
         return ack({
@@ -731,43 +720,44 @@ if (action === "searchUsers") {
         });
       }
 
-// ULTRA username normalizer
-const queryUser = data.username
-  .replace("@", "")
-  .trim()
-  .toLowerCase();
+      // ⭐ ULTRA username normalizer
+      const queryUser = data.username
+        .toString()
+        .replace("@", "")
+        .trim()
+        .toLowerCase();
 
-// probeer eerst exact match
-let res = await pool.query(
-  `
-    SELECT tiktok_id, display_name, username
-    FROM users
-    WHERE LOWER(username)=LOWER($1)
-    LIMIT 1
-  `,
-  [queryUser]
-);
+      // eerst exact match
+      let res = await pool.query(
+        `
+          SELECT tiktok_id, display_name, username
+          FROM users
+          WHERE LOWER(username)=LOWER($1)
+          LIMIT 1
+        `,
+        [queryUser]
+      );
 
-// fallback: LIKE search
-if (!res.rows.length) {
-  res = await pool.query(
-    `
-      SELECT tiktok_id, display_name, username
-      FROM users
-      WHERE LOWER(username) LIKE LOWER($1)
-      ORDER BY last_seen_at DESC NULLS LAST
-      LIMIT 1
-    `,
-    [`%${queryUser}%`]
-  );
-}
+      // fallback: LIKE search
+      if (!res.rows.length) {
+        res = await pool.query(
+          `
+            SELECT tiktok_id, display_name, username
+            FROM users
+            WHERE LOWER(username) LIKE LOWER($1)
+            ORDER BY last_seen_at DESC NULLS LAST
+            LIMIT 1
+          `,
+          [`%${queryUser}%`]
+        );
+      }
 
-if (!res.rows.length) {
-  return ack({
-    success: false,
-    message: `Gebruiker @${queryUser} niet gevonden`,
-  });
-}
+      if (!res.rows.length) {
+        return ack({
+          success: false,
+          message: `Gebruiker @${queryUser} niet gevonden`,
+        });
+      }
 
       const { tiktok_id, display_name, username } = res.rows[0];
 
@@ -835,32 +825,31 @@ if (!res.rows.length) {
           });
           break;
 
-// =====================================================================
-// NEW — TWIST EXECUTE (inventory-based MODEL A)
-// =====================================================================
-case "useTwist":
-  await useTwist(
-    String(tiktok_id),
-    display_name,
-    data.twist,
-    data.target
-  );
+        // =====================================================================
+        // TWISTS MODEL A — USE
+        // =====================================================================
+        case "useTwist":
+          await useTwist(
+            String(tiktok_id),
+            display_name,
+            data.twist,
+            data.target
+          );
+          await broadcastRoundLeaderboard();
+          return ack({ success: true });
 
-  await broadcastRoundLeaderboard();
-  return ack({ success: true });
+        // =====================================================================
+        // TWISTS MODEL A — GIVE
+        // =====================================================================
+        case "giveTwist":
+          await giveTwistToUser(String(tiktok_id), data.twist);
 
-// =====================================================================
-// NEW — TWIST GIVE (voegt stuk toe aan inventory)
-// =====================================================================
-case "giveTwist":
-  await giveTwistToUser(String(tiktok_id), data.twist);
+          emitLog({
+            type: "twist",
+            message: `ADMIN gaf twist '${data.twist}' → ${display_name}`,
+          });
 
-  emitLog({
-    type: "twist",
-    message: `ADMIN gaf twist '${data.twist}' → ${display_name}`,
-  });
-
-  return ack({ success: true });
+          return ack({ success: true });
 
         default:
           return ack({
@@ -869,9 +858,8 @@ case "giveTwist":
           });
       }
 
-      // After all user mods
+      // update leaderboard after any user action
       await broadcastRoundLeaderboard();
-
       return ack({ success: true });
     } catch (err: any) {
       console.error("ADMIN ERROR:", err);
@@ -887,27 +875,20 @@ case "giveTwist":
   socket.on("admin:setHost", (d, ack) => handle("setHost", d, ack));
   socket.on("admin:startGame", (d, ack) => handle("startGame", d, ack));
   socket.on("admin:stopGame", (d, ack) => handle("stopGame", d, ack));
-  socket.on("admin:hardResetGame", (d, ack) =>
-    handle("hardResetGame", d, ack)
-  );
+  socket.on("admin:hardResetGame", (d, ack) => handle("hardResetGame", d, ack));
   socket.on("admin:startRound", (d, ack) => handle("startRound", d, ack));
   socket.on("admin:endRound", (d, ack) => handle("endRound", d, ack));
-  socket.on("admin:updateSettings", (d, ack) =>
-    handle("updateSettings", d, ack)
-  );
+  socket.on("admin:updateSettings", (d, ack) => handle("updateSettings", d, ack));
 
   socket.on("admin:addToArena", (d, ack) => handle("addToArena", d, ack));
   socket.on("admin:addToQueue", (d, ack) => handle("addToQueue", d, ack));
   socket.on("admin:eliminate", (d, ack) => handle("eliminate", d, ack));
-  socket.on("admin:removeFromQueue", (d, ack) =>
-    handle("removeFromQueue", d, ack)
-  );
+  socket.on("admin:removeFromQueue", (d, ack) => handle("removeFromQueue", d, ack));
 
   socket.on("admin:promoteUser", (d, ack) => handle("promoteUser", d, ack));
   socket.on("admin:boostUser", (d, ack) => handle("boostUser", d, ack));
   socket.on("admin:demoteUser", (d, ack) => handle("demoteUser", d, ack));
 
-  // TWISTS (NEW routes voor jouw Admin UI)
   socket.on("admin:useTwist", (d, ack) => handle("useTwist", d, ack));
   socket.on("admin:giveTwist", (d, ack) => handle("giveTwist", d, ack));
 });
@@ -923,6 +904,5 @@ initDB().then(async () => {
   initGame();
   await loadActiveGame();
 
-  // ULTRA RECONNECT ENGINE direct starten
   await restartTikTokConnection(true);
 });
