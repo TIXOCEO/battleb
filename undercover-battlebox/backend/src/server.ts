@@ -1,5 +1,5 @@
 // ============================================================================
-// server.ts — Undercover BattleBox — v5.3-PATCH
+// server.ts — Undercover BattleBox — v5.4 ULTRA FIXED
 // HARD-HOST-LOCK + Username-Lock (OPTIE B) + TikTok ID Lookup + Engine Fixes
 // ============================================================================
 
@@ -97,7 +97,7 @@ const logBuffer: LogEntry[] = [];
 const LOG_MAX = 500;
 
 export function emitLog(entry: Partial<LogEntry>) {
-  // PATCH 1 — Admin connect mag NIET in de logbuffer
+  // PATCH — Admin connect mag NIET in logBuffer
   if (entry?.type === "system" && entry.message?.includes("Admin dashboard")) {
     io.emit("log", {
       id: Date.now().toString(),
@@ -184,10 +184,8 @@ export async function broadcastStats() {
       SELECT
         COUNT(DISTINCT CASE WHEN receiver_role IN ('speler','cohost')
           THEN receiver_id END) AS total_players,
-
         COALESCE(SUM(CASE WHEN receiver_role IN ('speler','cohost')
           THEN diamonds ELSE 0 END), 0) AS total_player_diamonds,
-
         COALESCE(SUM(CASE WHEN receiver_role = 'host'
           THEN diamonds ELSE 0 END), 0) AS total_host_diamonds
       FROM gifts
@@ -378,13 +376,12 @@ io.on("connection", async (socket: AdminSocket) => {
 
   console.log("ADMIN CONNECT:", socket.id);
 
-  // PATCH 2 — Admin connect wel loggen, maar NIET opslaan in logBuffer
   emitLog({
     type: "system",
     message: "Admin dashboard verbonden",
   });
 
-  // --- DIRECTE PUSH VAN STATE (snapshot)
+  // Synchronous snapshot
   socket.emit("initialLogs", logBuffer);
   socket.emit("updateArena", getArena());
   socket.emit("updateQueue", { open: true, entries: await getQueue() });
@@ -400,11 +397,9 @@ io.on("connection", async (socket: AdminSocket) => {
     gameId: currentGameId,
   });
 
-  // ------------------------------------------------------------------------
-  // PATCH 3 — Initial streamStats direct versturen
-  // ------------------------------------------------------------------------
+  // STREAMSTATS INIT
   if (currentGameId) {
-    await broadcastStats(); // stuurt streamStats-event opnieuw naar alle admins
+    await broadcastStats();
   } else {
     socket.emit("streamStats", {
       totalPlayers: 0,
@@ -413,9 +408,9 @@ io.on("connection", async (socket: AdminSocket) => {
     });
   }
 
-  // =========================================================================
-  // AUTO SNAPSHOT (volledig)
-  // =========================================================================
+  // --------------------------------------------------------------------------
+  // COMPLETE SNAPSHOT
+  // --------------------------------------------------------------------------
   socket.on("admin:getInitialSnapshot", async (d, ack) => {
     try {
       const arena = getArena();
@@ -435,23 +430,21 @@ io.on("connection", async (socket: AdminSocket) => {
         [currentGameId ?? null]
       );
 
-      // PATCH 4 — always include STATS in snapshot
       let stats = null;
+
       if (currentGameId) {
         const res = await pool.query(
           `
-            SELECT
-              COUNT(DISTINCT CASE WHEN receiver_role IN ('speler','cohost')
-                THEN receiver_id END) AS total_players,
-  
-              COALESCE(SUM(CASE WHEN receiver_role IN ('speler','cohost')
-                THEN diamonds ELSE 0 END), 0) AS total_player_diamonds,
-  
-              COALESCE(SUM(CASE WHEN receiver_role = 'host'
-                THEN diamonds ELSE 0 END), 0) AS total_host_diamonds
-            FROM gifts
-            WHERE game_id = $1
-          `,
+          SELECT
+            COUNT(DISTINCT CASE WHEN receiver_role IN ('speler','cohost')
+              THEN receiver_id END) AS total_players,
+            COALESCE(SUM(CASE WHEN receiver_role IN ('speler','cohost')
+              THEN diamonds ELSE 0 END), 0) AS total_player_diamonds,
+            COALESCE(SUM(CASE WHEN receiver_role = 'host'
+              THEN diamonds ELSE 0 END), 0) AS total_host_diamonds
+          FROM gifts
+          WHERE game_id = $1
+        `,
           [currentGameId]
         );
         const row = res.rows[0] || {};
@@ -485,19 +478,21 @@ io.on("connection", async (socket: AdminSocket) => {
     }
   });
 
-  // =========================================================================
+  // ============================================================================
   // TWISTS
-  // =========================================================================
+  // ============================================================================
   initAdminTwistEngine(socket);
 
-  // =========================================================================
+  // ============================================================================
   // ADMIN COMMAND HANDLER
-  // =========================================================================
+  // ============================================================================
   async function handle(action: string, data: any, ack: Function) {
     try {
       console.log("[ADMIN ACTION]", action, data);
 
-      // SETTINGS SNAPSHOT
+      // --------------------------------------------------------------
+      // Actions that do NOT require username
+      // --------------------------------------------------------------
       if (action === "getSettings") {
         return ack({
           success: true,
@@ -507,9 +502,66 @@ io.on("connection", async (socket: AdminSocket) => {
         });
       }
 
-      // ----------------------------------------------------------------------
-      // PATCH 5 — SEARCH USERS (autocomplete werkt weer)
-      // ----------------------------------------------------------------------
+      if (action === "setHost") {
+        const un = sanitizeHost(data?.username);
+        const id = data?.tiktok_id ? String(data.tiktok_id) : null;
+
+        if (!un || !id) {
+          return ack({
+            success: false,
+            message: "username en tiktok_id verplicht",
+          });
+        }
+
+        await setSetting("host_username", un);
+        await setSetting("host_id", id);
+
+        HARD_HOST_USERNAME = un;
+        HARD_HOST_ID = id;
+
+        await refreshHostUsername();
+
+        emitLog({
+          type: "system",
+          message: `Nieuwe hard-host ingesteld: @${un} (${id})`,
+        });
+
+        return ack({ success: true });
+      }
+
+      if (action === "startGame") {
+        await startNewGame();
+        return ack({ success: true });
+      }
+
+      if (action === "stopGame") {
+        await stopCurrentGame();
+        return ack({ success: true });
+      }
+
+      if (action === "hardResetGame") {
+        await hardResetGame();
+        return ack({ success: true });
+      }
+
+      if (action === "startRound") {
+        await startRound();
+        emitArena();
+        return ack({ success: true });
+      }
+
+      if (action === "endRound") {
+        await endRound();
+        emitArena();
+        return ack({ success: true });
+      }
+
+      if (action === "updateSettings") {
+        await updateArenaSettings(data);
+        socket.emit("settings", getArenaSettings());
+        return ack({ success: true });
+      }
+
       if (action === "searchUsers") {
         const q = (data?.query || "").toString().trim().toLowerCase();
         if (!q || q.length < 2) return ack({ users: [] });
@@ -518,33 +570,38 @@ io.on("connection", async (socket: AdminSocket) => {
 
         const r = await pool.query(
           `
-            SELECT tiktok_id, username, display_name
-            FROM users
-            WHERE LOWER(username) LIKE LOWER($1)
-               OR LOWER(display_name) LIKE LOWER($1)
-            ORDER BY last_seen_at DESC
-            LIMIT 25
-          `,
+          SELECT tiktok_id, username, display_name
+          FROM users
+          WHERE LOWER(username) LIKE LOWER($1)
+             OR LOWER(display_name) LIKE LOWER($1)
+          ORDER BY last_seen_at DESC
+          LIMIT 25
+        `,
           [like]
         );
 
         return ack({ users: r.rows });
       }
 
-      // ----------------------------------------------------------------------
-      // USER OPERATIONS REQUIRE username
-      // ----------------------------------------------------------------------
+      // --------------------------------------------------------------------
+      // Everything below REQUIRES username
+      // --------------------------------------------------------------------
       if (!data?.username) {
-        return ack({ success: false, message: "username verplicht" });
+        return ack({
+          success: false,
+          message: "username verplicht",
+        });
       }
 
       const queryUser = sanitizeHost(data.username);
 
       const res = await pool.query(
-        `SELECT tiktok_id, display_name, username
-         FROM users
-         WHERE LOWER(username)=LOWER($1)
-         LIMIT 1`,
+        `
+        SELECT tiktok_id, display_name, username
+        FROM users
+        WHERE LOWER(username)=LOWER($1)
+        LIMIT 1
+      `,
         [queryUser]
       );
 
@@ -557,6 +614,9 @@ io.on("connection", async (socket: AdminSocket) => {
 
       const { tiktok_id, display_name, username } = res.rows[0];
 
+      // =====================================================================
+      // USER COMMANDS
+      // =====================================================================
       switch (action) {
         case "addToArena":
           arenaJoin(String(tiktok_id), display_name, username);
@@ -605,10 +665,10 @@ io.on("connection", async (socket: AdminSocket) => {
         case "demoteUser":
           await pool.query(
             `
-              UPDATE queue
-              SET boost_spots = GREATEST(boost_spots - 1, 0)
-              WHERE user_tiktok_id=$1
-            `,
+            UPDATE queue
+            SET boost_spots = GREATEST(boost_spots - 1, 0)
+            WHERE user_tiktok_id=$1
+          `,
             [tiktok_id]
           );
           await emitQueue();
@@ -639,9 +699,7 @@ io.on("connection", async (socket: AdminSocket) => {
     }
   }
 
-  // ========================================================================
-  // SOCKET EVENT REGISTRATION
-  // ========================================================================
+  // ========== REGISTER EVENTS ==========
   socket.on("admin:getSettings", (d, ack) => handle("getSettings", d, ack));
   socket.on("admin:setHost", (d, ack) => handle("setHost", d, ack));
   socket.on("admin:startGame", (d, ack) => handle("startGame", d, ack));
@@ -654,15 +712,18 @@ io.on("connection", async (socket: AdminSocket) => {
   socket.on("admin:updateSettings", (d, ack) =>
     handle("updateSettings", d, ack)
   );
+
   socket.on("admin:addToArena", (d, ack) => handle("addToArena", d, ack));
   socket.on("admin:addToQueue", (d, ack) => handle("addToQueue", d, ack));
   socket.on("admin:eliminate", (d, ack) => handle("eliminate", d, ack));
   socket.on("admin:removeFromQueue", (d, ack) =>
     handle("removeFromQueue", d, ack)
   );
+
   socket.on("admin:promoteUser", (d, ack) => handle("promoteUser", d, ack));
   socket.on("admin:boostUser", (d, ack) => handle("boostUser", d, ack));
   socket.on("admin:demoteUser", (d, ack) => handle("demoteUser", d, ack));
+
   socket.on("admin:triggerTwist", (d, ack) =>
     handle("triggerTwist", d, ack)
   );
@@ -704,7 +765,6 @@ initDB().then(async () => {
         message: `TikTok-host @${HARD_HOST_USERNAME} offline bij startup`,
       });
 
-      // ❗ BELANGRIJK: BIJ OFFLINE HOST TOCH STATS RESETTEN
       io.emit("streamStats", {
         totalPlayers: 0,
         totalPlayerDiamonds: 0,
@@ -719,10 +779,8 @@ initDB().then(async () => {
     initGiftEngine(conn);
     initChatEngine(conn);
 
-    // DIRECTE HOST USERNAME REFRESH
     await refreshHostUsername();
 
-    // Extra: LAATSTE STATS PUSH NA STARTUP
     if (currentGameId) {
       await broadcastStats();
     } else {
