@@ -353,47 +353,39 @@ io.use((socket: AdminSocket, next) => {
 // ULTRA RECONNECT ENGINE v3.1
 // ============================================================================
 // ============================================================================
-// EULER LIVE ENGINE
+// EULER LIVE ENGINE — ULTRA ENGINE 2.0
 // ============================================================================
 let eulerConn: any = null;
 
 export async function restartTikTokConnection(force = false) {
-  console.log("🔄 EULER CONNECT — API");
+  console.log("🔄 [EULER] Restart connection…");
 
   const API_KEY = process.env.EULER_API_KEY;
   const HOST_USERNAME = await getSetting("host_username");
 
   if (!API_KEY || !HOST_USERNAME) {
-    console.log("❌ Geen API key of host username ingesteld");
-    io.emit("streamStats", {
-      totalPlayers: 0,
-      totalPlayerDiamonds: 0,
-      totalHostDiamonds: 0,
-    });
-    io.emit("streamLeaderboard", []);
+    console.log("❌ No API key or host username set");
     return;
   }
 
-  // stoppen oude conn
   try {
     if (eulerConn) await eulerConn.close();
   } catch {}
 
-  // start nieuwe
-  eulerConn = await startEuler(API_KEY, HOST_USERNAME, (packet: any) => {
+  eulerConn = await startEuler(API_KEY, HOST_USERNAME, (packet) => {
     try {
       processEulerEvent(packet);
     } catch (err) {
-      console.error("❌ processEulerEvent:", err);
+      console.error("❌ euler packet failed:", err);
     }
   });
 
   if (!eulerConn) {
-    console.log("❌ Euler start mislukt");
+    console.log("❌ Euler connection could not start");
     return;
   }
 
-  console.log("✔ EULER LIVE RUNNING");
+  console.log("✔ [EULER] Connection started");
 }
 
 
