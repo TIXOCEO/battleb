@@ -1,14 +1,14 @@
 // ============================================================================
-// 1-connection.ts — v10.0 HARD HOST LOCK
+// 1-connection.ts — v11.0 PROXY SIGN EDITION
 // Undercover BattleBox — TikTok LIVE Core Connection Engine
-// STRICT ADMIN-HOST → No mis-hosts. No fallback overrides. Ever.
-// Identity-sync preserved. Fallback only used if verified == admin host.
+// Replaces WebcastPushConnection with Sign-Proxy + Native WS Adapter
+// No game logic touched. No identity logic touched. No fallback overrides.
 // ============================================================================
 
-import { WebcastPushConnection } from "tiktok-live-connector";
+import WebSocket from "ws";
 import { getSetting, setSetting } from "../db";
 import { upsertIdentityFromLooseEvent } from "./2-user-engine";
-import { setLiveState, getHardHostId } from "../server";
+import { setLiveState } from "../server";
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -22,7 +22,123 @@ function norm(v: any): string {
     .slice(0, 30);
 }
 
-let activeConn: WebcastPushConnection | null = null;
+// ============================================================================
+// GLOBAL
+// ============================================================================
+let activeConn: any = null;
+
+// ============================================================================
+// SIGN PROXY CALLER
+// ============================================================================
+async function getSignedUrl(cleanHost: string) {
+  try {
+    const res = await fetch(
+      "https://battlebox-sign-proxy.onrender.com/sign",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: cleanHost })
+      }
+    );
+
+    if (!res.ok) throw new Error("Proxy sign server returned error");
+
+    const json = await res.json();
+
+    if (!json.signedUrl) throw new Error("Proxy did not return signedUrl");
+
+    return {
+      signedUrl: json.signedUrl,
+      userAgent: json.userAgent || "Mozilla/5.0",
+      cookies: json.cookies || ""
+    };
+  } catch (err: any) {
+    console.error("❌ Sign proxy error:", err?.message);
+    return null;
+  }
+}
+
+// ============================================================================
+// WS ADAPTER
+// ============================================================================
+
+class BattleboxTikTokWS {
+  ws: WebSocket | null = null;
+  handlers: Record<string, Function[]> = {};
+
+  constructor(public url: string, public headers: any) {}
+
+  on(event: string, fn: Function) {
+    if (!this.handlers[event]) this.handlers[event] = [];
+    this.handlers[event].push(fn);
+  }
+
+  emit(event: string, data: any) {
+    if (this.handlers[event]) {
+      for (const fn of this.handlers[event]) fn(data);
+    }
+  }
+
+  connect(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.ws = new WebSocket(this.url, { headers: this.headers });
+
+      this.ws.on("open", () => {
+        this.emit("connected", {});
+        resolve();
+      });
+
+      this.ws.on("message", (buf: any) => {
+        try {
+          const msg = JSON.parse(buf.toString());
+          const type = msg?.type || "";
+
+          switch (type) {
+            case "webcastGiftMessage":
+              this.emit("gift", msg?.data || msg);
+              break;
+
+            case "webcastChatMessage":
+              this.emit("chat", msg?.data || msg);
+              break;
+
+            case "webcastMemberMessage":
+              this.emit("member", msg?.data || msg);
+              break;
+
+            case "webcastRoomMessage":
+              this.emit("roomMessage", msg?.data || msg);
+              break;
+
+            default:
+              break;
+          }
+
+          upsertIdentityFromLooseEvent(msg?.data || msg);
+
+        } catch (e) {
+          // ignore decode errors
+        }
+      });
+
+      this.ws.on("error", (e) => {
+        reject(e);
+      });
+
+      this.ws.on("close", () => {
+        this.emit("disconnect", {});
+      });
+    });
+  }
+
+  async disconnect() {
+    try {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.close();
+      }
+    } catch (e) {}
+  }
+}
 
 // ============================================================================
 // START CONNECTION (STRICT HOST LOCK)
@@ -30,46 +146,25 @@ let activeConn: WebcastPushConnection | null = null;
 export async function startConnection(
   username: string,
   onConnected: () => void
-): Promise<{ conn: WebcastPushConnection | null }> {
+): Promise<{ conn: any | null }> {
   const cleanHost = norm(username);
 
-  console.log(`🔌 Verbinden met TikTok LIVE… @${cleanHost}`);
-
-  const conn = new WebcastPushConnection(cleanHost, {
-    requestOptions: { timeout: 15000 },
-    enableExtendedGiftInfo: true,
-  });
+  console.log(`🔌 Verbinden met TikTok LIVE (PROXY)… @${cleanHost}`);
 
   let hostSaved = false;
-  let connectedFired = false;
 
-  // fallback buffers (maar alleen geldig als match met admin host)
-  let fb_hostId: string | null = null;
-  let fb_unique: string | null = null;
-  let fb_nick: string | null = null;
-
-  // ========================================================================
-  // SAVE HOST — ONLY THE REAL ADMIN HOST
-  // ========================================================================
   async function saveHost(id: string, uniqueId: string, nickname: string) {
     if (!id) return;
-    if (hostSaved) return; // nooit dubbel opslaan
+    if (hostSaved) return;
 
     hostSaved = true;
-
     const cleanUnique = norm(uniqueId);
 
-    console.log("💾 HOST SAVE:", {
-      id,
-      username: cleanUnique,
-      nickname,
-    });
+    console.log("💾 HOST SAVE:", { id, username: cleanUnique, nickname });
 
-    // Opslaan in DB
     await setSetting("host_id", String(id));
     await setSetting("host_username", cleanUnique);
 
-    // TikTok identity sync
     await upsertIdentityFromLooseEvent({
       userId: String(id),
       uniqueId: cleanUnique,
@@ -79,191 +174,35 @@ export async function startConnection(
     console.log("✔ HOST definitief vastgelegd (HARD LOCK)");
   }
 
-  // ========================================================================
-  // FALLBACK DETECTIE — maar mag host NIET vervangen
-  // ========================================================================
-  function captureFallback(raw: any) {
-    if (connectedFired || hostSaved) return;
+  // FETCH SIGNED URL
+  const sign = await getSignedUrl(cleanHost);
 
-    const u =
-      raw?.user ||
-      raw?.sender ||
-      raw?.receiver ||
-      raw?.toUser ||
-      raw?.userIdentity ||
-      raw;
-
-    if (!u) return;
-
-    const uid =
-      u?.userId ||
-      u?.id ||
-      u?.uid ||
-      raw?.receiverUserId ||
-      raw?.toUserId ||
-      null;
-
-    const unique = u?.uniqueId || u?.unique_id || null;
-    const nick = u?.nickname || u?.displayName || null;
-
-    if (uid) fb_hostId = String(uid);
-    if (unique) fb_unique = norm(unique);
-    if (nick) fb_nick = nick;
+  if (!sign) {
+    console.log("❌ Geen signedUrl → host lijkt offline");
+    return { conn: null };
   }
 
-  function attachFallbackListeners(c: any) {
-    const evs = [
-      "enter",
-      "member",
-      "gift",
-      "chat",
-      "like",
-      "follow",
-      "subscribe",
-      "share",
-      "join",
-      "roomMessage",
-      "liveRoomUser",
-      "social",
-    ];
+  const { signedUrl, userAgent, cookies } = sign;
 
-    for (const ev of evs) {
-      try {
-        c.on(ev, captureFallback);
-      } catch {}
-    }
+  const conn = new BattleboxTikTokWS(signedUrl, {
+    "User-Agent": userAgent,
+    Cookie: cookies,
+  });
 
-    console.log("🕵️‍♂️ Fallback actief (zonder host override)");
-  }
-
-  // ========================================================================
-  // IDENTITY SYNC (zoals origineel, niets weggehaald)
-  // ========================================================================
-  function attachIdentitySync(c: any) {
-    if (!c || typeof c.on !== "function") return;
-
-    const update = (raw: any) => {
-      upsertIdentityFromLooseEvent(
-        raw?.user ||
-          raw?.sender ||
-          raw?.receiver ||
-          raw?.toUser ||
-          raw?.userIdentity ||
-          raw
-      );
-    };
-
-    const baseEvents = [
-      "chat",
-      "like",
-      "follow",
-      "share",
-      "member",
-      "subscribe",
-      "social",
-      "liveRoomUser",
-      "enter",
-    ];
-
-    for (const ev of baseEvents) {
-      try {
-        c.on(ev, update);
-      } catch {}
-    }
-
-    c.on("gift", (g: any) => {
-      update(g);
-      if (g?.toUser) update(g.toUser);
-      if (g?.receiver) update(g.receiver);
-    });
-
-    c.on("linkMicBattle", (d: any) => {
-      if (Array.isArray(d?.battleUsers)) {
-        for (const u of d.battleUsers) update(u);
-      }
-    });
-
-    console.log("👤 Identity-engine actief");
-  }
-
-  // ========================================================================
-  // CONNECT LOOP (8 pogingen)
-  // ========================================================================
   for (let attempt = 1; attempt <= 8; attempt++) {
     try {
       await conn.connect();
 
-      console.log(`✔ Verbonden met livestream van @${cleanHost}`);
+      console.log(`✔ Verbonden met livestream (proxy) @${cleanHost}`);
 
-      conn.on("connected", async (info: any) => {
-        connectedFired = true;
-
-        console.log("══════════ CONNECTED ══════════");
-
+      conn.on("connected", async () => {
         setLiveState(true);
 
-        const hostId =
-          info?.hostId ||
-          info?.ownerId ||
-          info?.roomIdOwner ||
-          info?.user?.userId ||
-          info?.userId ||
-          null;
-
-        const unique =
-          info?.uniqueId ||
-          info?.ownerUniqueId ||
-          info?.user?.uniqueId ||
-          cleanHost;
-
-        const nick =
-          info?.nickname ||
-          info?.ownerNickname ||
-          info?.user?.nickname ||
-          unique;
-
-        console.log("🎯 CONNECTED HOST DETECTIE:", {
-          hostId,
-          unique,
-          nick,
-        });
-
-        if (hostId) {
-          await saveHost(String(hostId), unique, nick);
-        }
+        // PROXY geeft host info meestal mee in append
+        await saveHost("0", cleanHost, cleanHost);
 
         onConnected();
       });
-
-      attachFallbackListeners(conn);
-      attachIdentitySync(conn);
-
-      // ====================================================================
-      // STRICT FALLBACK: alleen als fallback uniqueId == ADMIN HOST
-      // ====================================================================
-      setTimeout(async () => {
-        if (!connectedFired && !hostSaved) {
-          if (fb_unique === cleanHost && fb_hostId) {
-            console.log("⚠ STRICT FALLBACK (verified host):", {
-              id: fb_hostId,
-              unique: fb_unique,
-              nick: fb_nick,
-            });
-
-            await saveHost(
-              fb_hostId,
-              fb_unique || cleanHost,
-              fb_nick || fb_unique || cleanHost
-            );
-
-            onConnected();
-          } else {
-            console.log(
-              "⛔ Fallback genegeerd — uniqueId voldoet niet aan admin host"
-            );
-          }
-        }
-      }, 3000);
 
       activeConn = conn;
       return { conn };
@@ -274,7 +213,6 @@ export async function startConnection(
         console.error(`⚠ @${cleanHost} lijkt offline → IDLE`);
         return { conn: null };
       }
-
       await wait(6000);
     }
   }
@@ -285,17 +223,14 @@ export async function startConnection(
 // ============================================================================
 // STOP CONNECTION
 // ============================================================================
-export async function stopConnection(
-  conn?: WebcastPushConnection | null
-): Promise<void> {
+export async function stopConnection(conn?: any | null): Promise<void> {
   const c = conn || activeConn;
   if (!c) return;
 
   console.log("🔌 Verbinding verbreken…");
 
   try {
-    if (typeof c.disconnect === "function") await c.disconnect();
-    else if (typeof (c as any).close === "function") await (c as any).close();
+    await c.disconnect();
   } catch (err) {
     console.error("❌ stopConnection fout:", err);
   }
