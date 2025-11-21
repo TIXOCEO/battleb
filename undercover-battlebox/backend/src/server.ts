@@ -545,7 +545,7 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       if (action === "startRound") {
-        await startRound();
+        await startRound("normal");
         emitArena();
         return ack({ success: true });
       }
