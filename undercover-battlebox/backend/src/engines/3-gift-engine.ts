@@ -1,6 +1,6 @@
 // ============================================================================
-// 3-gift-engine.ts — v10.6 ULTRA FIXED
-// HARD HOST LOCK + HEART ME STRICT (name → fallback ID 7934 ONLY)
+// 3-gift-engine.ts — v10.7 ULTRA ROUND FIXED
+// ROUND-AWARE GIFTS + STRICT HEART ME + LEADERBOARD TRIGGERS
 // ============================================================================
 
 import pool, { getSetting } from "../db";
@@ -11,13 +11,23 @@ import {
 } from "./2-user-engine";
 
 import { addDiamonds, addBP } from "./4-points-engine";
-import { getArena, safeAddArenaDiamonds } from "./5-game-engine";
-import { emitLog, io, broadcastStats } from "../server";
+import {
+  getArena,
+  safeAddArenaDiamonds,
+} from "./5-game-engine";
+
+import {
+  emitLog,
+  io,
+  broadcastStats,
+  broadcastRoundLeaderboard,
+} from "../server";
+
 import { TWIST_MAP, TwistType } from "./twist-definitions";
 import { addTwistByGift } from "./8-twist-engine";
 
 // ============================================================================
-// HARD HOST LOCK STATE
+// HOST LOCK
 // ============================================================================
 let HOST_ID: string = "";
 let HOST_USERNAME: string = "";
@@ -39,6 +49,7 @@ export async function initDynamicHost() {
 // ============================================================================
 // HELPERS
 // ============================================================================
+
 const dedupe = new Set<string>();
 setInterval(() => dedupe.clear(), 25000);
 
@@ -65,7 +76,7 @@ function formatDisplay(u: any) {
 }
 
 // ============================================================================
-// FAN CLEANUP
+// FAN EXPIRE CHECK
 // ============================================================================
 async function cleanupFan(id: string) {
   const r = await pool.query(
@@ -74,7 +85,6 @@ async function cleanupFan(id: string) {
   );
 
   if (!r.rows[0]) return false;
-
   const { is_fan, fan_expires_at } = r.rows[0];
   if (!is_fan || !fan_expires_at) return false;
 
@@ -148,7 +158,7 @@ function calcDiamonds(evt: any): number {
 }
 
 // ============================================================================
-// RECEIVER (HARD HOST LOCK)
+// RECEIVER RESOLUTION (HARD HOST LOCK)
 // ============================================================================
 async function resolveReceiver(evt: any) {
   const directId =
@@ -159,8 +169,10 @@ async function resolveReceiver(evt: any) {
     null;
 
   const unique =
-    evt.toUser?.uniqueId ||
     evt.receiver?.uniqueId ||
+    evt.receiver?.unique_id ||
+    evt.toUser?.uniqueId ||
+    evt.toUser?.unique_id ||
     null;
 
   const un = unique ? norm(unique) : null;
@@ -170,7 +182,7 @@ async function resolveReceiver(evt: any) {
     return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
   }
 
-  if (HOST_ID && HOST_USERNAME && un === HOST_USERNAME) {
+  if (HOST_USERNAME && un === HOST_USERNAME) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
   }
@@ -189,25 +201,22 @@ async function resolveReceiver(evt: any) {
 }
 
 // ============================================================================
-// HEART ME DETECTOR — ONLY NAME → ID 7934
+// STRICT HEART ME
 // ============================================================================
 const HEART_ME_GIFT_IDS = new Set([7934]);
 
 function isHeartMeGift(evt: any): boolean {
   const name = (evt.giftName || "").toString().trim().toLowerCase();
-  if (name === "heart me" || name === "heartme" || name === "heart-me") {
-    return true;
-  }
+  if (name === "heart me") return true;
 
-  const gid = Number(evt.giftId);
-  return HEART_ME_GIFT_IDS.has(gid);
+  return HEART_ME_GIFT_IDS.has(Number(evt.giftId));
 }
 
 // ============================================================================
-// MAIN GIFT PROCESSOR
+// MAIN PROCESSOR
 // ============================================================================
 async function processGift(evt: any, source: string) {
-  console.log(`💠 Gift[${source}] giftId=${evt.giftId}`);
+  console.log(`💠 Gift[${source}] ${evt.giftId}`);
 
   const key =
     evt.msgId ||
@@ -222,14 +231,16 @@ async function processGift(evt: any, source: string) {
 
   // sender
   const S = extractSender(evt);
-  if (!S.id) return console.warn("⚠ Gift zonder sender ID — skip");
+  if (!S.id) return console.warn("⚠ Gift zonder sender ID — SKIP");
 
   const sender = await getOrUpdateUser(S.id, S.nick, S.unique);
+
   await cleanupFan(sender.tiktok_id);
 
-  const credited = calcDiamonds(evt);
-  if (credited <= 0) return;
+  const diamonds = calcDiamonds(evt);
+  if (diamonds <= 0) return;
 
+  // receiver
   const receiver = await resolveReceiver(evt);
   const isHost = receiver.role === "host";
 
@@ -238,46 +249,52 @@ async function processGift(evt: any, source: string) {
     : null;
 
   if (receiverUser) (receiverUser as any).is_host = isHost;
-
-  if (HOST_ID && String(sender.tiktok_id) === HOST_ID) {
+  if (HOST_ID && String(sender.tiktok_id) === HOST_ID)
     (sender as any).is_host = true;
-  }
 
   const senderFmt = formatDisplay(sender);
   const receiverFmt = formatDisplay(receiverUser);
 
-  console.log(`🎁 ${senderFmt} → ${receiverFmt} (${evt.giftName}) +${credited}💎`);
+  const arena = getArena();
+  const inRound =
+    (arena.status === "active" && now() <= arena.roundCutoff) ||
+    (arena.status === "grace" && now() <= arena.graceEnd);
 
-  // sender diamonds
-  await addDiamonds(BigInt(String(sender.tiktok_id)), credited, "total");
-  await addDiamonds(BigInt(String(sender.tiktok_id)), credited, "stream");
-  await addDiamonds(BigInt(String(sender.tiktok_id)), credited, "current_round");
+  const is_round_gift = inRound && !isHost;
 
-  const bp = credited * 0.2;
+  const round_active = arena.status === "active";
+
+  console.log(
+    `🎁 ${senderFmt} → ${receiverFmt}: ${evt.giftName} +${diamonds} (round=${is_round_gift})`
+  );
+
+  // sender points
+  await addDiamonds(BigInt(String(sender.tiktok_id)), diamonds, "total");
+  await addDiamonds(BigInt(String(sender.tiktok_id)), diamonds, "stream");
+  await addDiamonds(BigInt(String(sender.tiktok_id)), diamonds, "current_round");
+
+  const bp = diamonds * 0.2;
   await addBP(BigInt(String(sender.tiktok_id)), bp, "GIFT", sender.display_name);
 
-  // arena
-  const arena = getArena();
-  const active = arena.status === "active" && now() <= arena.roundCutoff;
-  const grace = arena.status === "grace" && now() <= arena.graceEnd;
-
-  if (!isHost && receiver.id && (active || grace)) {
-    await safeAddArenaDiamonds(String(receiver.id), credited);
+  // arena contribution
+  if (receiver.id && is_round_gift) {
+    await safeAddArenaDiamonds(String(receiver.id), diamonds);
   }
 
-  // host receiver
+  // host receiver?
   if (isHost && receiver.id) {
     await pool.query(
-      `UPDATE users
-       SET diamonds_total = diamonds_total + $1,
-           diamonds_stream = diamonds_stream + $1,
-           diamonds_current_round = diamonds_current_round + $1
-       WHERE tiktok_id = $2`,
-      [credited, BigInt(String(receiver.id))]
+      `
+      UPDATE users
+      SET diamonds_total = diamonds_total + $1,
+          diamonds_stream = diamonds_stream + $1,
+          diamonds_current_round = diamonds_current_round + $1
+      WHERE tiktok_id = $2`,
+      [diamonds, BigInt(String(receiver.id))]
     );
   }
 
-  // FAN — strict heart me
+  // fan strict heart me
   if (isHost && isHeartMeGift(evt)) {
     const expires = new Date(now() + 24 * 3600 * 1000);
 
@@ -286,15 +303,15 @@ async function processGift(evt: any, source: string) {
       [expires, BigInt(String(sender.tiktok_id))]
     );
 
+    (sender as any).is_fan = true;
+
     emitLog({
       type: "fan",
-      message: `${sender.display_name} is nu [FAN] voor 24 uur ❤️`,
+      message: `${sender.display_name} is nu FAN ❤️ (24u)`,
     });
-
-    (sender as any).is_fan = true;
   }
 
-  // twists
+  // twist by gift
   const giftId = Number(evt.giftId);
   const twistType =
     (Object.keys(TWIST_MAP) as TwistType[]).find(
@@ -305,21 +322,30 @@ async function processGift(evt: any, source: string) {
     await addTwistByGift(String(sender.tiktok_id), twistType);
     emitLog({
       type: "twist",
-      message: `${senderFmt} activeerde twist: ${TWIST_MAP[twistType].giftName}`,
+      message: `${senderFmt} ontving twist: ${TWIST_MAP[twistType].giftName}`,
     });
   }
 
-  // database logging
   const gameId = (io as any).currentGameId ?? null;
 
+  // save gift log
   await pool.query(
-    `INSERT INTO gifts (
+    `
+    INSERT INTO gifts (
       giver_id, giver_username, giver_display_name,
       receiver_id, receiver_username, receiver_display_name,
-      receiver_role, gift_name, diamonds, bp,
-      game_id, created_at
+      receiver_role,
+      gift_name, diamonds, bp,
+      game_id,
+      is_host_gift,
+      is_round_gift,
+      round_active,
+      arena_id,
+      created_at
     )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())`,
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+            $11,$12,$13,$14,$15,NOW())
+  `,
     [
       BigInt(String(sender.tiktok_id)),
       sender.username,
@@ -331,17 +357,25 @@ async function processGift(evt: any, source: string) {
       receiver.role,
 
       evt.giftName || "unknown",
-      credited,
+      diamonds,
       bp,
+
       gameId,
+      isHost,
+      is_round_gift,
+      round_active,
+      Number(arena.round),
     ]
   );
 
+  // live update stats
   await broadcastStats();
+  await broadcastRoundLeaderboard();
 
+  // logs
   emitLog({
     type: "gift",
-    message: `${senderFmt} → ${receiverFmt}: ${evt.giftName} (+${credited}💎)`,
+    message: `${senderFmt} → ${receiverFmt}: ${evt.giftName} (+${diamonds}💎)`,
   });
 }
 
@@ -354,7 +388,7 @@ export function initGiftEngine(conn: any) {
     return;
   }
 
-  console.log("🎁 GiftEngine v10.6 ULTRA LOADED");
+  console.log("🎁 GiftEngine v10.7 ULTRA LOADED");
 
   conn.on("gift", (d: any) => processGift(d, "gift"));
   conn.on("roomMessage", (d: any) =>
