@@ -12,6 +12,9 @@ import dotenv from "dotenv";
 import pool, { getSetting, setSetting } from "./db";
 import { initDB } from "./db";
 
+import { startEuler } from "./engines/euler-connection";
+import { processEulerEvent } from "./engines/euler-router";
+
 // TikTok engines
 import { startConnection, stopConnection } from "./engines/1-connection";
 import { initGiftEngine, refreshHostUsername } from "./engines/3-gift-engine";
@@ -349,143 +352,50 @@ io.use((socket: AdminSocket, next) => {
 // ============================================================================
 // ULTRA RECONNECT ENGINE v3.1
 // ============================================================================
-let tiktokConn: any = null;
-let reconnectLock = false;
-
-let lastEventAt = Date.now();
-let healthInterval: NodeJS.Timeout | null = null;
-
-export function markTikTokEvent() {
-  lastEventAt = Date.now();
-}
-
-async function fullyDisconnect() {
-  try {
-    if (tiktokConn) await stopConnection(tiktokConn);
-  } catch (e) {
-    console.log("⚠ stopConnection error:", e);
-  }
-  tiktokConn = null;
-}
-
-function startHealthMonitor() {
-  if (healthInterval) return;
-
-  healthInterval = setInterval(async () => {
-    const diff = Date.now() - lastEventAt;
-
-    if (diff > 20000) {
-      console.log("🛑 HEALTH MONITOR: geen TikTok events >20s → RECONNECT");
-      await restartTikTokConnection(true);
-    }
-  }, 12000);
-}
+// ============================================================================
+// EULER LIVE ENGINE
+// ============================================================================
+let eulerConn: any = null;
 
 export async function restartTikTokConnection(force = false) {
-  if (reconnectLock) return;
-  reconnectLock = true;
+  console.log("🔄 EULER CONNECT — API");
 
-  try {
-    console.log("🔄 RECONNECT ENGINE: start…");
+  const API_KEY = process.env.EULER_API_KEY;
+  const HOST_USERNAME = await getSetting("host_username");
 
-    await fullyDisconnect();
-
-    const confUser = sanitizeHost(await getSetting("host_username"));
-    const confId = await getSetting("host_id");
-
-    HARD_HOST_USERNAME = confUser || "";
-    HARD_HOST_ID = confId ? String(confId) : null;
-
-    if (!HARD_HOST_USERNAME || !HARD_HOST_ID) {
-      console.log("❌ GEEN HARD-HOST INGESTELD — admin:setHost nodig");
-      emitLog({
-        type: "warn",
-        message: "Geen hard-host ingesteld. Ga naar Admin → Settings.",
-      });
-
-      io.emit("streamStats", {
-        totalPlayers: 0,
-        totalPlayerDiamonds: 0,
-        totalHostDiamonds: 0,
-      });
-
-      io.emit("streamLeaderboard", []);
-
-      reconnectLock = false;
-      return;
-    }
-
-    console.log(`🔐 HARD-HOST LOCK: @${HARD_HOST_USERNAME} (${HARD_HOST_ID})`);
-    console.log(`🔌 Verbinden met TikTok LIVE… @${HARD_HOST_USERNAME}`);
-
-    const { conn } = await startConnection(
-      HARD_HOST_USERNAME,
-      () => {
-        console.log("⛔ TikTok stream error → reconnect in 3s");
-        setTimeout(() => restartTikTokConnection(true), 3000);
-      }
-    );
-
-    if (!conn) {
-      emitLog({
-        type: "warn",
-        message: `TikTok-host @${HARD_HOST_USERNAME} offline`,
-      });
-
-      io.emit("streamStats", {
-        totalPlayers: 0,
-        totalPlayerDiamonds: 0,
-        totalHostDiamonds: 0,
-      });
-
-      io.emit("streamLeaderboard", []);
-
-      reconnectLock = false;
-      return;
-    }
-
-    tiktokConn = conn;
-
-    initGiftEngine(conn);
-    initChatEngine(conn);
-    await refreshHostUsername();
-
-    startHealthMonitor();
-    markTikTokEvent();
-
-    if (currentGameId) {
-      await broadcastStats();
-      await broadcastRoundLeaderboard();
-    } else {
-      io.emit("streamStats", {
-        totalPlayers: 0,
-        totalPlayerDiamonds: 0,
-        totalHostDiamonds: 0,
-      });
-
-      io.emit("streamLeaderboard", []);
-    }
-
-    console.log("✔ TikTok connection fully initialized (HARD LOCK)");
-  } catch (err) {
-    console.error("TikTok reconnect error:", err);
-
-    emitLog({
-      type: "warn",
-      message: "TikTok kon niet verbinden.",
-    });
-
+  if (!API_KEY || !HOST_USERNAME) {
+    console.log("❌ Geen API key of host username ingesteld");
     io.emit("streamStats", {
       totalPlayers: 0,
       totalPlayerDiamonds: 0,
       totalHostDiamonds: 0,
     });
-
     io.emit("streamLeaderboard", []);
+    return;
   }
 
-  reconnectLock = false;
+  // stoppen oude conn
+  try {
+    if (eulerConn) await eulerConn.close();
+  } catch {}
+
+  // start nieuwe
+  eulerConn = await startEuler(API_KEY, HOST_USERNAME, (packet: any) => {
+    try {
+      processEulerEvent(packet);
+    } catch (err) {
+      console.error("❌ processEulerEvent:", err);
+    }
+  });
+
+  if (!eulerConn) {
+    console.log("❌ Euler start mislukt");
+    return;
+  }
+
+  console.log("✔ EULER LIVE RUNNING");
 }
+
 
 // ============================================================================
 // ADMIN SOCKET HANDLER
