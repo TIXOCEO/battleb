@@ -1,20 +1,6 @@
 // ============================================================================
 // 3-gift-engine.ts — v10.5 ULTRA FINAL
-// Undercover BattleBox — HARD HOST LOCK Edition
-// ============================================================================
-//
-// ✔ Hard-host-binding via ID + username
-// ✔ Sender nooit meer onbekend
-// ✔ Receiver nooit meer onbekend
-// ✔ Host alleen via ID/uniqueId (nooit via display name)
-// ✔ [HOST] tag 100% correct
-// ✔ [FAN] direct actief bij Heart Me
-// ✔ Heart Me detection: eerst giftName 'Heart Me', anders fallback op giftId 7934
-// ✔ Scoring perfect
-// ✔ Arena perfect
-// ✔ Twists perfect
-// ✔ Zero regressies
-//
+// HARD HOST LOCK + HEART ME FIX (name → fallback ID 7934 ONLY)
 // ============================================================================
 
 import pool, { getSetting } from "../db";
@@ -53,7 +39,6 @@ export async function initDynamicHost() {
 // ============================================================================
 // HELPERS
 // ============================================================================
-
 const dedupe = new Set<string>();
 setInterval(() => dedupe.clear(), 25000);
 
@@ -86,7 +71,7 @@ function logUserUpdate(label: string, id: string, username: string, disp: string
 }
 
 // ============================================================================
-// FAN EXPIRE CLEANUP
+// FAN CLEANUP
 // ============================================================================
 async function cleanupFan(id: string) {
   const r = await pool.query(
@@ -97,16 +82,11 @@ async function cleanupFan(id: string) {
   if (!r.rows[0]) return false;
 
   const { is_fan, fan_expires_at } = r.rows[0];
-
   if (!is_fan || !fan_expires_at) return false;
 
   if (new Date(fan_expires_at).getTime() <= now()) {
     await pool.query(
-      `
-      UPDATE users
-      SET is_fan=FALSE, fan_expires_at=NULL
-      WHERE tiktok_id=$1
-      `,
+      `UPDATE users SET is_fan=FALSE, fan_expires_at=NULL WHERE tiktok_id=$1`,
       [BigInt(id)]
     );
     return false;
@@ -174,7 +154,7 @@ function calcDiamonds(evt: any): number {
 }
 
 // ============================================================================
-// RECEIVER — HARD HOST LOCK
+// RECEIVER RESOLVER (HARD HOST LOCK)
 // ============================================================================
 async function resolveReceiver(evt: any) {
   const directId =
@@ -191,83 +171,58 @@ async function resolveReceiver(evt: any) {
 
   const un = unique ? norm(unique) : null;
 
-  // ID → host
+  // ID match → host
   if (HOST_ID && directId && String(directId) === HOST_ID) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     logUserUpdate("HOST(id)", HOST_ID, h.username, h.display_name);
-    return {
-      id: HOST_ID,
-      username: h.username,
-      display_name: h.display_name,
-      role: "host",
-    };
+    return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
   }
 
-  // uniqueId → host
+  // uniqueId match → host
   if (HOST_ID && HOST_USERNAME && un === HOST_USERNAME) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     logUserUpdate("HOST(unique)", HOST_ID, h.username, h.display_name);
-    return {
-      id: HOST_ID,
-      username: h.username,
-      display_name: h.display_name,
-      role: "host",
-    };
+    return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
   }
 
   // Normale speler
   if (directId) {
     const u = await getOrUpdateUser(String(directId), null, null);
     logUserUpdate("RECEIVER", String(directId), u.username, u.display_name);
-    return {
-      id: u.tiktok_id,
-      username: u.username,
-      display_name: u.display_name,
-      role: "speler",
-    };
+    return { id: u.tiktok_id, username: u.username, display_name: u.display_name, role: "speler" };
   }
 
   // fallback = host
   if (HOST_ID) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     logUserUpdate("HOST(fallback)", HOST_ID, h.username, h.display_name);
-    return {
-      id: HOST_ID,
-      username: h.username,
-      display_name: h.display_name,
-      role: "host",
-    };
+    return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
   }
 
   return { id: null, username: "", display_name: "UNKNOWN", role: "speler" };
 }
 
 // ============================================================================
-// HEART ME DETECTOR (naam → id 7934 fallback ONLY)
+// HEART ME DETECTOR (name → fallback ID 7934 ONLY)
 // ============================================================================
-
-// alleen fallback ID
 const HEART_ME_GIFT_IDS = new Set([7934]);
 
 function isHeartMeGift(evt: any): boolean {
-  // 1️⃣ PRIORITEIT: giftName "Heart Me"
   const name = (evt.giftName || "").toString().trim().toLowerCase();
   if (name === "heart me" || name === "heartme" || name === "heart-me") {
     return true;
   }
 
-  // 2️⃣ FALLBACK: giftId 7934
   const gid = Number(evt.giftId);
   return HEART_ME_GIFT_IDS.has(gid);
 }
 
 // ============================================================================
-// MAIN GIFT PROCESSOR — v10.5 ULTRA
+// MAIN GIFT PROCESSOR
 // ============================================================================
 async function processGift(evt: any, source: string) {
   console.log(`💠 Gift[${source}] giftId=${evt.giftId}`);
 
-  // DEDUPE
   const key =
     evt.msgId ||
     evt.logId ||
@@ -277,28 +232,22 @@ async function processGift(evt: any, source: string) {
   if (dedupe.has(key)) return;
   dedupe.add(key);
 
-  // Identity sync (unified extractor)
   await upsertIdentityFromLooseEvent(evt);
 
-  // Sender
+  // sender
   const S = extractSender(evt);
-  if (!S.id) {
-    console.warn("⚠ Gift zonder sender ID — skip");
-    return;
-  }
+  if (!S.id) return console.warn("⚠ Gift zonder sender ID — skip");
 
   const sender = await getOrUpdateUser(S.id, S.nick, S.unique);
   await cleanupFan(sender.tiktok_id);
 
-  // Diamonds
   const credited = calcDiamonds(evt);
   if (credited <= 0) return;
 
-  // Receiver
+  // receiver
   const receiver = await resolveReceiver(evt);
   const isHost = receiver.role === "host";
 
-  // Fetch receiver db-row
   const receiverUser = receiver.id
     ? await getUserByTikTokId(String(receiver.id))
     : null;
@@ -314,7 +263,7 @@ async function processGift(evt: any, source: string) {
 
   console.log(`🎁 ${senderFmt} → ${receiverFmt} (${evt.giftName}) +${credited}💎`);
 
-  // Sender diamonds
+  // sender diamonds
   await addDiamonds(BigInt(String(sender.tiktok_id)), credited, "total");
   await addDiamonds(BigInt(String(sender.tiktok_id)), credited, "stream");
   await addDiamonds(BigInt(String(sender.tiktok_id)), credited, "current_round");
@@ -322,7 +271,7 @@ async function processGift(evt: any, source: string) {
   const bp = credited * 0.2;
   await addBP(BigInt(String(sender.tiktok_id)), bp, "GIFT", sender.display_name);
 
-  // Arena
+  // arena scoring
   const arena = getArena();
   const active = arena.status === "active" && now() <= arena.roundCutoff;
   const grace = arena.status === "grace" && now() <= arena.graceEnd;
@@ -331,30 +280,24 @@ async function processGift(evt: any, source: string) {
     await safeAddArenaDiamonds(String(receiver.id), credited);
   }
 
-  // Host receiver diamonds
+  // host scoring
   if (isHost && receiver.id) {
     await pool.query(
-      `
-      UPDATE users
-      SET diamonds_total = diamonds_total + $1,
-          diamonds_stream = diamonds_stream + $1,
-          diamonds_current_round = diamonds_current_round + $1
-      WHERE tiktok_id = $2
-      `,
+      `UPDATE users
+       SET diamonds_total = diamonds_total + $1,
+           diamonds_stream = diamonds_stream + $1,
+           diamonds_current_round = diamonds_current_round + $1
+       WHERE tiktok_id = $2`,
       [credited, BigInt(String(receiver.id))]
     );
   }
 
-  // FAN — alleen Heart Me (naam → id 7934 fallback)
+  // FAN — ONLY heart-me
   if (isHost && isHeartMeGift(evt)) {
     const expires = new Date(now() + 24 * 3600 * 1000);
 
     await pool.query(
-      `
-      UPDATE users
-      SET is_fan=TRUE, fan_expires_at=$1
-      WHERE tiktok_id=$2
-      `,
+      `UPDATE users SET is_fan=TRUE, fan_expires_at=$1 WHERE tiktok_id=$2`,
       [expires, BigInt(String(sender.tiktok_id))]
     );
 
@@ -366,9 +309,9 @@ async function processGift(evt: any, source: string) {
     (sender as any).is_fan = true;
   }
 
-  // TWISTS
+  // twists
   const giftId = Number(evt.giftId);
-  const twistType: TwistType | null =
+  const twistType =
     (Object.keys(TWIST_MAP) as TwistType[]).find(
       (t) => TWIST_MAP[t].giftId === giftId
     ) || null;
@@ -381,19 +324,17 @@ async function processGift(evt: any, source: string) {
     });
   }
 
-  // Database log
+  // DB log
   const gameId = (io as any).currentGameId ?? null;
 
   await pool.query(
-    `
-    INSERT INTO gifts (
+    `INSERT INTO gifts (
       giver_id, giver_username, giver_display_name,
       receiver_id, receiver_username, receiver_display_name,
       receiver_role, gift_name, diamonds, bp,
       game_id, created_at
     )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
-    `,
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())`,
     [
       BigInt(String(sender.tiktok_id)),
       sender.username,
@@ -411,10 +352,8 @@ async function processGift(evt: any, source: string) {
     ]
   );
 
-  // Stats update
   await broadcastStats();
 
-  // Realtime log
   emitLog({
     type: "gift",
     message: `${senderFmt} → ${receiverFmt}: ${evt.giftName} (+${credited}💎)`,
@@ -422,7 +361,7 @@ async function processGift(evt: any, source: string) {
 }
 
 // ============================================================================
-// INIT GIFT ENGINE
+// INIT ENGINE
 // ============================================================================
 export function initGiftEngine(conn: any) {
   if (!conn || typeof conn.on !== "function") {
