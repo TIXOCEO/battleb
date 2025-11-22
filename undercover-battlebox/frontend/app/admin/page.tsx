@@ -53,15 +53,24 @@ export default function AdminDashboardPage() {
   const [username, setUsername] = useState("");
   const [status, setStatus] = useState<string | null>(null);
 
-  // TWISTS
-  const [twistUser, setTwistUser] = useState("");
-  const [twistType, setTwistType] = useState("");
-  const [twistTarget, setTwistTarget] = useState("");
+  // TWISTS — door jou gevraagd: ALLE velden uniek gemaakt
+  const [twistUserGive, setTwistUserGive] = useState("");
+  const [twistUserUse, setTwistUserUse] = useState("");
+  const [twistTargetUse, setTwistTargetUse] = useState("");
+  const [twistTypeGive, setTwistTypeGive] = useState("");
+  const [twistTypeUse, setTwistTypeUse] = useState("");
 
-  // AUTOCOMPLETE RESULTS
+  // AUTOCOMPLETE RESULTS → nu ook voor twists
   const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
   const [showResults, setShowResults] = useState(false);
+
+  // Unified typing state — wordt per input gescheiden verwerkt
   const [typing, setTyping] = useState("");
+
+  // welke input is actief voor autocomplete?
+  const [activeAutoField, setActiveAutoField] = useState<
+    null | "main" | "give" | "use" | "target"
+  >(null);
 
   // ============================================================
   // SOCKET SETUP
@@ -69,10 +78,7 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     const socket = getAdminSocket();
 
-    socket.on("updateArena", (data: ArenaState) => {
-      setArena(data);
-    });
-
+    socket.on("updateArena", (data: ArenaState) => setArena(data));
     socket.on("updateQueue", (d: any) => {
       setQueue(d.entries ?? []);
       setQueueOpen(d.open ?? true);
@@ -81,7 +87,6 @@ export default function AdminDashboardPage() {
     socket.on("log", (l: LogEntry) =>
       setLogs((prev) => [l, ...prev].slice(0, 200))
     );
-
     socket.on("initialLogs", (d: LogEntry[]) => setLogs(d.slice(0, 200)));
     socket.on("streamStats", (s: StreamStats) => setStreamStats(s));
     socket.on("streamLeaderboard", (e: LeaderboardEntry[]) =>
@@ -152,10 +157,15 @@ export default function AdminDashboardPage() {
 
   const emitAdminWithUser = (event: string, target?: string) => {
     const socket = getAdminSocket();
-    const uname = target || username || typing;
+    const uname =
+      target ||
+      (activeAutoField === "main" ? username : null) ||
+      "";
+
     if (!uname.trim()) return;
 
     const formatted = uname.startsWith("@") ? uname : `@${uname}`;
+
     setStatus(`Bezig met ${event}...`);
 
     socket.emit(event, { username: formatted }, (res: AdminAckResponse) => {
@@ -170,8 +180,10 @@ export default function AdminDashboardPage() {
 
   const players = useMemo(() => arena?.players ?? [], [arena]);
 
+  // ============================================================
+  // ARENA POSITION COLORS
+  // ============================================================
   const colorForPosition = (p: any) => {
-    // In idle: gewoon neutraal tonen
     if (!arena || arena.status === "idle") {
       return "bg-gray-50 border-gray-200";
     }
@@ -189,7 +201,7 @@ export default function AdminDashboardPage() {
   };
 
   // ============================================================
-  // ROUND STATE HELPERS (voor knoppen & waarschuwingen)
+  // ROUND STATE HELPERS
   // ============================================================
   const arenaStatus = arena?.status ?? "idle";
 
@@ -209,7 +221,7 @@ export default function AdminDashboardPage() {
     hasDoomed;
 
   // ============================================================
-  // AUTOCOMPLETE — alleen via socket (geen HTTP fallback meer)
+  // AUTOCOMPLETE (werkt nu voor alle velden!)
   // ============================================================
   useEffect(() => {
     if (!typing.trim() || typing.length < 2) {
@@ -219,7 +231,6 @@ export default function AdminDashboardPage() {
 
     const run = () => {
       const socket = getAdminSocket();
-
       socket.emit(
         "admin:searchUsers",
         { query: typing },
@@ -233,44 +244,136 @@ export default function AdminDashboardPage() {
     return () => clearTimeout(timer);
   }, [typing]);
 
+  // ========================================================================
+  // APPLY AUTOFILL (PER INPUTVELD)
+  // ========================================================================
   const applyAutoFill = (u: SearchUser) => {
     const formatted = u.username.startsWith("@") ? u.username : `@${u.username}`;
-    setUsername(formatted);
-    setTwistUser(formatted);
-    setTwistTarget(formatted);
-    setTyping(formatted);
-    setSearchResults([]);
+
+    if (activeAutoField === "main") {
+      setUsername(formatted);
+    }
+
+    if (activeAutoField === "give") {
+      setTwistUserGive(formatted);
+    }
+
+    if (activeAutoField === "use") {
+      setTwistUserUse(formatted);
+    }
+
+    if (activeAutoField === "target") {
+      setTwistTargetUse(formatted);
+    }
+
     setShowResults(false);
+    setTyping("");
+    setSearchResults([]);
   };
 
   // ============================================================
-  // RENDER UI
+  // TIMER / PROGRESSBAR LOGICA
   // ============================================================
+  const roundProgress = useMemo(() => {
+    if (!arena) return 0;
+
+    const status = arena.status;
+    const now = Date.now();
+
+    if (status === "active") {
+      const start = arena.roundStartTime;
+      const end = arena.roundCutoff;
+      return Math.max(
+        0,
+        Math.min(100, ((now - start) / (end - start)) * 100)
+      );
+    }
+
+    if (status === "grace") {
+      const start = arena.roundCutoff;
+      const end = arena.graceEnd;
+      return Math.max(
+        0,
+        Math.min(100, ((now - start) / (end - start)) * 100)
+      );
+    }
+
+    return 0;
+  }, [arena]);
+
+  function formatTime(sec: number) {
+    if (!sec || sec < 0) sec = 0;
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m.toString().padStart(2, "0")}:${s
+      .toString()
+      .padStart(2, "0")}`;
+  }
+
+  // ============================================================
+  // UI RENDER
+  // ===========================================================
+  
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
-      {/* HEADER */}
-      <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-6">
-        <div className="flex items-center gap-2">
-          <div className="text-2xl font-bold text-[#ff4d4f]">UB</div>
-          <div>
-            <div className="text-xl font-semibold">
-              Undercover BattleBox – Admin
+
+      {/* ===========================================
+          HEADER MET TIMER / PROGRESSBAR
+      ============================================ */}
+      <header className="mb-6">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-2">
+          <div className="flex items-center gap-2">
+            <div className="text-2xl font-bold text-[#ff4d4f]">UB</div>
+            <div>
+              <div className="text-xl font-semibold">
+                Undercover BattleBox – Admin
+              </div>
+              <div className="text-xs text-gray-500">
+                Verbonden als{" "}
+                <span className="font-semibold text-green-600">Admin</span>
+              </div>
             </div>
-            <div className="text-xs text-gray-500">
-              Verbonden als{" "}
-              <span className="font-semibold text-green-600">Admin</span>
-            </div>
+          </div>
+
+          <div className="text-xs px-3 py-1 rounded-full bg-gray-200 text-gray-800">
+            {gameSession.active
+              ? `Spel actief (#${gameSession.gameId})`
+              : "Geen spel actief"}
           </div>
         </div>
 
-        <div className="text-xs px-3 py-1 rounded-full bg-gray-200 text-gray-800">
-          {gameSession.active
-            ? `Spel actief (#${gameSession.gameId})`
-            : "Geen spel actief"}
-        </div>
+        {/* TIMER / PROGRESSBAR */}
+        {arena && arena.status !== "idle" && (
+          <div className="w-full bg-gray-300 rounded-full h-4 shadow-inner relative overflow-hidden">
+
+            {/* Progress */}
+            <div
+              className={`
+                h-4 transition-all duration-300
+                ${arena.status === "active" ? "bg-[#ff4d4f]" : ""}
+                ${arena.status === "grace" ? "bg-yellow-400" : ""}
+                ${arena.status === "ended" ? "bg-gray-600" : ""}
+              `}
+              style={{ width: `${roundProgress}%` }}
+            />
+
+            {/* Timer Text */}
+            <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold">
+              {arena.status === "active" &&
+                formatTime(Math.max(0, Math.floor((arena.roundCutoff - Date.now()) / 1000)))}
+
+              {arena.status === "grace" &&
+                formatTime(Math.max(0, Math.floor((arena.graceEnd - Date.now()) / 1000)))}
+
+              {arena.status === "ended" && "00:00"}
+            </div>
+          </div>
+        )}
       </header>
 
-            {/* SPELBESTURING */}
+      {/* ===========================================
+          SPELBESTURING
+      ============================================ */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="flex flex-col gap-3">
           <div className="text-sm font-semibold">Spelbesturing</div>
@@ -348,19 +451,27 @@ export default function AdminDashboardPage() {
               <label className="text-xs text-gray-600 font-semibold mb-1 block">
                 @username (zoek)
               </label>
+
               <input
                 type="text"
-                value={typing}
+                value={username}
+                onFocus={() => {
+                  setActiveAutoField("main");
+                  setTyping(username);
+                  setShowResults(true);
+                }}
                 onChange={(e) => {
+                  setUsername(e.target.value);
+                  setActiveAutoField("main");
                   setTyping(e.target.value);
                   setShowResults(true);
                 }}
-                onFocus={() => setShowResults(true)}
                 placeholder="@zoeken"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
               />
 
-              {showResults && searchResults.length > 0 && (
+              {/* AUTOCOMPLETE DROPDOWN */}
+              {showResults && searchResults.length > 0 && activeAutoField === "main" && (
                 <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
                   {searchResults.map((u) => (
                     <div
@@ -378,21 +489,21 @@ export default function AdminDashboardPage() {
 
             <div className="flex gap-2 text-xs">
               <button
-                onClick={() => emitAdminWithUser("admin:addToArena")}
+                onClick={() => emitAdminWithUser("admin:addToArena", username)}
                 className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full"
               >
                 → Arena
               </button>
 
               <button
-                onClick={() => emitAdminWithUser("admin:addToQueue")}
+                onClick={() => emitAdminWithUser("admin:addToQueue", username)}
                 className="px-3 py-1.5 bg-gray-800 text-white rounded-full"
               >
                 → Queue
               </button>
 
               <button
-                onClick={() => emitAdminWithUser("admin:eliminate")}
+                onClick={() => emitAdminWithUser("admin:eliminate", username)}
                 className="px-3 py-1.5 bg-red-600 text-white rounded-full"
               >
                 Elimineer
@@ -402,15 +513,18 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
+      {/* STATUS BALK */}
       {status && (
         <div className="mb-4 text-sm text-center bg-amber-50 border border-amber-200 text-amber-800 rounded-xl py-2">
           {status}
         </div>
       )}
 
-      {/* ARENA + QUEUE */}
+      {/* ===========================================
+          ARENA + QUEUE
+      ============================================ */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Arena */}
+        {/* ARENA */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Arena</h2>
           <p className="text-sm text-gray-500 mb-4">
@@ -468,7 +582,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* Queue */}
+        {/* QUEUE */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Wachtrij</h2>
           <p className="text-sm text-gray-500 mb-3">
@@ -563,7 +677,9 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* LEADERBOARD & STATS */}
+      {/* ===========================================
+          LEADERBOARD & STATS
+      ============================================ */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
         {/* Leaderboard */}
         <div className="bg-white rounded-2xl shadow p-4">
@@ -641,11 +757,14 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* TWISTS */}
+      {/* ===========================================
+          TWISTS
+      ============================================ */}
       <section className="mt-8 bg-white rounded-2xl shadow p-4">
         <h2 className="text-xl font-semibold mb-4">Twists</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
           {/* GIVE TWIST */}
           <div className="p-4 border rounded-xl bg-gray-50 shadow-sm">
             <h3 className="font-semibold mb-3">Twist geven aan speler</h3>
@@ -653,16 +772,42 @@ export default function AdminDashboardPage() {
             <label className="text-xs font-semibold">@username</label>
             <input
               type="text"
-              value={twistUser}
-              onChange={(e) => setTwistUser(e.target.value)}
+              value={twistUserGive}
+              onFocus={() => {
+                setActiveAutoField("give");
+                setShowResults(true);
+                setTyping(twistUserGive);
+              }}
+              onChange={(e) => {
+                setTwistUserGive(e.target.value);
+                setActiveAutoField("give");
+                setTyping(e.target.value);
+                setShowResults(true);
+              }}
               placeholder="@gebruiker"
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
+            {/* AUTOCOMPLETE FOR GIVE */}
+            {showResults && searchResults.length > 0 && activeAutoField === "give" && (
+              <div className="absolute mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto w-full">
+                {searchResults.map((u) => (
+                  <div
+                    key={u.tiktok_id}
+                    onClick={() => applyAutoFill(u)}
+                    className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+                  >
+                    <span className="font-semibold">{u.display_name}</span>{" "}
+                    <span className="text-gray-500">@{u.username}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <label className="text-xs font-semibold">Kies twist</label>
             <select
-              value={twistType}
-              onChange={(e) => setTwistType(e.target.value)}
+              value={twistTypeGive}
+              onChange={(e) => setTwistTypeGive(e.target.value)}
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             >
               <option value="">-- Kies twist --</option>
@@ -677,8 +822,8 @@ export default function AdminDashboardPage() {
             <button
               onClick={() =>
                 emitAdmin("admin:giveTwist", {
-                  username: twistUser,
-                  twist: twistType,
+                  username: twistUserGive,
+                  twist: twistTypeGive,
                 })
               }
               className="mt-2 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm w-full"
@@ -688,22 +833,50 @@ export default function AdminDashboardPage() {
           </div>
 
           {/* USE TWIST */}
-          <div className="p-4 border rounded-xl bg-gray-50 shadow-sm">
+          <div className="p-4 border rounded-xl bg-gray-50 shadow-sm relative">
             <h3 className="font-semibold mb-3">Twist gebruiken (admin)</h3>
 
             <label className="text-xs font-semibold">Gebruiker</label>
             <input
               type="text"
-              value={twistUser}
-              onChange={(e) => setTwistUser(e.target.value)}
+              value={twistUserUse}
+              onFocus={() => {
+                setActiveAutoField("use");
+                setShowResults(true);
+                setTyping(twistUserUse);
+              }}
+              onChange={(e) => {
+                setTwistUserUse(e.target.value);
+                setActiveAutoField("use");
+                setTyping(e.target.value);
+                setShowResults(true);
+              }}
               placeholder="@gebruiker"
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
+            {/* AUTOCOMPLETE FOR USE */}
+            {showResults &&
+              searchResults.length > 0 &&
+              activeAutoField === "use" && (
+                <div className="absolute mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto w-full">
+                  {searchResults.map((u) => (
+                    <div
+                      key={u.tiktok_id}
+                      onClick={() => applyAutoFill(u)}
+                      className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+                    >
+                      <span className="font-semibold">{u.display_name}</span>{" "}
+                      <span className="text-gray-500">@{u.username}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
             <label className="text-xs font-semibold">Twist</label>
             <select
-              value={twistType}
-              onChange={(e) => setTwistType(e.target.value)}
+              value={twistTypeUse}
+              onChange={(e) => setTwistTypeUse(e.target.value)}
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             >
               <option value="">-- Kies twist --</option>
@@ -715,23 +888,49 @@ export default function AdminDashboardPage() {
               <option value="diamond_pistol">Diamond Pistol</option>
             </select>
 
-            <label className="text-xs font-semibold">
-              Target gebruiker (indien nodig)
-            </label>
+            <label className="text-xs font-semibold">Target speler (optioneel)</label>
             <input
               type="text"
-              value={twistTarget}
-              onChange={(e) => setTwistTarget(e.target.value)}
+              value={twistTargetUse}
+              onFocus={() => {
+                setActiveAutoField("target");
+                setShowResults(true);
+                setTyping(twistTargetUse);
+              }}
+              onChange={(e) => {
+                setTwistTargetUse(e.target.value);
+                setActiveAutoField("target");
+                setTyping(e.target.value);
+                setShowResults(true);
+              }}
               placeholder="@target"
               className="w-full border rounded-lg px-3 py-2 text-sm mb-3"
             />
 
+            {/* AUTOCOMPLETE FOR TARGET */}
+            {showResults &&
+              searchResults.length > 0 &&
+              activeAutoField === "target" && (
+                <div className="absolute mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto w-full">
+                  {searchResults.map((u) => (
+                    <div
+                      key={u.tiktok_id}
+                      onClick={() => applyAutoFill(u)}
+                      className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+                    >
+                      <span className="font-semibold">{u.display_name}</span>{" "}
+                      <span className="text-gray-500">@{u.username}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
             <button
               onClick={() =>
                 emitAdmin("admin:useTwist", {
-                  username: twistUser,
-                  twist: twistType,
-                  target: twistTarget,
+                  username: twistUserUse,
+                  twist: twistTypeUse,
+                  target: twistTargetUse,
                 })
               }
               className="mt-2 px-3 py-2 bg-purple-600 text-white rounded-lg text-sm w-full"
@@ -742,7 +941,9 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* LOGS */}
+      {/* ===========================================
+          LOG FEED
+      ============================================ */}
       <section className="mt-6 bg-white rounded-2xl shadow p-4">
         <h2 className="text-lg font-semibold mb-2">Log feed</h2>
 
