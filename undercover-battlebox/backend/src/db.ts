@@ -1,5 +1,5 @@
 // ============================================================================
-// db.ts — v3.0 HOST PROFILES EDITION
+// db.ts — v3.1 HOST PROFILES EDITION (FIXED active / is_active mismatch)
 // ============================================================================
 import { Pool } from "pg";
 
@@ -44,7 +44,7 @@ export async function initDB() {
     );
   `);
 
-  // SETTINGS (blijft nodig voor arena config)
+  // SETTINGS
   await pool.query(`
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
@@ -52,7 +52,7 @@ export async function initDB() {
     );
   `);
 
-  // HOST PROFILES
+  // HOST PROFILES — FIXED (active i.p.v. is_active)
   await pool.query(`
     CREATE TABLE IF NOT EXISTS hosts (
       id SERIAL PRIMARY KEY,
@@ -61,7 +61,7 @@ export async function initDB() {
       display_name TEXT DEFAULT '',
       created_at TIMESTAMPTZ DEFAULT NOW(),
       last_used_at TIMESTAMPTZ DEFAULT NOW(),
-      is_active BOOLEAN DEFAULT false
+      active BOOLEAN DEFAULT false
     );
   `);
 
@@ -83,14 +83,14 @@ export async function initDB() {
   }
 
   // ========================================================================
-  // MIGRATE OLD HOST INTO HOST PROFILES (only once)
+  // MIGRATE OLD HOST INTO HOST PROFILES (uses "active")
   // ========================================================================
   const oldHostUsername = await getSetting("host_username");
   const oldHostId = await getSetting("host_id");
   const activeHostId = await getSetting("active_host_id");
 
   if (!activeHostId && oldHostUsername && oldHostId) {
-    // check if exists already
+    // exists?
     const exists = await pool.query(
       `SELECT id FROM hosts WHERE tiktok_id=$1`,
       [oldHostId]
@@ -101,14 +101,14 @@ export async function initDB() {
     if (exists.rows.length) {
       newId = exists.rows[0].id;
       await pool.query(
-        `UPDATE hosts SET is_active=true, last_used_at=NOW()
+        `UPDATE hosts SET active=true, last_used_at=NOW()
          WHERE id=$1`,
         [newId]
       );
     } else {
       const ins = await pool.query(
         `
-        INSERT INTO hosts (username, tiktok_id, display_name, is_active)
+        INSERT INTO hosts (username, tiktok_id, display_name, active)
         VALUES ($1, $2, $3, true)
         RETURNING id
         `,
@@ -142,7 +142,7 @@ export async function setSetting(key: string, value: string) {
 }
 
 // ============================================================================
-// HOST PROFILE HELPERS
+// HOST PROFILE HELPERS (active i.p.v. is_active)
 // ============================================================================
 export async function getAllHosts() {
   const { rows } = await pool.query(
@@ -202,15 +202,15 @@ export async function createOrUpdateHost(
 
 export async function setActiveHost(hostId: number) {
   // deactivate all
-  await pool.query(`UPDATE hosts SET is_active=false`);
+  await pool.query(`UPDATE hosts SET active=false`);
 
   // activate selected
   await pool.query(
-    `UPDATE hosts SET is_active=true, last_used_at=NOW() WHERE id=$1`,
+    `UPDATE hosts SET active=true, last_used_at=NOW() WHERE id=$1`,
     [hostId]
   );
 
-  // update settings
+  // persist selection in settings
   await setSetting("active_host_id", String(hostId));
 }
 
