@@ -1,15 +1,15 @@
 // ============================================================================
-// 1-connection.ts — v13.1 PRO EDITION (Stable)
-// TikTok LIVE via Render Proxy Sign Server + Euler PRO room resolver
-// Fully backward compatible with BattleBox engines
+// 1-connection.ts — v10.0 HARD HOST LOCK
+// Undercover BattleBox — TikTok LIVE Core Connection Engine
+// STRICT ADMIN-HOST → No mis-hosts. No fallback overrides. Ever.
+// Identity-sync preserved. Fallback only used if verified == admin host.
 // ============================================================================
 
-import WebSocket from "ws";
+import { WebcastPushConnection } from "tiktok-live-connector";
 import { getSetting, setSetting } from "../db";
 import { upsertIdentityFromLooseEvent } from "./2-user-engine";
-import { setLiveState } from "../server";
+import { setLiveState, getHardHostId } from "../server";
 
-// Node 20 → native fetch aanwezig
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function norm(v: any): string {
@@ -22,182 +22,54 @@ function norm(v: any): string {
     .slice(0, 30);
 }
 
-let activeConn: any = null;
-
-// ENV
-const EULER_KEY = process.env.EULER_API_KEY || "";
-const SIGN_PROXY = "https://battlebox-sign-proxy.onrender.com/sign";
+let activeConn: WebcastPushConnection | null = null;
 
 // ============================================================================
-// 🔍 ROOM-ID VIA EULER (PRO PLAN)
-// ============================================================================
-async function resolveRoomId(username: string): Promise<string | null> {
-  console.log("🟦 [DEBUG] Starting room_id lookup…");
-
-  try {
-    const url = `https://tiktok.eulerstream.com/webcast/room_id?uniqueId=${username}`;
-
-    console.log("🔍 [DEBUG] Resolving room_id via:", url);
-
-    const res = await fetch(url, {
-      method: "GET",
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
-        "Content-Type": "application/json",
-        "x-api-key": EULER_KEY, // <-- FIX!!
-      },
-    });
-
-    const json: any = await res.json();
-    console.log("🔍 [DEBUG] Euler /room_id response:", json);
-
-    if (!json.ok || json.is_live !== true) {
-      console.log("❌ [DEBUG] Euler reports: not live OR unauthorized");
-      return null;
-    }
-
-    console.log("🟦 [DEBUG] Lookup result:", json.room_id);
-    return json.room_id;
-  } catch (err: any) {
-    console.log("❌ [DEBUG] Euler room_id error:", err.message);
-    return null;
-  }
-}
-
-// ============================================================================
-// 🔐 SIGN WEBSOCKET URL — via Render Proxy
-// ============================================================================
-async function signWebsocketUrl(roomId: string) {
-  try {
-    const fetchUrl = `https://webcast.tiktok.com/webcast/room/info/?aid=1988&room_id=${roomId}`;
-
-    const res = await fetch(SIGN_PROXY, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url: fetchUrl,
-        method: "GET",
-        includeBrowserParams: true,
-        includeVerifyFp: true,
-      }),
-    });
-
-    if (!res.ok) throw new Error("Proxy sign server returned an error");
-
-    const json: any = await res.json();
-    const data = json.response || json;
-
-    if (!data.signedUrl) throw new Error("Proxy returned no signedUrl");
-
-    const cookieStr = (data.cookies || [])
-      .map((c: any) => `${c.name}=${c.value}`)
-      .join("; ");
-
-    return {
-      signedUrl: data.signedUrl,
-      cookies: cookieStr,
-      userAgent:
-        data.userAgent ||
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
-      requestHeaders: data.requestHeaders || {},
-    };
-  } catch (err: any) {
-    console.error("❌ Sign proxy error:", err?.message);
-    return null;
-  }
-}
-
-// ============================================================================
-// 🔌 WS ADAPTER (NIKS VERWIJDERD, ALLEEN SAFE UPGRADE)
-// ============================================================================
-class BattleboxTikTokWS {
-  ws: WebSocket | null = null;
-  handlers: Record<string, Function[]> = {};
-
-  constructor(public url: string, public headers: any) {}
-
-  on(event: string, fn: Function) {
-    if (!this.handlers[event]) this.handlers[event] = [];
-    this.handlers[event].push(fn);
-  }
-
-  emit(event: string, data: any) {
-    const arr = this.handlers[event];
-    if (arr) for (const fn of arr) fn(data);
-  }
-
-  connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.ws = new WebSocket(this.url, { headers: this.headers });
-
-      const sock = this.ws as any;
-
-      sock.on("open", () => {
-        this.emit("connected", {});
-        resolve();
-      });
-
-      sock.on("message", (buf: any) => {
-        try {
-          const msg = JSON.parse(buf.toString());
-          const type = msg?.type || "";
-
-          switch (type) {
-            case "webcastGiftMessage":
-              this.emit("gift", msg.data || msg);
-              break;
-            case "webcastChatMessage":
-              this.emit("chat", msg.data || msg);
-              break;
-            case "webcastMemberMessage":
-              this.emit("member", msg.data || msg);
-              break;
-            case "webcastRoomMessage":
-              this.emit("roomMessage", msg.data || msg);
-              break;
-          }
-
-          upsertIdentityFromLooseEvent(msg.data || msg);
-        } catch {}
-      });
-
-      sock.on("error", (e: any) => reject(e));
-      sock.on("close", () => this.emit("disconnect", {}));
-    });
-  }
-
-  async disconnect() {
-    try {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.close();
-      }
-    } catch {}
-  }
-}
-
-// ============================================================================
-// 🚀 MAIN ENTRY
+// START CONNECTION (STRICT HOST LOCK)
 // ============================================================================
 export async function startConnection(
   username: string,
   onConnected: () => void
-): Promise<{ conn: any | null }> {
+): Promise<{ conn: WebcastPushConnection | null }> {
   const cleanHost = norm(username);
 
-  console.log(`🔌 Verbinden met TikTok LIVE (Proxy + Euler PRO)… @${cleanHost}`);
+  console.log(`🔌 Verbinden met TikTok LIVE… @${cleanHost}`);
+
+  const conn = new WebcastPushConnection(cleanHost, {
+    requestOptions: { timeout: 15000 },
+    enableExtendedGiftInfo: true,
+  });
 
   let hostSaved = false;
+  let connectedFired = false;
 
+  // fallback buffers (maar alleen geldig als match met admin host)
+  let fb_hostId: string | null = null;
+  let fb_unique: string | null = null;
+  let fb_nick: string | null = null;
+
+  // ========================================================================
+  // SAVE HOST — ONLY THE REAL ADMIN HOST
+  // ========================================================================
   async function saveHost(id: string, uniqueId: string, nickname: string) {
-    if (hostSaved) return;
+    if (!id) return;
+    if (hostSaved) return; // nooit dubbel opslaan
+
     hostSaved = true;
 
     const cleanUnique = norm(uniqueId);
 
+    console.log("💾 HOST SAVE:", {
+      id,
+      username: cleanUnique,
+      nickname,
+    });
+
+    // Opslaan in DB
     await setSetting("host_id", String(id));
     await setSetting("host_username", cleanUnique);
 
+    // TikTok identity sync
     await upsertIdentityFromLooseEvent({
       userId: String(id),
       uniqueId: cleanUnique,
@@ -207,51 +79,202 @@ export async function startConnection(
     console.log("✔ HOST definitief vastgelegd (HARD LOCK)");
   }
 
-  // 1️⃣ ROOM-ID VIA EULER
-  const roomId = await resolveRoomId(cleanHost);
-  if (!roomId) {
-    console.log("❌ Kon room_id niet ophalen → waarschijnlijk offline");
-    return { conn: null };
+  // ========================================================================
+  // FALLBACK DETECTIE — maar mag host NIET vervangen
+  // ========================================================================
+  function captureFallback(raw: any) {
+    if (connectedFired || hostSaved) return;
+
+    const u =
+      raw?.user ||
+      raw?.sender ||
+      raw?.receiver ||
+      raw?.toUser ||
+      raw?.userIdentity ||
+      raw;
+
+    if (!u) return;
+
+    const uid =
+      u?.userId ||
+      u?.id ||
+      u?.uid ||
+      raw?.receiverUserId ||
+      raw?.toUserId ||
+      null;
+
+    const unique = u?.uniqueId || u?.unique_id || null;
+    const nick = u?.nickname || u?.displayName || null;
+
+    if (uid) fb_hostId = String(uid);
+    if (unique) fb_unique = norm(unique);
+    if (nick) fb_nick = nick;
   }
 
-  // 2️⃣ SIGNED URL VIA RENDER-PROXY
-  const sign = await signWebsocketUrl(roomId);
-  if (!sign) {
-    console.log("❌ Geen signedUrl → proxy fout");
-    return { conn: null };
+  function attachFallbackListeners(c: any) {
+    const evs = [
+      "enter",
+      "member",
+      "gift",
+      "chat",
+      "like",
+      "follow",
+      "subscribe",
+      "share",
+      "join",
+      "roomMessage",
+      "liveRoomUser",
+      "social",
+    ];
+
+    for (const ev of evs) {
+      try {
+        c.on(ev, captureFallback);
+      } catch {}
+    }
+
+    console.log("🕵️‍♂️ Fallback actief (zonder host override)");
   }
 
-  const { signedUrl, cookies, userAgent, requestHeaders } = sign;
+  // ========================================================================
+  // IDENTITY SYNC (zoals origineel, niets weggehaald)
+  // ========================================================================
+  function attachIdentitySync(c: any) {
+    if (!c || typeof c.on !== "function") return;
 
-  const wsHeaders = {
-    "User-Agent": userAgent,
-    Cookie: cookies,
-    ...requestHeaders,
-  };
+    const update = (raw: any) => {
+      upsertIdentityFromLooseEvent(
+        raw?.user ||
+          raw?.sender ||
+          raw?.receiver ||
+          raw?.toUser ||
+          raw?.userIdentity ||
+          raw
+      );
+    };
 
-  const conn = new BattleboxTikTokWS(signedUrl, wsHeaders);
+    const baseEvents = [
+      "chat",
+      "like",
+      "follow",
+      "share",
+      "member",
+      "subscribe",
+      "social",
+      "liveRoomUser",
+      "enter",
+    ];
 
-  // 3️⃣ CONNECT-LOOP (battlebox standaard)
+    for (const ev of baseEvents) {
+      try {
+        c.on(ev, update);
+      } catch {}
+    }
+
+    c.on("gift", (g: any) => {
+      update(g);
+      if (g?.toUser) update(g.toUser);
+      if (g?.receiver) update(g.receiver);
+    });
+
+    c.on("linkMicBattle", (d: any) => {
+      if (Array.isArray(d?.battleUsers)) {
+        for (const u of d.battleUsers) update(u);
+      }
+    });
+
+    console.log("👤 Identity-engine actief");
+  }
+
+  // ========================================================================
+  // CONNECT LOOP (8 pogingen)
+  // ========================================================================
   for (let attempt = 1; attempt <= 8; attempt++) {
     try {
       await conn.connect();
 
-      console.log(`✔ Verbonden met livestream (proxy) @${cleanHost}`);
+      console.log(`✔ Verbonden met livestream van @${cleanHost}`);
 
-      conn.on("connected", async () => {
+      conn.on("connected", async (info: any) => {
+        connectedFired = true;
+
+        console.log("══════════ CONNECTED ══════════");
+
         setLiveState(true);
-        await saveHost(roomId, cleanHost, cleanHost);
+
+        const hostId =
+          info?.hostId ||
+          info?.ownerId ||
+          info?.roomIdOwner ||
+          info?.user?.userId ||
+          info?.userId ||
+          null;
+
+        const unique =
+          info?.uniqueId ||
+          info?.ownerUniqueId ||
+          info?.user?.uniqueId ||
+          cleanHost;
+
+        const nick =
+          info?.nickname ||
+          info?.ownerNickname ||
+          info?.user?.nickname ||
+          unique;
+
+        console.log("🎯 CONNECTED HOST DETECTIE:", {
+          hostId,
+          unique,
+          nick,
+        });
+
+        if (hostId) {
+          await saveHost(String(hostId), unique, nick);
+        }
+
         onConnected();
       });
+
+      attachFallbackListeners(conn);
+      attachIdentitySync(conn);
+
+      // ====================================================================
+      // STRICT FALLBACK: alleen als fallback uniqueId == ADMIN HOST
+      // ====================================================================
+      setTimeout(async () => {
+        if (!connectedFired && !hostSaved) {
+          if (fb_unique === cleanHost && fb_hostId) {
+            console.log("⚠ STRICT FALLBACK (verified host):", {
+              id: fb_hostId,
+              unique: fb_unique,
+              nick: fb_nick,
+            });
+
+            await saveHost(
+              fb_hostId,
+              fb_unique || cleanHost,
+              fb_nick || fb_unique || cleanHost
+            );
+
+            onConnected();
+          } else {
+            console.log(
+              "⛔ Fallback genegeerd — uniqueId voldoet niet aan admin host"
+            );
+          }
+        }
+      }, 3000);
 
       activeConn = conn;
       return { conn };
     } catch (err: any) {
       console.error(`⛔ Verbinding mislukt (${attempt}/8):`, err?.message);
+
       if (attempt === 8) {
         console.error(`⚠ @${cleanHost} lijkt offline → IDLE`);
         return { conn: null };
       }
+
       await wait(6000);
     }
   }
@@ -260,16 +283,19 @@ export async function startConnection(
 }
 
 // ============================================================================
-// 🛑 STOP CONNECTION
+// STOP CONNECTION
 // ============================================================================
-export async function stopConnection(conn?: any | null): Promise<void> {
+export async function stopConnection(
+  conn?: WebcastPushConnection | null
+): Promise<void> {
   const c = conn || activeConn;
   if (!c) return;
 
   console.log("🔌 Verbinding verbreken…");
 
   try {
-    await c.disconnect();
+    if (typeof c.disconnect === "function") await c.disconnect();
+    else if (typeof (c as any).close === "function") await (c as any).close();
   } catch (err) {
     console.error("❌ stopConnection fout:", err);
   }
@@ -280,5 +306,5 @@ export async function stopConnection(conn?: any | null): Promise<void> {
 }
 
 // ============================================================================
-// END — v13.1
+// END FILE
 // ============================================================================
