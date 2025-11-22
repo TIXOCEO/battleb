@@ -1,7 +1,6 @@
 // ============================================================================
-// 1-connection.ts — v11.3 BUILD-SAFE PROXY WS EDITION
-// TikTok LIVE via Proxy Sign Server + Native WS Adapter
-// SAFE for TypeScript (no RawData, no null errors)
+// 1-connection.ts — v12.0 PRO EDITION (Safe upgrades, no removals)
+// TikTok LIVE via Proxy Sign Server + Browser-Accurate WS Adapter
 // ============================================================================
 
 import WebSocket from "ws";
@@ -9,7 +8,6 @@ import { getSetting, setSetting } from "../db";
 import { upsertIdentityFromLooseEvent } from "./2-user-engine";
 import { setLiveState } from "../server";
 
-// wait util
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function norm(v: any): string {
@@ -25,23 +23,42 @@ function norm(v: any): string {
 let activeConn: any = null;
 
 // ============================================================================
-// SIGN PROXY REQUEST
+// PRO SIGN REQUEST (Browser-accurate flow)
 // ============================================================================
 async function getSignedUrl(cleanHost: string) {
   try {
-    const res = await fetch(
-      `https://battlebox-sign-proxy.onrender.com/sign?username=${cleanHost}`
-    );
+    const targetUrl = `https://webcast.tiktok.com/webcast/room/info/?aid=1988&room_id=${cleanHost}`;
 
-    if (!res.ok) throw new Error("Proxy sign server returned error");
+    const res = await fetch("https://battlebox-sign-proxy.onrender.com/sign", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: targetUrl,
+        method: "GET",
+        includeBrowserParams: true,
+        includeVerifyFp: true,
+      }),
+    });
+
+    if (!res.ok) throw new Error("Proxy sign server returned HTTP error");
+
     const json: any = await res.json();
 
-    if (!json.signedUrl) throw new Error("Proxy did not return signedUrl");
+    // Correct JSON-structuur uit Euler
+    const data = json.response || json;
+
+    if (!data.signedUrl) throw new Error("Proxy did not return signedUrl");
+
+    // Cookies array → Cookie header
+    const cookieStr = (data.cookies || [])
+      .map((c: any) => `${c.name}=${c.value}`)
+      .join("; ");
 
     return {
-      signedUrl: json.signedUrl,
-      userAgent: json.userAgent || "Mozilla/5.0",
-      cookies: json.cookies || ""
+      signedUrl: data.signedUrl,
+      userAgent: data.userAgent || "Mozilla/5.0",
+      cookies: cookieStr,
+      requestHeaders: data.requestHeaders || {},
     };
   } catch (err: any) {
     console.error("❌ Sign proxy error:", err?.message);
@@ -50,7 +67,7 @@ async function getSignedUrl(cleanHost: string) {
 }
 
 // ============================================================================
-// WS ADAPTER (BUILD-SAFE VERSION)
+// WS ADAPTER (no removals, only safe upgrades)
 // ============================================================================
 class BattleboxTikTokWS {
   ws: WebSocket | null = null;
@@ -72,7 +89,7 @@ class BattleboxTikTokWS {
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(this.url, { headers: this.headers });
 
-      const sock = this.ws as any; // build-safe cast
+      const sock = this.ws as any;
 
       // OPEN
       sock.on("open", () => {
@@ -106,14 +123,10 @@ class BattleboxTikTokWS {
       });
 
       // ERROR
-      sock.on("error", (e: any) => {
-        reject(e);
-      });
+      sock.on("error", (e: any) => reject(e));
 
       // CLOSE
-      sock.on("close", () => {
-        this.emit("disconnect", {});
-      });
+      sock.on("close", () => this.emit("disconnect", {}));
     });
   }
 
@@ -127,7 +140,7 @@ class BattleboxTikTokWS {
 }
 
 // ============================================================================
-// START CONNECTION
+// START CONNECTION (only required improvements)
 // ============================================================================
 export async function startConnection(
   username: string,
@@ -159,19 +172,23 @@ export async function startConnection(
     console.log("✔ HOST definitief vastgelegd (HARD LOCK)");
   }
 
-  // SIGN URL
+  // SIGN
   const sign = await getSignedUrl(cleanHost);
   if (!sign) {
     console.log("❌ Geen signedUrl → host lijkt offline");
     return { conn: null };
   }
 
-  const { signedUrl, userAgent, cookies } = sign;
+  const { signedUrl, userAgent, cookies, requestHeaders } = sign;
 
-  const conn = new BattleboxTikTokWS(signedUrl, {
+  // Combineer headers veilig
+  const wsHeaders = {
     "User-Agent": userAgent,
     Cookie: cookies,
-  });
+    ...requestHeaders, // extra headers van Euler → cruciaal
+  };
+
+  const conn = new BattleboxTikTokWS(signedUrl, wsHeaders);
 
   // CONNECT LOOP
   for (let attempt = 1; attempt <= 8; attempt++) {
@@ -182,10 +199,7 @@ export async function startConnection(
 
       conn.on("connected", async () => {
         setLiveState(true);
-
-        // PROXY geeft geen echte hostId → we koppelen via nickname
         await saveHost("0", cleanHost, cleanHost);
-
         onConnected();
       });
 
@@ -206,7 +220,7 @@ export async function startConnection(
 }
 
 // ============================================================================
-// STOP CONNECTION
+// STOP CONNECTION (unchanged)
 // ============================================================================
 export async function stopConnection(conn?: any | null): Promise<void> {
   const c = conn || activeConn;
@@ -225,6 +239,4 @@ export async function stopConnection(conn?: any | null): Promise<void> {
   if (!conn || conn === activeConn) activeConn = null;
 }
 
-// ============================================================================
-// END FILE
-// ============================================================================
+// =====================================================================
