@@ -4,7 +4,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { getAdminSocket } from "@/lib/socketClient";
 import type { AdminAckResponse } from "@/lib/adminTypes";
 
-// Sanitizer username
+// Sanitizers
 function sanitizeHostUsername(input: string): string {
   if (!input) return "";
   return input
@@ -14,13 +14,12 @@ function sanitizeHostUsername(input: string): string {
     .replace(/[^a-z0-9._-]/g, "")
     .slice(0, 30);
 }
-
-// Sanitizer TikTok ID (numeric only)
 function sanitizeHostId(input: string): string {
   if (!input) return "";
   return input.replace(/[^0-9]/g, "").slice(0, 32);
 }
 
+// Types
 type ArenaSettings = {
   roundDurationPre: number;
   roundDurationFinal: number;
@@ -28,18 +27,28 @@ type ArenaSettings = {
   forceEliminations: boolean;
 };
 
-type GameSessionState = {
-  active: boolean;
-  gameId: number | null;
+type HostProfile = {
+  id: number;           // DB primary key
+  username: string;
+  tiktok_id: string;
+  display_name: string;
+  created_at: string;
+  last_used_at: string | null;
+  is_active: boolean;
 };
 
 export default function SettingsPage() {
-  const [hostUsername, setHostUsername] = useState("");
-  const [hostId, setHostId] = useState("");
+  // ------------------ NEW: Host Profiles ----------------------
+  const [hostProfiles, setHostProfiles] = useState<HostProfile[]>([]);
+  const [activeHost, setActiveHost] = useState<HostProfile | null>(null);
 
-  const [currentHostUser, setCurrentHostUser] = useState("");
-  const [currentHostId, setCurrentHostId] = useState("");
+  // UI fields for new host
+  const [newHostUser, setNewHostUser] = useState("");
+  const [newHostId, setNewHostId] = useState("");
+  const manualHostIdEdit = useRef(false);
+  const tiktokIdInputRef = useRef<HTMLInputElement | null>(null);
 
+  // ------------------ Settings / status -----------------------
   const [settings, setSettings] = useState<ArenaSettings>({
     roundDurationPre: 180,
     roundDurationFinal: 300,
@@ -51,18 +60,13 @@ export default function SettingsPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [gameActive, setGameActive] = useState(false);
 
-  // Track whether user typed in hostId manually (blocks auto-override)
-  const manualHostIdEdit = useRef(false);
-
-  // Reference to ID input for label click
-  const hostIdInputRef = useRef<HTMLInputElement | null>(null);
-
   // ---------------------------------------------------------------------
   // INIT SOCKET
   // ---------------------------------------------------------------------
   useEffect(() => {
     const socket = getAdminSocket();
 
+    // Initial fetch
     socket.emit("admin:getSettings", {}, (res: any) => {
       if (!res?.success) {
         setStatus(`❌ ${res?.message || "Kon instellingen niet laden"}`);
@@ -71,76 +75,66 @@ export default function SettingsPage() {
 
       if (res.settings) setSettings(res.settings);
 
-if (res.host?.username) {
-  const cleanUser = sanitizeHostUsername(res.host.username);
-  setCurrentHostUser(cleanUser);
-  setHostUsername(cleanUser);
-}
-
-if (res.host?.id) {
-  const cleanId = sanitizeHostId(String(res.host.id));
-  setCurrentHostId(cleanId);
-  setHostId(cleanId);
-}
-
-
-      setGameActive(!!res.gameActive);
       setConnected(true);
+      setGameActive(!!res.gameActive);
+
+      // hosts ophalen
+      socket.emit("admin:listHosts", {}, (hres: any) => {
+        if (hres?.success) {
+          setHostProfiles(hres.hosts || []);
+          setActiveHost(hres.activeHost || null);
+        }
+      });
     });
 
     socket.on("connect", () => setConnected(true));
     socket.on("disconnect", () => setConnected(false));
 
-    socket.on("host", (h: any) => {
-      const cleanUser = sanitizeHostUsername(h?.username || "");
-      const cleanId = sanitizeHostId(String(h?.id || ""));
-      setCurrentHostUser(cleanUser);
-      setCurrentHostId(cleanId);
+    // Real-time host updates
+    socket.on("hosts:update", (payload: any) => {
+      setHostProfiles(payload.hosts || []);
+      setActiveHost(payload.activeHost || null);
     });
 
+    // Timers update
     socket.on("settings", (s: ArenaSettings) =>
       setSettings((prev) => ({ ...prev, ...s }))
     );
 
-    socket.on("gameSession", (s: GameSessionState) =>
-      setGameActive(!!s?.active)
-    );
+    socket.on("gameSession", (s: any) => setGameActive(!!s?.active));
 
     return () => {
       socket.off("connect");
       socket.off("disconnect");
       socket.off("settings");
-      socket.off("host");
+      socket.off("hosts:update");
       socket.off("gameSession");
     };
   }, []);
 
   // ---------------------------------------------------------------------
-  // AUTO TIKTOK-ID LOOKUP BASED ON USERNAME
+  // AUTO TIKTOK-ID LOOKUP (for new host form)
   // ---------------------------------------------------------------------
   useEffect(() => {
-    if (!hostUsername) return;
-    if (manualHostIdEdit.current) return; // stop auto updates if manually edited
+    if (!newHostUser) return;
+    if (manualHostIdEdit.current) return;
 
     let cancelled = false;
 
     const timer = setTimeout(async () => {
       try {
-        setHostId("..."); // UI loading indicator
-
-        const res = await fetch(`/api/tiktok-id/${hostUsername}`);
+        setNewHostId("...");
+        const res = await fetch(`/api/tiktok-id/${newHostUser}`);
         const json = await res.json();
-
         if (cancelled) return;
 
         if (json.success && json.tiktok_id) {
-          setHostId(String(json.tiktok_id));
+          setNewHostId(String(json.tiktok_id));
         } else {
-          // Keep field empty → user can manually type
-          setHostId("");
+          setNewHostId("");
         }
       } catch {
-        if (!cancelled) setHostId("");
+        if (!cancelled) setNewHostId("");
       }
     }, 400);
 
@@ -148,43 +142,72 @@ if (res.host?.id) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [hostUsername]);
+  }, [newHostUser]);
 
   // ---------------------------------------------------------------------
-  // HOST OPSLAAN
+  // CREATE HOST PROFILE
   // ---------------------------------------------------------------------
-  const updateHost = () => {
-    if (gameActive) {
-      setStatus("❌ Host kan niet worden gewijzigd tijdens een actief spel");
-      return;
-    }
-
-    const cleanUser = sanitizeHostUsername(hostUsername);
-    const cleanId = sanitizeHostId(hostId);
+  const createHostProfile = () => {
+    const cleanUser = sanitizeHostUsername(newHostUser);
+    const cleanId = sanitizeHostId(newHostId);
 
     if (!cleanUser || !cleanId) {
-      setStatus("❌ Zowel username als TikTok ID zijn verplicht");
+      setStatus("❌ Zowel username als TikTok-ID zijn verplicht");
       return;
     }
 
     const socket = getAdminSocket();
-
     socket.emit(
-      "admin:setHost",
-      { username: cleanUser, tiktok_id: cleanId },
+      "admin:addHostProfile",
+      {
+        username: cleanUser,
+        tiktok_id: cleanId,
+      },
       (res: AdminAckResponse) => {
         setStatus(
-          res.success ? "✔ Host succesvol opgeslagen" : `❌ ${res.message}`
+          res.success ? "✔ Host-profiel toegevoegd" : `❌ ${res.message}`
         );
         if (res.success) {
-          manualHostIdEdit.current = false; // reset manual override
+          manualHostIdEdit.current = false;
+          setNewHostUser("");
+          setNewHostId("");
         }
       }
     );
   };
 
   // ---------------------------------------------------------------------
-  // TIMERS OPSLAAN
+  // ACTIVATE HOST PROFILE
+  // ---------------------------------------------------------------------
+  const activateProfile = (id: number) => {
+    if (gameActive) {
+      setStatus("❌ Kan host niet wisselen tijdens actief spel");
+      return;
+    }
+
+    const socket = getAdminSocket();
+    socket.emit("admin:activateHostProfile", { id }, (res: AdminAckResponse) => {
+      setStatus(
+        res.success ? "✔ Actieve host gewijzigd" : `❌ ${res.message}`
+      );
+    });
+  };
+
+  // ---------------------------------------------------------------------
+  // DELETE PROFILE
+  // ---------------------------------------------------------------------
+  const deleteProfile = (id: number) => {
+    const socket = getAdminSocket();
+
+    socket.emit("admin:deleteHostProfile", { id }, (res: AdminAckResponse) => {
+      setStatus(
+        res.success ? "✔ Host-profiel verwijderd" : `❌ ${res.message}`
+      );
+    });
+  };
+
+  // ---------------------------------------------------------------------
+  // UPDATE TIMER SETTINGS
   // ---------------------------------------------------------------------
   const updateTimers = () => {
     const socket = getAdminSocket();
@@ -210,10 +233,10 @@ if (res.host?.id) {
   // UI
   // ---------------------------------------------------------------------
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold mb-4">⚙ Admin Settings</h1>
 
-      {/* Status */}
+      {/* Connection status */}
       <div
         className={`text-sm mb-4 px-3 py-1 rounded-full inline-block ${
           connected ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
@@ -222,79 +245,111 @@ if (res.host?.id) {
         {connected ? "Verbonden met server" : "❌ Niet verbonden"}
       </div>
 
+      {/* Status message */}
       {status && (
         <div className="mb-4 p-2 text-center text-sm bg-blue-50 border border-blue-200 text-blue-700 rounded-xl">
           {status}
         </div>
       )}
 
-      {/* HOST SETTINGS */}
+      {/* ========================= HOST PROFILES ========================= */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
-        <h2 className="text-lg font-semibold mb-3">Host instellingen</h2>
+        <h2 className="text-lg font-semibold mb-3">Host-profielen</h2>
 
-        <div className="text-xs text-gray-500 mb-1">Huidige host</div>
-
-        <div className="text-lg font-semibold mb-1">
-          {currentHostUser ? `@${currentHostUser}` : "— geen host username —"}
+        {/* Active host display */}
+        <div className="mb-4">
+          <div className="text-xs text-gray-500">Actieve host:</div>
+          {activeHost ? (
+            <div className="text-lg font-semibold">
+              @{activeHost.username}  
+              <span className="text-gray-500 text-sm ml-2">
+                (ID: {activeHost.tiktok_id})
+              </span>
+            </div>
+          ) : (
+            <div className="text-sm text-gray-400">Geen actieve host geselecteerd</div>
+          )}
         </div>
-        <div className="text-lg font-mono text-gray-600 mb-4">
-          {currentHostId ? `ID: ${currentHostId}` : "— geen host ID —"}
+
+        {/* Profiles list */}
+        <div className="border rounded-xl p-3 bg-gray-50 max-h-80 overflow-y-auto">
+          {hostProfiles.length === 0 ? (
+            <p className="text-gray-500 text-sm italic">Nog geen host-profielen opgeslagen.</p>
+          ) : (
+            hostProfiles.map((h) => (
+              <div
+                key={h.id}
+                className={`flex items-center justify-between p-2 rounded-lg mb-2 ${
+                  h.is_active ? "bg-blue-100" : "bg-white"
+                }`}
+              >
+                <div>
+                  <div className="font-semibold">@{h.username}</div>
+                  <div className="text-xs text-gray-500">ID: {h.tiktok_id}</div>
+                </div>
+                <div className="flex gap-2">
+                  {!h.is_active && (
+                    <button
+                      onClick={() => activateProfile(h.id)}
+                      className="px-3 py-1 text-xs bg-green-600 text-white rounded-full"
+                    >
+                      Activeer
+                    </button>
+                  )}
+                  <button
+                    onClick={() => deleteProfile(h.id)}
+                    className="px-3 py-1 text-xs bg-red-600 text-white rounded-full"
+                  >
+                    Verwijder
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
         </div>
 
-        {/* Nieuwe host username */}
-        <label className="text-xs text-gray-600">Nieuwe username</label>
-        <input
-          type="text"
-          maxLength={30}
-          value={hostUsername}
-          disabled={gameActive}
-          onChange={(e) => {
-            manualHostIdEdit.current = false; // allow auto lookup
-            setHostUsername(sanitizeHostUsername(e.target.value));
-          }}
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3"
-        />
+        {/* ADD PROFILE FORM */}
+        <div className="mt-5">
+          <h3 className="text-sm font-semibold mb-2">Nieuw host-profiel toevoegen</h3>
 
-        {/* Nieuwe host ID */}
-        <label
-          className="text-xs text-gray-600 cursor-pointer"
-          onClick={() => hostIdInputRef.current?.focus()}
-        >
-          Nieuwe TikTok ID (klikken = focus)
-        </label>
-        <input
-          type="text"
-          ref={hostIdInputRef}
-          maxLength={32}
-          value={hostId}
-          disabled={gameActive}
-          onChange={(e) => {
-            manualHostIdEdit.current = true; // user takes control
-            setHostId(sanitizeHostId(e.target.value));
-          }}
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3 font-mono"
-        />
+          <label className="text-xs text-gray-600">Username</label>
+          <input
+            type="text"
+            className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
+            value={newHostUser}
+            onChange={(e) => {
+              manualHostIdEdit.current = false;
+              setNewHostUser(sanitizeHostUsername(e.target.value));
+            }}
+          />
 
-        <button
-          onClick={updateHost}
-          disabled={gameActive}
-          className={`mt-3 px-4 py-2 rounded-full text-sm text-white ${
-            gameActive
-              ? "bg-gray-400 cursor-not-allowed"
-              : "bg-blue-600 hover:bg-blue-700"
-          }`}
-        >
-          Host opslaan
-        </button>
+          <label
+            className="text-xs text-gray-600 cursor-pointer"
+            onClick={() => tiktokIdInputRef.current?.focus()}
+          >
+            TikTok ID (klik om te focussen)
+          </label>
+          <input
+            ref={tiktokIdInputRef}
+            type="text"
+            className="w-full border rounded-lg px-3 py-2 text-sm font-mono mb-3"
+            value={newHostId}
+            onChange={(e) => {
+              manualHostIdEdit.current = true;
+              setNewHostId(sanitizeHostId(e.target.value));
+            }}
+          />
 
-        {gameActive && (
-          <p className="mt-2 text-xs text-amber-600">
-            Host kan alleen worden gewijzigd wanneer er géén spel actief is.
-          </p>
-        )}
+          <button
+            onClick={createHostProfile}
+            className="px-4 py-2 rounded-full text-sm text-white bg-blue-600 hover:bg-blue-700"
+          >
+            Host-profiel opslaan
+          </button>
+        </div>
       </section>
 
-      {/* TIMERS */}
+      {/* ========================= TIMERS ========================= */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
         <h2 className="text-lg font-semibold mb-3">Game timers</h2>
 
@@ -311,7 +366,7 @@ if (res.host?.id) {
                   roundDurationPre: Number(e.target.value),
                 })
               }
-              className="w-full border border-gray-300 rounded-lg px-3 py-1 text-sm"
+              className="w-full border rounded-lg px-3 py-1 text-sm"
             />
           </div>
 
@@ -327,7 +382,7 @@ if (res.host?.id) {
                   roundDurationFinal: Number(e.target.value),
                 })
               }
-              className="w-full border border-gray-300 rounded-lg px-3 py-1 text-sm"
+              className="w-full border rounded-lg px-3 py-1 text-sm"
             />
           </div>
 
@@ -343,12 +398,11 @@ if (res.host?.id) {
                   graceSeconds: Number(e.target.value),
                 })
               }
-              className="w-full border border-gray-300 rounded-lg px-3 py-1 text-sm"
+              className="w-full border rounded-lg px-3 py-1 text-sm"
             />
           </div>
         </div>
 
-        {/* Force eliminations */}
         <label className="mt-4 flex items-center gap-2 text-xs text-gray-600">
           <input
             type="checkbox"
