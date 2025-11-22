@@ -1,5 +1,5 @@
 // ============================================================================
-// 3-gift-engine.ts — v11.1 FINAL HOST PROFILE EDITION
+// 3-gift-engine.ts — v11.1 FINAL HOST PROFILE EDITION (TSC FIXED)
 // ============================================================================
 
 import pool from "../db";
@@ -44,7 +44,6 @@ function makeDedupeKey(evt: any, source: string) {
 // ============================================================================
 // NORMALIZERS
 // ============================================================================
-
 function norm(v: any) {
   return (v || "")
     .toString()
@@ -69,7 +68,6 @@ function formatDisplay(u: any) {
 // ============================================================================
 // FAN EXPIRE
 // ============================================================================
-
 async function cleanupFan(id: string) {
   const r = await pool.query(
     `SELECT is_fan, fan_expires_at FROM users WHERE tiktok_id=$1`,
@@ -95,7 +93,6 @@ async function cleanupFan(id: string) {
 // ============================================================================
 // SENDER PARSER
 // ============================================================================
-
 function extractSender(evt: any) {
   const raw =
     evt.user ||
@@ -133,7 +130,6 @@ function extractSender(evt: any) {
 // ============================================================================
 // DIAMONDS
 // ============================================================================
-
 function calcDiamonds(evt: any): number {
   const base = Number(evt.diamondCount || evt.diamond || 0);
   if (base <= 0) return 0;
@@ -150,11 +146,13 @@ function calcDiamonds(evt: any): number {
 // ============================================================================
 // RECEIVER PARSER — HOST LOCK
 // ============================================================================
-
 async function resolveReceiver(evt: any) {
   const active = getActiveHost();
-  const HOST_ID = active?.id || null;
+  const HOST_ID_RAW = active?.id || null;
   const HOST_USERNAME = active?.username || "";
+
+  // safe string
+  const HOST_ID = HOST_ID_RAW ? String(HOST_ID_RAW) : "";
 
   const directId =
     evt.receiverUserId ||
@@ -172,11 +170,13 @@ async function resolveReceiver(evt: any) {
 
   const un = unique ? norm(unique) : null;
 
-  if (HOST_ID && directId && String(directId) === String(HOST_ID)) {
+  // ID lock
+  if (HOST_ID && directId && String(directId) === HOST_ID) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
   }
 
+  // username lock
   if (HOST_USERNAME && un === HOST_USERNAME) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
@@ -184,7 +184,12 @@ async function resolveReceiver(evt: any) {
 
   if (directId) {
     const u = await getOrUpdateUser(String(directId), null, null);
-    return { id: u.tiktok_id, username: u.username, display_name: u.display_name, role: "speler" };
+    return {
+      id: u.tiktok_id,
+      username: u.username,
+      display_name: u.display_name,
+      role: "speler",
+    };
   }
 
   if (HOST_ID) {
@@ -198,7 +203,6 @@ async function resolveReceiver(evt: any) {
 // ============================================================================
 // HEART ME
 // ============================================================================
-
 const HEART_ME_GIFT_IDS = new Set([7934]);
 
 function isHeartMeGift(evt: any): boolean {
@@ -210,7 +214,6 @@ function isHeartMeGift(evt: any): boolean {
 // ============================================================================
 // MAIN PROCESSOR
 // ============================================================================
-
 async function processGift(evt: any, source: string) {
   try {
     const key = makeDedupeKey(evt, source);
@@ -222,7 +225,7 @@ async function processGift(evt: any, source: string) {
     const S = extractSender(evt);
     if (!S.id) return;
 
-    const sender = await getOrUpdateUser(S.id, S.nick, S.unique);
+    const sender = await getOrUpdateUser(String(S.id), S.nick, S.unique);
     await cleanupFan(sender.tiktok_id);
 
     const diamonds = calcDiamonds(evt);
@@ -303,7 +306,6 @@ async function processGift(evt: any, source: string) {
 
     if (twistType) {
       await addTwistByGift(String(sender.tiktok_id), twistType);
-
       emitLog({
         type: "twist",
         message: `${senderFmt} ontving twist: ${TWIST_MAP[twistType].giftName}`,
@@ -367,7 +369,6 @@ async function processGift(evt: any, source: string) {
 // ============================================================================
 // INIT ENGINE
 // ============================================================================
-
 export function initGiftEngine(conn: any) {
   if (!conn || typeof conn.on !== "function") {
     console.log("⚠ initGiftEngine: no connection");
@@ -392,7 +393,6 @@ export function initGiftEngine(conn: any) {
 // ============================================================================
 // EXPORT
 // ============================================================================
-
 export default {
   initGiftEngine,
 };
