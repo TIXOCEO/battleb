@@ -1,17 +1,16 @@
 // ============================================================================
-// 1-connection.ts — v11 SAFE MODE
+// 1-connection.ts — v12 SAFE MODE
 // Undercover BattleBox — TikTok LIVE Core Connection Engine
-// SAFE HOST LOCK + SAFE CONNECT + NO SIGN SPAM
+// SINGLE CONNECT → SINGLE RECONNECT → ELSE IDLE
+// SAFE MODE: No health monitor, no retry spam, no fallback loops
 // ============================================================================
 
 import { WebcastPushConnection } from "tiktok-live-connector";
-import { getSetting, setSetting } from "../db";
+import { setSetting } from "../db";
 import { upsertIdentityFromLooseEvent } from "./2-user-engine";
 import { setLiveState } from "../server";
 
-// ============================================================================
-// HELPERS
-// ============================================================================
+// small helper
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function norm(v: any): string {
@@ -24,52 +23,39 @@ function norm(v: any): string {
     .slice(0, 30);
 }
 
-// Actieve verbinding
 let activeConn: WebcastPushConnection | null = null;
-let isIdle = true;
+
+// exported getter for outside systems
+export function getActiveConn() {
+  return activeConn;
+}
 
 // ============================================================================
-// START CONNECTION — SAFE MODE (no loops)
+// START CONNECTION — SAFE MODE
 // ============================================================================
 export async function startConnection(
   username: string,
-  onConnected: () => void
+  onError: () => void
 ): Promise<{ conn: WebcastPushConnection | null }> {
-  
+
   const cleanHost = norm(username);
   console.log(`🔌 Verbinden met TikTok LIVE… @${cleanHost}`);
-
-  // Als systeem idle is omdat admin dat wilt → nooit automatisch verbinden
-  if (!cleanHost || cleanHost.length < 2) {
-    console.log("⚠ Geen geldige host ingesteld → IDLE");
-    isIdle = true;
-    return { conn: null };
-  }
-
-  isIdle = false;
 
   const conn = new WebcastPushConnection(cleanHost, {
     requestOptions: { timeout: 15000 },
     enableExtendedGiftInfo: true,
   });
 
-  let connectedFired = false;
+  let connected = false;
   let hostSaved = false;
 
-  // ------------------------------------------------------------------------
-  // HOST SAVE FUNCTION
-  // ------------------------------------------------------------------------
   async function saveHost(id: string, uniqueId: string, nickname: string) {
     if (!id || hostSaved) return;
     hostSaved = true;
 
     const cleanUnique = norm(uniqueId);
 
-    console.log("💾 HOST SAVE:", {
-      id,
-      username: cleanUnique,
-      nickname,
-    });
+    console.log("💾 HOST SAVE:", { id, username: cleanUnique, nickname });
 
     await setSetting("host_id", String(id));
     await setSetting("host_username", cleanUnique);
@@ -83,91 +69,24 @@ export async function startConnection(
     console.log("✔ HOST definitief vastgelegd (HARD LOCK)");
   }
 
-  // ------------------------------------------------------------------------
-  // FALLBACK CAPTURE (alleen ter detectie)
-  // ------------------------------------------------------------------------
-  function captureFallback(raw: any) {
-    if (connectedFired || hostSaved) return;
-    const u =
-      raw?.user ||
-      raw?.sender ||
-      raw?.receiver ||
-      raw?.toUser ||
-      raw?.userIdentity ||
-      raw;
-
-    if (!u) return;
-
-    const uid =
-      u?.userId ||
-      u?.id ||
-      u?.uid ||
-      raw?.receiverUserId ||
-      raw?.toUserId ||
-      null;
-
-    const unique = u?.uniqueId || u?.unique_id || null;
-    const nick = u?.nickname || u?.displayName || null;
-
-    if (uid && unique) {
-      saveHost(String(uid), unique, nick || unique);
-      onConnected(); // fallback accepted
-    }
-  }
-
-  function attachFallbackListeners(c: any) {
-    const events = [
-      "enter",
-      "member",
-      "gift",
-      "chat",
-      "like",
-      "follow",
-      "subscribe",
-      "share",
-      "join",
-      "roomMessage",
-      "liveRoomUser",
-      "social",
-    ];
-    for (const ev of events) {
-      try {
-        c.on(ev, captureFallback);
-      } catch {}
-    }
-    console.log("🕵️‍♂️ Fallback actief (alleen detectie)");
-  }
-
-  // ------------------------------------------------------------------------
-  // IDENTITY SYNC
-  // ------------------------------------------------------------------------
   function attachIdentitySync(c: any) {
     const update = (raw: any) => {
       upsertIdentityFromLooseEvent(
         raw?.user ||
-          raw?.sender ||
-          raw?.receiver ||
-          raw?.toUser ||
-          raw?.userIdentity ||
-          raw
+        raw?.sender ||
+        raw?.receiver ||
+        raw?.toUser ||
+        raw?.userIdentity ||
+        raw
       );
     };
 
     const base = [
-      "chat",
-      "like",
-      "follow",
-      "share",
-      "member",
-      "subscribe",
-      "social",
-      "liveRoomUser",
-      "enter",
+      "chat", "like", "follow", "share", "member",
+      "subscribe", "social", "liveRoomUser", "enter"
     ];
     for (const ev of base) {
-      try {
-        c.on(ev, update);
-      } catch {}
+      try { c.on(ev, update); } catch {}
     }
 
     c.on("gift", (g: any) => {
@@ -185,26 +104,24 @@ export async function startConnection(
     console.log("👤 Identity-engine actief");
   }
 
-  // ------------------------------------------------------------------------
-  // *** 1× CONNECT TRY — NO RETRIES ***
-  // ------------------------------------------------------------------------
+  // ---------------------------------------------------------
+  // 1) Single connect attempt
+  // ---------------------------------------------------------
   try {
     await conn.connect();
   } catch (err: any) {
     console.error("❌ Verbinden mislukt:", err?.message);
     console.log("⚠ Host waarschijnlijk offline → IDLE MODE");
-    isIdle = true;
     setLiveState(false);
+    activeConn = null;
     return { conn: null };
   }
 
-  console.log(`✔ Verbonden met livestream van @${cleanHost}`);
-
-  // ------------------------------------------------------------------------
-  // CONNECTED EVENT
-  // ------------------------------------------------------------------------
+  // ---------------------------------------------------------
+  // CONNECTED event
+  // ---------------------------------------------------------
   conn.on("connected", async (info: any) => {
-    connectedFired = true;
+    connected = true;
 
     console.log("══════════ CONNECTED ══════════");
 
@@ -230,27 +147,20 @@ export async function startConnection(
       info?.user?.nickname ||
       unique;
 
-    console.log("🎯 CONNECTED HOST DETECTIE:", {
-      hostId,
-      unique,
-      nick,
-    });
+    console.log("🎯 HOST DETECTIE:", { hostId, unique, nick });
 
     if (hostId) {
       await saveHost(String(hostId), unique, nick);
     }
-
-    onConnected();
   });
 
-  attachFallbackListeners(conn);
   attachIdentitySync(conn);
 
-  // ------------------------------------------------------------------------
-  // DISCONNECT → één reconnect-poging → anders IDLE
-  // ------------------------------------------------------------------------
+  // ---------------------------------------------------------
+  // 2) Single reconnect attempt on real disconnect
+  // ---------------------------------------------------------
   conn.on("disconnected", async () => {
-    console.log("🔻 Verbinding verbroken — poging tot één reconnect…");
+    console.log("🔻 Verbinding verbroken — poging tot 1 reconnect…");
 
     try {
       await conn.connect();
@@ -258,9 +168,9 @@ export async function startConnection(
       return;
     } catch (err) {
       console.log("⛔ Reconnect mislukt → IDLE MODE");
-      isIdle = true;
       setLiveState(false);
       activeConn = null;
+      onError(); // notify server
       return;
     }
   });
@@ -272,9 +182,7 @@ export async function startConnection(
 // ============================================================================
 // STOP CONNECTION
 // ============================================================================
-export async function stopConnection(
-  conn?: WebcastPushConnection | null
-): Promise<void> {
+export async function stopConnection(conn?: WebcastPushConnection | null) {
   const c = conn || activeConn;
   if (!c) return;
 
@@ -288,9 +196,4 @@ export async function stopConnection(
 
   setLiveState(false);
   activeConn = null;
-  isIdle = true;
 }
-
-// ============================================================================
-// END
-// ============================================================================
