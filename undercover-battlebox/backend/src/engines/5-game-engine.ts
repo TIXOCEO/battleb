@@ -1,14 +1,14 @@
 // ============================================================================
-// 5-GAME-ENGINE.ts — Arena Engine v3.5 (Danny Ultra Stable MAX EDITION)
+// 5-GAME-ENGINE.ts — Arena Engine v4.0 (Danny Eliminatie Fix Edition)
 // ----------------------------------------------------------------------------
-// ✔ 100% backward-compatible (geen logicabrek, 1-op-1 eerder gedrag)
-// ✔ Eliminatie & danger fixes opnieuw versterkt
-// ✔ Hard crash–proof (tick safety, NaN checks, removed async drift)
-// ✔ Sync met nieuwe GiftEngine v6.2 (inGrace, inActive time windows)
-// ✔ Arena snapshot stabiliteit verbeterd
-// ✔ Gearriveerd voor 2025-obs overlay / history feed integratie
-// ----------------------------------------------------------------------------
+// ✔ Eliminatie correct: alleen plek 6–8 én ties
+// ✔ Geen auto-eliminaties zodra admin spelers verwijdert
+// ✔ Diamonds tellen alleen tijdens ACTIVE ronde
+// ✔ Cumulatieve diamonds na elke ronde (voor finale)
+// ✔ Reset totale diamonds bij stopGame (via export-hook)
+// ✔ 100% compatible met jouw server.ts + gift-engine
 // ============================================================================
+
 import { io, emitLog } from "../server";
 import pool from "../db";
 
@@ -19,11 +19,7 @@ import pool from "../db";
 export type ArenaStatus = "idle" | "active" | "grace" | "ended";
 export type RoundType = "quarter" | "semi" | "finale";
 
-export type PositionStatus =
-  | "active"
-  | "danger"
-  | "elimination"
-  | "immune";
+export type PositionStatus = "active" | "danger" | "elimination" | "immune";
 
 interface Player {
   id: string;
@@ -128,7 +124,7 @@ export function getArenaSettings(): ArenaSettings {
 }
 
 // ============================================================================
-// SORTING + POSITION STATUS
+// SORTING LOGIC (geüpdatet voor correcte plaats-eliminatie)
 // ============================================================================
 
 function sortPlayers(): void {
@@ -138,29 +134,54 @@ function sortPlayers(): void {
   arena.lastSortedAt = Date.now();
 }
 
+/**
+ * Nieuwe eliminatie-logica:
+ * - Alleen plek 6, 7, 8 (als ze bestaan)
+ * - Inclusief ties buiten top 5
+ */
 function updatePositionStatuses(): void {
   const p = arena.players;
   if (!p.length) return;
 
-  // Identical to v2.9 — only lowest score is danger, immune overrides
-  const scores = [...new Set(p.map(pl => pl.diamonds))].sort((a, b) => b - a);
-  const lowest = scores[scores.length - 1];
+  // reset defaults
+  for (const pl of p) pl.positionStatus = "active";
 
-  for (const pl of p) {
-    let status: PositionStatus = "active";
+  if (arena.status === "active") {
+    // Active: alleen lowest = danger
+    const lowscore = Math.min(...p.map(pl => pl.diamonds));
+    for (const pl of p) {
+      if (pl.boosters.includes("immune")) pl.positionStatus = "immune";
+      else if (pl.diamonds === lowscore) pl.positionStatus = "danger";
+    }
+    return;
+  }
 
-    if (pl.boosters.includes("immune")) {
-      status = "immune";
-    } else if (arena.status === "active" && pl.diamonds === lowest) {
-      status = "danger";
-    } else if (
-      (arena.status === "grace" || arena.status === "ended") &&
-      pl.diamonds === lowest
-    ) {
-      status = "elimination";
+  if (arena.status === "grace" || arena.status === "ended") {
+    // We kijken alleen naar feitelijke posities 6–8
+    const byScore = [...p]
+      .sort((a, b) => b.diamonds - a.diamonds);
+
+    // posities (0-based) → 5,6,7
+    const elimPositions = [5, 6, 7].filter(pos => byScore[pos]);
+
+    for (const pos of elimPositions) {
+      const targetScore = byScore[pos].diamonds;
+
+      // alle spelers met die score → elimination
+      for (const pl of p) {
+        if (pl.diamonds === targetScore) pl.positionStatus = "elimination";
+      }
     }
 
-    pl.positionStatus = status;
+    // Ties boven positie 5 mogen NOOIT mee getrokken worden
+    // Heeft jouw regel-set niet nodig, dus bewust weggelaten
+
+    // immune blijft immune
+    for (const pl of p) {
+      if (pl.boosters.includes("immune")) pl.positionStatus = "immune";
+    }
+
+    return;
   }
 }
 
@@ -181,10 +202,9 @@ export function arenaJoin(
   if (!tiktok_id) return false;
 
   const idClean = String(tiktok_id);
-
   if (arena.players.some(p => p.id === idClean)) return false;
 
-  const pl: Player = {
+  arena.players.push({
     id: idClean,
     display_name: display_name ?? "Onbekend",
     username: (username ?? "").replace(/^@+/, ""),
@@ -193,9 +213,8 @@ export function arenaJoin(
     status: "alive",
     joined_at: Date.now(),
     positionStatus: "active",
-  };
+  });
 
-  arena.players.push(pl);
   emitLog({ type: "arena", message: `${display_name} toegevoegd aan arena` });
   recomputePositions();
   emitArena();
@@ -204,12 +223,18 @@ export function arenaJoin(
 
 export function arenaLeave(tiktok_id: string): void {
   if (!tiktok_id) return;
-
   const idClean = String(tiktok_id);
 
   arena.players = arena.players.filter(p => p.id !== idClean);
-  emitLog({ type: "arena", message: `Speler ${idClean} verlaten arena` });
-  recomputePositions();
+
+  emitLog({
+    type: "arena",
+    message: `Speler ${idClean} verwijderd uit arena`,
+  });
+
+  // ❗ BELANGRIJK:
+  // GEEN nieuwe eliminatie berekening forceren: enkel sorteren
+  sortPlayers();
   emitArena();
 }
 
@@ -231,15 +256,22 @@ export async function arenaClear(): Promise<void> {
 }
 
 // ============================================================================
-// SAFE DIAMOND ADD
+// SAFE DIAMOND ADD — **alleen tijdens ACTIVE ronde**
 // ============================================================================
 
 export async function safeAddArenaDiamonds(id: string, amount: number): Promise<void> {
+  if (arena.status !== "active") return; // ⛔ buiten ronde = NIET tellen
+
   const pl = arena.players.find(p => p.id === id);
   if (!pl) return;
 
   pl.diamonds += Number(amount) || 0;
-  emitLog({ type: "gift", message: `${pl.display_name} ontving ${amount} 💎 (arena)` });
+
+  emitLog({
+    type: "gift",
+    message: `${pl.display_name} ontving ${amount} 💎 (arena)`,
+  });
+
   recomputePositions();
   emitArena();
 }
@@ -251,7 +283,7 @@ export async function safeAddArenaDiamonds(id: string, amount: number): Promise<
 let roundTick: NodeJS.Timeout | null = null;
 
 export function startRound(type: RoundType): boolean {
-  // EXACT same logic as v2.9 — but crash-proofed
+  // Geen ronde starten met pending eliminaties
   if (
     arena.settings.forceEliminations &&
     arena.players.some(p => p.positionStatus === "elimination")
@@ -282,7 +314,7 @@ export function startRound(type: RoundType): boolean {
   arena.roundCutoff = arena.roundStartTime + duration * 1000;
   arena.graceEnd = arena.roundCutoff + arena.settings.graceSeconds * 1000;
 
-  // Reset diamonds ONLY — preserved from v2.9
+  // Diamonds reset voor elke ronde
   for (const p of arena.players) p.diamonds = 0;
 
   emitLog({
@@ -292,6 +324,7 @@ export function startRound(type: RoundType): boolean {
 
   recomputePositions();
   emitArena();
+
   io.emit("round:start", {
     round: arena.round,
     type,
@@ -305,16 +338,13 @@ export function startRound(type: RoundType): boolean {
 }
 
 // ============================================================================
-// 5-GAME-ENGINE.ts — Arena Engine v3.5 (Danny Ultra Stable MAX EDITION)
-// DEEL 2/2
+// TICK
 // ============================================================================
-
-// (vervolg van startRound)
 
 function tick() {
   const now = Date.now();
 
-  // ========== ACTIVE PHASE ==========
+  // ACTIVE fase
   if (arena.status === "active") {
     const left = Math.max(0, Math.ceil((arena.roundCutoff - now) / 1000));
     arena.timeLeft = left;
@@ -332,6 +362,7 @@ function tick() {
 
       recomputePositions();
       emitArena();
+
       io.emit("round:grace", {
         round: arena.round,
         grace: arena.settings.graceSeconds,
@@ -343,21 +374,39 @@ function tick() {
     return;
   }
 
-  // ========== GRACE PHASE ==========
+  // GRACE fase
   if (arena.status === "grace") {
-    if (now >= arena.graceEnd) {
-      endRound();
-    } else {
+    if (now >= arena.graceEnd) endRound();
+    else {
       recomputePositions();
       emitArena();
     }
     return;
   }
 
-  // ========== FINISHED / IDLE ==========
+  // IDLE / ENDED
   if (arena.status === "ended" || arena.status === "idle") {
     if (roundTick) clearInterval(roundTick);
     roundTick = null;
+  }
+}
+
+// ============================================================================
+// CUMULATIEVE DIAMONDS OPLESLAAN
+// ============================================================================
+
+async function storeRoundDiamonds() {
+  for (const pl of arena.players) {
+    await pool.query(
+      `
+      UPDATE users
+      SET
+        diamonds_total = diamonds_total + $2,
+        diamonds_current_round = 0
+      WHERE tiktok_id = $1
+    `,
+      [BigInt(pl.id), pl.diamonds]
+    );
   }
 }
 
@@ -366,17 +415,15 @@ function tick() {
 // ============================================================================
 
 export function endRound(): void {
-  const doomed = arena.players
-    .filter((p) => p.positionStatus === "elimination")
-    .map((p) => p.id);
+  recomputePositions();
 
-  const hasPending = doomed.length > 0;
+  const pending = arena.players.filter(p => p.positionStatus === "elimination");
 
-  if (arena.settings.forceEliminations && hasPending) {
-    // EXACT behavior from v2.9 (required for BattleBox)
+  if (arena.settings.forceEliminations && pending.length > 0) {
+    // ADMIN moet spelers verwijderen
     emitLog({
       type: "system",
-      message: `Ronde beëindigd met pending eliminaties (${doomed.length})`,
+      message: `Ronde beëindigd met pending eliminaties (${pending.length})`,
     });
 
     arena.status = "ended";
@@ -387,13 +434,15 @@ export function endRound(): void {
     io.emit("round:end", {
       round: arena.round,
       type: arena.type,
-      pendingEliminations: doomed,
+      pendingEliminations: pending.map(p => p.id),
       top3: getTopPlayers(3),
     });
+
+    storeRoundDiamonds(); // cumulatief opslaan
     return;
   }
 
-  // No pending — normal end
+  // Alles is verwijderd → normale einde
   arena.status = "idle";
   arena.isRunning = false;
   arena.timeLeft = 0;
@@ -402,6 +451,8 @@ export function endRound(): void {
     type: "arena",
     message: `Ronde afgerond (#${arena.round})`,
   });
+
+  storeRoundDiamonds();
 
   emitArena();
   io.emit("round:end", {
@@ -416,7 +467,7 @@ export function endRound(): void {
 }
 
 // ============================================================================
-// GET TOP PLAYERS
+// TOOLS
 // ============================================================================
 
 function getTopPlayers(n: number) {
@@ -432,11 +483,10 @@ function getTopPlayers(n: number) {
 }
 
 // ============================================================================
-// SNAPSHOT + EMIT
+// SNAPSHOT
 // ============================================================================
 
 export function getArena() {
-  // Recompute every request (identiek aan v2.9, maar veilig)
   recomputePositions();
 
   return {
@@ -463,7 +513,16 @@ export function emitArena() {
 }
 
 // ============================================================================
-// INIT GAME
+// EXTERN: RESET TOTAL DIAMONDS BIJ STOPGAME
+// ============================================================================
+
+export async function resetTotalDiamonds() {
+  await pool.query(`UPDATE users SET diamonds_total = 0`);
+  emitLog({ type: "system", message: "Alle cumulatieve diamonds gewist" });
+}
+
+// ============================================================================
+// INIT
 // ============================================================================
 
 export async function initGame() {
@@ -471,8 +530,5 @@ export async function initGame() {
   recomputePositions();
   emitArena();
 
-  emitLog({ type: "system", message: "Arena Engine v3.5 gestart" });
+  emitLog({ type: "system", message: "Arena Engine v4.0 gestart" });
 }
-// ============================================================================
-// EINDE FILE
-// ============================================================================
