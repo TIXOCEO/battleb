@@ -76,6 +76,7 @@ export function getActiveHost() {
   return {
     id: HARD_HOST_ID,
     username: HARD_HOST_USERNAME,
+    display_name: HARD_HOST_USERNAME // simpele fallback zodat engines niet crashen
   };
 }
 
