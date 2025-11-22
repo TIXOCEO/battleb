@@ -1,10 +1,10 @@
 // ============================================================================
-// 6-chat-engine.ts — v10.1 ULTRA FINAL
+// 6-chat-engine.ts — v10.1 ULTRA FINAL (Host Profiles compat patch)
 // Fan-only join + VIP labels + Host rules + HARD HOST LOCK
 // ============================================================================
 
 import pool from "../db";
-import { io, emitLog, isStreamLive, getHardHostId } from "../server";
+import { io, emitLog, isStreamLive, getActiveHost } from "../server";
 
 import { addToQueue, leaveQueue, getQueue } from "../queue";
 import { getOrUpdateUser } from "./2-user-engine";
@@ -59,7 +59,7 @@ async function ensureFanStatus(userId: bigint): Promise<boolean> {
 // MAIN CHAT ENGINE
 // ============================================================================
 export function initChatEngine(conn: any) {
-  console.log("💬 CHAT ENGINE v10.1 LOADED");
+  console.log("💬 CHAT ENGINE v10.1 LOADED (Host Profiles Compatible)");
 
   conn.on("chat", async (msg: any) => {
     try {
@@ -106,9 +106,10 @@ export function initChatEngine(conn: any) {
 
       const tag = isVip ? "[VIP] " : fan ? "[FAN] " : "";
 
-      // Host logic
-      const hostId = getHardHostId();
-      const isHost = hostId && String(hostId) === String(userId);
+      // NEW HOST PROFILE CHECK
+      const activeHost = getActiveHost(); // { id, username }
+      const isHost =
+        activeHost && String(activeHost.id) === String(userId);
 
       // =====================================================================
       // !join — FAN ONLY (behalve host mag joinen als stream NIET live is)
