@@ -1,7 +1,7 @@
 // ============================================================================
-// 1-connection.ts — v13.0 PRO EDITION
+// 1-connection.ts — v13.1 PRO EDITION (Stable)
 // TikTok LIVE via Render Proxy Sign Server + Euler PRO room resolver
-// 100% backward compatible with BattleBox engines
+// Fully backward compatible with BattleBox engines
 // ============================================================================
 
 import WebSocket from "ws";
@@ -10,7 +10,6 @@ import { upsertIdentityFromLooseEvent } from "./2-user-engine";
 import { setLiveState } from "../server";
 
 // Node 20 → native fetch aanwezig
-// ---------------------------------------------------------------------------
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function norm(v: any): string {
@@ -23,7 +22,6 @@ function norm(v: any): string {
     .slice(0, 30);
 }
 
-// BattleBox hard-lock state
 let activeConn: any = null;
 
 // ENV
@@ -31,43 +29,36 @@ const EULER_KEY = process.env.EULER_API_KEY || "";
 const SIGN_PROXY = "https://battlebox-sign-proxy.onrender.com/sign";
 
 // ============================================================================
-// 🔍 ROOM RESOLUTION (Euler PRO)
+// 🔍 ROOM-ID VIA EULER (PRO PLAN)
 // ============================================================================
-// 1: haal eerst numeric room-id via Euler PRO endpoint
-// ---------------------------------------------------------------------------
-// ============================================================================
-// 🔍 ROOM RESOLUTION (Euler PRO) — v13.0.1 strict TS safe
-// ============================================================================
-async function resolveRoomId(username: string) {
+async function resolveRoomId(username: string): Promise<string | null> {
   console.log("🟦 [DEBUG] Starting room_id lookup…");
 
   try {
     const url = `https://tiktok.eulerstream.com/webcast/room_id?uniqueId=${username}`;
+
     console.log("🔍 [DEBUG] Resolving room_id via:", url);
 
     const res = await fetch(url, {
+      method: "GET",
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
-        "x-api-key": EULER_KEY,
+        "Content-Type": "application/json",
+        "x-api-key": EULER_KEY, // <-- FIX!!
       },
     });
 
-    // ---- FIX: expliciet casten naar any ----
     const json: any = await res.json();
-
     console.log("🔍 [DEBUG] Euler /room_id response:", json);
 
-    // Veiliger checken
-    if (!json || json.ok !== true || json.is_live !== true) {
-      console.log("❌ [DEBUG] Euler reports: user not live or no data");
+    if (!json.ok || json.is_live !== true) {
+      console.log("❌ [DEBUG] Euler reports: not live OR unauthorized");
       return null;
     }
 
-    const roomId = json.room_id;
-    console.log("🟦 [DEBUG] Lookup result:", roomId);
-
-    return roomId || null;
+    console.log("🟦 [DEBUG] Lookup result:", json.room_id);
+    return json.room_id;
   } catch (err: any) {
     console.log("❌ [DEBUG] Euler room_id error:", err.message);
     return null;
@@ -75,11 +66,8 @@ async function resolveRoomId(username: string) {
 }
 
 // ============================================================================
-// 🔐 SIGN WS URL (Render Proxy)
+// 🔐 SIGN WEBSOCKET URL — via Render Proxy
 // ============================================================================
-// 2: sign de uiteindelijke WS handshake via jouw Render-proxy
-// ============================================================================
-
 async function signWebsocketUrl(roomId: string) {
   try {
     const fetchUrl = `https://webcast.tiktok.com/webcast/room/info/?aid=1988&room_id=${roomId}`;
@@ -102,7 +90,6 @@ async function signWebsocketUrl(roomId: string) {
 
     if (!data.signedUrl) throw new Error("Proxy returned no signedUrl");
 
-    // Zet cookies om in header formaat
     const cookieStr = (data.cookies || [])
       .map((c: any) => `${c.name}=${c.value}`)
       .join("; ");
@@ -122,7 +109,7 @@ async function signWebsocketUrl(roomId: string) {
 }
 
 // ============================================================================
-// 🔌 BROWSER-ACCURATE WS ADAPTER (BattleBox Safe Mode)
+// 🔌 WS ADAPTER (NIKS VERWIJDERD, ALLEEN SAFE UPGRADE)
 // ============================================================================
 class BattleboxTikTokWS {
   ws: WebSocket | null = null;
@@ -143,6 +130,7 @@ class BattleboxTikTokWS {
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(this.url, { headers: this.headers });
+
       const sock = this.ws as any;
 
       sock.on("open", () => {
@@ -175,7 +163,6 @@ class BattleboxTikTokWS {
       });
 
       sock.on("error", (e: any) => reject(e));
-
       sock.on("close", () => this.emit("disconnect", {}));
     });
   }
@@ -190,7 +177,7 @@ class BattleboxTikTokWS {
 }
 
 // ============================================================================
-// 🚀 START CONNECTION — MAIN ENTRY (BattleBox standard API preserved)
+// 🚀 MAIN ENTRY
 // ============================================================================
 export async function startConnection(
   username: string,
@@ -208,8 +195,6 @@ export async function startConnection(
 
     const cleanUnique = norm(uniqueId);
 
-    console.log("💾 HOST SAVE:", { id, username: cleanUnique, nickname });
-
     await setSetting("host_id", String(id));
     await setSetting("host_username", cleanUnique);
 
@@ -222,18 +207,14 @@ export async function startConnection(
     console.log("✔ HOST definitief vastgelegd (HARD LOCK)");
   }
 
-  // ========================================================================
-  // 1: ROOM-ID VIA EULER PRO
-  // ========================================================================
+  // 1️⃣ ROOM-ID VIA EULER
   const roomId = await resolveRoomId(cleanHost);
   if (!roomId) {
     console.log("❌ Kon room_id niet ophalen → waarschijnlijk offline");
     return { conn: null };
   }
 
-  // ========================================================================
-  // 2: SIGN VIA RENDER PROXY
-  // ========================================================================
+  // 2️⃣ SIGNED URL VIA RENDER-PROXY
   const sign = await signWebsocketUrl(roomId);
   if (!sign) {
     console.log("❌ Geen signedUrl → proxy fout");
@@ -250,9 +231,7 @@ export async function startConnection(
 
   const conn = new BattleboxTikTokWS(signedUrl, wsHeaders);
 
-  // ========================================================================
-  // 3: CONNECT LOOP (BattleBox standaard)
-  // ========================================================================
+  // 3️⃣ CONNECT-LOOP (battlebox standaard)
   for (let attempt = 1; attempt <= 8; attempt++) {
     try {
       await conn.connect();
@@ -281,7 +260,7 @@ export async function startConnection(
 }
 
 // ============================================================================
-// 🛑 VERBINDING STOPPEN — unchanged
+// 🛑 STOP CONNECTION
 // ============================================================================
 export async function stopConnection(conn?: any | null): Promise<void> {
   const c = conn || activeConn;
@@ -301,5 +280,5 @@ export async function stopConnection(conn?: any | null): Promise<void> {
 }
 
 // ============================================================================
-// END FILE — v13.0
+// END — v13.1
 // ============================================================================
