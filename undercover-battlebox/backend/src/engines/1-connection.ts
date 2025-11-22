@@ -1,6 +1,7 @@
 // ============================================================================
-// 1-connection.ts — v12.3 PRO EDITION (Euler RoomID + Proxy Signing + Debug)
-// Full TikTok LIVE Connection Engine (no removed logic, only additions)
+// 1-connection.ts — v13.0 PRO EDITION
+// TikTok LIVE via Render Proxy Sign Server + Euler PRO room resolver
+// 100% backward compatible with BattleBox engines
 // ============================================================================
 
 import WebSocket from "ws";
@@ -8,7 +9,8 @@ import { getSetting, setSetting } from "../db";
 import { upsertIdentityFromLooseEvent } from "./2-user-engine";
 import { setLiveState } from "../server";
 
-// Debug helper
+// Node 20 → native fetch aanwezig
+// ---------------------------------------------------------------------------
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function norm(v: any): string {
@@ -21,183 +23,98 @@ function norm(v: any): string {
     .slice(0, 30);
 }
 
+// BattleBox hard-lock state
 let activeConn: any = null;
 
+// ENV
+const EULER_KEY = process.env.EULER_API_KEY || "";
+const SIGN_PROXY = "https://battlebox-sign-proxy.onrender.com/sign";
+
 // ============================================================================
-// STEP 0 — Username → room_id (Euler API, ultra-stable)
+// 🔍 ROOM RESOLUTION (Euler PRO)
 // ============================================================================
-async function getRoomIdFromUsername(username: string): Promise<string | null> {
+// 1: haal eerst numeric room-id via Euler PRO endpoint
+// ---------------------------------------------------------------------------
+async function resolveRoomId(username: string) {
+  console.log("🟦 [DEBUG] Starting room_id lookup…");
+
   try {
-    console.log(`🔍 [DEBUG] Resolving room_id for @${username} via Euler /room_id`);
+    const url = `https://tiktok.eulerstream.com/webcast/room_id?uniqueId=${username}`;
+    console.log("🔍 [DEBUG] Resolving room_id via:", url);
 
-    const lookupUrl = `https://tiktok.eulerstream.com/webcast/room_id?uniqueId=${username}`;
-
-    const res = await fetch(lookupUrl, {
+    const res = await fetch(url, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+        "x-api-key": EULER_KEY,
       },
     });
 
-    const json: any = await res.json();
-
+    const json = await res.json();
     console.log("🔍 [DEBUG] Euler /room_id response:", json);
 
-    if (!json.ok) {
+    if (!json.ok || json.is_live !== true) {
       console.log("❌ [DEBUG] Euler reports: user not live or no data");
       return null;
     }
 
-    const roomId =
-      json.room_id ||
-      json?.data?.room_id ||
-      json?.response?.room_id ||
-      null;
-
-    console.log("🎯 [DEBUG] Euler resolved room_id:", roomId);
-
-    return roomId;
+    console.log("🟦 [DEBUG] Lookup result:", json.room_id);
+    return json.room_id;
   } catch (err: any) {
-    console.error("❌ [DEBUG] getRoomIdFromUsername error:", err.message);
+    console.log("❌ [DEBUG] Euler room_id error:", err.message);
     return null;
   }
 }
 
 // ============================================================================
-// STEP 1 — SIGN HTTP REQUEST VIA PROXY SIGN SERVER
+// 🔐 SIGN WS URL (Render Proxy)
 // ============================================================================
-async function getSignedUrl(roomId: string) {
+// 2: sign de uiteindelijke WS handshake via jouw Render-proxy
+// ============================================================================
+
+async function signWebsocketUrl(roomId: string) {
   try {
-    console.log("🟦 [DEBUG] Requesting signedUrl from Proxy…");
+    const fetchUrl = `https://webcast.tiktok.com/webcast/room/info/?aid=1988&room_id=${roomId}`;
 
-    const targetUrl = `https://webcast.tiktok.com/webcast/room/info/?aid=1988&room_id=${roomId}`;
-
-    const res = await fetch("https://battlebox-sign-proxy.onrender.com/sign", {
+    const res = await fetch(SIGN_PROXY, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        url: targetUrl,
+        url: fetchUrl,
         method: "GET",
         includeBrowserParams: true,
         includeVerifyFp: true,
       }),
     });
 
-    const json: any = await res.json();
-    console.log("🟦 [DEBUG] Proxy response:", json);
+    if (!res.ok) throw new Error("Proxy sign server returned an error");
 
+    const json: any = await res.json();
     const data = json.response || json;
 
-    if (!data.signedUrl) throw new Error("Proxy did not return signedUrl");
+    if (!data.signedUrl) throw new Error("Proxy returned no signedUrl");
 
+    // Zet cookies om in header formaat
     const cookieStr = (data.cookies || [])
       .map((c: any) => `${c.name}=${c.value}`)
       .join("; ");
 
     return {
       signedUrl: data.signedUrl,
-      userAgent: data.userAgent || "Mozilla/5.0",
       cookies: cookieStr,
+      userAgent:
+        data.userAgent ||
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
       requestHeaders: data.requestHeaders || {},
     };
   } catch (err: any) {
-    console.error("❌ [DEBUG] Sign proxy error:", err.message);
+    console.error("❌ Sign proxy error:", err?.message);
     return null;
   }
 }
 
 // ============================================================================
-// STEP 2 — FETCH REAL WEBSOCKET URL (TikTok Browser Flow)
-// ============================================================================
-async function getRealWebsocketUrl(
-  signedUrl: string,
-  userAgent: string,
-  cookies: string
-) {
-  try {
-    console.log("🟪 [DEBUG] Fetching room_info via signedUrl…");
-
-    // 1) GET room_info
-    const infoRes = await fetch(signedUrl, {
-      headers: {
-        "User-Agent": userAgent,
-        Cookie: cookies,
-      },
-    });
-
-    const infoJson: any = await infoRes.json();
-    console.log("🟪 [DEBUG] room_info response:", infoJson);
-
-    const cursor =
-      infoJson?.data?.cursor ??
-      infoJson?.cursor ??
-      infoJson?.data?.next_cursor ??
-      "";
-
-    const roomId =
-      infoJson?.data?.id_str ??
-      infoJson?.data?.room_id ??
-      infoJson?.room_id ??
-      "";
-
-    if (!roomId) throw new Error("RoomId ontbreekt");
-
-    // 2) Build fetch URL
-    const fetchUrl = `https://webcast.tiktok.com/webcast/fetch/?aid=1988&room_id=${roomId}&cursor=${cursor}`;
-
-    console.log("🟪 [DEBUG] Fetch URL:", fetchUrl);
-
-    // 3) Sign fetch URL
-    const signedFetch = await fetch(
-      "https://battlebox-sign-proxy.onrender.com/sign",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: fetchUrl,
-          method: "GET",
-          includeBrowserParams: true,
-          includeVerifyFp: true,
-        }),
-      }
-    );
-
-    const signedFetchJson: any = await signedFetch.json();
-    console.log("🟪 [DEBUG] Signed fetch response:", signedFetchJson);
-
-    const f = signedFetchJson.response || signedFetchJson;
-
-    const fetchCookies = (f.cookies || [])
-      .map((c: any) => `${c.name}=${c.value}`)
-      .join("; ");
-
-    // 4) Fetch final WS URL
-    const wsRes = await fetch(f.signedUrl, {
-      headers: {
-        "User-Agent": f.userAgent,
-        Cookie: fetchCookies,
-      },
-    });
-
-    const wsJson: any = await wsRes.json();
-    console.log("🟪 [DEBUG] Final fetch result:", wsJson);
-
-    const wsUrl =
-      wsJson?.data?.ws_url ??
-      wsJson?.data?.push_server ??
-      wsJson?.ws_url ??
-      wsJson?.push_server ??
-      "";
-
-    return wsUrl;
-  } catch (err: any) {
-    console.error("❌ [DEBUG] Fout bij ophalen WebSocket URL:", err.message);
-    return null;
-  }
-}
-
-// ============================================================================
-// WS ADAPTER (unchanged except more debug)
+// 🔌 BROWSER-ACCURATE WS ADAPTER (BattleBox Safe Mode)
 // ============================================================================
 class BattleboxTikTokWS {
   ws: WebSocket | null = null;
@@ -217,13 +134,10 @@ class BattleboxTikTokWS {
 
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      console.log("📡 [DEBUG] Opening WebSocket:", this.url);
-
       this.ws = new WebSocket(this.url, { headers: this.headers });
       const sock = this.ws as any;
 
       sock.on("open", () => {
-        console.log("📡 [DEBUG] WebSocket connected");
         this.emit("connected", {});
         resolve();
       });
@@ -231,9 +145,8 @@ class BattleboxTikTokWS {
       sock.on("message", (buf: any) => {
         try {
           const msg = JSON.parse(buf.toString());
-          upsertIdentityFromLooseEvent(msg.data || msg);
-
           const type = msg?.type || "";
+
           switch (type) {
             case "webcastGiftMessage":
               this.emit("gift", msg.data || msg);
@@ -248,35 +161,28 @@ class BattleboxTikTokWS {
               this.emit("roomMessage", msg.data || msg);
               break;
           }
-        } catch (e) {
-          console.error("⚠️ [DEBUG] WS parse error:", e);
-        }
+
+          upsertIdentityFromLooseEvent(msg.data || msg);
+        } catch {}
       });
 
-      sock.on("error", (e: any) => {
-        console.error("❌ [DEBUG] WS ERROR:", e.message);
-        reject(e);
-      });
+      sock.on("error", (e: any) => reject(e));
 
-      sock.on("close", () => {
-        console.log("🔌 [DEBUG] WS CLOSED");
-        this.emit("disconnect", {});
-      });
+      sock.on("close", () => this.emit("disconnect", {}));
     });
   }
 
   async disconnect() {
     try {
-      if (this.ws && (this.ws as any).readyState === WebSocket.OPEN) {
-        console.log("🔌 [DEBUG] Closing WebSocket…");
-        (this.ws as any).close();
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.close();
       }
     } catch {}
   }
 }
 
 // ============================================================================
-// START CONNECTION — v12.3 DEBUG MODE
+// 🚀 START CONNECTION — MAIN ENTRY (BattleBox standard API preserved)
 // ============================================================================
 export async function startConnection(
   username: string,
@@ -284,18 +190,7 @@ export async function startConnection(
 ): Promise<{ conn: any | null }> {
   const cleanHost = norm(username);
 
-  console.log(`🔌 Verbinden met TikTok LIVE… @${cleanHost}`);
-  console.log("🟦 [DEBUG] Starting room_id lookup…");
-
-  // STEP 0 — resolve username → room_id via Euler
-  const resolvedRoomId = await getRoomIdFromUsername(cleanHost);
-
-  console.log("🟦 [DEBUG] Lookup result:", resolvedRoomId);
-
-  if (!resolvedRoomId) {
-    console.log("❌ Kon room_id niet ophalen → waarschijnlijk offline");
-    return { conn: null };
-  }
+  console.log(`🔌 Verbinden met TikTok LIVE (Proxy + Euler PRO)… @${cleanHost}`);
 
   let hostSaved = false;
 
@@ -303,28 +198,41 @@ export async function startConnection(
     if (hostSaved) return;
     hostSaved = true;
 
+    const cleanUnique = norm(uniqueId);
+
+    console.log("💾 HOST SAVE:", { id, username: cleanUnique, nickname });
+
     await setSetting("host_id", String(id));
-    await setSetting("host_username", norm(uniqueId));
+    await setSetting("host_username", cleanUnique);
 
     await upsertIdentityFromLooseEvent({
       userId: String(id),
-      uniqueId: norm(uniqueId),
+      uniqueId: cleanUnique,
       nickname,
     });
 
-    console.log("✔ HOST opgeslagen (HARD LOCK)");
+    console.log("✔ HOST definitief vastgelegd (HARD LOCK)");
   }
 
-  // STEP 1 — Sign
-  console.log("🟦 [DEBUG] Requesting SIGN…");
-
-  const sign = await getSignedUrl(resolvedRoomId);
-  if (!sign) {
-    console.log("❌ SignedUrl mislukt → host offline?");
+  // ========================================================================
+  // 1: ROOM-ID VIA EULER PRO
+  // ========================================================================
+  const roomId = await resolveRoomId(cleanHost);
+  if (!roomId) {
+    console.log("❌ Kon room_id niet ophalen → waarschijnlijk offline");
     return { conn: null };
   }
 
-  const { signedUrl, userAgent, cookies, requestHeaders } = sign;
+  // ========================================================================
+  // 2: SIGN VIA RENDER PROXY
+  // ========================================================================
+  const sign = await signWebsocketUrl(roomId);
+  if (!sign) {
+    console.log("❌ Geen signedUrl → proxy fout");
+    return { conn: null };
+  }
+
+  const { signedUrl, cookies, userAgent, requestHeaders } = sign;
 
   const wsHeaders = {
     "User-Agent": userAgent,
@@ -332,38 +240,27 @@ export async function startConnection(
     ...requestHeaders,
   };
 
-  // STEP 2 — Real WebSocket URL
-  console.log("🟪 [DEBUG] Getting REAL WebSocket URL…");
+  const conn = new BattleboxTikTokWS(signedUrl, wsHeaders);
 
-  const wsUrl = await getRealWebsocketUrl(signedUrl, userAgent, cookies);
-
-  console.log("🟪 [DEBUG] WS URL:", wsUrl);
-
-  if (!wsUrl) {
-    console.log("❌ Geen WebSocket URL → offline?");
-    return { conn: null };
-  }
-
-  const conn = new BattleboxTikTokWS(wsUrl, wsHeaders);
-
-  // CONNECT LOOP
+  // ========================================================================
+  // 3: CONNECT LOOP (BattleBox standaard)
+  // ========================================================================
   for (let attempt = 1; attempt <= 8; attempt++) {
     try {
-      console.log(`🔄 [DEBUG] WS connect attempt ${attempt}/8`);
       await conn.connect();
 
-      console.log(`✔ Verbonden met livestream @${cleanHost}`);
+      console.log(`✔ Verbonden met livestream (proxy) @${cleanHost}`);
 
       conn.on("connected", async () => {
         setLiveState(true);
-        await saveHost(resolvedRoomId, cleanHost, cleanHost);
+        await saveHost(roomId, cleanHost, cleanHost);
         onConnected();
       });
 
       activeConn = conn;
       return { conn };
     } catch (err: any) {
-      console.error(`⛔ Verbinding mislukt (${attempt}/8):`, err.message);
+      console.error(`⛔ Verbinding mislukt (${attempt}/8):`, err?.message);
       if (attempt === 8) {
         console.error(`⚠ @${cleanHost} lijkt offline → IDLE`);
         return { conn: null };
@@ -376,13 +273,14 @@ export async function startConnection(
 }
 
 // ============================================================================
-// STOP CONNECTION
+// 🛑 VERBINDING STOPPEN — unchanged
 // ============================================================================
 export async function stopConnection(conn?: any | null): Promise<void> {
   const c = conn || activeConn;
   if (!c) return;
 
   console.log("🔌 Verbinding verbreken…");
+
   try {
     await c.disconnect();
   } catch (err) {
@@ -395,5 +293,5 @@ export async function stopConnection(conn?: any | null): Promise<void> {
 }
 
 // ============================================================================
-// END FILE
+// END FILE — v13.0
 // ============================================================================
