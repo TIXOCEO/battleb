@@ -1,5 +1,5 @@
 // ============================================================================
-// 1-connection.ts — v12.1 PRO EDITION (Safe upgrades, no removals)
+// 1-connection.ts — v12.1.1 PRO EDITION (Safe upgrades, no removals)
 // TikTok LIVE via Proxy Sign Server + Browser-Accurate WS Adapter
 // ============================================================================
 
@@ -72,7 +72,7 @@ async function getRealWebsocketUrl(
   cookies: string
 ) {
   try {
-    // 1) GET room info (signed)
+    // 1) GET room info
     const infoRes = await fetch(signedUrl, {
       headers: {
         "User-Agent": userAgent,
@@ -80,14 +80,18 @@ async function getRealWebsocketUrl(
       },
     });
 
-    const infoJson = await infoRes.json();
+    const infoJson: any = await infoRes.json();
 
     const cursor =
-      infoJson?.data?.cursor || infoJson?.cursor || infoJson?.data?.next_cursor;
+      infoJson?.data?.cursor ??
+      infoJson?.cursor ??
+      infoJson?.data?.next_cursor ??
+      "";
+
     const roomId =
-      infoJson?.data?.id_str ||
-      infoJson?.data?.room_id ||
-      infoJson?.room_id ||
+      infoJson?.data?.id_str ??
+      infoJson?.data?.room_id ??
+      infoJson?.room_id ??
       "";
 
     if (!roomId) throw new Error("RoomId ontbreekt");
@@ -95,7 +99,7 @@ async function getRealWebsocketUrl(
     // 2) Build fetch URL
     const fetchUrl = `https://webcast.tiktok.com/webcast/fetch/?aid=1988&room_id=${roomId}&cursor=${cursor}`;
 
-    // 3) Laat opnieuw signen
+    // 3) Laat opnieuw signen via proxy
     const signedFetch = await fetch(
       "https://battlebox-sign-proxy.onrender.com/sign",
       {
@@ -117,7 +121,7 @@ async function getRealWebsocketUrl(
       .map((c: any) => `${c.name}=${c.value}`)
       .join("; ");
 
-    // 4) Doe GET op de signed fetch URL
+    // 4) Doe GET op signed fetch URL → bevat echte WebSocket URL
     const wsRes = await fetch(f.signedUrl, {
       headers: {
         "User-Agent": f.userAgent,
@@ -125,13 +129,14 @@ async function getRealWebsocketUrl(
       },
     });
 
-    const wsJson = await wsRes.json();
+    const wsJson: any = await wsRes.json();
 
     const wsUrl =
-      wsJson?.data?.ws_url ||
-      wsJson?.data?.push_server ||
-      wsJson?.ws_url ||
-      wsJson?.push_server;
+      wsJson?.data?.ws_url ??
+      wsJson?.data?.push_server ??
+      wsJson?.ws_url ??
+      wsJson?.push_server ??
+      "";
 
     if (!wsUrl || !wsUrl.startsWith("wss://"))
       throw new Error("Geen geldige WebSocket URL gevonden");
