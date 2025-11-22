@@ -16,7 +16,7 @@ import {
   emitLog,
   io,
   broadcastStats,
-  broadcastRoundLeaderboard,
+  broadcastPlayerLeaderboard,
   getActiveHost,
 } from "../server";
 
@@ -354,7 +354,7 @@ async function processGift(evt: any, source: string) {
     );
 
     await broadcastStats();
-    await broadcastRoundLeaderboard();
+    await broadcastPlayerLeaderboard();
 
     emitLog({
       type: "gift",
