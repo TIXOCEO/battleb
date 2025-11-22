@@ -1,13 +1,9 @@
 // ============================================================================
-// 2-user-engine.ts — v11.0 HOST PROFILES EDITION
-// Identity Engine + TikTok Universal Normalizer + HARD HOST LOCK
+// 2-user-engine.ts — v11.1 HOST PROFILE SYNC EDITION
 // ============================================================================
 
 import pool from "../db";
-import {
-  isStreamLive,
-  getActiveHost, // <── Host profile loader
-} from "../server";
+import { isStreamLive, getActiveHost } from "../server";
 
 // ============================================================================
 // NORMALIZERS
@@ -39,6 +35,7 @@ function big(v: string | number): bigint {
 // ============================================================================
 // UNIVERSAL IDENTITY EXTRACTOR
 // ============================================================================
+
 function extractIdentity(raw: any) {
   if (!raw) return { id: null, username: null, display: null };
 
@@ -87,6 +84,7 @@ function extractIdentity(raw: any) {
 // ============================================================================
 // USER GETTERS
 // ============================================================================
+
 export async function getUserByTikTokId(id: string) {
   const { rows } = await pool.query(
     `SELECT * FROM users WHERE tiktok_id=$1`,
@@ -105,54 +103,46 @@ export async function getUserByUsername(username: string) {
 }
 
 // ============================================================================
-// UPSERT IDENTITY FROM ANY EVENT (gift/chat/member/roomMessage)
+// UPSERT IDENTITY FROM ANY EVENT
 // ============================================================================
+
 export async function upsertIdentityFromLooseEvent(raw: any) {
   const { id, username, display } = extractIdentity(raw);
   if (!id) return;
 
-  const activeHost = getActiveHost(); // → { id, username }
+  const activeHost = getActiveHost();
   const isHost = activeHost && String(activeHost.id) === String(id);
-  const lockedHostUsername = activeHost?.username || "";
 
-  const cleanDisplay = display || "Onbekend";
   let cleanUsername = username || "unknown";
+  const cleanDisplay = display || "Onbekend";
 
-  // Ensure host username never gets overwritten incorrectly
   if (isHost) {
     const existing = await getUserByTikTokId(id);
+    cleanUsername =
+      existing?.username ||
+      activeHost?.username ||
+      username ||
+      "unknown";
 
-    if (existing?.username) {
-      cleanUsername = existing.username;
-    } else if (lockedHostUsername) {
-      cleanUsername = normUsername(lockedHostUsername);
-    } else if (username) {
-      cleanUsername = username;
-    } else {
-      cleanUsername = "unknown";
+    if (isStreamLive()) {
+      await pool.query(
+        `
+        INSERT INTO users (tiktok_id, username, display_name, last_seen_at)
+        VALUES ($1,$2,$3,NOW())
+        ON CONFLICT(tiktok_id) DO UPDATE SET
+          display_name = EXCLUDED.display_name,
+          last_seen_at = NOW()
+      `,
+        [big(id), cleanUsername, cleanDisplay]
+      );
+      return;
     }
   }
 
-  // During LIVE → prevent host username overwrite
-  if (isHost && isStreamLive()) {
-    await pool.query(
-      `
-      INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at)
-      VALUES ($1, $2, $3, NOW(), NOW())
-      ON CONFLICT(tiktok_id) DO UPDATE SET
-        display_name = EXCLUDED.display_name,
-        last_seen_at = NOW()
-      `,
-      [big(id), cleanUsername, cleanDisplay]
-    );
-    return;
-  }
-
-  // Normal user or host outside stream
   await pool.query(
     `
-    INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at)
-    VALUES ($1,$2,$3,NOW(),NOW())
+    INSERT INTO users (tiktok_id, username, display_name, last_seen_at)
+    VALUES ($1,$2,$3,NOW())
     ON CONFLICT(tiktok_id) DO UPDATE SET
       username = EXCLUDED.username,
       display_name = EXCLUDED.display_name,
@@ -165,6 +155,7 @@ export async function upsertIdentityFromLooseEvent(raw: any) {
 // ============================================================================
 // DIRECT UPSERT
 // ============================================================================
+
 export async function upsertUser(
   tiktok_id: string,
   username: string,
@@ -175,19 +166,16 @@ export async function upsertUser(
 
   const activeHost = getActiveHost();
   const isHost = activeHost && String(activeHost.id) === String(tiktok_id);
-  const lockedHostUsername = activeHost?.username || "";
 
   if (isHost && isStreamLive()) {
     const existing = await getUserByTikTokId(tiktok_id);
-
     const finalUsername =
-      existing?.username ||
-      (lockedHostUsername ? normUsername(lockedHostUsername) : cleanUser);
+      existing?.username || activeHost?.username || cleanUser;
 
     await pool.query(
       `
-      INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at)
-      VALUES ($1,$2,$3,NOW(),NOW())
+      INSERT INTO users (tiktok_id, username, display_name, last_seen_at)
+      VALUES ($1,$2,$3,NOW())
       ON CONFLICT(tiktok_id) DO UPDATE SET
         display_name = EXCLUDED.display_name,
         last_seen_at = NOW()
@@ -199,8 +187,8 @@ export async function upsertUser(
 
   await pool.query(
     `
-    INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at)
-    VALUES ($1,$2,$3,NOW(),NOW())
+    INSERT INTO users (tiktok_id, username, display_name, last_seen_at)
+    VALUES ($1,$2,$3,NOW())
     ON CONFLICT(tiktok_id) DO UPDATE SET
       username = EXCLUDED.username,
       display_name = EXCLUDED.display_name,
@@ -211,8 +199,9 @@ export async function upsertUser(
 }
 
 // ============================================================================
-// MAIN ENTRY FOR ENGINES
+// MAIN ENTRY
 // ============================================================================
+
 export async function getOrUpdateUser(
   tiktokId: string,
   displayName?: string | null,
@@ -224,7 +213,7 @@ export async function getOrUpdateUser(
   if (existing) return existing;
 
   const activeHost = getActiveHost();
-  const isHost = activeHost && String(activeHost.id) === String(id);
+  const isHost = activeHost && String(activeHost.id) === id;
 
   const finalUsername =
     username ||
@@ -232,7 +221,6 @@ export async function getOrUpdateUser(
       ? activeHost?.username || existing?.username || "unknown"
       : existing?.username || "unknown");
 
-  // FIX: display_name is NOT in host profile → fallback to DB or "Onbekend"
   const finalDisplay =
     displayName ||
     (isHost
