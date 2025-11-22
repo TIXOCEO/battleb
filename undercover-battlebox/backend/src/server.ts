@@ -1,7 +1,8 @@
 // ============================================================================
-// server.ts — Undercover BattleBox — v12 SAFE MODE
-// TikTok LIVE SAFE CONNECT ENGINE (no loops, no health monitor, no sign spam)
-// Game logic 100% intact — only connection-system rewritten
+// server.ts — Undercover BattleBox — v7.0 ULTRA-SAFE MODE (A)
+// HARD-HOST-LOCK  •  NO AUTORECONNECT  •  NO HEALTH MONITOR
+// TikTok Live verbinding gebeurt 1x → faalt = IDLE
+// Alleen admin:setHost start opnieuw verbinding
 // ============================================================================
 
 import express from "express";
@@ -12,7 +13,7 @@ import dotenv from "dotenv";
 import pool, { getSetting, setSetting } from "./db";
 import { initDB } from "./db";
 
-// TikTok engines (v12 connection engine!)
+// TikTok engines
 import { startConnection, stopConnection } from "./engines/1-connection";
 import { initGiftEngine, refreshHostUsername } from "./engines/3-gift-engine";
 import { initChatEngine } from "./engines/6-chat-engine";
@@ -43,15 +44,23 @@ import { giveTwistToUser } from "./engines/twist-inventory";
 let HARD_HOST_ID: string | null = null;
 let HARD_HOST_USERNAME: string = "";
 
-export function getHardHostId() { return HARD_HOST_ID; }
-export function getHardHostUsername() { return HARD_HOST_USERNAME; }
+export function getHardHostId() {
+  return HARD_HOST_ID;
+}
+export function getHardHostUsername() {
+  return HARD_HOST_USERNAME;
+}
 
 // ============================================================================
 // STREAM LIVE STATE
 // ============================================================================
 let streamLive = false;
-export function setLiveState(v: boolean) { streamLive = v; }
-export function isStreamLive() { return streamLive; }
+export function setLiveState(v: boolean) {
+  streamLive = v;
+}
+export function isStreamLive() {
+  return streamLive;
+}
 
 // ============================================================================
 // ENVIRONMENT
@@ -91,19 +100,9 @@ const logBuffer: LogEntry[] = [];
 const LOG_MAX = 500;
 
 export function emitLog(entry: Partial<LogEntry>) {
-  if (entry?.type === "system" && entry.message?.includes("Admin dashboard")) {
-    io.emit("log", {
-      id: Date.now().toString(),
-      timestamp: new Date().toISOString(),
-      type: "system",
-      message: entry.message,
-    });
-    return;
-  }
-
   const log: LogEntry = {
     id: entry.id ?? Date.now().toString(),
-    timestamp: entry.timestamp ?? new Date().toISOString(),
+    timestamp: new Date().toISOString(),
     type: entry.type ?? "system",
     message: entry.message ?? "",
   };
@@ -130,10 +129,8 @@ async function fetchTikTokId(username: string): Promise<string | null> {
 
     const html = await res.text();
     const match = html.match(/"id":"(\d{5,30})"/);
-
     return match?.[1] ?? null;
-  } catch (err) {
-    console.error("TikTok ID lookup failed:", err);
+  } catch {
     return null;
   }
 }
@@ -162,7 +159,6 @@ export async function emitQueue() {
 }
 
 export { emitArena };
-
 // ============================================================================
 // STREAM STATS + ROUND LEADERBOARD
 // ============================================================================
@@ -223,7 +219,6 @@ export async function broadcastStats() {
 
 // ============================================================================
 // GAME SESSION MANAGEMENT
-// (original logic — untouched)
 // ============================================================================
 async function loadActiveGame() {
   const res = await pool.query(`
@@ -340,94 +335,7 @@ io.use((socket: AdminSocket, next) => {
 });
 
 // ============================================================================
-// SAFE RECONNECT ENGINE v12
-// → geen health monitor
-// → geen loops
-// → enkel 1 reconnect op echte disconnect
-// ============================================================================
-let tiktokConn: any = null;
-let reconnectBusy = false;
-
-async function fullyDisconnect() {
-  try {
-    if (tiktokConn) await stopConnection(tiktokConn);
-  } catch (e) {
-    console.log("⚠ stopConnection error:", e);
-  }
-  tiktokConn = null;
-}
-
-export async function restartTikTokConnection(force = false) {
-  if (reconnectBusy) return;
-  reconnectBusy = true;
-
-  try {
-    await fullyDisconnect();
-
-    const confUser = sanitizeHost(await getSetting("host_username"));
-    const confId = await getSetting("host_id");
-
-    HARD_HOST_USERNAME = confUser || "";
-    HARD_HOST_ID = confId ? String(confId) : null;
-
-    if (!HARD_HOST_USERNAME || !HARD_HOST_ID) {
-      console.log("❌ GEEN HARD-HOST INGESTELD — admin:setHost nodig");
-      emitLog({
-        type: "warn",
-        message: "Geen hard-host ingesteld. Ga naar Admin → Settings.",
-      });
-      reconnectBusy = false;
-      return;
-    }
-
-    console.log(`🔐 HARD-HOST LOCK: @${HARD_HOST_USERNAME} (${HARD_HOST_ID})`);
-    console.log(`🔌 Verbinden met TikTok LIVE… @${HARD_HOST_USERNAME}`);
-
-    const { conn } = await startConnection(
-      HARD_HOST_USERNAME,
-      () => {
-        console.log("⛔ TikTok fout → verbinding in IDLE");
-      }
-    );
-
-    if (!conn) {
-      console.log("⚠ Live offline → IDLE");
-      emitLog({
-        type: "warn",
-        message: `TikTok-host @${HARD_HOST_USERNAME} offline`,
-      });
-      reconnectBusy = false;
-      return;
-    }
-
-    tiktokConn = conn;
-
-    initGiftEngine(conn);
-    initChatEngine(conn);
-    await refreshHostUsername();
-
-    if (currentGameId) {
-      await broadcastStats();
-      await broadcastRoundLeaderboard();
-    } else {
-      io.emit("streamStats", {
-        totalPlayers: 0,
-        totalPlayerDiamonds: 0,
-        totalHostDiamonds: 0,
-      });
-      io.emit("streamLeaderboard", []);
-    }
-
-    console.log("✔ TikTok connection fully initialized (HARD LOCK)");
-  } catch (err) {
-    console.error("TikTok reconnect error:", err);
-  }
-
-  reconnectBusy = false;
-}
-
-// ============================================================================
-// ADMIN SOCKET HANDLER (unchanged)
+// ADMIN SOCKET HANDLER
 // ============================================================================
 io.on("connection", async (socket: AdminSocket) => {
   if (!socket.isAdmin) return socket.disconnect();
@@ -540,7 +448,7 @@ io.on("connection", async (socket: AdminSocket) => {
 
   // ========================================================================
   // ADMIN COMMAND HANDLER
-  // ============================================================================
+  // ========================================================================
   async function handle(action: string, data: any, ack: Function) {
     try {
       console.log("[ADMIN ACTION]", action, data);
@@ -626,7 +534,7 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       // ------------------------------
-      // SEARCH USERS — FINAL FIX
+      // SEARCH USERS (autocomplete FIX)
       // ------------------------------
       if (action === "searchUsers") {
         const q = (data?.query || "").trim().toLowerCase();
@@ -766,7 +674,7 @@ io.on("connection", async (socket: AdminSocket) => {
           break;
 
         // =====================================================================
-        // TWISTS MODEL A — USE
+        // TWISTS — USE
         // =====================================================================
         case "useTwist":
           await useTwist(
@@ -779,7 +687,7 @@ io.on("connection", async (socket: AdminSocket) => {
           return ack({ success: true });
 
         // =====================================================================
-        // TWISTS MODEL A — GIVE
+        // TWISTS — GIVE
         // =====================================================================
         case "giveTwist":
           await giveTwistToUser(String(tiktok_id), data.twist);
@@ -813,17 +721,24 @@ io.on("connection", async (socket: AdminSocket) => {
   // REGISTER EVENTS
   socket.on("admin:getSettings", (d, ack) => handle("getSettings", d, ack));
   socket.on("admin:setHost", (d, ack) => handle("setHost", d, ack));
+
   socket.on("admin:startGame", (d, ack) => handle("startGame", d, ack));
   socket.on("admin:stopGame", (d, ack) => handle("stopGame", d, ack));
   socket.on("admin:hardResetGame", (d, ack) => handle("hardResetGame", d, ack));
+
   socket.on("admin:startRound", (d, ack) => handle("startRound", d, ack));
   socket.on("admin:endRound", (d, ack) => handle("endRound", d, ack));
-  socket.on("admin:updateSettings", (d, ack) => handle("updateSettings", d, ack));
+
+  socket.on("admin:updateSettings", (d, ack) =>
+    handle("updateSettings", d, ack)
+  );
 
   socket.on("admin:addToArena", (d, ack) => handle("addToArena", d, ack));
   socket.on("admin:addToQueue", (d, ack) => handle("addToQueue", d, ack));
   socket.on("admin:eliminate", (d, ack) => handle("eliminate", d, ack));
-  socket.on("admin:removeFromQueue", (d, ack) => handle("removeFromQueue", d, ack));
+  socket.on("admin:removeFromQueue", (d, ack) =>
+    handle("removeFromQueue", d, ack)
+  );
 
   socket.on("admin:promoteUser", (d, ack) => handle("promoteUser", d, ack));
   socket.on("admin:boostUser", (d, ack) => handle("boostUser", d, ack));
@@ -831,7 +746,125 @@ io.on("connection", async (socket: AdminSocket) => {
 
   socket.on("admin:useTwist", (d, ack) => handle("useTwist", d, ack));
   socket.on("admin:giveTwist", (d, ack) => handle("giveTwist", d, ack));
+
+  // ⭐ AUTOCOMPLETE FIX — this was missing
+  socket.on("admin:searchUsers", (d, ack) =>
+    handle("searchUsers", d, ack)
+  );
 });
+
+// ============================================================================
+// ULTRA-SAFE MODE TIKTOK CONNECT ENGINE v7.0
+// Geen auto-reconnect • Geen health monitor • 1 connect attempt
+// Admin moet handmatig herstellen via setHost
+// ============================================================================
+
+let tiktokConn: any = null;
+
+/**
+ * Ontkoppel huidige TikTok-verbinding volledig
+ */
+async function fullyDisconnect() {
+  try {
+    if (tiktokConn) await stopConnection(tiktokConn);
+  } catch (e) {
+    console.log("⚠ stopConnection fout:", e);
+  }
+  tiktokConn = null;
+  setLiveState(false);
+}
+
+/**
+ * Start TikTok verbinding éénmalig.
+ * Als host offline is of signs falen → IDLE mode.
+ */
+export async function restartTikTokConnection(force = false) {
+  console.log("🔄 TikTok Connect (ULTRA SAFE MODE)…");
+
+  await fullyDisconnect();
+
+  const confUser = sanitizeHost(await getSetting("host_username"));
+  const confId = await getSetting("host_id");
+
+  HARD_HOST_USERNAME = confUser || "";
+  HARD_HOST_ID = confId ? String(confId) : null;
+
+  if (!HARD_HOST_USERNAME || !HARD_HOST_ID) {
+    console.log("❌ GEEN HARD-HOST INGESTELD — Admin moet host instellen.");
+    emitLog({
+      type: "warn",
+      message: "Geen hard-host ingesteld. Ga naar Admin → Settings.",
+    });
+    io.emit("streamLeaderboard", []);
+    io.emit("streamStats", {
+      totalPlayers: 0,
+      totalPlayerDiamonds: 0,
+      totalHostDiamonds: 0,
+    });
+    return;
+  }
+
+  console.log(`🔐 HARD-HOST LOCK actief: @${HARD_HOST_USERNAME} (${HARD_HOST_ID})`);
+  console.log(`🔌 Verbinden met TikTok LIVE… @${HARD_HOST_USERNAME}`);
+
+  // ⭐ Eén enkele connect attempt
+  const { conn } = await startConnection(
+    HARD_HOST_USERNAME,
+    () => {
+      // Maar in ULTRA SAFE MODE doen we NIETS bij disconnect
+      console.log("⚠ TikTok disconnect gedetecteerd — ULTRA SAFE → geen reconnect");
+      emitLog({
+        type: "warn",
+        message: "TikTok verbinding verbroken — Server staat nu in IDLE.",
+      });
+      fullyDisconnect();
+    }
+  );
+
+  if (!conn) {
+    console.log("❌ TikTok-host offline → IDLE MODE");
+    emitLog({
+      type: "warn",
+      message: `TikTok-host @${HARD_HOST_USERNAME} offline — IDLE mode`,
+    });
+
+    io.emit("streamLeaderboard", []);
+    io.emit("streamStats", {
+      totalPlayers: 0,
+      totalPlayerDiamonds: 0,
+      totalHostDiamonds: 0,
+    });
+
+    setLiveState(false);
+    return;
+  }
+
+  // ✔ Verbinding gelukt
+  tiktokConn = conn;
+  setLiveState(true);
+
+  // Gift/chat engines starten
+  initGiftEngine(conn);
+  initChatEngine(conn);
+
+  // Sync username (in database)
+  await refreshHostUsername();
+
+  // Initial stats / leaderboard
+  if (currentGameId) {
+    await broadcastStats();
+    await broadcastRoundLeaderboard();
+  } else {
+    io.emit("streamStats", {
+      totalPlayers: 0,
+      totalPlayerDiamonds: 0,
+      totalHostDiamonds: 0,
+    });
+    io.emit("streamLeaderboard", []);
+  }
+
+  console.log("✔ TikTok verbinding actief (ULTRA SAFE MODE)");
+}
 
 // ============================================================================
 // STARTUP FLOW
@@ -844,5 +877,6 @@ initDB().then(async () => {
   initGame();
   await loadActiveGame();
 
+  // Eerste connect attempt bij startup
   await restartTikTokConnection(true);
 });
