@@ -1,5 +1,5 @@
 // ============================================================================
-// 1-connection.ts — v12.0 PRO EDITION (Safe upgrades, no removals)
+// 1-connection.ts — v12.1 PRO EDITION (Safe upgrades, no removals)
 // TikTok LIVE via Proxy Sign Server + Browser-Accurate WS Adapter
 // ============================================================================
 
@@ -23,7 +23,7 @@ function norm(v: any): string {
 let activeConn: any = null;
 
 // ============================================================================
-// PRO SIGN REQUEST (Browser-accurate flow)
+// STEP 1 — SIGN HTTP REQUEST VIA PROXY
 // ============================================================================
 async function getSignedUrl(cleanHost: string) {
   try {
@@ -43,13 +43,10 @@ async function getSignedUrl(cleanHost: string) {
     if (!res.ok) throw new Error("Proxy sign server returned HTTP error");
 
     const json: any = await res.json();
-
-    // Correct JSON-structuur uit Euler
     const data = json.response || json;
 
     if (!data.signedUrl) throw new Error("Proxy did not return signedUrl");
 
-    // Cookies array → Cookie header
     const cookieStr = (data.cookies || [])
       .map((c: any) => `${c.name}=${c.value}`)
       .join("; ");
@@ -67,7 +64,87 @@ async function getSignedUrl(cleanHost: string) {
 }
 
 // ============================================================================
-// WS ADAPTER (no removals, only safe upgrades)
+// STEP 2 — FETCH REAL WEBSOCKET URL (CRUCIAL FIX)
+// ============================================================================
+async function getRealWebsocketUrl(
+  signedUrl: string,
+  userAgent: string,
+  cookies: string
+) {
+  try {
+    // 1) GET room info (signed)
+    const infoRes = await fetch(signedUrl, {
+      headers: {
+        "User-Agent": userAgent,
+        Cookie: cookies,
+      },
+    });
+
+    const infoJson = await infoRes.json();
+
+    const cursor =
+      infoJson?.data?.cursor || infoJson?.cursor || infoJson?.data?.next_cursor;
+    const roomId =
+      infoJson?.data?.id_str ||
+      infoJson?.data?.room_id ||
+      infoJson?.room_id ||
+      "";
+
+    if (!roomId) throw new Error("RoomId ontbreekt");
+
+    // 2) Build fetch URL
+    const fetchUrl = `https://webcast.tiktok.com/webcast/fetch/?aid=1988&room_id=${roomId}&cursor=${cursor}`;
+
+    // 3) Laat opnieuw signen
+    const signedFetch = await fetch(
+      "https://battlebox-sign-proxy.onrender.com/sign",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: fetchUrl,
+          method: "GET",
+          includeBrowserParams: true,
+          includeVerifyFp: true,
+        }),
+      }
+    );
+
+    const signedFetchJson: any = await signedFetch.json();
+    const f = signedFetchJson.response || signedFetchJson;
+
+    const fetchCookies = (f.cookies || [])
+      .map((c: any) => `${c.name}=${c.value}`)
+      .join("; ");
+
+    // 4) Doe GET op de signed fetch URL
+    const wsRes = await fetch(f.signedUrl, {
+      headers: {
+        "User-Agent": f.userAgent,
+        Cookie: fetchCookies,
+      },
+    });
+
+    const wsJson = await wsRes.json();
+
+    const wsUrl =
+      wsJson?.data?.ws_url ||
+      wsJson?.data?.push_server ||
+      wsJson?.ws_url ||
+      wsJson?.push_server;
+
+    if (!wsUrl || !wsUrl.startsWith("wss://"))
+      throw new Error("Geen geldige WebSocket URL gevonden");
+
+    return wsUrl;
+  } catch (err: any) {
+    console.error("❌ Fout bij ophalen WebSocket URL:", err.message);
+    return null;
+  }
+}
+
+// ============================================================================
+// WS ADAPTER (unchanged except safe cast)
 // ============================================================================
 class BattleboxTikTokWS {
   ws: WebSocket | null = null;
@@ -91,13 +168,11 @@ class BattleboxTikTokWS {
 
       const sock = this.ws as any;
 
-      // OPEN
       sock.on("open", () => {
         this.emit("connected", {});
         resolve();
       });
 
-      // MESSAGE
       sock.on("message", (buf: any) => {
         try {
           const msg = JSON.parse(buf.toString());
@@ -122,10 +197,7 @@ class BattleboxTikTokWS {
         } catch {}
       });
 
-      // ERROR
       sock.on("error", (e: any) => reject(e));
-
-      // CLOSE
       sock.on("close", () => this.emit("disconnect", {}));
     });
   }
@@ -140,7 +212,7 @@ class BattleboxTikTokWS {
 }
 
 // ============================================================================
-// START CONNECTION (only required improvements)
+// START CONNECTION (minimal changes)
 // ============================================================================
 export async function startConnection(
   username: string,
@@ -172,7 +244,7 @@ export async function startConnection(
     console.log("✔ HOST definitief vastgelegd (HARD LOCK)");
   }
 
-  // SIGN
+  // STEP 1 — Sign HTTP request
   const sign = await getSignedUrl(cleanHost);
   if (!sign) {
     console.log("❌ Geen signedUrl → host lijkt offline");
@@ -181,14 +253,20 @@ export async function startConnection(
 
   const { signedUrl, userAgent, cookies, requestHeaders } = sign;
 
-  // Combineer headers veilig
-  const wsHeaders = {
+  const headers = {
     "User-Agent": userAgent,
     Cookie: cookies,
-    ...requestHeaders, // extra headers van Euler → cruciaal
+    ...requestHeaders,
   };
 
-  const conn = new BattleboxTikTokWS(signedUrl, wsHeaders);
+  // STEP 2 — Fetch REAL WS URL (NEW FIX)
+  const wsUrl = await getRealWebsocketUrl(signedUrl, userAgent, cookies);
+  if (!wsUrl) {
+    console.log("❌ Geen WebSocket URL gevonden → livestream offline?");
+    return { conn: null };
+  }
+
+  const conn = new BattleboxTikTokWS(wsUrl, headers);
 
   // CONNECT LOOP
   for (let attempt = 1; attempt <= 8; attempt++) {
@@ -239,4 +317,6 @@ export async function stopConnection(conn?: any | null): Promise<void> {
   if (!conn || conn === activeConn) activeConn = null;
 }
 
-// =====================================================================
+// ============================================================================
+// END FILE
+// ============================================================================
