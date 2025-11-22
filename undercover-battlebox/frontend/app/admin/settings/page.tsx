@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useEffect, useState, useRef } from "react";
@@ -14,6 +15,7 @@ function sanitizeHostUsername(input: string): string {
     .replace(/[^a-z0-9._-]/g, "")
     .slice(0, 30);
 }
+
 function sanitizeHostId(input: string): string {
   if (!input) return "";
   return input.replace(/[^0-9]/g, "").slice(0, 32);
@@ -28,27 +30,24 @@ type ArenaSettings = {
 };
 
 type HostProfile = {
-  id: number;           // DB primary key
+  id: number;
   username: string;
   tiktok_id: string;
-  display_name: string;
-  created_at: string;
-  last_used_at: string | null;
-  is_active: boolean;
+  active: boolean;
 };
 
 export default function SettingsPage() {
-  // ------------------ NEW: Host Profiles ----------------------
+  // Host profiles
   const [hostProfiles, setHostProfiles] = useState<HostProfile[]>([]);
   const [activeHost, setActiveHost] = useState<HostProfile | null>(null);
 
-  // UI fields for new host
+  // New host form
   const [newHostUser, setNewHostUser] = useState("");
   const [newHostId, setNewHostId] = useState("");
   const manualHostIdEdit = useRef(false);
   const tiktokIdInputRef = useRef<HTMLInputElement | null>(null);
 
-  // ------------------ Settings / status -----------------------
+  // General state
   const [settings, setSettings] = useState<ArenaSettings>({
     roundDurationPre: 180,
     roundDurationFinal: 300,
@@ -66,7 +65,6 @@ export default function SettingsPage() {
   useEffect(() => {
     const socket = getAdminSocket();
 
-    // Initial fetch
     socket.emit("admin:getSettings", {}, (res: any) => {
       if (!res?.success) {
         setStatus(`❌ ${res?.message || "Kon instellingen niet laden"}`);
@@ -74,46 +72,58 @@ export default function SettingsPage() {
       }
 
       if (res.settings) setSettings(res.settings);
-
-      setConnected(true);
       setGameActive(!!res.gameActive);
+      setConnected(true);
+    });
 
-      // hosts ophalen
-      socket.emit("admin:listHosts", {}, (hres: any) => {
-        if (hres?.success) {
-          setHostProfiles(hres.hosts || []);
-          setActiveHost(hres.activeHost || null);
-        }
-      });
+    // Initial host load
+    socket.emit("admin:getHosts", {}, (res: any) => {
+      if (res?.success) {
+        setHostProfiles(res.hosts || []);
+        const active = res.hosts?.find((h: any) => h.active) || null;
+        setActiveHost(active);
+      }
     });
 
     socket.on("connect", () => setConnected(true));
     socket.on("disconnect", () => setConnected(false));
 
-    // Real-time host updates
-    socket.on("hosts:update", (payload: any) => {
-      setHostProfiles(payload.hosts || []);
-      setActiveHost(payload.activeHost || null);
+    // Host list update (from server)
+    socket.on("hosts", (hosts: any[]) => {
+      setHostProfiles(hosts);
+      const active = hosts.find((h) => h.active) || null;
+      setActiveHost(active);
     });
 
-    // Timers update
+    // Active host changed
+    socket.on("hostsActiveChanged", () => {
+      socket.emit("admin:getHosts", {}, (res: any) => {
+        if (res?.success) {
+          setHostProfiles(res.hosts);
+          const a = res.hosts.find((h: any) => h.active) || null;
+          setActiveHost(a);
+        }
+      });
+    });
+
+    socket.on("gameSession", (s: any) => setGameActive(!!s?.active));
+
     socket.on("settings", (s: ArenaSettings) =>
       setSettings((prev) => ({ ...prev, ...s }))
     );
 
-    socket.on("gameSession", (s: any) => setGameActive(!!s?.active));
-
     return () => {
       socket.off("connect");
       socket.off("disconnect");
+      socket.off("hosts");
+      socket.off("hostsActiveChanged");
       socket.off("settings");
-      socket.off("hosts:update");
       socket.off("gameSession");
     };
   }, []);
 
   // ---------------------------------------------------------------------
-  // AUTO TIKTOK-ID LOOKUP (for new host form)
+  // AUTO TIKTOK-ID LOOKUP
   // ---------------------------------------------------------------------
   useEffect(() => {
     if (!newHostUser) return;
@@ -126,6 +136,7 @@ export default function SettingsPage() {
         setNewHostId("...");
         const res = await fetch(`/api/tiktok-id/${newHostUser}`);
         const json = await res.json();
+
         if (cancelled) return;
 
         if (json.success && json.tiktok_id) {
@@ -157,20 +168,32 @@ export default function SettingsPage() {
     }
 
     const socket = getAdminSocket();
+
     socket.emit(
-      "admin:addHostProfile",
+      "admin:createHost",
       {
+        label: cleanUser,
         username: cleanUser,
         tiktok_id: cleanId,
       },
       (res: AdminAckResponse) => {
         setStatus(
-          res.success ? "✔ Host-profiel toegevoegd" : `❌ ${res.message}`
+          res.success ? "✔ Host-profiel opgeslagen" : `❌ ${res.message}`
         );
+
         if (res.success) {
-          manualHostIdEdit.current = false;
           setNewHostUser("");
           setNewHostId("");
+          manualHostIdEdit.current = false;
+
+          // reload
+          socket.emit("admin:getHosts", {}, (r: any) => {
+            if (r.success) {
+              setHostProfiles(r.hosts);
+              const active = r.hosts.find((h: any) => h.active) || null;
+              setActiveHost(active);
+            }
+          });
         }
       }
     );
@@ -186,28 +209,25 @@ export default function SettingsPage() {
     }
 
     const socket = getAdminSocket();
-    socket.emit("admin:activateHostProfile", { id }, (res: AdminAckResponse) => {
+    socket.emit("admin:setActiveHost", { id }, (res: any) => {
       setStatus(
-        res.success ? "✔ Actieve host gewijzigd" : `❌ ${res.message}`
+        res.success ? "✔ Actieve host ingesteld" : `❌ ${res.message}`
       );
     });
   };
 
   // ---------------------------------------------------------------------
-  // DELETE PROFILE
+  // DELETE HOST PROFILE
   // ---------------------------------------------------------------------
   const deleteProfile = (id: number) => {
     const socket = getAdminSocket();
-
-    socket.emit("admin:deleteHostProfile", { id }, (res: AdminAckResponse) => {
-      setStatus(
-        res.success ? "✔ Host-profiel verwijderd" : `❌ ${res.message}`
-      );
+    socket.emit("admin:deleteHost", { id }, (res: any) => {
+      setStatus(res.success ? "✔ Verwijderd" : `❌ ${res.message}`);
     });
   };
 
   // ---------------------------------------------------------------------
-  // UPDATE TIMER SETTINGS
+  // TIMERS
   // ---------------------------------------------------------------------
   const updateTimers = () => {
     const socket = getAdminSocket();
@@ -219,7 +239,7 @@ export default function SettingsPage() {
         graceSeconds: settings.graceSeconds,
         forceEliminations: settings.forceEliminations,
       },
-      (res: AdminAckResponse) => {
+      (res: any) => {
         setStatus(
           res.success
             ? "✔ Timer-instellingen opgeslagen"
@@ -252,43 +272,69 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* ========================= HOST PROFILES ========================= */}
+      {/* HOST PROFILES */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
         <h2 className="text-lg font-semibold mb-3">Host-profielen</h2>
 
-        {/* Active host display */}
+        {/* ================== ACTIVE HOST DROPDOWN (NEW) ================== */}
         <div className="mb-4">
-          <div className="text-xs text-gray-500">Actieve host:</div>
-          {activeHost ? (
-            <div className="text-lg font-semibold">
-              @{activeHost.username}  
-              <span className="text-gray-500 text-sm ml-2">
-                (ID: {activeHost.tiktok_id})
-              </span>
-            </div>
-          ) : (
-            <div className="text-sm text-gray-400">Geen actieve host geselecteerd</div>
-          )}
+          <div className="text-xs text-gray-500 mb-1">Actieve host:</div>
+
+          <div className="flex items-center gap-2">
+            <select
+              disabled={gameActive}
+              className={`px-3 py-2 border rounded-lg text-sm bg-white ${
+                gameActive ? "opacity-50 cursor-not-allowed" : ""
+              }`}
+              value={activeHost?.id ?? ""}
+              onChange={(e) => {
+                const id = Number(e.target.value);
+                if (!id) return;
+                activateProfile(id);
+              }}
+            >
+              <option value="">
+                {activeHost ? "Selecteer andere host…" : "Geen actieve host"}
+              </option>
+
+              {hostProfiles.map((h) => (
+                <option key={h.id} value={h.id}>
+                  {h.active ? "⭐ " : ""}@{h.username} (ID: {h.tiktok_id})
+                </option>
+              ))}
+            </select>
+
+            {activeHost && (
+              <div className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded-full">
+                Actief
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Profiles list */}
+        {/* Profile list */}
         <div className="border rounded-xl p-3 bg-gray-50 max-h-80 overflow-y-auto">
           {hostProfiles.length === 0 ? (
-            <p className="text-gray-500 text-sm italic">Nog geen host-profielen opgeslagen.</p>
+            <p className="text-gray-500 text-sm italic">
+              Nog geen host-profielen opgeslagen.
+            </p>
           ) : (
             hostProfiles.map((h) => (
               <div
                 key={h.id}
                 className={`flex items-center justify-between p-2 rounded-lg mb-2 ${
-                  h.is_active ? "bg-blue-100" : "bg-white"
+                  h.active ? "bg-blue-100" : "bg-white"
                 }`}
               >
                 <div>
                   <div className="font-semibold">@{h.username}</div>
-                  <div className="text-xs text-gray-500">ID: {h.tiktok_id}</div>
+                  <div className="text-xs text-gray-500">
+                    ID: {h.tiktok_id}
+                  </div>
                 </div>
+
                 <div className="flex gap-2">
-                  {!h.is_active && (
+                  {!h.active && (
                     <button
                       onClick={() => activateProfile(h.id)}
                       className="px-3 py-1 text-xs bg-green-600 text-white rounded-full"
@@ -308,9 +354,11 @@ export default function SettingsPage() {
           )}
         </div>
 
-        {/* ADD PROFILE FORM */}
+        {/* Add profile */}
         <div className="mt-5">
-          <h3 className="text-sm font-semibold mb-2">Nieuw host-profiel toevoegen</h3>
+          <h3 className="text-sm font-semibold mb-2">
+            Nieuw host-profiel toevoegen
+          </h3>
 
           <label className="text-xs text-gray-600">Username</label>
           <input
@@ -329,6 +377,7 @@ export default function SettingsPage() {
           >
             TikTok ID (klik om te focussen)
           </label>
+
           <input
             ref={tiktokIdInputRef}
             type="text"
@@ -349,7 +398,7 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* ========================= TIMERS ========================= */}
+      {/* TIMERS */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
         <h2 className="text-lg font-semibold mb-3">Game timers</h2>
 
@@ -403,6 +452,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {/* Force eliminations */}
         <label className="mt-4 flex items-center gap-2 text-xs text-gray-600">
           <input
             type="checkbox"
