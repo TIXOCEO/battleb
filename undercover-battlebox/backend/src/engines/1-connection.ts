@@ -1,15 +1,17 @@
 // ============================================================================
-// 1-connection.ts — v10.0 HARD HOST LOCK
+// 1-connection.ts — v11 SAFE MODE
 // Undercover BattleBox — TikTok LIVE Core Connection Engine
-// STRICT ADMIN-HOST → No mis-hosts. No fallback overrides. Ever.
-// Identity-sync preserved. Fallback only used if verified == admin host.
+// SAFE HOST LOCK + SAFE CONNECT + NO SIGN SPAM
 // ============================================================================
 
 import { WebcastPushConnection } from "tiktok-live-connector";
 import { getSetting, setSetting } from "../db";
 import { upsertIdentityFromLooseEvent } from "./2-user-engine";
-import { setLiveState, getHardHostId } from "../server";
+import { setLiveState } from "../server";
 
+// ============================================================================
+// HELPERS
+// ============================================================================
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function norm(v: any): string {
@@ -22,39 +24,43 @@ function norm(v: any): string {
     .slice(0, 30);
 }
 
+// Actieve verbinding
 let activeConn: WebcastPushConnection | null = null;
+let isIdle = true;
 
 // ============================================================================
-// START CONNECTION (STRICT HOST LOCK)
+// START CONNECTION — SAFE MODE (no loops)
 // ============================================================================
 export async function startConnection(
   username: string,
   onConnected: () => void
 ): Promise<{ conn: WebcastPushConnection | null }> {
+  
   const cleanHost = norm(username);
-
   console.log(`🔌 Verbinden met TikTok LIVE… @${cleanHost}`);
+
+  // Als systeem idle is omdat admin dat wilt → nooit automatisch verbinden
+  if (!cleanHost || cleanHost.length < 2) {
+    console.log("⚠ Geen geldige host ingesteld → IDLE");
+    isIdle = true;
+    return { conn: null };
+  }
+
+  isIdle = false;
 
   const conn = new WebcastPushConnection(cleanHost, {
     requestOptions: { timeout: 15000 },
     enableExtendedGiftInfo: true,
   });
 
-  let hostSaved = false;
   let connectedFired = false;
+  let hostSaved = false;
 
-  // fallback buffers (maar alleen geldig als match met admin host)
-  let fb_hostId: string | null = null;
-  let fb_unique: string | null = null;
-  let fb_nick: string | null = null;
-
-  // ========================================================================
-  // SAVE HOST — ONLY THE REAL ADMIN HOST
-  // ========================================================================
+  // ------------------------------------------------------------------------
+  // HOST SAVE FUNCTION
+  // ------------------------------------------------------------------------
   async function saveHost(id: string, uniqueId: string, nickname: string) {
-    if (!id) return;
-    if (hostSaved) return; // nooit dubbel opslaan
-
+    if (!id || hostSaved) return;
     hostSaved = true;
 
     const cleanUnique = norm(uniqueId);
@@ -65,11 +71,9 @@ export async function startConnection(
       nickname,
     });
 
-    // Opslaan in DB
     await setSetting("host_id", String(id));
     await setSetting("host_username", cleanUnique);
 
-    // TikTok identity sync
     await upsertIdentityFromLooseEvent({
       userId: String(id),
       uniqueId: cleanUnique,
@@ -79,12 +83,11 @@ export async function startConnection(
     console.log("✔ HOST definitief vastgelegd (HARD LOCK)");
   }
 
-  // ========================================================================
-  // FALLBACK DETECTIE — maar mag host NIET vervangen
-  // ========================================================================
+  // ------------------------------------------------------------------------
+  // FALLBACK CAPTURE (alleen ter detectie)
+  // ------------------------------------------------------------------------
   function captureFallback(raw: any) {
     if (connectedFired || hostSaved) return;
-
     const u =
       raw?.user ||
       raw?.sender ||
@@ -106,13 +109,14 @@ export async function startConnection(
     const unique = u?.uniqueId || u?.unique_id || null;
     const nick = u?.nickname || u?.displayName || null;
 
-    if (uid) fb_hostId = String(uid);
-    if (unique) fb_unique = norm(unique);
-    if (nick) fb_nick = nick;
+    if (uid && unique) {
+      saveHost(String(uid), unique, nick || unique);
+      onConnected(); // fallback accepted
+    }
   }
 
   function attachFallbackListeners(c: any) {
-    const evs = [
+    const events = [
       "enter",
       "member",
       "gift",
@@ -126,22 +130,18 @@ export async function startConnection(
       "liveRoomUser",
       "social",
     ];
-
-    for (const ev of evs) {
+    for (const ev of events) {
       try {
         c.on(ev, captureFallback);
       } catch {}
     }
-
-    console.log("🕵️‍♂️ Fallback actief (zonder host override)");
+    console.log("🕵️‍♂️ Fallback actief (alleen detectie)");
   }
 
-  // ========================================================================
-  // IDENTITY SYNC (zoals origineel, niets weggehaald)
-  // ========================================================================
+  // ------------------------------------------------------------------------
+  // IDENTITY SYNC
+  // ------------------------------------------------------------------------
   function attachIdentitySync(c: any) {
-    if (!c || typeof c.on !== "function") return;
-
     const update = (raw: any) => {
       upsertIdentityFromLooseEvent(
         raw?.user ||
@@ -153,7 +153,7 @@ export async function startConnection(
       );
     };
 
-    const baseEvents = [
+    const base = [
       "chat",
       "like",
       "follow",
@@ -164,8 +164,7 @@ export async function startConnection(
       "liveRoomUser",
       "enter",
     ];
-
-    for (const ev of baseEvents) {
+    for (const ev of base) {
       try {
         c.on(ev, update);
       } catch {}
@@ -186,100 +185,88 @@ export async function startConnection(
     console.log("👤 Identity-engine actief");
   }
 
-  // ========================================================================
-  // CONNECT LOOP (8 pogingen)
-  // ========================================================================
-  for (let attempt = 1; attempt <= 8; attempt++) {
-    try {
-      await conn.connect();
-
-      console.log(`✔ Verbonden met livestream van @${cleanHost}`);
-
-      conn.on("connected", async (info: any) => {
-        connectedFired = true;
-
-        console.log("══════════ CONNECTED ══════════");
-
-        setLiveState(true);
-
-        const hostId =
-          info?.hostId ||
-          info?.ownerId ||
-          info?.roomIdOwner ||
-          info?.user?.userId ||
-          info?.userId ||
-          null;
-
-        const unique =
-          info?.uniqueId ||
-          info?.ownerUniqueId ||
-          info?.user?.uniqueId ||
-          cleanHost;
-
-        const nick =
-          info?.nickname ||
-          info?.ownerNickname ||
-          info?.user?.nickname ||
-          unique;
-
-        console.log("🎯 CONNECTED HOST DETECTIE:", {
-          hostId,
-          unique,
-          nick,
-        });
-
-        if (hostId) {
-          await saveHost(String(hostId), unique, nick);
-        }
-
-        onConnected();
-      });
-
-      attachFallbackListeners(conn);
-      attachIdentitySync(conn);
-
-      // ====================================================================
-      // STRICT FALLBACK: alleen als fallback uniqueId == ADMIN HOST
-      // ====================================================================
-      setTimeout(async () => {
-        if (!connectedFired && !hostSaved) {
-          if (fb_unique === cleanHost && fb_hostId) {
-            console.log("⚠ STRICT FALLBACK (verified host):", {
-              id: fb_hostId,
-              unique: fb_unique,
-              nick: fb_nick,
-            });
-
-            await saveHost(
-              fb_hostId,
-              fb_unique || cleanHost,
-              fb_nick || fb_unique || cleanHost
-            );
-
-            onConnected();
-          } else {
-            console.log(
-              "⛔ Fallback genegeerd — uniqueId voldoet niet aan admin host"
-            );
-          }
-        }
-      }, 3000);
-
-      activeConn = conn;
-      return { conn };
-    } catch (err: any) {
-      console.error(`⛔ Verbinding mislukt (${attempt}/8):`, err?.message);
-
-      if (attempt === 8) {
-        console.error(`⚠ @${cleanHost} lijkt offline → IDLE`);
-        return { conn: null };
-      }
-
-      await wait(6000);
-    }
+  // ------------------------------------------------------------------------
+  // *** 1× CONNECT TRY — NO RETRIES ***
+  // ------------------------------------------------------------------------
+  try {
+    await conn.connect();
+  } catch (err: any) {
+    console.error("❌ Verbinden mislukt:", err?.message);
+    console.log("⚠ Host waarschijnlijk offline → IDLE MODE");
+    isIdle = true;
+    setLiveState(false);
+    return { conn: null };
   }
 
-  return { conn: null };
+  console.log(`✔ Verbonden met livestream van @${cleanHost}`);
+
+  // ------------------------------------------------------------------------
+  // CONNECTED EVENT
+  // ------------------------------------------------------------------------
+  conn.on("connected", async (info: any) => {
+    connectedFired = true;
+
+    console.log("══════════ CONNECTED ══════════");
+
+    setLiveState(true);
+
+    const hostId =
+      info?.hostId ||
+      info?.ownerId ||
+      info?.roomIdOwner ||
+      info?.user?.userId ||
+      info?.userId ||
+      null;
+
+    const unique =
+      info?.uniqueId ||
+      info?.ownerUniqueId ||
+      info?.user?.uniqueId ||
+      cleanHost;
+
+    const nick =
+      info?.nickname ||
+      info?.ownerNickname ||
+      info?.user?.nickname ||
+      unique;
+
+    console.log("🎯 CONNECTED HOST DETECTIE:", {
+      hostId,
+      unique,
+      nick,
+    });
+
+    if (hostId) {
+      await saveHost(String(hostId), unique, nick);
+    }
+
+    onConnected();
+  });
+
+  attachFallbackListeners(conn);
+  attachIdentitySync(conn);
+
+  // ------------------------------------------------------------------------
+  // DISCONNECT → één reconnect-poging → anders IDLE
+  // ------------------------------------------------------------------------
+  conn.on("disconnected", async () => {
+    console.log("🔻 Verbinding verbroken — poging tot één reconnect…");
+
+    try {
+      await conn.connect();
+      console.log("🔄 Reconnect gelukt");
+      return;
+    } catch (err) {
+      console.log("⛔ Reconnect mislukt → IDLE MODE");
+      isIdle = true;
+      setLiveState(false);
+      activeConn = null;
+      return;
+    }
+  });
+
+  activeConn = conn;
+  return { conn };
 }
 
 // ============================================================================
@@ -294,17 +281,16 @@ export async function stopConnection(
   console.log("🔌 Verbinding verbreken…");
 
   try {
-    if (typeof c.disconnect === "function") await c.disconnect();
-    else if (typeof (c as any).close === "function") await (c as any).close();
+    await c.disconnect();
   } catch (err) {
     console.error("❌ stopConnection fout:", err);
   }
 
   setLiveState(false);
-
-  if (!conn || conn === activeConn) activeConn = null;
+  activeConn = null;
+  isIdle = true;
 }
 
 // ============================================================================
-// END FILE
+// END
 // ============================================================================
