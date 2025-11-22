@@ -35,6 +35,9 @@ const SIGN_PROXY = "https://battlebox-sign-proxy.onrender.com/sign";
 // ============================================================================
 // 1: haal eerst numeric room-id via Euler PRO endpoint
 // ---------------------------------------------------------------------------
+// ============================================================================
+// 🔍 ROOM RESOLUTION (Euler PRO) — v13.0.1 strict TS safe
+// ============================================================================
 async function resolveRoomId(username: string) {
   console.log("🟦 [DEBUG] Starting room_id lookup…");
 
@@ -50,16 +53,21 @@ async function resolveRoomId(username: string) {
       },
     });
 
-    const json = await res.json();
+    // ---- FIX: expliciet casten naar any ----
+    const json: any = await res.json();
+
     console.log("🔍 [DEBUG] Euler /room_id response:", json);
 
-    if (!json.ok || json.is_live !== true) {
+    // Veiliger checken
+    if (!json || json.ok !== true || json.is_live !== true) {
       console.log("❌ [DEBUG] Euler reports: user not live or no data");
       return null;
     }
 
-    console.log("🟦 [DEBUG] Lookup result:", json.room_id);
-    return json.room_id;
+    const roomId = json.room_id;
+    console.log("🟦 [DEBUG] Lookup result:", roomId);
+
+    return roomId || null;
   } catch (err: any) {
     console.log("❌ [DEBUG] Euler room_id error:", err.message);
     return null;
