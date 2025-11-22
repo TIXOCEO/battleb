@@ -1,27 +1,18 @@
 // ============================================================================
-// 2-user-engine.ts — v11.1 HOST PROFILES EDITION
-// Identity Engine + Universal Normalizer + HARD HOST LOCK + Host Profiles
-// ============================================================================
-//
-// ✔ Compatible met hosts-tabel (server:getActiveHost())
-// ✔ Hard host lock blijft actief tijdens livestream
-// ✔ Host username komt uit actief profiel (nooit overschrijven tijdens live)
-// ✔ Display name wordt altijd live geüpdatet
-// ✔ Normal users blijven gewone upsert-flow gebruiken
-// ✔ Extractor vangt ALLE TikTok structuren
-// ✔ Foutloos in combinatie met gift/chat engines
-//
+// 2-user-engine.ts — v11.0 HOST PROFILES EDITION
+// Identity Engine + TikTok Universal Normalizer + HARD HOST LOCK
 // ============================================================================
 
 import pool from "../db";
 import {
   isStreamLive,
-  getActiveHost,  // <-- NEW: haalt actief hostprofiel uit server.ts
+  getActiveHost, // <── Host profile loader
 } from "../server";
 
 // ============================================================================
 // NORMALIZERS
 // ============================================================================
+
 function normUsername(v: any): string {
   return (v || "")
     .toString()
@@ -46,7 +37,7 @@ function big(v: string | number): bigint {
 }
 
 // ============================================================================
-// UNIVERSAL IDENTITY EXTRACTOR — kleedt ALLES uit TikTok events
+// UNIVERSAL IDENTITY EXTRACTOR
 // ============================================================================
 function extractIdentity(raw: any) {
   if (!raw) return { id: null, username: null, display: null };
@@ -114,23 +105,20 @@ export async function getUserByUsername(username: string) {
 }
 
 // ============================================================================
-// UPSERT IDENTITY (main entrypoint from gift/chat engines)
+// UPSERT IDENTITY FROM ANY EVENT (gift/chat/member/roomMessage)
 // ============================================================================
 export async function upsertIdentityFromLooseEvent(raw: any) {
   const { id, username, display } = extractIdentity(raw);
   if (!id) return;
 
-  const activeHost = getActiveHost(); // { username, tiktok_id, display_name? }
-  const isHost =
-    activeHost &&
-    activeHost.id &&
-    String(activeHost.id) === String(id);
-
+  const activeHost = getActiveHost(); // → { id, username }
+  const isHost = activeHost && String(activeHost.id) === String(id);
   const lockedHostUsername = activeHost?.username || "";
+
   const cleanDisplay = display || "Onbekend";
   let cleanUsername = username || "unknown";
 
-  // --- HOST LOGICA ---
+  // Ensure host username never gets overwritten incorrectly
   if (isHost) {
     const existing = await getUserByTikTokId(id);
 
@@ -145,13 +133,13 @@ export async function upsertIdentityFromLooseEvent(raw: any) {
     }
   }
 
-  // --- HARD HOST LOCK TIJDENS LIVESTREAM ---
+  // During LIVE → prevent host username overwrite
   if (isHost && isStreamLive()) {
     await pool.query(
       `
       INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at)
-      VALUES ($1,$2,$3,NOW(),NOW())
-      ON CONFLICT (tiktok_id) DO UPDATE SET
+      VALUES ($1, $2, $3, NOW(), NOW())
+      ON CONFLICT(tiktok_id) DO UPDATE SET
         display_name = EXCLUDED.display_name,
         last_seen_at = NOW()
       `,
@@ -160,12 +148,12 @@ export async function upsertIdentityFromLooseEvent(raw: any) {
     return;
   }
 
-  // --- NORMAL UPSERT / HOST BUITEN LIVESTREAM ---
+  // Normal user or host outside stream
   await pool.query(
     `
     INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at)
     VALUES ($1,$2,$3,NOW(),NOW())
-    ON CONFLICT (tiktok_id) DO UPDATE SET
+    ON CONFLICT(tiktok_id) DO UPDATE SET
       username = EXCLUDED.username,
       display_name = EXCLUDED.display_name,
       last_seen_at = NOW()
@@ -175,7 +163,7 @@ export async function upsertIdentityFromLooseEvent(raw: any) {
 }
 
 // ============================================================================
-// DIRECT UPSERT — gebruikt door arena/queue/admin acties
+// DIRECT UPSERT
 // ============================================================================
 export async function upsertUser(
   tiktok_id: string,
@@ -186,25 +174,21 @@ export async function upsertUser(
   const cleanDisp = normDisplay(display_name);
 
   const activeHost = getActiveHost();
-  const isHost =
-    activeHost &&
-    activeHost.id &&
-    String(activeHost.id) === String(tiktok_id);
-
+  const isHost = activeHost && String(activeHost.id) === String(tiktok_id);
   const lockedHostUsername = activeHost?.username || "";
 
-  // Hard lock
   if (isHost && isStreamLive()) {
     const existing = await getUserByTikTokId(tiktok_id);
+
     const finalUsername =
       existing?.username ||
       (lockedHostUsername ? normUsername(lockedHostUsername) : cleanUser);
 
     await pool.query(
       `
-      INSERT INTO users(tiktok_id, username, display_name, created_at, last_seen_at)
+      INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at)
       VALUES ($1,$2,$3,NOW(),NOW())
-      ON CONFLICT (tiktok_id) DO UPDATE SET
+      ON CONFLICT(tiktok_id) DO UPDATE SET
         display_name = EXCLUDED.display_name,
         last_seen_at = NOW()
       `,
@@ -213,10 +197,9 @@ export async function upsertUser(
     return;
   }
 
-  // Normale users of host buiten live
   await pool.query(
     `
-    INSERT INTO users(tiktok_id, username, display_name, created_at, last_seen_at)
+    INSERT INTO users (tiktok_id, username, display_name, created_at, last_seen_at)
     VALUES ($1,$2,$3,NOW(),NOW())
     ON CONFLICT(tiktok_id) DO UPDATE SET
       username = EXCLUDED.username,
@@ -228,7 +211,7 @@ export async function upsertUser(
 }
 
 // ============================================================================
-// MAIN ENTRY — gift-engine / chat-engine roept deze aan
+// MAIN ENTRY FOR ENGINES
 // ============================================================================
 export async function getOrUpdateUser(
   tiktokId: string,
@@ -241,10 +224,7 @@ export async function getOrUpdateUser(
   if (existing) return existing;
 
   const activeHost = getActiveHost();
-  const isHost =
-    activeHost &&
-    activeHost.id &&
-    String(activeHost.id) === String(id);
+  const isHost = activeHost && String(activeHost.id) === String(id);
 
   const finalUsername =
     username ||
@@ -252,10 +232,11 @@ export async function getOrUpdateUser(
       ? activeHost?.username || existing?.username || "unknown"
       : existing?.username || "unknown");
 
+  // FIX: display_name is NOT in host profile → fallback to DB or "Onbekend"
   const finalDisplay =
     displayName ||
     (isHost
-      ? activeHost?.display_name || "Onbekend"
+      ? existing?.display_name || "Onbekend"
       : existing?.display_name || "Onbekend");
 
   await upsertUser(id, finalUsername, finalDisplay);
