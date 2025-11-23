@@ -88,65 +88,69 @@ export default function AdminDashboardPage() {
   /* ===========================================
      SOCKET INIT
   ============================================ */
-  useEffect(() => {
-    const socket = getAdminSocket();
+useEffect(() => {
+  const socket = getAdminSocket();
 
-    /* CONNECTION STATE */
-    socket.on("connect", () => {
-      setConnected("connected");
-      setStatus("🟢 Verbonden met server");
-    });
+  /* CONNECTION STATE */
+  socket.on("connect", () => {
+    setConnected("connected");
+    setStatus("🟢 Verbonden met server");
+  });
 
-    socket.on("disconnect", () => {
-      setConnected("disconnected");
-      setStatus("🔴 Verbroken");
-    });
+  socket.on("disconnect", () => {
+    setConnected("disconnected");
+    setStatus("🔴 Verbroken");
+  });
 
-    socket.on("connect_error", () => {
-      setConnected("disconnected");
-      setStatus("❌ Socket fout");
-    });
+  socket.on("connect_error", () => {
+    setConnected("disconnected");
+    setStatus("❌ Socket fout");
+  });
 
-    /* LIVE STATE */
-    socket.on("updateArena", (data) => setArena(data));
-    socket.on("updateQueue", (data) => {
-      setQueue(data.entries ?? []);
-      setQueueOpen(data.open ?? true);
-    });
+  /* ARENA EVENTS */
+  socket.on("updateArena", (data) => setArena(data));
+  socket.on("updateQueue", (d) => {
+    setQueue(d.entries ?? []);
+    setQueueOpen(d.open ?? true);
+  });
 
-    /* LOGS */
-    socket.on("log", (l) =>
-      setLogs((prev) => [l, ...prev].slice(0, 200))
-    );
-    socket.on("initialLogs", (arr) => setLogs(arr.slice(0, 200)));
+  /* LOGS */
+  socket.on("log", (l) =>
+    setLogs((prev) => [l, ...prev].slice(0, 200))
+  );
 
-    /* STATS */
-    socket.on("streamStats", (s) => setStreamStats(s));
+  socket.on("initialLogs", (arr) =>
+    setLogs(arr.slice(0, 200))
+  );
 
-    /* LEADERBOARDS */
-    socket.on("leaderboardPlayers", (rows) =>
-      setPlayerLeaderboard(rows ?? [])
-    );
-    socket.on("leaderboardGifters", (rows) =>
-      setGifterLeaderboard(rows ?? [])
-    );
+  /* STREAM STATS */
+  socket.on("streamStats", (s) => setStreamStats(s));
 
-    /* GAME SESSION STATE */
-    socket.on("gameSession", (s) => setGameSession(s));
+  /* LEADERBOARDS */
+  socket.on("leaderboardPlayers", (rows) => setPlayerLeaderboard(rows ?? []));
+  socket.on("leaderboardGifters", (rows) => setGifterLeaderboard(rows ?? []));
 
-    /* ROUND EVENTS */
-    socket.on("round:start", (d) =>
-      setStatus(`▶️ Ronde gestart (${d.type}) — ${d.duration}s`)
-    );
-    socket.on("round:grace", (d) =>
-      setStatus(`⏳ Grace-periode actief (${d.grace}s)`)
-    );
-    socket.on("round:end", () =>
-      setStatus("⛔ Ronde beëindigd — voer eliminaties uit")
-    );
+  /* GAME SESSION */
+  socket.on("gameSession", (s) => setGameSession(s));
 
-    return () => socket.removeAllListeners();
-  }, []);
+  /* ROUND STATUS */
+  socket.on("round:start", (d) =>
+    setStatus(`▶️ Ronde gestart (${d.type}) — ${d.duration}s`)
+  );
+
+  socket.on("round:grace", (d) =>
+    setStatus(`⏳ Grace-periode actief (${d.grace}s)`)
+  );
+
+  socket.on("round:end", () =>
+    setStatus("⛔ Ronde beëindigd — voer eliminaties uit")
+  );
+
+  /* CLEANUP IS BELANGRIJK */
+  return () => {
+    socket.removeAllListeners();
+  };
+}, []);
 
   /* ===========================================
      AUTOCOMPLETE (STRICT)
