@@ -1,5 +1,5 @@
 // ============================================================================
-// 3-gift-engine.ts — v11.1 FINAL HOST PROFILE EDITION (TSC FIXED)
+// 3-gift-engine.ts — v11.3 FAN (24h) + VIP (30d ADMIN ONLY) EDITION
 // ============================================================================
 
 import pool from "../db";
@@ -26,7 +26,6 @@ import { addTwistByGift } from "./8-twist-engine";
 // ============================================================================
 // DEDUPE
 // ============================================================================
-
 const dedupe = new Set<string>();
 setInterval(() => dedupe.clear(), 20000);
 
@@ -61,33 +60,43 @@ function now() {
 function formatDisplay(u: any) {
   if (!u) return "Onbekend";
   if (u.is_host) return `${u.display_name} [HOST]`;
+  if (u.is_vip) return `${u.display_name} [VIP]`;
   if (u.is_fan) return `${u.display_name} [FAN]`;
   return u.display_name;
 }
 
 // ============================================================================
-// FAN EXPIRE
+// FAN + VIP EXPIRE
 // ============================================================================
-async function cleanupFan(id: string) {
+async function cleanupFanVip(id: string) {
   const r = await pool.query(
-    `SELECT is_fan, fan_expires_at FROM users WHERE tiktok_id=$1`,
+    `SELECT is_fan, fan_expires_at, is_vip, vip_expires_at
+     FROM users
+     WHERE tiktok_id=$1`,
     [BigInt(id)]
   );
 
-  if (!r.rows[0]) return false;
-  const { is_fan, fan_expires_at } = r.rows[0];
+  if (!r.rows[0]) return;
 
-  if (!is_fan || !fan_expires_at) return false;
+  const { is_fan, fan_expires_at, is_vip, vip_expires_at } = r.rows[0];
 
-  if (new Date(fan_expires_at).getTime() <= now()) {
+  const ts = now();
+
+  // FAN expires after 24 hours
+  if (is_fan && fan_expires_at && new Date(fan_expires_at).getTime() <= ts) {
     await pool.query(
       `UPDATE users SET is_fan=FALSE, fan_expires_at=NULL WHERE tiktok_id=$1`,
       [BigInt(id)]
     );
-    return false;
   }
 
-  return true;
+  // VIP expires after 30 days
+  if (is_vip && vip_expires_at && new Date(vip_expires_at).getTime() <= ts) {
+    await pool.query(
+      `UPDATE users SET is_vip=FALSE, vip_expires_at=NULL WHERE tiktok_id=$1`,
+      [BigInt(id)]
+    );
+  }
 }
 
 // ============================================================================
@@ -144,15 +153,12 @@ function calcDiamonds(evt: any): number {
 }
 
 // ============================================================================
-// RECEIVER PARSER — HOST LOCK
+// RECEIVER — HARD HOST LOCK
 // ============================================================================
 async function resolveReceiver(evt: any) {
   const active = getActiveHost();
-  const HOST_ID_RAW = active?.id || null;
+  const HOST_ID = active?.id ? String(active.id) : "";
   const HOST_USERNAME = active?.username || "";
-
-  // safe string
-  const HOST_ID = HOST_ID_RAW ? String(HOST_ID_RAW) : "";
 
   const directId =
     evt.receiverUserId ||
@@ -176,12 +182,13 @@ async function resolveReceiver(evt: any) {
     return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
   }
 
-  // username lock
+  // Username lock
   if (HOST_USERNAME && un === HOST_USERNAME) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
   }
 
+  // Normal player
   if (directId) {
     const u = await getOrUpdateUser(String(directId), null, null);
     return {
@@ -201,10 +208,9 @@ async function resolveReceiver(evt: any) {
 }
 
 // ============================================================================
-// HEART ME
+// HEART ME = FAN (24h)
 // ============================================================================
 const HEART_ME_GIFT_IDS = new Set([7934]);
-
 function isHeartMeGift(evt: any): boolean {
   const name = (evt.giftName || "").toLowerCase().trim();
   if (name === "heart me") return true;
@@ -226,7 +232,7 @@ async function processGift(evt: any, source: string) {
     if (!S.id) return;
 
     const sender = await getOrUpdateUser(String(S.id), S.nick, S.unique);
-    await cleanupFan(sender.tiktok_id);
+    await cleanupFanVip(sender.tiktok_id);
 
     const diamonds = calcDiamonds(evt);
     if (diamonds <= 0) return;
@@ -253,7 +259,7 @@ async function processGift(evt: any, source: string) {
     const is_round_gift = inRound && !isHostReceiver;
     const round_active = arena.status === "active";
 
-    // sender points
+    // Add diamonds to sender
     await addDiamonds(BigInt(sender.tiktok_id), diamonds, "total");
     await addDiamonds(BigInt(sender.tiktok_id), diamonds, "stream");
     await addDiamonds(BigInt(sender.tiktok_id), diamonds, "current_round");
@@ -265,30 +271,32 @@ async function processGift(evt: any, source: string) {
       sender.display_name
     );
 
-    // arena diamonds
+    // Arena receiver points
     if (receiver.id && is_round_gift) {
       await safeAddArenaDiamonds(String(receiver.id), diamonds);
     }
 
-    // host receiver
+    // Host receiver diamonds
     if (isHostReceiver && receiver.id) {
       await pool.query(
-        `
-        UPDATE users
-        SET diamonds_total = diamonds_total + $1,
-            diamonds_stream = diamonds_stream + $1,
-            diamonds_current_round = diamonds_current_round + $1
-        WHERE tiktok_id=$2
-      `,
+        `UPDATE users
+         SET diamonds_total = diamonds_total + $1,
+             diamonds_stream = diamonds_stream + $1,
+             diamonds_current_round = diamonds_current_round + $1
+         WHERE tiktok_id=$2`,
         [diamonds, BigInt(String(receiver.id))]
       );
     }
 
-    // fan gift
+    // FAN gift (24h)
     if (isHostReceiver && isHeartMeGift(evt)) {
       const expires = new Date(nowMs + 24 * 3600 * 1000);
+
       await pool.query(
-        `UPDATE users SET is_fan=TRUE, fan_expires_at=$1 WHERE tiktok_id=$2`,
+        `UPDATE users
+         SET is_fan=TRUE,
+             fan_expires_at=$1
+         WHERE tiktok_id=$2`,
         [expires, BigInt(sender.tiktok_id)]
       );
 
@@ -298,7 +306,9 @@ async function processGift(evt: any, source: string) {
       });
     }
 
-    // twist gifts
+    // NO VIP GIFTS ANYMORE (ADMIN ONLY)
+
+    // TWISTS
     const giftId = Number(evt.giftId);
     const twistType =
       (Object.keys(TWIST_MAP) as TwistType[])
@@ -306,6 +316,7 @@ async function processGift(evt: any, source: string) {
 
     if (twistType) {
       await addTwistByGift(String(sender.tiktok_id), twistType);
+
       emitLog({
         type: "twist",
         message: `${senderFmt} ontving twist: ${TWIST_MAP[twistType].giftName}`,
@@ -314,6 +325,7 @@ async function processGift(evt: any, source: string) {
 
     const gameId = (io as any).currentGameId ?? null;
 
+    // LOG GIFT
     await pool.query(
       `
       INSERT INTO gifts (
@@ -367,7 +379,7 @@ async function processGift(evt: any, source: string) {
 }
 
 // ============================================================================
-// INIT ENGINE
+// INIT
 // ============================================================================
 export function initGiftEngine(conn: any) {
   if (!conn || typeof conn.on !== "function") {
@@ -375,7 +387,7 @@ export function initGiftEngine(conn: any) {
     return;
   }
 
-  console.log("🎁 GiftEngine v11.1 LOADED");
+  console.log("🎁 GiftEngine v11.3 LOADED");
 
   conn.on("gift", (d: any) => processGift(d, "gift"));
   conn.on("roomMessage", (d: any) => {
