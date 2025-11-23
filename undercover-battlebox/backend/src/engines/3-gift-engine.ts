@@ -1,5 +1,5 @@
 // ============================================================================
-// 3-gift-engine.ts — v11.3 FAN (24h) + VIP (30d ADMIN ONLY) EDITION
+// 3-gift-engine.ts — v11.1 FINAL HOST PROFILE EDITION
 // ============================================================================
 
 import pool from "../db";
@@ -16,7 +16,7 @@ import {
   emitLog,
   io,
   broadcastStats,
-  broadcastPlayerLeaderboard,
+  broadcastRoundLeaderboard,
   getActiveHost,
 } from "../server";
 
@@ -26,6 +26,7 @@ import { addTwistByGift } from "./8-twist-engine";
 // ============================================================================
 // DEDUPE
 // ============================================================================
+
 const dedupe = new Set<string>();
 setInterval(() => dedupe.clear(), 20000);
 
@@ -43,6 +44,7 @@ function makeDedupeKey(evt: any, source: string) {
 // ============================================================================
 // NORMALIZERS
 // ============================================================================
+
 function norm(v: any) {
   return (v || "")
     .toString()
@@ -60,48 +62,40 @@ function now() {
 function formatDisplay(u: any) {
   if (!u) return "Onbekend";
   if (u.is_host) return `${u.display_name} [HOST]`;
-  if (u.is_vip) return `${u.display_name} [VIP]`;
   if (u.is_fan) return `${u.display_name} [FAN]`;
   return u.display_name;
 }
 
 // ============================================================================
-// FAN + VIP EXPIRE
+// FAN EXPIRE
 // ============================================================================
-async function cleanupFanVip(id: string) {
+
+async function cleanupFan(id: string) {
   const r = await pool.query(
-    `SELECT is_fan, fan_expires_at, is_vip, vip_expires_at
-     FROM users
-     WHERE tiktok_id=$1`,
+    `SELECT is_fan, fan_expires_at FROM users WHERE tiktok_id=$1`,
     [BigInt(id)]
   );
 
-  if (!r.rows[0]) return;
+  if (!r.rows[0]) return false;
+  const { is_fan, fan_expires_at } = r.rows[0];
 
-  const { is_fan, fan_expires_at, is_vip, vip_expires_at } = r.rows[0];
+  if (!is_fan || !fan_expires_at) return false;
 
-  const ts = now();
-
-  // FAN expires after 24 hours
-  if (is_fan && fan_expires_at && new Date(fan_expires_at).getTime() <= ts) {
+  if (new Date(fan_expires_at).getTime() <= now()) {
     await pool.query(
       `UPDATE users SET is_fan=FALSE, fan_expires_at=NULL WHERE tiktok_id=$1`,
       [BigInt(id)]
     );
+    return false;
   }
 
-  // VIP expires after 30 days
-  if (is_vip && vip_expires_at && new Date(vip_expires_at).getTime() <= ts) {
-    await pool.query(
-      `UPDATE users SET is_vip=FALSE, vip_expires_at=NULL WHERE tiktok_id=$1`,
-      [BigInt(id)]
-    );
-  }
+  return true;
 }
 
 // ============================================================================
 // SENDER PARSER
 // ============================================================================
+
 function extractSender(evt: any) {
   const raw =
     evt.user ||
@@ -139,6 +133,7 @@ function extractSender(evt: any) {
 // ============================================================================
 // DIAMONDS
 // ============================================================================
+
 function calcDiamonds(evt: any): number {
   const base = Number(evt.diamondCount || evt.diamond || 0);
   if (base <= 0) return 0;
@@ -153,11 +148,12 @@ function calcDiamonds(evt: any): number {
 }
 
 // ============================================================================
-// RECEIVER — HARD HOST LOCK
+// RECEIVER PARSER — HOST LOCK
 // ============================================================================
+
 async function resolveReceiver(evt: any) {
   const active = getActiveHost();
-  const HOST_ID = active?.id ? String(active.id) : "";
+  const HOST_ID = active?.id || null;
   const HOST_USERNAME = active?.username || "";
 
   const directId =
@@ -176,27 +172,19 @@ async function resolveReceiver(evt: any) {
 
   const un = unique ? norm(unique) : null;
 
-  // ID lock
-  if (HOST_ID && directId && String(directId) === HOST_ID) {
+  if (HOST_ID && directId && String(directId) === String(HOST_ID)) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
   }
 
-  // Username lock
   if (HOST_USERNAME && un === HOST_USERNAME) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
   }
 
-  // Normal player
   if (directId) {
     const u = await getOrUpdateUser(String(directId), null, null);
-    return {
-      id: u.tiktok_id,
-      username: u.username,
-      display_name: u.display_name,
-      role: "speler",
-    };
+    return { id: u.tiktok_id, username: u.username, display_name: u.display_name, role: "speler" };
   }
 
   if (HOST_ID) {
@@ -208,9 +196,11 @@ async function resolveReceiver(evt: any) {
 }
 
 // ============================================================================
-// HEART ME = FAN (24h)
+// HEART ME
 // ============================================================================
+
 const HEART_ME_GIFT_IDS = new Set([7934]);
+
 function isHeartMeGift(evt: any): boolean {
   const name = (evt.giftName || "").toLowerCase().trim();
   if (name === "heart me") return true;
@@ -220,6 +210,7 @@ function isHeartMeGift(evt: any): boolean {
 // ============================================================================
 // MAIN PROCESSOR
 // ============================================================================
+
 async function processGift(evt: any, source: string) {
   try {
     const key = makeDedupeKey(evt, source);
@@ -231,8 +222,8 @@ async function processGift(evt: any, source: string) {
     const S = extractSender(evt);
     if (!S.id) return;
 
-    const sender = await getOrUpdateUser(String(S.id), S.nick, S.unique);
-    await cleanupFanVip(sender.tiktok_id);
+    const sender = await getOrUpdateUser(S.id, S.nick, S.unique);
+    await cleanupFan(sender.tiktok_id);
 
     const diamonds = calcDiamonds(evt);
     if (diamonds <= 0) return;
@@ -259,7 +250,7 @@ async function processGift(evt: any, source: string) {
     const is_round_gift = inRound && !isHostReceiver;
     const round_active = arena.status === "active";
 
-    // Add diamonds to sender
+    // sender points
     await addDiamonds(BigInt(sender.tiktok_id), diamonds, "total");
     await addDiamonds(BigInt(sender.tiktok_id), diamonds, "stream");
     await addDiamonds(BigInt(sender.tiktok_id), diamonds, "current_round");
@@ -271,32 +262,30 @@ async function processGift(evt: any, source: string) {
       sender.display_name
     );
 
-    // Arena receiver points
+    // arena diamonds
     if (receiver.id && is_round_gift) {
       await safeAddArenaDiamonds(String(receiver.id), diamonds);
     }
 
-    // Host receiver diamonds
+    // host receiver
     if (isHostReceiver && receiver.id) {
       await pool.query(
-        `UPDATE users
-         SET diamonds_total = diamonds_total + $1,
-             diamonds_stream = diamonds_stream + $1,
-             diamonds_current_round = diamonds_current_round + $1
-         WHERE tiktok_id=$2`,
+        `
+        UPDATE users
+        SET diamonds_total = diamonds_total + $1,
+            diamonds_stream = diamonds_stream + $1,
+            diamonds_current_round = diamonds_current_round + $1
+        WHERE tiktok_id=$2
+      `,
         [diamonds, BigInt(String(receiver.id))]
       );
     }
 
-    // FAN gift (24h)
+    // fan gift
     if (isHostReceiver && isHeartMeGift(evt)) {
       const expires = new Date(nowMs + 24 * 3600 * 1000);
-
       await pool.query(
-        `UPDATE users
-         SET is_fan=TRUE,
-             fan_expires_at=$1
-         WHERE tiktok_id=$2`,
+        `UPDATE users SET is_fan=TRUE, fan_expires_at=$1 WHERE tiktok_id=$2`,
         [expires, BigInt(sender.tiktok_id)]
       );
 
@@ -306,9 +295,7 @@ async function processGift(evt: any, source: string) {
       });
     }
 
-    // NO VIP GIFTS ANYMORE (ADMIN ONLY)
-
-    // TWISTS
+    // twist gifts
     const giftId = Number(evt.giftId);
     const twistType =
       (Object.keys(TWIST_MAP) as TwistType[])
@@ -325,7 +312,6 @@ async function processGift(evt: any, source: string) {
 
     const gameId = (io as any).currentGameId ?? null;
 
-    // LOG GIFT
     await pool.query(
       `
       INSERT INTO gifts (
@@ -366,7 +352,7 @@ async function processGift(evt: any, source: string) {
     );
 
     await broadcastStats();
-    await broadcastPlayerLeaderboard();
+    await broadcastRoundLeaderboard();
 
     emitLog({
       type: "gift",
@@ -379,15 +365,16 @@ async function processGift(evt: any, source: string) {
 }
 
 // ============================================================================
-// INIT
+// INIT ENGINE
 // ============================================================================
+
 export function initGiftEngine(conn: any) {
   if (!conn || typeof conn.on !== "function") {
     console.log("⚠ initGiftEngine: no connection");
     return;
   }
 
-  console.log("🎁 GiftEngine v11.3 LOADED");
+  console.log("🎁 GiftEngine v11.1 LOADED");
 
   conn.on("gift", (d: any) => processGift(d, "gift"));
   conn.on("roomMessage", (d: any) => {
@@ -405,6 +392,7 @@ export function initGiftEngine(conn: any) {
 // ============================================================================
 // EXPORT
 // ============================================================================
+
 export default {
   initGiftEngine,
 };
