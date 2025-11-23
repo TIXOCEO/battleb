@@ -75,7 +75,6 @@ export interface AdminSocketInbound {
     };
   }) => void;
 
-  // heartbeat
   pong: () => void;
 }
 
@@ -83,6 +82,15 @@ export interface AdminSocketInbound {
    OUTBOUND EVENTS (CLIENT → SERVER)
 =========================================== */
 export interface AdminSocketOutbound {
+
+  /* =====================
+      INITIAL SNAPSHOT
+  ===================== */
+  "admin:getInitialSnapshot": (
+    payload?: {},
+    cb?: (snap: any) => void
+  ) => void;
+
   /* =====================
       HOSTS
   ===================== */
@@ -140,7 +148,7 @@ export interface AdminSocketOutbound {
   ) => void;
 
   /* =====================
-      PREMIUM (VIP/FAN)
+      PREMIUM
   ===================== */
   "admin:giveVip": (
     payload: { username: string },
@@ -210,13 +218,8 @@ export interface AdminSocketOutbound {
     cb?: AdminAckResponse
   ) => void;
 
-  "admin:getInitialState": (
-    payload?: {},
-    cb?: (res: any) => void
-  ) => void;
-
   /* =====================
-      SEARCH USERS (ACK)
+      SEARCH
   ===================== */
   "admin:searchUsers": (
     payload: { query: string },
@@ -224,7 +227,7 @@ export interface AdminSocketOutbound {
   ) => void;
 
   /* =====================
-      HEALTH CHECK
+      HEARTBEAT
   ===================== */
   ping: () => void;
 }
@@ -262,9 +265,9 @@ export function getAdminSocket(): Socket<
   /* AUTO-RESYNC NA CONNECT */
   socket.on("connect", () => {
     console.log("✅ Admin socket verbonden:", socket.id);
+
     socket.emit("ping");
-    socket.emit("admin:getInitialState", {});
-    socket.emit("admin:searchUsers", { query: "" }, () => {});
+    socket.emit("admin:getInitialSnapshot", {}); // ✔ FIXED
     socket.emit("admin:getHosts", {}, () => {});
     socket.emit("admin:getSettings", {}, () => {});
   });
