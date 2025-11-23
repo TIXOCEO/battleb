@@ -30,7 +30,7 @@ type GameSessionState = {
 };
 
 /* ===========================================
-   STRICT GENERIC EMITTER (SAFE)
+   STRICT EMITTER — TYPE-SAFE
 =========================================== */
 function emitAdmin<E extends keyof AdminSocketOutbound>(
   event: E,
@@ -45,7 +45,7 @@ function emitAdmin<E extends keyof AdminSocketOutbound>(
 }
 
 /* ===========================================
-   STRICT USER-EMITTER (ALLEEN USER COMMANDS)
+   ONLY USER COMMANDS
 =========================================== */
 function emitUser(
   event: keyof Pick<
@@ -73,10 +73,12 @@ function emitUser(
 }
 
 /* ===========================================
-   DASHBOARD COMPONENT
+   COMPONENT
 =========================================== */
 export default function AdminDashboardPage() {
-  /* CORE STATE */
+  /* -------------------------------------------
+     CORE STATE
+  ------------------------------------------- */
   const [arena, setArena] = useState<ArenaState | null>(null);
   const [queue, setQueue] = useState<QueueEntry[]>([]);
   const [queueOpen, setQueueOpen] = useState(true);
@@ -100,31 +102,37 @@ export default function AdminDashboardPage() {
     gameId: null,
   });
 
-  /* INPUT STATE */
   const [username, setUsername] = useState("");
   const [status, setStatus] = useState<string | null>(null);
 
-  /* TWISTS */
+  /* -------------------------------------------
+     TWISTS
+  ------------------------------------------- */
   const [twistUserGive, setTwistUserGive] = useState("");
   const [twistUserUse, setTwistUserUse] = useState("");
   const [twistTargetUse, setTwistTargetUse] = useState("");
   const [twistTypeGive, setTwistTypeGive] = useState("");
   const [twistTypeUse, setTwistTypeUse] = useState("");
 
-  /* AUTOCOMPLETE */
+  /* -------------------------------------------
+     AUTOCOMPLETE STATE
+  ------------------------------------------- */
   const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
   const [typing, setTyping] = useState("");
   const [showResults, setShowResults] = useState(false);
+
   const [activeAutoField, setActiveAutoField] =
     useState<null | "main" | "give" | "use" | "target">(null);
 
-  /* CONNECTION INDICATOR */
+  /* -------------------------------------------
+     CONNECTION STATE
+  ------------------------------------------- */
   const [connected, setConnected] = useState<
     "connected" | "disconnected" | "connecting"
   >("connecting");
 
   /* ===========================================
-     SOCKET INIT
+     SOCKET INIT — FIXED, CLEAN, SAFE
   ============================================ */
   useEffect(() => {
     const socket = getAdminSocket();
@@ -147,7 +155,6 @@ export default function AdminDashboardPage() {
 
     /* ARENA */
     socket.on("updateArena", (data) => setArena(data));
-
     socket.on("updateQueue", (d) => {
       setQueue(d.entries ?? []);
       setQueueOpen(d.open ?? true);
@@ -155,17 +162,21 @@ export default function AdminDashboardPage() {
 
     /* LOGS */
     socket.on("log", (l) =>
-      setLogs((p) => [l, ...p].splice(0, 200))
+      setLogs((p) => [l, ...p].slice(0, 200))
     );
 
     socket.on("initialLogs", (arr) =>
       setLogs(arr.slice(0, 200))
     );
 
-    /* STATS + LEADERBOARDS */
+    /* LEADERBOARDS & STATS */
     socket.on("streamStats", (s) => setStreamStats(s));
-    socket.on("leaderboardPlayers", (rows) => setPlayerLeaderboard(rows ?? []));
-    socket.on("leaderboardGifters", (rows) => setGifterLeaderboard(rows ?? []));
+    socket.on("leaderboardPlayers", (rows) =>
+      setPlayerLeaderboard(rows ?? [])
+    );
+    socket.on("leaderboardGifters", (rows) =>
+      setGifterLeaderboard(rows ?? [])
+    );
 
     /* GAME SESSION */
     socket.on("gameSession", (s) => setGameSession(s));
@@ -183,7 +194,12 @@ export default function AdminDashboardPage() {
       setStatus("⛔ Ronde beëindigd — voer eliminaties uit")
     );
 
-    return () => socket.removeAllListeners();
+    /* -----------------------------------------
+       ✔️ PERFECTE CLEANUP (build-proof)
+    -------------------------------------------- */
+    return () => {
+      socket.removeAllListeners();
+    };
   }, []);
 
   /* ===========================================
@@ -233,7 +249,7 @@ export default function AdminDashboardPage() {
       finalScore:
         arena.type === "finale"
           ? ((p as any)._total ?? 0) + (p.diamonds ?? 0)
-          : (p.diamonds ?? 0),
+          : p.diamonds ?? 0,
     }));
   }, [arena]);
 
@@ -483,7 +499,6 @@ export default function AdminDashboardPage() {
                 placeholder="@zoeken"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
               />
-
               {/* AUTOCOMPLETE */}
               {showResults &&
                 searchResults.length > 0 &&
@@ -864,7 +879,7 @@ export default function AdminDashboardPage() {
         <h2 className="text-xl font-semibold mb-4">Twists</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* GIVE */}
+          {/* GIVE TWIST */}
           <div className="bg-gray-50 border rounded-xl p-4 shadow-sm relative">
             <h3 className="font-semibold mb-3">Twist geven</h3>
 
@@ -935,7 +950,7 @@ export default function AdminDashboardPage() {
             </button>
           </div>
 
-          {/* USE */}
+          {/* USE TWIST */}
           <div className="bg-gray-50 border rounded-xl p-4 shadow-sm relative">
             <h3 className="font-semibold mb-3">Twist gebruiken (admin)</h3>
 
@@ -970,9 +985,7 @@ export default function AdminDashboardPage() {
                       <span className="font-semibold">
                         {u.display_name}
                       </span>{" "}
-                      <span className="text-gray-500">
-                        @{u.username}
-                      </span>
+                      <span className="text-gray-500">@{u.username}</span>
                     </div>
                   ))}
                 </div>
