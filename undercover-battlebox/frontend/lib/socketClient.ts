@@ -7,6 +7,7 @@ import type {
   AdminAckResponse,
   PlayerLeaderboardEntry,
   GifterLeaderboardEntry,
+  SearchUser,
 } from "./adminTypes";
 
 const BACKEND_URL = "http://178.251.232.12:4000";
@@ -19,9 +20,9 @@ declare global {
   var __adminSocket: Socket | undefined;
 }
 
-/* ===========================================
-   ALL SERVER → CLIENT EVENTS (TYPESAFE)
-=========================================== */
+/* ============================================================
+   INBOUND: SERVER → CLIENT EVENTS (TYPESAFE)
+============================================================ */
 export interface AdminSocketInbound {
   connect: () => void;
   disconnect: (reason: string) => void;
@@ -53,70 +54,134 @@ export interface AdminSocketInbound {
   "round:grace": (d: any) => void;
   "round:end": () => void;
 
-  // search / autocomplete
-  "admin:searchUsers:result": (res: { users: any[] }) => void;
+  // autocomplete
+  "admin:searchUsers:result": (res: { users: SearchUser[] }) => void;
 
-  // VIP / FAN auto-expire
+  // VIP/FAN auto-expire
   vipExpired: (payload: { username: string; tiktok_id: string }) => void;
   fanExpired: (payload: { username: string; tiktok_id: string }) => void;
 
-  // Health check
   pong: () => void;
 }
 
-/* ===========================================
-    OUTBOUND ADMIN COMMAND EVENTS
-=========================================== */
+/* ============================================================
+   OUTBOUND: CLIENT → SERVER EVENTS (TYPESAFE)
+============================================================ */
 export interface AdminSocketOutbound {
-  // user actions
-  "admin:addToArena": (payload: { username: string }, cb?: AdminAckResponse) => void;
-  "admin:addToQueue": (payload: { username: string }, cb?: AdminAckResponse) => void;
+  // User actions
+  "admin:addToArena": (
+    payload: { username: string },
+    cb?: (res: AdminAckResponse) => void
+  ) => void;
+
+  "admin:addToQueue": (
+    payload: { username: string },
+    cb?: (res: AdminAckResponse) => void
+  ) => void;
+
   "admin:removeFromQueue": (
     payload: { username: string },
-    cb?: AdminAckResponse
+    cb?: (res: AdminAckResponse) => void
   ) => void;
+
   "admin:promoteUser": (
     payload: { username: string },
-    cb?: AdminAckResponse
+    cb?: (res: AdminAckResponse) => void
   ) => void;
+
   "admin:demoteUser": (
     payload: { username: string },
-    cb?: AdminAckResponse
+    cb?: (res: AdminAckResponse) => void
   ) => void;
 
-  "admin:eliminate": (payload: { username: string }, cb?: AdminAckResponse) => void;
+  "admin:eliminate": (
+    payload: { username: string },
+    cb?: (res: AdminAckResponse) => void
+  ) => void;
 
   // VIP / FAN
-  "admin:giveVip": (payload: { username: string }, cb?: AdminAckResponse) => void;
-  "admin:removeVip": (payload: { username: string }, cb?: AdminAckResponse) => void;
-  "admin:giveFan": (payload: { username: string }, cb?: AdminAckResponse) => void;
+  "admin:giveVip": (
+    payload: { username: string },
+    cb?: (res: AdminAckResponse) => void
+  ) => void;
 
-  // twist system
-  "admin:giveTwist": (payload: any, cb?: AdminAckResponse) => void;
-  "admin:useTwist": (payload: any, cb?: AdminAckResponse) => void;
+  "admin:removeVip": (
+    payload: { username: string },
+    cb?: (res: AdminAckResponse) => void
+  ) => void;
+
+  "admin:giveFan": (
+    payload: { username: string },
+    cb?: (res: AdminAckResponse) => void
+  ) => void;
+
+  // twists
+  "admin:giveTwist": (
+    payload: any,
+    cb?: (res: AdminAckResponse) => void
+  ) => void;
+
+  "admin:useTwist": (
+    payload: any,
+    cb?: (res: AdminAckResponse) => void
+  ) => void;
 
   // rounds
-  "admin:startRound": (payload: any, cb?: AdminAckResponse) => void;
-  "admin:endRound": (payload?: {}, cb?: AdminAckResponse) => void;
+  "admin:startRound": (
+    payload: { type: "quarter" | "finale" },
+    cb?: (res: AdminAckResponse) => void
+  ) => void;
+
+  "admin:endRound": (
+    payload?: {},
+    cb?: (res: AdminAckResponse) => void
+  ) => void;
 
   // game control
-  "admin:startGame": (payload?: {}, cb?: AdminAckResponse) => void;
-  "admin:stopGame": (payload?: {}, cb?: AdminAckResponse) => void;
+  "admin:startGame": (
+    payload?: {},
+    cb?: (res: AdminAckResponse) => void
+  ) => void;
+
+  "admin:stopGame": (
+    payload?: {},
+    cb?: (res: AdminAckResponse) => void
+  ) => void;
+
+  // settings
+  "admin:getSettings": (
+    payload?: {},
+    cb?: (res: any) => void
+  ) => void;
+
+  "admin:updateSettings": (
+    payload: any,
+    cb?: (res: AdminAckResponse) => void
+  ) => void;
+
+  // initial sync (after reconnect)
+  "admin:getInitialState": (
+    payload?: {},
+    cb?: (res: any) => void
+  ) => void;
 
   // autocomplete
   "admin:searchUsers": (
     payload: { query: string },
-    cb: (data: { users: any[] }) => void
+    cb: (res: { users: SearchUser[] }) => void
   ) => void;
 
-  // health check
+  // ping
   ping: () => void;
 }
 
-/* ===========================================
-   SINGLETON SOCKET CLIENT
-=========================================== */
-export function getAdminSocket(): Socket<AdminSocketInbound, AdminSocketOutbound> {
+/* ============================================================
+   SINGLETON SOCKET INSTANCE
+============================================================ */
+export function getAdminSocket(): Socket<
+  AdminSocketInbound,
+  AdminSocketOutbound
+> {
   if (typeof window === "undefined") {
     throw new Error("getAdminSocket moet client-side gebruikt worden.");
   }
@@ -127,45 +192,42 @@ export function getAdminSocket(): Socket<AdminSocketInbound, AdminSocketOutbound
 
   console.log(`⚙️ Verbinden met backend socket: ${BACKEND_URL}`);
 
-  const socket: Socket<AdminSocketInbound, AdminSocketOutbound> = io(
-    BACKEND_URL,
-    {
-      transports: ["polling", "websocket"],
-      path: "/socket.io",
-      auth: { token: ADMIN_TOKEN, role: "admin" },
-      reconnection: true,
-      reconnectionAttempts: 60,
-      reconnectionDelay: 1500,
-      timeout: 9000,
-    }
-  );
+  const socket: Socket<
+    AdminSocketInbound,
+    AdminSocketOutbound
+  > = io(BACKEND_URL, {
+    transports: ["polling", "websocket"],
+    path: "/socket.io",
+    auth: { token: ADMIN_TOKEN, role: "admin" },
+    reconnection: true,
+    reconnectionAttempts: 80,
+    reconnectionDelay: 1500,
+    timeout: 8000,
+  });
 
-  /* ===========================================
-     AUTO-RESYNC NA RECONNECT
-  ============================================ */
+  // RECONNECT-SYNC
   socket.on("connect", () => {
     console.log("✅ Admin socket verbonden:", socket.id);
-    socket.emit("ping");
 
-    // volledige refresh bij reconnect:
-    socket.emit("admin:searchUsers", { query: "" }, () => {});
+    socket.emit("ping");
     socket.emit("admin:getInitialState", {}, () => {});
+    socket.emit("admin:getSettings", {}, () => {});
   });
 
   socket.on("disconnect", (reason) => {
-    console.warn("⚠️ Admin socket disconnect:", reason);
+    console.warn("⚠️ Socket disconnect:", reason);
   });
 
   socket.on("connect_error", (err) => {
     console.error("❌ Connect error:", err?.message || err);
   });
 
-  /* heartbeat */
+  // Heartbeat
   setInterval(() => {
     try {
       socket.emit("ping");
-    } catch (e) {}
-  }, 12000);
+    } catch {}
+  }, 12_000);
 
   globalThis.__adminSocket = socket;
   return socket;
