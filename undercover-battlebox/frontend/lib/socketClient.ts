@@ -56,7 +56,7 @@ export interface AdminSocketInbound {
   "round:grace": (d: any) => void;
   "round:end": () => void;
 
-  // HOSTS SYSTEM
+  // HOST SYSTEM
   hosts: (rows: HostProfile[]) => void;
   hostsActiveChanged: (payload: {
     username: string;
@@ -82,7 +82,6 @@ export interface AdminSocketInbound {
    OUTBOUND EVENTS (CLIENT → SERVER)
 =========================================== */
 export interface AdminSocketOutbound {
-
   /* =====================
       INITIAL SNAPSHOT
   ===================== */
@@ -119,32 +118,32 @@ export interface AdminSocketOutbound {
   ===================== */
   "admin:addToArena": (
     payload: { username: string },
-    cb?: AdminAckResponse
+    cb?: (res: AdminAckResponse) => void
   ) => void;
 
   "admin:addToQueue": (
     payload: { username: string },
-    cb?: AdminAckResponse
+    cb?: (res: AdminAckResponse) => void
   ) => void;
 
   "admin:removeFromQueue": (
     payload: { username: string },
-    cb?: AdminAckResponse
+    cb?: (res: AdminAckResponse) => void
   ) => void;
 
   "admin:promoteUser": (
     payload: { username: string },
-    cb?: AdminAckResponse
+    cb?: (res: AdminAckResponse) => void
   ) => void;
 
   "admin:demoteUser": (
     payload: { username: string },
-    cb?: AdminAckResponse
+    cb?: (res: AdminAckResponse) => void
   ) => void;
 
   "admin:eliminate": (
     payload: { username: string },
-    cb?: AdminAckResponse
+    cb?: (res: AdminAckResponse) => void
   ) => void;
 
   /* =====================
@@ -152,17 +151,17 @@ export interface AdminSocketOutbound {
   ===================== */
   "admin:giveVip": (
     payload: { username: string },
-    cb?: AdminAckResponse
+    cb?: (res: AdminAckResponse) => void
   ) => void;
 
   "admin:removeVip": (
     payload: { username: string },
-    cb?: AdminAckResponse
+    cb?: (res: AdminAckResponse) => void
   ) => void;
 
   "admin:giveFan": (
     payload: { username: string },
-    cb?: AdminAckResponse
+    cb?: (res: AdminAckResponse) => void
   ) => void;
 
   /* =====================
@@ -170,12 +169,12 @@ export interface AdminSocketOutbound {
   ===================== */
   "admin:giveTwist": (
     payload: { username: string; twist: string },
-    cb?: AdminAckResponse
+    cb?: (res: AdminAckResponse) => void
   ) => void;
 
   "admin:useTwist": (
     payload: { username: string; twist: string; target?: string },
-    cb?: AdminAckResponse
+    cb?: (res: AdminAckResponse) => void
   ) => void;
 
   /* =====================
@@ -183,22 +182,22 @@ export interface AdminSocketOutbound {
   ===================== */
   "admin:startRound": (
     payload: { type: "quarter" | "finale" },
-    cb?: AdminAckResponse
+    cb?: (res: AdminAckResponse) => void
   ) => void;
 
   "admin:endRound": (
     payload?: {},
-    cb?: AdminAckResponse
+    cb?: (res: AdminAckResponse) => void
   ) => void;
 
   "admin:startGame": (
     payload?: {},
-    cb?: AdminAckResponse
+    cb?: (res: AdminAckResponse) => void
   ) => void;
 
   "admin:stopGame": (
     payload?: {},
-    cb?: AdminAckResponse
+    cb?: (res: AdminAckResponse) => void
   ) => void;
 
   /* =====================
@@ -215,7 +214,7 @@ export interface AdminSocketOutbound {
 
   "admin:updateSettings": (
     payload: ArenaSettings,
-    cb?: AdminAckResponse
+    cb?: (res: AdminAckResponse) => void
   ) => void;
 
   /* =====================
@@ -267,7 +266,7 @@ export function getAdminSocket(): Socket<
     console.log("✅ Admin socket verbonden:", socket.id);
 
     socket.emit("ping");
-    socket.emit("admin:getInitialSnapshot", {}); // ✔ FIXED
+    socket.emit("admin:getInitialSnapshot", {});
     socket.emit("admin:getHosts", {}, () => {});
     socket.emit("admin:getSettings", {}, () => {});
   });
