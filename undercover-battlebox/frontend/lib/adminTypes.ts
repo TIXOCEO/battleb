@@ -1,9 +1,8 @@
-// lib/adminTypes.ts
+// frontend/lib/adminTypes.ts
 
 /* ================================
    ARENA PLAYER TYPES
 ================================ */
-
 export type ArenaPlayerStatus =
   | "alive"
   | "eliminated"
@@ -20,10 +19,8 @@ export interface ArenaPlayer {
   boosters: string[];
   status: "alive" | "eliminated";
 
-  // UI kleurstatus
   positionStatus: ArenaPlayerStatus;
 
-  // Premium flags (handig voor finale UI, toekomstige buffs)
   is_vip?: boolean;
   is_fan?: boolean;
 }
@@ -31,7 +28,6 @@ export interface ArenaPlayer {
 /* ================================
    ARENA STATE
 ================================ */
-
 export interface ArenaState {
   players: ArenaPlayer[];
   round: number;
@@ -42,57 +38,51 @@ export interface ArenaState {
   roundStartTime: number;
   roundCutoff: number;
   graceEnd: number;
+
   settings: {
     roundDurationPre: number;
     roundDurationFinal: number;
     graceSeconds: number;
     forceEliminations: boolean;
   };
+
   lastSortedAt: number;
 }
 
 /* ================================
-   QUEUE ENTRIES (INCL. VIP/FAN)
+   QUEUE ENTRIES
 ================================ */
-
-export type QueueEntry = {
+export interface QueueEntry {
   position: number;
   tiktok_id: string;
   display_name: string;
   username: string;
 
-  // boosters / VIP priority
   priorityDelta: number;
-
-  // teller waarom iemand staat waar 'ie staat
   reason: string;
 
-  // Premium states
   is_vip: boolean;
   is_fan: boolean;
 
-  // Nieuwe velden
   vip_expires_at?: string | null;
   fan_expires_at?: string | null;
-};
+}
 
 /* ================================
    GLOBAL TOGGLES
 ================================ */
-
-export type GlobalToggles = {
+export interface GlobalToggles {
   queueOpen: boolean;
   boostersEnabled: boolean;
   twistsEnabled: boolean;
   roundType: "voorronde" | "finale";
   debugLogs: boolean;
   dayResetTime: string;
-};
+}
 
 /* ================================
    LOG FEED
 ================================ */
-
 export type LogType =
   | "gift"
   | "join"
@@ -116,38 +106,33 @@ export interface LogEntry {
 }
 
 /* ================================
-   SOCKET ADMIN ACK
+   ACK
 ================================ */
-
 export interface AdminAckResponse {
   success: boolean;
   message?: string;
 }
 
 /* ================================
-   AUTOCOMPLETE USER (admin:searchUsers)
+   AUTOCOMPLETE RESULTS
 ================================ */
-
 export interface SearchUser {
   tiktok_id: string;
   username: string;
   display_name: string;
 
-  // Premium info zichtbaar in dropdown
   is_vip?: boolean;
   vip_expires_at?: string | null;
 
   is_fan?: boolean;
   fan_expires_at?: string | null;
 
-  // handig voor sortering
   last_seen_at?: string | null;
 }
 
 /* ================================
    LEADERBOARDS
 ================================ */
-
 export interface PlayerLeaderboardEntry {
   username: string;
   display_name: string;
