@@ -1,5 +1,6 @@
 // ============================================================================
-// server.ts — Undercover BattleBox — v9.1 REALTIME LEADERBOARD MODE
+// server.ts — Undercover BattleBox — v9.2
+// VIP Auto-Expire + Admin Give/Remove VIP + Logging
 // ============================================================================
 
 import express from "express";
@@ -48,6 +49,38 @@ function sanitizeHost(v: string | null) {
     .replace(/[^a-z0-9._-]/g, "")
     .slice(0, 30);
 }
+
+// ============================================================================
+// VIP AUTO-EXPIRE
+// ============================================================================
+async function cleanupVIP(tiktokId: string) {
+  const r = await pool.query(
+    `SELECT is_vip, vip_expires_at, username FROM users WHERE tiktok_id=$1`,
+    [BigInt(tiktokId)]
+  );
+
+  if (!r.rows.length) return;
+
+  const { is_vip, vip_expires_at, username } = r.rows[0];
+  if (!is_vip || !vip_expires_at) return;
+
+  const now = Date.now();
+  if (new Date(vip_expires_at).getTime() <= now) {
+    await pool.query(
+      `UPDATE users SET is_vip=FALSE, vip_expires_at=NULL WHERE tiktok_id=$1`,
+      [BigInt(tiktokId)]
+    );
+
+    emitLog({
+      type: "system",
+      message: `VIP verlopen voor @${username} (automatisch)`,
+    });
+  }
+}
+
+// ============================================================================
+// FAN AUTO CHECK (bestond al via engines)
+// ============================================================================
 
 // ============================================================================
 // LIVE STATE
@@ -135,10 +168,7 @@ async function fetchTikTokId(username: string): Promise<string | null> {
 
   try {
     const res = await fetch(`https://www.tiktok.com/@${clean}`, {
-      headers: {
-        "user-agent":
-          "Mozilla/5.0",
-      },
+      headers: { "user-agent": "Mozilla/5.0" },
     });
 
     const html = await res.text();
@@ -161,7 +191,7 @@ app.get("/api/tiktok-id/:username", async (req, res) => {
 });
 
 // ============================================================================
-// QUEUE
+// QUEUE BROADCAST
 // ============================================================================
 export async function emitQueue() {
   try {
@@ -479,6 +509,48 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       // ==================================================================
+      // VIP MANAGEMENT
+      // ==================================================================
+      if (action === "giveVIP") {
+        const tid = BigInt(data.tiktok_id);
+        const expires = new Date(Date.now() + 30 * 24 * 3600 * 1000);
+
+        await pool.query(
+          `UPDATE users
+           SET is_vip=TRUE, vip_expires_at=$1
+           WHERE tiktok_id=$2`,
+          [expires, tid]
+        );
+
+        emitLog({
+          type: "system",
+          message: `VIP gegeven aan @${data.username}`,
+        });
+
+        await emitQueue();
+        return ack({ success: true });
+      }
+
+      if (action === "removeVIP") {
+        const tid = BigInt(data.tiktok_id);
+
+        await pool.query(
+          `UPDATE users
+           SET is_vip=FALSE, vip_expires_at=NULL
+           WHERE tiktok_id=$1`,
+          [tid]
+        );
+
+        emitLog({
+          type: "system",
+          message: `VIP verwijderd bij @${data.username}`,
+        });
+
+        await emitQueue();
+        return ack({ success: true });
+      }
+
+      // ==================================================================
       // GAME MANAGEMENT
       // ==================================================================
       if (action === "startGame") {
@@ -569,7 +641,9 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // start round (quarter/finale)
+      // ==================================================================
+      // ROUND MANAGEMENT
+      // ==================================================================
       if (action === "startRound") {
         const type = data?.type || "quarter";
         await startRound(type);
@@ -614,10 +688,8 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       // ==================================================================
-      // USER ACTIONS (arena/queue)
-// ==================================================================
-
-
+      // USER ACTIONS
+      // ==================================================================
       if (!data?.username)
         return ack({
           success: false,
@@ -632,7 +704,7 @@ io.on("connection", async (socket: AdminSocket) => {
 
       let rUser = await pool.query(
         `
-        SELECT tiktok_id, display_name, username
+        SELECT tiktok_id, display_name, username, is_vip, vip_expires_at
         FROM users
         WHERE LOWER(username)=LOWER($1)
         LIMIT 1
@@ -643,7 +715,7 @@ io.on("connection", async (socket: AdminSocket) => {
       if (!rUser.rows.length) {
         rUser = await pool.query(
           `
-        SELECT tiktok_id, display_name, username
+        SELECT tiktok_id, display_name, username, is_vip, vip_expires_at
         FROM users
         WHERE LOWER(username) LIKE LOWER($1)
         ORDER BY last_seen_at DESC NULLS LAST
@@ -659,7 +731,13 @@ io.on("connection", async (socket: AdminSocket) => {
           message: `Gebruiker @${qUser} niet gevonden`,
         });
 
-      const { tiktok_id, display_name, username } = rUser.rows[0];
+      const { tiktok_id, display_name, username, is_vip, vip_expires_at } =
+        rUser.rows[0];
+
+      // VIP auto-expire check
+      if (is_vip) {
+        await cleanupVIP(String(tiktok_id));
+      }
 
       switch (action) {
         case "addToArena":
@@ -810,5 +888,5 @@ initDB().then(async () => {
 
   await restartTikTokConnection(true);
 
-  console.log("🚀 Server klaar — REALTIME LEADERBOARD MODE");
+  console.log("🚀 Server klaar — VIP AUTO-EXPIRE MODE");
 });
