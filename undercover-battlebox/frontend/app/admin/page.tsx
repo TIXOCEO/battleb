@@ -15,10 +15,17 @@ type StreamStats = {
   totalHostDiamonds: number;
 };
 
-type LeaderboardEntry = {
-  user_id: string;
-  display_name: string;
+type PlayerLeaderboardEntry = {
   username: string;
+  display_name: string;
+  tiktok_id: string;
+  diamonds_total: number;
+};
+
+type GifterLeaderboardEntry = {
+  user_id: string;
+  username: string;
+  display_name: string;
   total_diamonds: number;
 };
 
@@ -29,7 +36,6 @@ type GameSessionState = {
   endedAt?: string | null;
 };
 
-// For autocomplete
 type SearchUser = {
   tiktok_id: string;
   username: string;
@@ -43,7 +49,10 @@ export default function AdminDashboardPage() {
   const [queueOpen, setQueueOpen] = useState(true);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [streamStats, setStreamStats] = useState<StreamStats | null>(null);
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+
+  const [playerLeaderboard, setPlayerLeaderboard] = useState<PlayerLeaderboardEntry[]>([]);
+  const [gifterLeaderboard, setGifterLeaderboard] = useState<GifterLeaderboardEntry[]>([]);
+
   const [gameSession, setGameSession] = useState<GameSessionState>({
     active: false,
     gameId: null,
@@ -53,21 +62,18 @@ export default function AdminDashboardPage() {
   const [username, setUsername] = useState("");
   const [status, setStatus] = useState<string | null>(null);
 
-  // TWISTS — door jou gevraagd: ALLE velden uniek gemaakt
+  // TWISTS
   const [twistUserGive, setTwistUserGive] = useState("");
   const [twistUserUse, setTwistUserUse] = useState("");
   const [twistTargetUse, setTwistTargetUse] = useState("");
   const [twistTypeGive, setTwistTypeGive] = useState("");
   const [twistTypeUse, setTwistTypeUse] = useState("");
 
-  // AUTOCOMPLETE RESULTS → nu ook voor twists
+  // AUTOCOMPLETE
   const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
   const [showResults, setShowResults] = useState(false);
 
-  // Unified typing state — wordt per input gescheiden verwerkt
   const [typing, setTyping] = useState("");
-
-  // welke input is actief voor autocomplete?
   const [activeAutoField, setActiveAutoField] = useState<
     null | "main" | "give" | "use" | "target"
   >(null);
@@ -79,6 +85,7 @@ export default function AdminDashboardPage() {
     const socket = getAdminSocket();
 
     socket.on("updateArena", (data: ArenaState) => setArena(data));
+
     socket.on("updateQueue", (d: any) => {
       setQueue(d.entries ?? []);
       setQueueOpen(d.open ?? true);
@@ -87,12 +94,34 @@ export default function AdminDashboardPage() {
     socket.on("log", (l: LogEntry) =>
       setLogs((prev) => [l, ...prev].slice(0, 200))
     );
+
     socket.on("initialLogs", (d: LogEntry[]) => setLogs(d.slice(0, 200)));
+
     socket.on("streamStats", (s: StreamStats) => setStreamStats(s));
-    socket.on("streamLeaderboard", (e: LeaderboardEntry[]) =>
-      setLeaderboard(e)
-    );
+
     socket.on("gameSession", (s: GameSessionState) => setGameSession(s));
+
+    socket.on("leaderboardPlayers", (rows: any[]) => {
+      setPlayerLeaderboard(
+        rows.map((r) => ({
+          username: r.username,
+          display_name: r.display_name,
+          tiktok_id: r.tiktok_id,
+          diamonds_total: r.diamonds_total,
+        }))
+      );
+    });
+
+    socket.on("leaderboardGifters", (rows: any[]) => {
+      setGifterLeaderboard(
+        rows.map((r) => ({
+          user_id: r.user_id,
+          username: r.username,
+          display_name: r.display_name,
+          total_diamonds: r.total_diamonds,
+        }))
+      );
+    });
 
     socket.on("connect_error", () =>
       setStatus("❌ Socket verbinding weggevallen")
@@ -101,9 +130,11 @@ export default function AdminDashboardPage() {
     socket.on("round:start", (d: any) =>
       setStatus(`▶️ Ronde gestart (${d.type}) — ${d.duration}s`)
     );
+
     socket.on("round:grace", (d: any) =>
       setStatus(`⏳ Grace-periode actief (${d.grace}s)`)
     );
+
     socket.on("round:end", () =>
       setStatus("⛔ Ronde beëindigd — voer eliminaties uit")
     );
@@ -114,8 +145,9 @@ export default function AdminDashboardPage() {
       socket.off("log");
       socket.off("initialLogs");
       socket.off("streamStats");
-      socket.off("streamLeaderboard");
       socket.off("gameSession");
+      socket.off("leaderboardPlayers");
+      socket.off("leaderboardGifters");
       socket.off("connect_error");
       socket.off("round:start");
       socket.off("round:grace");
@@ -130,15 +162,23 @@ export default function AdminDashboardPage() {
     const socket = getAdminSocket();
     socket.emit("admin:getInitialSnapshot", {}, (snap: any) => {
       if (!snap) return;
+
       if (snap.arena) setArena(snap.arena);
+
       if (snap.queue) {
         setQueue(snap.queue.entries ?? []);
         setQueueOpen(snap.queue.open ?? true);
       }
+
       if (snap.logs) setLogs(snap.logs.slice(0, 200));
       if (snap.stats) setStreamStats(snap.stats);
       if (snap.gameSession) setGameSession(snap.gameSession);
-      if (snap.leaderboard) setLeaderboard(snap.leaderboard);
+
+      if (snap.playerLeaderboard)
+        setPlayerLeaderboard(snap.playerLeaderboard);
+
+      if (snap.gifterLeaderboard)
+        setGifterLeaderboard(snap.gifterLeaderboard);
     });
   }, []);
 
@@ -219,7 +259,6 @@ export default function AdminDashboardPage() {
     (arena?.settings?.forceEliminations ?? true) &&
     arenaStatus === "ended" &&
     hasDoomed;
-
   // ============================================================
   // AUTOCOMPLETE (werkt nu voor alle velden!)
   // ============================================================
@@ -248,7 +287,8 @@ export default function AdminDashboardPage() {
   // APPLY AUTOFILL (PER INPUTVELD)
   // ========================================================================
   const applyAutoFill = (u: SearchUser) => {
-    const formatted = u.username.startsWith("@") ? u.username : `@${u.username}`;
+    const formatted =
+      u.username.startsWith("@") ? u.username : `@${u.username}`;
 
     if (activeAutoField === "main") {
       setUsername(formatted);
@@ -312,8 +352,7 @@ export default function AdminDashboardPage() {
 
   // ============================================================
   // UI RENDER
-  // ===========================================================
-  
+  // ============================================================
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
 
@@ -330,7 +369,9 @@ export default function AdminDashboardPage() {
               </div>
               <div className="text-xs text-gray-500">
                 Verbonden als{" "}
-                <span className="font-semibold text-green-600">Admin</span>
+                <span className="font-semibold text-green-600">
+                  Admin
+                </span>
               </div>
             </div>
           </div>
@@ -360,10 +401,22 @@ export default function AdminDashboardPage() {
             {/* Timer Text */}
             <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold">
               {arena.status === "active" &&
-                formatTime(Math.max(0, Math.floor((arena.roundCutoff - Date.now()) / 1000)))}
+                formatTime(
+                  Math.max(
+                    0,
+                    Math.floor(
+                      (arena.roundCutoff - Date.now()) / 1000
+                    )
+                  )
+                )}
 
               {arena.status === "grace" &&
-                formatTime(Math.max(0, Math.floor((arena.graceEnd - Date.now()) / 1000)))}
+                formatTime(
+                  Math.max(
+                    0,
+                    Math.floor((arena.graceEnd - Date.now()) / 1000)
+                  )
+                )}
 
               {arena.status === "ended" && "00:00"}
             </div>
@@ -418,7 +471,9 @@ export default function AdminDashboardPage() {
               </button>
 
               <button
-                onClick={() => emitAdmin("admin:startRound", { type: "finale" })}
+                onClick={() =>
+                  emitAdmin("admin:startRound", { type: "finale" })
+                }
                 disabled={!canStartRound}
                 className="px-3 py-1.5 bg-gray-900 text-white rounded-full text-xs disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
@@ -471,39 +526,51 @@ export default function AdminDashboardPage() {
               />
 
               {/* AUTOCOMPLETE DROPDOWN */}
-              {showResults && searchResults.length > 0 && activeAutoField === "main" && (
-                <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
-                  {searchResults.map((u) => (
-                    <div
-                      key={u.tiktok_id}
-                      onClick={() => applyAutoFill(u)}
-                      className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
-                    >
-                      <span className="font-semibold">{u.display_name}</span>{" "}
-                      <span className="text-gray-500">@{u.username}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {showResults &&
+                searchResults.length > 0 &&
+                activeAutoField === "main" && (
+                  <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
+                    {searchResults.map((u) => (
+                      <div
+                        key={u.tiktok_id}
+                        onClick={() => applyAutoFill(u)}
+                        className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+                      >
+                        <span className="font-semibold">
+                          {u.display_name}
+                        </span>{" "}
+                        <span className="text-gray-500">
+                          @{u.username}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
             </div>
 
             <div className="flex gap-2 text-xs">
               <button
-                onClick={() => emitAdminWithUser("admin:addToArena", username)}
+                onClick={() =>
+                  emitAdminWithUser("admin:addToArena", username)
+                }
                 className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full"
               >
                 → Arena
               </button>
 
               <button
-                onClick={() => emitAdminWithUser("admin:addToQueue", username)}
+                onClick={() =>
+                  emitAdminWithUser("admin:addToQueue", username)
+                }
                 className="px-3 py-1.5 bg-gray-800 text-white rounded-full"
               >
                 → Queue
               </button>
 
               <button
-                onClick={() => emitAdminWithUser("admin:eliminate", username)}
+                onClick={() =>
+                  emitAdminWithUser("admin:eliminate", username)
+                }
                 className="px-3 py-1.5 bg-red-600 text-white rounded-full"
               >
                 Elimineer
@@ -512,7 +579,6 @@ export default function AdminDashboardPage() {
           </div>
         </div>
       </section>
-
       {/* STATUS BALK */}
       {status && (
         <div className="mb-4 text-sm text-center bg-amber-50 border border-amber-200 text-amber-800 rounded-xl py-2">
@@ -672,23 +738,64 @@ export default function AdminDashboardPage() {
               </div>
             ))
           ) : (
-            <div className="text-sm text-gray-500 italic">Wachtrij is leeg.</div>
+            <div className="text-sm text-gray-500 italic">
+              Wachtrij is leeg.
+            </div>
           )}
         </div>
       </section>
 
       {/* ===========================================
-          LEADERBOARD & STATS
+          LEADERBOARDS (NIEUW — SPELERS & GIFTERS)
       ============================================ */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-        {/* Leaderboard */}
+
+        {/* RECEIVERS (PLAYERS) */}
         <div className="bg-white rounded-2xl shadow p-4">
-          <h2 className="text-xl font-semibold mb-2">Leaderboard</h2>
-          <p className="text-xs text-gray-500 mb-3">Per spel – spelers</p>
+          <h2 className="text-xl font-semibold mb-2">Player Leaderboard</h2>
+          <p className="text-xs text-gray-500 mb-3">
+            Diamanten ontvangen door spelers
+          </p>
 
           <div className="max-h-72 overflow-y-auto text-sm">
-            {leaderboard.length ? (
-              leaderboard.map((e, idx) => (
+            {playerLeaderboard.length ? (
+              playerLeaderboard.map((e, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center justify-between border-b last:border-0 border-gray-200 py-1"
+                >
+                  <div>
+                    <span className="font-mono text-xs text-gray-500 mr-2">
+                      #{idx + 1}
+                    </span>
+                    <span className="font-semibold">
+                      {e.display_name} (@{e.username})
+                    </span>
+                  </div>
+
+                  <span className="font-semibold">
+                    {fmt(e.diamonds_total)} 💎
+                  </span>
+                </div>
+              ))
+            ) : (
+              <div className="text-sm text-gray-500 italic">
+                Geen data beschikbaar.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* SENDERS (GIFTERS) */}
+        <div className="bg-white rounded-2xl shadow p-4">
+          <h2 className="text-xl font-semibold mb-2">Gifter Leaderboard</h2>
+          <p className="text-xs text-gray-500 mb-3">
+            Diamanten verstuurd door gifters
+          </p>
+
+          <div className="max-h-72 overflow-y-auto text-sm">
+            {gifterLeaderboard.length ? (
+              gifterLeaderboard.map((e, idx) => (
                 <div
                   key={idx}
                   className="flex items-center justify-between border-b last:border-0 border-gray-200 py-1"
@@ -712,47 +819,6 @@ export default function AdminDashboardPage() {
                 Geen data beschikbaar.
               </div>
             )}
-          </div>
-        </div>
-
-        {/* Stats */}
-        <div className="bg-white rounded-2xl shadow p-4">
-          <h2 className="text-xl font-semibold mb-2">Stream stats</h2>
-          <p className="text-xs text-gray-500 mb-3">
-            Gebaseerd op huidige actieve game-sessie
-          </p>
-
-          <div className="text-sm space-y-1">
-            <div className="flex justify-between">
-              <span className="text-gray-600">Game ID</span>
-              <span className="font-semibold">
-                {gameSession.gameId ?? "–"}
-              </span>
-            </div>
-
-            <div className="flex justify-between">
-              <span className="text-gray-600">Aantal spelers</span>
-              <span className="font-semibold">
-                {streamStats ? fmt(streamStats.totalPlayers) : "0"}
-              </span>
-            </div>
-
-            <div className="flex justify-between">
-              <span className="text-gray-600">Speler diamonds</span>
-              <span className="font-semibold">
-                {streamStats
-                  ? fmt(streamStats.totalPlayerDiamonds)
-                  : "0"}{" "}
-                💎
-              </span>
-            </div>
-
-            <div className="flex justify-between">
-              <span className="text-gray-600">Host diamonds</span>
-              <span className="font-semibold">
-                {streamStats ? fmt(streamStats.totalHostDiamonds) : "0"} 💎
-              </span>
-            </div>
           </div>
         </div>
       </section>
@@ -788,21 +854,23 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
-            {/* AUTOCOMPLETE FOR GIVE */}
-            {showResults && searchResults.length > 0 && activeAutoField === "give" && (
-              <div className="absolute mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto w-full">
-                {searchResults.map((u) => (
-                  <div
-                    key={u.tiktok_id}
-                    onClick={() => applyAutoFill(u)}
-                    className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
-                  >
-                    <span className="font-semibold">{u.display_name}</span>{" "}
-                    <span className="text-gray-500">@{u.username}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+            {/* AUTOCOMPLETE GIVE */}
+            {showResults &&
+              searchResults.length > 0 &&
+              activeAutoField === "give" && (
+                <div className="absolute mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto w-full">
+                  {searchResults.map((u) => (
+                    <div
+                      key={u.tiktok_id}
+                      onClick={() => applyAutoFill(u)}
+                      className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+                    >
+                      <span className="font-semibold">{u.display_name}</span>{" "}
+                      <span className="text-gray-500">@{u.username}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
 
             <label className="text-xs font-semibold">Kies twist</label>
             <select
@@ -855,7 +923,7 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
-            {/* AUTOCOMPLETE FOR USE */}
+            {/* AUTOCOMPLETE USE */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "use" && (
@@ -888,7 +956,9 @@ export default function AdminDashboardPage() {
               <option value="diamond_pistol">Diamond Pistol</option>
             </select>
 
-            <label className="text-xs font-semibold">Target speler (optioneel)</label>
+            <label className="text-xs font-semibold">
+              Target speler (optioneel)
+            </label>
             <input
               type="text"
               value={twistTargetUse}
@@ -907,7 +977,7 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-3"
             />
 
-            {/* AUTOCOMPLETE FOR TARGET */}
+            {/* AUTOCOMPLETE TARGET */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "target" && (
