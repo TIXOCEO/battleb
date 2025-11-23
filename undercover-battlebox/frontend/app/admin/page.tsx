@@ -30,14 +30,13 @@ type GameSessionState = {
 };
 
 /* ===========================================
-   STRICT GENERIC EMITTER
+   STRICT GENERIC EMITTER (SAFE)
 =========================================== */
 function emitAdmin<E extends keyof AdminSocketOutbound>(
   event: E,
   ...args: Parameters<AdminSocketOutbound[E]>
 ) {
   const socket = getAdminSocket();
-
   try {
     socket.emit(event, ...args);
   } catch (err) {
@@ -45,7 +44,9 @@ function emitAdmin<E extends keyof AdminSocketOutbound>(
   }
 }
 
-/* Helper for user-based events */
+/* ===========================================
+   STRICT USER-EMITTER (ALLEEN USER COMMANDS)
+=========================================== */
 function emitUser(
   event: keyof Pick<
     AdminSocketOutbound,
@@ -62,6 +63,8 @@ function emitUser(
   raw: string,
   cb?: (r: AdminAckResponse) => void
 ) {
+  if (!raw.trim()) return;
+
   const formatted = raw.startsWith("@")
     ? raw.toLowerCase()
     : "@" + raw.toLowerCase();
@@ -70,7 +73,7 @@ function emitUser(
 }
 
 /* ===========================================
-   ADMIN DASHBOARD
+   DASHBOARD COMPONENT
 =========================================== */
 export default function AdminDashboardPage() {
   /* CORE STATE */
@@ -97,7 +100,7 @@ export default function AdminDashboardPage() {
     gameId: null,
   });
 
-  /* USER INPUT */
+  /* INPUT STATE */
   const [username, setUsername] = useState("");
   const [status, setStatus] = useState<string | null>(null);
 
@@ -110,8 +113,8 @@ export default function AdminDashboardPage() {
 
   /* AUTOCOMPLETE */
   const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
-  const [showResults, setShowResults] = useState(false);
   const [typing, setTyping] = useState("");
+  const [showResults, setShowResults] = useState(false);
   const [activeAutoField, setActiveAutoField] =
     useState<null | "main" | "give" | "use" | "target">(null);
 
@@ -124,68 +127,64 @@ export default function AdminDashboardPage() {
      SOCKET INIT
   ============================================ */
   useEffect(() => {
-  const socket = getAdminSocket();
+    const socket = getAdminSocket();
 
-  /* CONNECTION STATE */
-  socket.on("connect", () => {
-    setConnected("connected");
-    setStatus("🟢 Verbonden met server");
-  });
+    /* CONNECTION */
+    socket.on("connect", () => {
+      setConnected("connected");
+      setStatus("🟢 Verbonden met server");
+    });
 
-  socket.on("disconnect", () => {
-    setConnected("disconnected");
-    setStatus("🔴 Verbroken");
-  });
+    socket.on("disconnect", () => {
+      setConnected("disconnected");
+      setStatus("🔴 Verbroken");
+    });
 
-  socket.on("connect_error", () => {
-    setConnected("disconnected");
-    setStatus("❌ Socket fout");
-  });
+    socket.on("connect_error", () => {
+      setConnected("disconnected");
+      setStatus("❌ Socket fout");
+    });
 
-  /* ARENA EVENTS */
-  socket.on("updateArena", (data) => setArena(data));
-  socket.on("updateQueue", (d) => {
-    setQueue(d.entries ?? []);
-    setQueueOpen(d.open ?? true);
-  });
+    /* ARENA */
+    socket.on("updateArena", (data) => setArena(data));
 
-  /* LOGS */
-  socket.on("log", (l) =>
-    setLogs((prev) => [l, ...prev].slice(0, 200))
-  );
+    socket.on("updateQueue", (d) => {
+      setQueue(d.entries ?? []);
+      setQueueOpen(d.open ?? true);
+    });
 
-  socket.on("initialLogs", (arr) =>
-    setLogs(arr.slice(0, 200))
-  );
+    /* LOGS */
+    socket.on("log", (l) =>
+      setLogs((p) => [l, ...p].splice(0, 200))
+    );
 
-  /* STREAM STATS */
-  socket.on("streamStats", (s) => setStreamStats(s));
+    socket.on("initialLogs", (arr) =>
+      setLogs(arr.slice(0, 200))
+    );
 
-  /* LEADERBOARDS */
-  socket.on("leaderboardPlayers", (rows) => setPlayerLeaderboard(rows ?? []));
-  socket.on("leaderboardGifters", (rows) => setGifterLeaderboard(rows ?? []));
+    /* STATS + LEADERBOARDS */
+    socket.on("streamStats", (s) => setStreamStats(s));
+    socket.on("leaderboardPlayers", (rows) => setPlayerLeaderboard(rows ?? []));
+    socket.on("leaderboardGifters", (rows) => setGifterLeaderboard(rows ?? []));
 
-  /* GAME SESSION */
-  socket.on("gameSession", (s) => setGameSession(s));
+    /* GAME SESSION */
+    socket.on("gameSession", (s) => setGameSession(s));
 
-  /* ROUND STATUS */
-  socket.on("round:start", (d) =>
-    setStatus(`▶️ Ronde gestart (${d.type}) — ${d.duration}s`)
-  );
+    /* ROUND STATUS */
+    socket.on("round:start", (d) =>
+      setStatus(`▶️ Ronde gestart (${d.type}) — ${d.duration}s`)
+    );
 
-  socket.on("round:grace", (d) =>
-    setStatus(`⏳ Grace-periode actief (${d.grace}s)`)
-  );
+    socket.on("round:grace", (d) =>
+      setStatus(`⏳ Grace-periode actief (${d.grace}s)`)
+    );
 
-  socket.on("round:end", () =>
-    setStatus("⛔ Ronde beëindigd — voer eliminaties uit")
-  );
+    socket.on("round:end", () =>
+      setStatus("⛔ Ronde beëindigd — voer eliminaties uit")
+    );
 
-  /* CLEANUP */
-  return () => {
-    socket.removeAllListeners();
-  };
-}, []);
+    return () => socket.removeAllListeners();
+  }, []);
 
   /* ===========================================
      AUTOCOMPLETE
@@ -196,7 +195,7 @@ export default function AdminDashboardPage() {
       return;
     }
 
-    const timer = setTimeout(() => {
+    const t = setTimeout(() => {
       emitAdmin(
         "admin:searchUsers",
         { query: typing },
@@ -206,18 +205,17 @@ export default function AdminDashboardPage() {
       );
     }, 150);
 
-    return () => clearTimeout(timer);
+    return () => clearTimeout(t);
   }, [typing]);
 
   const applyAutoFill = (u: SearchUser) => {
-    const f = "@" + u.username.toLowerCase();
+    const formatted = "@" + u.username.toLowerCase();
 
-    if (activeAutoField === "main") setUsername(f);
-    if (activeAutoField === "give") setTwistUserGive(f);
-    if (activeAutoField === "use") setTwistUserUse(f);
-    if (activeAutoField === "target") setTwistTargetUse(f);
+    if (activeAutoField === "main") setUsername(formatted);
+    if (activeAutoField === "give") setTwistUserGive(formatted);
+    if (activeAutoField === "use") setTwistUserUse(formatted);
+    if (activeAutoField === "target") setTwistTargetUse(formatted);
 
-    setSearchResults([]);
     setTyping("");
     setShowResults(false);
   };
@@ -242,6 +240,7 @@ export default function AdminDashboardPage() {
   const colorForPosition = (p: any) => {
     if (!arena || arena.status === "idle")
       return "bg-gray-50 border-gray-200";
+
     switch (p.positionStatus) {
       case "immune":
         return "bg-green-100 border-green-300";
@@ -255,8 +254,10 @@ export default function AdminDashboardPage() {
   };
 
   const arenaStatus = arena?.status ?? "idle";
-  const hasDoomed =
-    players.some((p) => p.positionStatus === "elimination");
+
+  const hasDoomed = players.some(
+    (p) => p.positionStatus === "elimination"
+  );
 
   const canStartRound =
     !!arena &&
@@ -273,20 +274,21 @@ export default function AdminDashboardPage() {
 
   const roundProgress = useMemo(() => {
     if (!arena) return 0;
+
     const now = Date.now();
 
     if (arena.status === "active") {
       const pct =
         (now - arena.roundStartTime) /
         (arena.roundCutoff - arena.roundStartTime);
-      return Math.max(0, Math.min(100, pct * 100));
+      return Math.min(100, Math.max(0, pct * 100));
     }
 
     if (arena.status === "grace") {
       const pct =
         (now - arena.roundCutoff) /
         (arena.graceEnd - arena.roundCutoff);
-      return Math.max(0, Math.min(100, pct * 100));
+      return Math.min(100, Math.max(0, pct * 100));
     }
 
     return 0;
@@ -304,17 +306,9 @@ export default function AdminDashboardPage() {
   /* ===========================================
      RENDER
   ============================================ */
-
-  /* 
-     ——— SNIPPED FOR CHAT LENGTH LIMIT ———
-     (DE REST VAN DE RENDER BLIJFT 100% ONGEPROEFD)
-     Geen wijzigingen nodig in UI zelf.
-     Alleen emits hierboven zijn vervangen.
-  */
-
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
-      {/* ---- HEADER ---- */}
+      {/* HEADER */}
       <header className="mb-6">
         <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-2 mb-2">
           <div className="flex items-center gap-2">
@@ -389,7 +383,7 @@ export default function AdminDashboardPage() {
         )}
       </header>
 
-      {/* ---- SPELBESTURING ---- */}
+      {/* SPELBESTURING */}
       <section className="bg-white p-4 rounded-2xl shadow mb-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="flex flex-col gap-3">
           <div className="text-sm font-semibold">Spelbesturing</div>
@@ -429,7 +423,7 @@ export default function AdminDashboardPage() {
                 onClick={() =>
                   emitAdmin("admin:startRound", { type: "quarter" })
                 }
-                className="px-3 py-1.5 rounded-full text-xs bg-[#ff4d4f] text-white disabled:bg-gray-400 disabled:cursor-not-allowed"
+                className="px-3 py-1.5 rounded-full text-xs bg-[#ff4d4f] text-white disabled:bg-gray-400"
               >
                 Start voorronde
               </button>
@@ -439,7 +433,7 @@ export default function AdminDashboardPage() {
                 onClick={() =>
                   emitAdmin("admin:startRound", { type: "finale" })
                 }
-                className="px-3 py-1.5 rounded-full text-xs bg-gray-900 text-white disabled:bg-gray-400 disabled:cursor-not-allowed"
+                className="px-3 py-1.5 rounded-full text-xs bg-gray-900 text-white disabled:bg-gray-400"
               >
                 Start finale
               </button>
@@ -447,7 +441,7 @@ export default function AdminDashboardPage() {
               <button
                 disabled={!canStopRound && !canGraceEnd}
                 onClick={() => emitAdmin("admin:endRound")}
-                className="px-3 py-1.5 rounded-full text-xs bg-red-600 text-white disabled:bg-gray-400 disabled:cursor-not-allowed"
+                className="px-3 py-1.5 rounded-full text-xs bg-red-600 text-white disabled:bg-gray-400"
               >
                 Stop ronde
               </button>
@@ -461,7 +455,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* ---- SPELERACTIES ---- */}
+        {/* SPELERACTIES */}
         <div className="lg:col-span-2 flex flex-col gap-3">
           <div className="text-sm font-semibold">Speleracties</div>
 
@@ -490,6 +484,7 @@ export default function AdminDashboardPage() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
               />
 
+              {/* AUTOCOMPLETE */}
               {showResults &&
                 searchResults.length > 0 &&
                 activeAutoField === "main" && (
@@ -515,54 +510,42 @@ export default function AdminDashboardPage() {
             {/* ACTION BUTTONS */}
             <div className="flex flex-wrap gap-2 text-xs">
               <button
-                onClick={() =>
-                  emitAdminWithUser("admin:addToArena", username)
-                }
+                onClick={() => emitUser("admin:addToArena", username)}
                 className="px-3 py-1.5 rounded-full bg-[#ff4d4f] text-white"
               >
                 → Arena
               </button>
 
               <button
-                onClick={() =>
-                  emitAdminWithUser("admin:addToQueue", username)
-                }
+                onClick={() => emitUser("admin:addToQueue", username)}
                 className="px-3 py-1.5 rounded-full bg-gray-800 text-white"
               >
                 → Queue
               </button>
 
               <button
-                onClick={() =>
-                  emitAdminWithUser("admin:eliminate", username)
-                }
+                onClick={() => emitUser("admin:eliminate", username)}
                 className="px-3 py-1.5 rounded-full bg-red-600 text-white"
               >
                 Elimineer
               </button>
 
               <button
-                onClick={() =>
-                  emitAdminWithUser("admin:giveVip", username)
-                }
+                onClick={() => emitUser("admin:giveVip", username)}
                 className="px-3 py-1.5 rounded-full bg-yellow-500 text-white"
               >
                 Geef VIP
               </button>
 
               <button
-                onClick={() =>
-                  emitAdminWithUser("admin:removeVip", username)
-                }
+                onClick={() => emitUser("admin:removeVip", username)}
                 className="px-3 py-1.5 rounded-full bg-yellow-700 text-white"
               >
                 Remove VIP
               </button>
 
               <button
-                onClick={() =>
-                  emitAdminWithUser("admin:giveFan", username)
-                }
+                onClick={() => emitUser("admin:giveFan", username)}
                 className="px-3 py-1.5 rounded-full bg-blue-600 text-white"
               >
                 Geef FAN (24u)
@@ -579,7 +562,7 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      {/* ---- ARENA & QUEUE ---- */}
+      {/* ARENA & QUEUE */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* ARENA */}
         <div className="bg-white p-4 rounded-2xl shadow">
@@ -619,10 +602,7 @@ export default function AdminDashboardPage() {
                   {p.positionStatus === "elimination" && (
                     <button
                       onClick={() =>
-                        emitAdminWithUser(
-                          "admin:eliminate",
-                          p.username
-                        )
+                        emitUser("admin:eliminate", p.username)
                       }
                       className="mt-2 px-2 py-1 text-[11px] bg-red-50 text-red-700 border-red-300 rounded-full border"
                     >
@@ -644,7 +624,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* ---- QUEUE ---- */}
+        {/* QUEUE */}
         <div className="bg-white p-4 rounded-2xl shadow">
           <h2 className="text-xl font-semibold mb-2">Wachtrij</h2>
           <p className="text-sm text-gray-500 mb-3">
@@ -699,7 +679,7 @@ export default function AdminDashboardPage() {
                 <div className="flex gap-1 mt-2 sm:mt-0">
                   <button
                     onClick={() =>
-                      emitAdminWithUser("admin:promoteUser", q.username)
+                      emitUser("admin:promoteUser", q.username)
                     }
                     className="px-2 py-1 bg-purple-50 text-purple-800 border border-purple-300 rounded-full text-xs"
                   >
@@ -708,7 +688,7 @@ export default function AdminDashboardPage() {
 
                   <button
                     onClick={() =>
-                      emitAdminWithUser("admin:demoteUser", q.username)
+                      emitUser("admin:demoteUser", q.username)
                     }
                     className="px-2 py-1 bg-purple-50 text-purple-800 border border-purple-300 rounded-full text-xs"
                   >
@@ -717,7 +697,7 @@ export default function AdminDashboardPage() {
 
                   <button
                     onClick={() =>
-                      emitAdminWithUser("admin:addToArena", q.username)
+                      emitUser("admin:addToArena", q.username)
                     }
                     className="px-2 py-1 border border-[#ff4d4f] text-[#ff4d4f] rounded-full text-xs"
                   >
@@ -726,10 +706,7 @@ export default function AdminDashboardPage() {
 
                   <button
                     onClick={() =>
-                      emitAdminWithUser(
-                        "admin:removeFromQueue",
-                        q.username
-                      )
+                      emitUser("admin:removeFromQueue", q.username)
                     }
                     className="px-2 py-1 bg-red-50 text-red-700 border border-red-300 rounded-full text-xs"
                   >
@@ -746,7 +723,7 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* ---- LEADERBOARD & STATS ---- */}
+      {/* LEADERBOARD + STATS */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
         {/* LEADERBOARD */}
         <div className="bg-white p-4 rounded-2xl shadow">
@@ -779,6 +756,7 @@ export default function AdminDashboardPage() {
           </div>
 
           <div className="max-h-72 overflow-y-auto text-sm border-t pt-2">
+            {/* PLAYER LEADERBOARD */}
             {leaderboardTab === "players" &&
               (playerLeaderboard.length ? (
                 playerLeaderboard.map((e, idx) => (
@@ -806,6 +784,7 @@ export default function AdminDashboardPage() {
                 </div>
               ))}
 
+            {/* GIFTERS */}
             {leaderboardTab === "gifters" &&
               (gifterLeaderboard.length ? (
                 gifterLeaderboard.map((e, idx) => (
@@ -835,7 +814,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* STREAM STATS */}
+        {/* STATS */}
         <div className="bg-white p-4 rounded-2xl shadow">
           <h2 className="text-xl font-semibold mb-2">Stream stats</h2>
           <p className="text-xs text-gray-500 mb-3">
@@ -858,9 +837,7 @@ export default function AdminDashboardPage() {
             </div>
 
             <div className="flex justify-between">
-              <span className="text-gray-600">
-                Speler diamonds
-              </span>
+              <span className="text-gray-600">Speler diamonds</span>
               <span className="font-semibold">
                 {streamStats
                   ? fmt(streamStats.totalPlayerDiamonds)
@@ -882,12 +859,12 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* ---- TWISTS ---- */}
+      {/* TWISTS */}
       <section className="bg-white rounded-2xl shadow p-4 mt-8">
         <h2 className="text-xl font-semibold mb-4">Twists</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* GIVE TWIST */}
+          {/* GIVE */}
           <div className="bg-gray-50 border rounded-xl p-4 shadow-sm relative">
             <h3 className="font-semibold mb-3">Twist geven</h3>
 
@@ -908,6 +885,7 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
+            {/* AUTOCOMPLETE */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "give" && (
@@ -957,11 +935,9 @@ export default function AdminDashboardPage() {
             </button>
           </div>
 
-          {/* USE TWIST */}
+          {/* USE */}
           <div className="bg-gray-50 border rounded-xl p-4 shadow-sm relative">
-            <h3 className="font-semibold mb-3">
-              Twist gebruiken (admin)
-            </h3>
+            <h3 className="font-semibold mb-3">Twist gebruiken (admin)</h3>
 
             <label className="text-xs font-semibold">Gebruiker</label>
             <input
@@ -980,10 +956,11 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
+            {/* AUTOCOMPLETE */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "use" && (
-                <div className="absolute bg-white border border-gray-300 w-full mt-1 rounded-lg shadow max-h-60 overflow-auto z-20">
+                <div className="absolute w-full bg-white border border-gray-300 mt-1 rounded-lg shadow max-h-60 overflow-auto z-20">
                   {searchResults.map((u) => (
                     <div
                       key={u.tiktok_id}
@@ -1016,9 +993,7 @@ export default function AdminDashboardPage() {
               <option value="diamond_pistol">Diamond Pistol</option>
             </select>
 
-            <label className="text-xs font-semibold">
-              Target speler (optioneel)
-            </label>
+            <label className="text-xs font-semibold">Target speler (optioneel)</label>
             <input
               type="text"
               value={twistTargetUse}
@@ -1035,10 +1010,11 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-3"
             />
 
+            {/* AUTOCOMPLETE */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "target" && (
-                <div className="absolute bg-white border border-gray-300 w-full mt-1 rounded-lg shadow max-h-60 overflow-auto z-20">
+                <div className="absolute w-full bg-white border border-gray-300 mt-1 rounded-lg shadow max-h-60 overflow-auto z-20">
                   {searchResults.map((u) => (
                     <div
                       key={u.tiktok_id}
@@ -1048,9 +1024,7 @@ export default function AdminDashboardPage() {
                       <span className="font-semibold">
                         {u.display_name}
                       </span>{" "}
-                      <span className="text-gray-500">
-                        @{u.username}
-                      </span>
+                      <span className="text-gray-500">@{u.username}</span>
                     </div>
                   ))}
                 </div>
@@ -1072,7 +1046,7 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* ---- LOG FEED ---- */}
+      {/* LOG FEED */}
       <section className="bg-white rounded-2xl shadow p-4 mt-6">
         <h2 className="text-lg font-semibold mb-2">Log feed</h2>
 
@@ -1081,28 +1055,24 @@ export default function AdminDashboardPage() {
             logs.map((log) => (
               <div
                 key={log.id}
-                className={`
-                  px-3 py-1 border-b last:border-0
-                  ${
-                    log.type === "gift"
-                      ? "bg-pink-50 text-pink-800"
-                      : log.type === "elim"
-                      ? "bg-red-50 text-red-700"
-                      : log.type === "join"
-                      ? "bg-green-50 text-green-700"
-                      : log.type === "twist"
-                      ? "bg-purple-50 text-purple-700"
-                      : "bg-blue-50 text-blue-700"
-                  }
-                `}
+                className={`px-3 py-1 border-b last:border-0 ${
+                  log.type === "gift"
+                    ? "bg-pink-50 text-pink-800"
+                    : log.type === "elim"
+                    ? "bg-red-50 text-red-700"
+                    : log.type === "join"
+                    ? "bg-green-50 text-green-700"
+                    : log.type === "twist"
+                    ? "bg-purple-50 text-purple-700"
+                    : "bg-blue-50 text-blue-700"
+                }`}
               >
                 <span className="font-mono text-xs opacity-60">
                   {new Date(log.timestamp).toLocaleTimeString("nl-NL", {
                     hour12: false,
                   })}
                 </span>{" "}
-                <strong>{log.type.toUpperCase()}</strong> –{" "}
-                {log.message}
+                <strong>{log.type.toUpperCase()}</strong> – {log.message}
               </div>
             ))
           ) : (
