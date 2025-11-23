@@ -7,26 +7,24 @@ import type {
   QueueEntry,
   LogEntry,
   AdminAckResponse,
+  PlayerLeaderboardEntry,
+  GifterLeaderboardEntry,
+  SearchUser,
+  HostProfile,
+  ArenaSettings,
 } from "@/lib/adminTypes";
+import type {
+  AdminSocketInbound,
+  AdminSocketOutbound,
+} from "@/lib/socketClient";
 
+/* ===========================================
+   STATE TYPES
+=========================================== */
 type StreamStats = {
   totalPlayers: number;
   totalPlayerDiamonds: number;
   totalHostDiamonds: number;
-};
-
-type PlayerLeaderboardEntry = {
-  username: string;
-  display_name: string;
-  tiktok_id: string;
-  diamonds_total: number | null;
-};
-
-type GifterLeaderboardEntry = {
-  user_id: string;
-  display_name: string;
-  username: string;
-  total_diamonds: number | null;
 };
 
 type GameSessionState = {
@@ -36,25 +34,26 @@ type GameSessionState = {
   endedAt?: string | null;
 };
 
-type SearchUser = {
-  tiktok_id: string;
-  username: string;
-  display_name: string;
-};
-
+/* ===========================================
+   ADMIN DASHBOARD
+=========================================== */
 export default function AdminDashboardPage() {
+  /* CORE STATE */
   const [arena, setArena] = useState<ArenaState | null>(null);
   const [queue, setQueue] = useState<QueueEntry[]>([]);
   const [queueOpen, setQueueOpen] = useState(true);
+
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [streamStats, setStreamStats] = useState<StreamStats | null>(null);
 
   const [playerLeaderboard, setPlayerLeaderboard] = useState<
     PlayerLeaderboardEntry[]
   >([]);
+
   const [gifterLeaderboard, setGifterLeaderboard] = useState<
     GifterLeaderboardEntry[]
   >([]);
+
   const [leaderboardTab, setLeaderboardTab] =
     useState<"players" | "gifters">("players");
 
@@ -63,31 +62,36 @@ export default function AdminDashboardPage() {
     gameId: null,
   });
 
+  /* USER INPUT */
   const [username, setUsername] = useState("");
   const [status, setStatus] = useState<string | null>(null);
 
+  /* TWISTS */
   const [twistUserGive, setTwistUserGive] = useState("");
   const [twistUserUse, setTwistUserUse] = useState("");
   const [twistTargetUse, setTwistTargetUse] = useState("");
   const [twistTypeGive, setTwistTypeGive] = useState("");
   const [twistTypeUse, setTwistTypeUse] = useState("");
 
+  /* AUTOCOMPLETE */
   const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
   const [showResults, setShowResults] = useState(false);
   const [typing, setTyping] = useState("");
   const [activeAutoField, setActiveAutoField] =
     useState<null | "main" | "give" | "use" | "target">(null);
 
+  /* CONNECTION INDICATOR */
   const [connected, setConnected] = useState<
     "connected" | "disconnected" | "connecting"
   >("connecting");
 
-  // ============================
-  // SOCKET
-  // ============================
+  /* ===========================================
+     SOCKET INIT
+  ============================================ */
   useEffect(() => {
     const socket = getAdminSocket();
 
+    /* CONNECTION STATE */
     socket.on("connect", () => {
       setConnected("connected");
       setStatus("🟢 Verbonden met server");
@@ -103,68 +107,67 @@ export default function AdminDashboardPage() {
       setStatus("❌ Socket fout");
     });
 
-    socket.on("updateArena", (data: ArenaState) => setArena(data));
-    socket.on("updateQueue", (d: any) => {
-      setQueue(d.entries ?? []);
-      setQueueOpen(d.open ?? true);
+    /* LIVE STATE */
+    socket.on("updateArena", (data) => setArena(data));
+    socket.on("updateQueue", (data) => {
+      setQueue(data.entries ?? []);
+      setQueueOpen(data.open ?? true);
     });
 
-    socket.on("log", (l: LogEntry) =>
+    /* LOGS */
+    socket.on("log", (l) =>
       setLogs((prev) => [l, ...prev].slice(0, 200))
     );
+    socket.on("initialLogs", (arr) => setLogs(arr.slice(0, 200)));
 
-    socket.on("initialLogs", (arr: LogEntry[]) =>
-      setLogs(arr.slice(0, 200))
-    );
+    /* STATS */
+    socket.on("streamStats", (s) => setStreamStats(s));
 
-    socket.on("streamStats", (s: StreamStats) => setStreamStats(s));
-
-    socket.on("leaderboardPlayers", (rows: PlayerLeaderboardEntry[]) =>
+    /* LEADERBOARDS */
+    socket.on("leaderboardPlayers", (rows) =>
       setPlayerLeaderboard(rows ?? [])
     );
-    socket.on("leaderboardGifters", (rows: GifterLeaderboardEntry[]) =>
+    socket.on("leaderboardGifters", (rows) =>
       setGifterLeaderboard(rows ?? [])
     );
 
-    socket.on("gameSession", (s: GameSessionState) => setGameSession(s));
+    /* GAME SESSION STATE */
+    socket.on("gameSession", (s) => setGameSession(s));
 
-    socket.on("round:start", (d: any) =>
+    /* ROUND EVENTS */
+    socket.on("round:start", (d) =>
       setStatus(`▶️ Ronde gestart (${d.type}) — ${d.duration}s`)
     );
-
-    socket.on("round:grace", (d: any) =>
+    socket.on("round:grace", (d) =>
       setStatus(`⏳ Grace-periode actief (${d.grace}s)`)
     );
-
     socket.on("round:end", () =>
       setStatus("⛔ Ronde beëindigd — voer eliminaties uit")
     );
 
-    return () => {
-      socket.removeAllListeners();
-    };
+    return () => socket.removeAllListeners();
   }, []);
 
-  // ============================
-  // AUTOCOMPLETE
-  // ============================
+  /* ===========================================
+     AUTOCOMPLETE (STRICT)
+  ============================================ */
   useEffect(() => {
     if (!typing.trim() || typing.length < 2) {
       setSearchResults([]);
       return;
     }
 
-    const run = () => {
+    const timer = setTimeout(() => {
       const socket = getAdminSocket();
       socket.emit(
         "admin:searchUsers",
         { query: typing },
-        (res: { users: SearchUser[] }) =>
-          setSearchResults(res?.users ?? [])
+        (res: { users: SearchUser[] }) => {
+          setSearchResults(res?.users ?? []);
+        }
       );
-    };
+    }, 150);
 
-    const timer = setTimeout(run, 150);
     return () => clearTimeout(timer);
   }, [typing]);
 
@@ -176,61 +179,77 @@ export default function AdminDashboardPage() {
     if (activeAutoField === "use") setTwistUserUse(formatted);
     if (activeAutoField === "target") setTwistTargetUse(formatted);
 
-    setShowResults(false);
-    setTyping("");
     setSearchResults([]);
+    setTyping("");
+    setShowResults(false);
   };
 
-  // ============================
-  // ADMIN SENDER
-  // ============================
-  const emitAdmin = (event: string, payload?: any) => {
+  /* ===========================================
+     STRICT ADMIN EMITTER
+  ============================================ */
+  const emitAdmin = <
+    E extends keyof AdminSocketOutbound
+  >(
+    event: E,
+    payload?: Parameters<AdminSocketOutbound[E]>[0]
+  ) => {
     const socket = getAdminSocket();
     setStatus(`Bezig met ${event}...`);
-    socket.emit(event as any, payload || {}, (res: AdminAckResponse) => {
-      setStatus(
-        res?.success
-          ? "✅ Uitgevoerd"
-          : `❌ ${res?.message ?? "Geen antwoord"}`
-      );
-    });
+
+    const cb =
+      (res: AdminAckResponse) =>
+        setStatus(
+          res?.success
+            ? "✅ Uitgevoerd"
+            : `❌ ${res?.message ?? "Geen antwoord"}`
+        );
+
+    try {
+      // Wanneer commandos ACK ondersteunen (de meeste), stuur mee:
+      if (payload !== undefined) socket.emit(event, payload as any, cb);
+      else socket.emit(event, {}, cb);
+    } catch (err) {
+      console.error("Emit error:", err);
+      setStatus("❌ Fout bij versturen");
+    }
   };
 
-  const emitAdminWithUser = (event: string, raw?: string) => {
+  const emitAdminWithUser = <
+    E extends keyof AdminSocketOutbound
+  >(
+    event: E,
+    raw?: string
+  ) => {
     let u = raw || username;
     if (!u.trim()) return;
 
-    const formatted = u.startsWith("@") ? u.toLowerCase() : `@${u.toLowerCase()}`;
-    emitAdmin(event, { username: formatted });
+    const formatted = u.startsWith("@")
+      ? u.toLowerCase()
+      : `@${u.toLowerCase()}`;
+
+    emitAdmin(event, { username: formatted } as any);
   };
 
-  // safe fmt
+  /* ===========================================
+     HELPERS
+  ============================================ */
   const fmt = (n: number | null | undefined) =>
-    (n ?? 0).toLocaleString("nl-NL", {
-      maximumFractionDigits: 0,
-    });
+    (n ?? 0).toLocaleString("nl-NL", { maximumFractionDigits: 0 });
 
-  // ============================
-  // FINAL SCORE
-  // ============================
   const players = useMemo(() => {
-    if (!arena || !arena.players) return [];
-    return arena.players.map((p: any) => ({
+    if (!arena?.players) return [];
+    return arena.players.map((p) => ({
       ...p,
       finalScore:
         arena.type === "finale"
-          ? ((p._total ?? 0) + (p.diamonds ?? 0))
+          ? ((p as any)._total ?? 0) + (p.diamonds ?? 0)
           : (p.diamonds ?? 0),
     }));
   }, [arena]);
 
-  // ============================
-  // COLORS
-  // ============================
   const colorForPosition = (p: any) => {
-    if (!arena || arena.status === "idle") {
+    if (!arena || arena.status === "idle")
       return "bg-gray-50 border-gray-200";
-    }
     switch (p.positionStatus) {
       case "immune":
         return "bg-green-100 border-green-300";
@@ -243,12 +262,9 @@ export default function AdminDashboardPage() {
     }
   };
 
-  // ============================
-  // ROUND LOGIC
-  // ============================
   const arenaStatus = arena?.status ?? "idle";
   const hasDoomed =
-    players?.some((p: any) => p.positionStatus === "elimination") ?? false;
+    players.some((p) => p.positionStatus === "elimination");
 
   const canStartRound =
     !!arena &&
@@ -263,51 +279,45 @@ export default function AdminDashboardPage() {
     arenaStatus === "ended" &&
     hasDoomed;
 
-  // TIMER
   const roundProgress = useMemo(() => {
     if (!arena) return 0;
     const now = Date.now();
 
     if (arena.status === "active") {
-      const start = arena.roundStartTime;
-      const end = arena.roundCutoff;
-      return Math.max(
-        0,
-        Math.min(100, ((now - start) / (end - start)) * 100)
-      );
+      const pct =
+        (now - arena.roundStartTime) /
+        (arena.roundCutoff - arena.roundStartTime);
+      return Math.max(0, Math.min(100, pct * 100));
     }
 
     if (arena.status === "grace") {
-      const start = arena.roundCutoff;
-      const end = arena.graceEnd;
-      return Math.max(
-        0,
-        Math.min(100, ((now - start) / (end - start)) * 100)
-      );
+      const pct =
+        (now - arena.roundCutoff) /
+        (arena.graceEnd - arena.roundCutoff);
+      return Math.max(0, Math.min(100, pct * 100));
     }
 
     return 0;
   }, [arena]);
 
-  function formatTime(sec: number) {
+  const formatTime = (sec: number) => {
     if (!sec || sec < 0) sec = 0;
     const m = Math.floor(sec / 60);
     const s = sec % 60;
     return `${m.toString().padStart(2, "0")}:${s
       .toString()
       .padStart(2, "0")}`;
-  }
+  };
 
-  // =====================================
-  // RENDER START (DEEL 2 GAAT HIER DOOR)
-  // =====================================
+  /* ===========================================
+     RENDER
+  ============================================ */
 
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
-      {/* HEADER */}
+      {/* ---- HEADER ---- */}
       <header className="mb-6">
         <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-2 mb-2">
-
           <div className="flex items-center gap-2">
             <div className="text-2xl font-bold text-[#ff4d4f]">UB</div>
             <div>
@@ -316,7 +326,9 @@ export default function AdminDashboardPage() {
               </div>
               <div className="text-xs text-gray-500">
                 Verbonden als{" "}
-                <span className="text-green-600 font-semibold">Admin</span>
+                <span className="text-green-600 font-semibold">
+                  Admin
+                </span>
               </div>
             </div>
           </div>
@@ -338,6 +350,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
+        {/* TIMER BAR */}
         {arena && arena.status !== "idle" && (
           <div className="w-full h-4 bg-gray-300 rounded-full shadow-inner relative overflow-hidden">
             <div
@@ -355,7 +368,9 @@ export default function AdminDashboardPage() {
                 formatTime(
                   Math.max(
                     0,
-                    Math.floor((arena.roundCutoff - Date.now()) / 1000)
+                    Math.floor(
+                      (arena.roundCutoff - Date.now()) / 1000
+                    )
                   )
                 )}
 
@@ -363,7 +378,9 @@ export default function AdminDashboardPage() {
                 formatTime(
                   Math.max(
                     0,
-                    Math.floor((arena.graceEnd - Date.now()) / 1000)
+                    Math.floor(
+                      (arena.graceEnd - Date.now()) / 1000
+                    )
                   )
                 )}
 
@@ -373,10 +390,9 @@ export default function AdminDashboardPage() {
         )}
       </header>
 
-      {/* SPELBESTURING */}
+      {/* ---- SPELBESTURING ---- */}
       <section className="bg-white p-4 rounded-2xl shadow mb-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="flex flex-col gap-3">
-
           <div className="text-sm font-semibold">Spelbesturing</div>
 
           <div className="flex gap-2 flex-wrap">
@@ -446,17 +462,17 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* SPELERACTIES */}
+        {/* ---- SPELERACTIES ---- */}
         <div className="lg:col-span-2 flex flex-col gap-3">
-
           <div className="text-sm font-semibold">Speleracties</div>
 
           <div className="flex flex-col md:flex-row gap-3 md:items-end relative">
-
+            {/* USERNAME INPUT */}
             <div className="flex-1">
               <label className="text-xs text-gray-600 font-semibold mb-1 block">
                 @username (zoek)
               </label>
+
               <input
                 type="text"
                 value={username}
@@ -485,53 +501,69 @@ export default function AdminDashboardPage() {
                         onClick={() => applyAutoFill(u)}
                         className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
                       >
-                        <span className="font-semibold">{u.display_name}</span>{" "}
-                        <span className="text-gray-500">@{u.username}</span>
+                        <span className="font-semibold">
+                          {u.display_name}
+                        </span>{" "}
+                        <span className="text-gray-500">
+                          @{u.username}
+                        </span>
                       </div>
                     ))}
                   </div>
                 )}
             </div>
 
+            {/* ACTION BUTTONS */}
             <div className="flex flex-wrap gap-2 text-xs">
-
               <button
-                onClick={() => emitAdminWithUser("admin:addToArena", username)}
+                onClick={() =>
+                  emitAdminWithUser("admin:addToArena", username)
+                }
                 className="px-3 py-1.5 rounded-full bg-[#ff4d4f] text-white"
               >
                 → Arena
               </button>
 
               <button
-                onClick={() => emitAdminWithUser("admin:addToQueue", username)}
+                onClick={() =>
+                  emitAdminWithUser("admin:addToQueue", username)
+                }
                 className="px-3 py-1.5 rounded-full bg-gray-800 text-white"
               >
                 → Queue
               </button>
 
               <button
-                onClick={() => emitAdminWithUser("admin:eliminate", username)}
+                onClick={() =>
+                  emitAdminWithUser("admin:eliminate", username)
+                }
                 className="px-3 py-1.5 rounded-full bg-red-600 text-white"
               >
                 Elimineer
               </button>
 
               <button
-                onClick={() => emitAdminWithUser("admin:giveVip", username)}
+                onClick={() =>
+                  emitAdminWithUser("admin:giveVip", username)
+                }
                 className="px-3 py-1.5 rounded-full bg-yellow-500 text-white"
               >
                 Geef VIP
               </button>
 
               <button
-                onClick={() => emitAdminWithUser("admin:removeVip", username)}
+                onClick={() =>
+                  emitAdminWithUser("admin:removeVip", username)
+                }
                 className="px-3 py-1.5 rounded-full bg-yellow-700 text-white"
               >
                 Remove VIP
               </button>
 
               <button
-                onClick={() => emitAdminWithUser("admin:giveFan", username)}
+                onClick={() =>
+                  emitAdminWithUser("admin:giveFan", username)
+                }
                 className="px-3 py-1.5 rounded-full bg-blue-600 text-white"
               >
                 Geef FAN (24u)
@@ -541,15 +573,15 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
+      {/* STATUS MESSAGE */}
       {status && (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 py-2 px-4 text-center rounded-xl mb-4 text-sm">
           {status}
         </div>
       )}
 
-      {/* ARENA + QUEUE */}
+      {/* ---- ARENA & QUEUE ---- */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
         {/* ARENA */}
         <div className="bg-white p-4 rounded-2xl shadow">
           <h2 className="text-xl font-semibold mb-2">Arena</h2>
@@ -588,7 +620,10 @@ export default function AdminDashboardPage() {
                   {p.positionStatus === "elimination" && (
                     <button
                       onClick={() =>
-                        emitAdminWithUser("admin:eliminate", p.username)
+                        emitAdminWithUser(
+                          "admin:eliminate",
+                          p.username
+                        )
                       }
                       className="mt-2 px-2 py-1 text-[11px] bg-red-50 text-red-700 border-red-300 rounded-full border"
                     >
@@ -610,7 +645,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* QUEUE */}
+        {/* ---- QUEUE ---- */}
         <div className="bg-white p-4 rounded-2xl shadow">
           <h2 className="text-xl font-semibold mb-2">Wachtrij</h2>
           <p className="text-sm text-gray-500 mb-3">
@@ -692,7 +727,10 @@ export default function AdminDashboardPage() {
 
                   <button
                     onClick={() =>
-                      emitAdminWithUser("admin:removeFromQueue", q.username)
+                      emitAdminWithUser(
+                        "admin:removeFromQueue",
+                        q.username
+                      )
                     }
                     className="px-2 py-1 bg-red-50 text-red-700 border border-red-300 rounded-full text-xs"
                   >
@@ -709,9 +747,8 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* LEADERBOARD + STATS */}
+      {/* ---- LEADERBOARD & STATS ---- */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-
         {/* LEADERBOARD */}
         <div className="bg-white p-4 rounded-2xl shadow">
           <div className="flex justify-between items-center mb-3">
@@ -822,29 +859,36 @@ export default function AdminDashboardPage() {
             </div>
 
             <div className="flex justify-between">
-              <span className="text-gray-600">Speler diamonds</span>
+              <span className="text-gray-600">
+                Speler diamonds
+              </span>
               <span className="font-semibold">
-                {streamStats ? fmt(streamStats.totalPlayerDiamonds) : "0"} 💎
+                {streamStats
+                  ? fmt(streamStats.totalPlayerDiamonds)
+                  : "0"}{" "}
+                💎
               </span>
             </div>
 
             <div className="flex justify-between">
               <span className="text-gray-600">Host diamonds</span>
               <span className="font-semibold">
-                {streamStats ? fmt(streamStats.totalHostDiamonds) : "0"} 💎
+                {streamStats
+                  ? fmt(streamStats.totalHostDiamonds)
+                  : "0"}{" "}
+                💎
               </span>
             </div>
           </div>
         </div>
       </section>
 
-      {/* TWISTS */}
+      {/* ---- TWISTS ---- */}
       <section className="bg-white rounded-2xl shadow p-4 mt-8">
         <h2 className="text-xl font-semibold mb-4">Twists</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-
-          {/* GIVE */}
+          {/* GIVE TWIST */}
           <div className="bg-gray-50 border rounded-xl p-4 shadow-sm relative">
             <h3 className="font-semibold mb-3">Twist geven</h3>
 
@@ -875,8 +919,12 @@ export default function AdminDashboardPage() {
                       onClick={() => applyAutoFill(u)}
                       className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
                     >
-                      <span className="font-semibold">{u.display_name}</span>{" "}
-                      <span className="text-gray-500">@{u.username}</span>
+                      <span className="font-semibold">
+                        {u.display_name}
+                      </span>{" "}
+                      <span className="text-gray-500">
+                        @{u.username}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -910,9 +958,11 @@ export default function AdminDashboardPage() {
             </button>
           </div>
 
-          {/* USE */}
+          {/* USE TWIST */}
           <div className="bg-gray-50 border rounded-xl p-4 shadow-sm relative">
-            <h3 className="font-semibold mb-3">Twist gebruiken (admin)</h3>
+            <h3 className="font-semibold mb-3">
+              Twist gebruiken (admin)
+            </h3>
 
             <label className="text-xs font-semibold">Gebruiker</label>
             <input
@@ -941,8 +991,12 @@ export default function AdminDashboardPage() {
                       onClick={() => applyAutoFill(u)}
                       className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
                     >
-                      <span className="font-semibold">{u.display_name}</span>{" "}
-                      <span className="text-gray-500">@{u.username}</span>
+                      <span className="font-semibold">
+                        {u.display_name}
+                      </span>{" "}
+                      <span className="text-gray-500">
+                        @{u.username}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -992,8 +1046,12 @@ export default function AdminDashboardPage() {
                       onClick={() => applyAutoFill(u)}
                       className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
                     >
-                      <span className="font-semibold">{u.display_name}</span>{" "}
-                      <span className="text-gray-500">@{u.username}</span>
+                      <span className="font-semibold">
+                        {u.display_name}
+                      </span>{" "}
+                      <span className="text-gray-500">
+                        @{u.username}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -1015,7 +1073,7 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* LOGS */}
+      {/* ---- LOG FEED ---- */}
       <section className="bg-white rounded-2xl shadow p-4 mt-6">
         <h2 className="text-lg font-semibold mb-2">Log feed</h2>
 
@@ -1044,7 +1102,8 @@ export default function AdminDashboardPage() {
                     hour12: false,
                   })}
                 </span>{" "}
-                <strong>{log.type.toUpperCase()}</strong> – {log.message}
+                <strong>{log.type.toUpperCase()}</strong> –{" "}
+                {log.message}
               </div>
             ))
           ) : (
