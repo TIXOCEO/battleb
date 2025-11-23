@@ -1,5 +1,5 @@
 // ============================================================================
-// 3-gift-engine.ts — v11.1 FINAL HOST PROFILE EDITION
+// 3-gift-engine.ts — v11.1 FINAL HOST PROFILE EDITION (PATCHED)
 // ============================================================================
 
 import pool from "../db";
@@ -16,7 +16,7 @@ import {
   emitLog,
   io,
   broadcastStats,
-  broadcastRoundLeaderboard,
+  // ❌ broadcastRoundLeaderboard verwijderd
   getActiveHost,
 } from "../server";
 
@@ -44,7 +44,6 @@ function makeDedupeKey(evt: any, source: string) {
 // ============================================================================
 // NORMALIZERS
 // ============================================================================
-
 function norm(v: any) {
   return (v || "")
     .toString()
@@ -69,7 +68,6 @@ function formatDisplay(u: any) {
 // ============================================================================
 // FAN EXPIRE
 // ============================================================================
-
 async function cleanupFan(id: string) {
   const r = await pool.query(
     `SELECT is_fan, fan_expires_at FROM users WHERE tiktok_id=$1`,
@@ -95,7 +93,6 @@ async function cleanupFan(id: string) {
 // ============================================================================
 // SENDER PARSER
 // ============================================================================
-
 function extractSender(evt: any) {
   const raw =
     evt.user ||
@@ -116,10 +113,10 @@ function extractSender(evt: any) {
       null,
     unique: norm(
       raw?.uniqueId ||
-      raw?.unique_id ||
-      evt.uniqueId ||
-      evt.unique_id ||
-      null
+        raw?.unique_id ||
+        evt.uniqueId ||
+        evt.unique_id ||
+        null
     ),
     nick:
       raw?.nickname ||
@@ -133,7 +130,6 @@ function extractSender(evt: any) {
 // ============================================================================
 // DIAMONDS
 // ============================================================================
-
 function calcDiamonds(evt: any): number {
   const base = Number(evt.diamondCount || evt.diamond || 0);
   if (base <= 0) return 0;
@@ -150,7 +146,6 @@ function calcDiamonds(evt: any): number {
 // ============================================================================
 // RECEIVER PARSER — HOST LOCK
 // ============================================================================
-
 async function resolveReceiver(evt: any) {
   const active = getActiveHost();
   const HOST_ID = active?.id || null;
@@ -172,33 +167,61 @@ async function resolveReceiver(evt: any) {
 
   const un = unique ? norm(unique) : null;
 
+  // HOST match (ID)
   if (HOST_ID && directId && String(directId) === String(HOST_ID)) {
-    const h = await getOrUpdateUser(HOST_ID, null, null);
-    return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
+    const h = await getOrUpdateUser(String(HOST_ID), null, null);   // ✔ FIX toegepast
+    return {
+      id: HOST_ID,
+      username: h.username,
+      display_name: h.display_name,
+      role: "host",
+    };
   }
 
+  // HOST match (username)
   if (HOST_USERNAME && un === HOST_USERNAME) {
-    const h = await getOrUpdateUser(HOST_ID, null, null);
-    return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
+    const h = await getOrUpdateUser(String(HOST_ID), null, null);   // ✔ FIX toegepast
+    return {
+      id: HOST_ID,
+      username: h.username,
+      display_name: h.display_name,
+      role: "host",
+    };
   }
 
+  // Direct receiver found
   if (directId) {
     const u = await getOrUpdateUser(String(directId), null, null);
-    return { id: u.tiktok_id, username: u.username, display_name: u.display_name, role: "speler" };
+    return {
+      id: u.tiktok_id,
+      username: u.username,
+      display_name: u.display_name,
+      role: "speler",
+    };
   }
 
+  // Fallback → default to host if available
   if (HOST_ID) {
-    const h = await getOrUpdateUser(HOST_ID, null, null);
-    return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
+    const h = await getOrUpdateUser(String(HOST_ID), null, null);   // ✔ FIX toegepast
+    return {
+      id: HOST_ID,
+      username: h.username,
+      display_name: h.display_name,
+      role: "host",
+    };
   }
 
-  return { id: null, username: "", display_name: "UNKNOWN", role: "speler" };
+  return {
+    id: null,
+    username: "",
+    display_name: "UNKNOWN",
+    role: "speler",
+  };
 }
 
 // ============================================================================
 // HEART ME
 // ============================================================================
-
 const HEART_ME_GIFT_IDS = new Set([7934]);
 
 function isHeartMeGift(evt: any): boolean {
@@ -210,7 +233,6 @@ function isHeartMeGift(evt: any): boolean {
 // ============================================================================
 // MAIN PROCESSOR
 // ============================================================================
-
 async function processGift(evt: any, source: string) {
   try {
     const key = makeDedupeKey(evt, source);
@@ -298,8 +320,9 @@ async function processGift(evt: any, source: string) {
     // twist gifts
     const giftId = Number(evt.giftId);
     const twistType =
-      (Object.keys(TWIST_MAP) as TwistType[])
-        .find(t => TWIST_MAP[t].giftId === giftId) || null;
+      (Object.keys(TWIST_MAP) as TwistType[]).find(
+        (t) => TWIST_MAP[t].giftId === giftId
+      ) || null;
 
     if (twistType) {
       await addTwistByGift(String(sender.tiktok_id), twistType);
@@ -352,7 +375,7 @@ async function processGift(evt: any, source: string) {
     );
 
     await broadcastStats();
-    await broadcastRoundLeaderboard();
+    // ❌ broadcastRoundLeaderboard verwijderd — jij gebruikt alleen sender & receiver leaderboards
 
     emitLog({
       type: "gift",
@@ -367,7 +390,6 @@ async function processGift(evt: any, source: string) {
 // ============================================================================
 // INIT ENGINE
 // ============================================================================
-
 export function initGiftEngine(conn: any) {
   if (!conn || typeof conn.on !== "function") {
     console.log("⚠ initGiftEngine: no connection");
@@ -377,12 +399,15 @@ export function initGiftEngine(conn: any) {
   console.log("🎁 GiftEngine v11.1 LOADED");
 
   conn.on("gift", (d: any) => processGift(d, "gift"));
+
   conn.on("roomMessage", (d: any) => {
     if (d?.giftId || d?.diamondCount) processGift(d, "roomMessage");
   });
+
   conn.on("member", (d: any) => {
     if (d?.giftId || d?.diamondCount) processGift(d, "member");
   });
+
   conn.on("chat", (d: any) => {
     if (d?._data?.giftId || d?._data?.diamondCount)
       processGift(d._data, "chat-hidden");
@@ -392,7 +417,6 @@ export function initGiftEngine(conn: any) {
 // ============================================================================
 // EXPORT
 // ============================================================================
-
 export default {
   initGiftEngine,
 };
