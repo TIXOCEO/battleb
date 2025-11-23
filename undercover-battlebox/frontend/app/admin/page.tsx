@@ -187,7 +187,7 @@ export default function AdminDashboardPage() {
   const emitAdmin = (event: string, payload?: any) => {
     const socket = getAdminSocket();
     setStatus(`Bezig met ${event}...`);
-    socket.emit(event, payload || {}, (res: AdminAckResponse) => {
+    socket.emit(event as any, payload || {}, (res: AdminAckResponse) => {
       setStatus(
         res?.success
           ? "✅ Uitgevoerd"
