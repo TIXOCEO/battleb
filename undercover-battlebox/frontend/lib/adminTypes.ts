@@ -1,5 +1,3 @@
-// frontend/lib/adminTypes.ts
-
 /* ================================
    ARENA PLAYER TYPES
 ================================ */
@@ -15,14 +13,21 @@ export interface ArenaPlayer {
   id: string;
   display_name: string;
   username: string;
+
   diamonds: number;
   boosters: string[];
+
+  /** Server primary state */
   status: "alive" | "eliminated";
 
+  /** UI state (sorting outcome / danger zone / immunity) */
   positionStatus: ArenaPlayerStatus;
 
   is_vip?: boolean;
   is_fan?: boolean;
+
+  vip_expires_at?: string | null;
+  fan_expires_at?: string | null;
 }
 
 /* ================================
@@ -30,11 +35,14 @@ export interface ArenaPlayer {
 ================================ */
 export interface ArenaState {
   players: ArenaPlayer[];
+
   round: number;
   type: "quarter" | "semi" | "finale";
+
   status: "idle" | "active" | "grace" | "ended";
   timeLeft: number;
   isRunning: boolean;
+
   roundStartTime: number;
   roundCutoff: number;
   graceEnd: number;
@@ -54,6 +62,7 @@ export interface ArenaState {
 ================================ */
 export interface QueueEntry {
   position: number;
+
   tiktok_id: string;
   display_name: string;
   username: string;
@@ -77,6 +86,8 @@ export interface GlobalToggles {
   twistsEnabled: boolean;
   roundType: "voorronde" | "finale";
   debugLogs: boolean;
+
+  /** Server daily reset moment HH:MM */
   dayResetTime: string;
 }
 
@@ -106,7 +117,7 @@ export interface LogEntry {
 }
 
 /* ================================
-   ACK
+   ACK RESPONSE
 ================================ */
 export interface AdminAckResponse {
   success: boolean;
@@ -137,6 +148,7 @@ export interface PlayerLeaderboardEntry {
   username: string;
   display_name: string;
   tiktok_id: string;
+
   diamonds_total: number;
 
   is_vip?: boolean;
