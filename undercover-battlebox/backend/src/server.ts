@@ -41,12 +41,7 @@ const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "supersecret123";
 // ============================================================================
 function sanitizeHost(v: string | null) {
   if (!v) return "";
-  return v
-    .trim()
-    .replace(/^@+/, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]/g, "")
-    .slice(0, 30);
+  return v.trim().replace(/^@+/, "").toLowerCase().replace(/[^a-z0-9._-]/g, "").slice(0, 30);
 }
 
 // ============================================================================
@@ -120,8 +115,7 @@ export function emitLog(entry: Partial<LogEntry>) {
 // ============================================================================
 app.get("/api/hosts", async (req, res) => {
   const r = await pool.query(
-    `SELECT id, label, username, tiktok_id, active
-     FROM hosts ORDER BY id`
+    `SELECT id, label, username, tiktok_id, active FROM hosts ORDER BY id`
   );
   res.json({ success: true, hosts: r.rows });
 });
@@ -135,10 +129,7 @@ async function fetchTikTokId(username: string): Promise<string | null> {
 
   try {
     const res = await fetch(`https://www.tiktok.com/@${clean}`, {
-      headers: {
-        "user-agent":
-          "Mozilla/5.0",
-      },
+      headers: { "user-agent": "Mozilla/5.0" },
     });
 
     const html = await res.text();
@@ -151,11 +142,7 @@ async function fetchTikTokId(username: string): Promise<string | null> {
 
 app.get("/api/tiktok-id/:username", async (req, res) => {
   const id = await fetchTikTokId(req.params.username || "");
-  if (!id)
-    return res.status(404).json({
-      success: false,
-      message: "Kon TikTok ID niet vinden",
-    });
+  if (!id) return res.status(404).json({ success: false, message: "Kon TikTok ID niet vinden" });
 
   res.json({ success: true, tiktok_id: id });
 });
@@ -341,6 +328,69 @@ io.use((socket: AdminSocket, next) => {
 io.on("connection", async (socket: AdminSocket) => {
   if (!socket.isAdmin) return socket.disconnect();
 
+  // -----------------------------
+  // NEW → INITIAL SNAPSHOT HANDLER
+  // -----------------------------
+  socket.on("admin:getInitialSnapshot", async (_data, ack) => {
+    const snapshot: any = {};
+
+    snapshot.arena = getArena();
+    snapshot.queue = {
+      open: true,
+      entries: await getQueue(),
+    };
+    snapshot.logs = logBuffer;
+    snapshot.settings = getArenaSettings();
+    snapshot.stats = null;
+
+    snapshot.gameSession = {
+      active: currentGameId !== null,
+      gameId: currentGameId,
+    };
+
+    if (currentGameId) {
+      const p = await pool.query(`
+        SELECT COUNT(DISTINCT receiver_id) AS total_players,
+               COALESCE(SUM(diamonds), 0) AS total_diamonds
+        FROM gifts WHERE game_id=$1
+      `, [currentGameId]);
+
+      snapshot.stats = p.rows[0] || {};
+    }
+
+    // leaderboards
+    const topPlayers = await pool.query(`
+      SELECT username, display_name, tiktok_id, diamonds_total
+      FROM users
+      WHERE diamonds_total > 0
+      ORDER BY diamonds_total DESC
+      LIMIT 200
+    `);
+    snapshot.playerLeaderboard = topPlayers.rows;
+
+    if (currentGameId) {
+      const topGifters = await pool.query(`
+        SELECT giver_id AS user_id,
+               giver_username AS username,
+               giver_display_name AS display_name,
+               SUM(diamonds) AS total_diamonds
+        FROM gifts
+        WHERE game_id=$1
+        GROUP BY giver_id, giver_username, giver_display_name
+        ORDER BY total_diamonds DESC
+        LIMIT 200
+      `, [currentGameId]);
+      snapshot.gifterLeaderboard = topGifters.rows;
+    } else {
+      snapshot.gifterLeaderboard = [];
+    }
+
+    ack(snapshot);
+  });
+
+  // -------------------------------------------------------
+  // ORIGINELE INIT-EVENTS (GEEN WIJZIGINGEN)
+  // -------------------------------------------------------
   socket.emit("initialLogs", logBuffer);
   socket.emit("updateArena", getArena());
   socket.emit("updateQueue", {
@@ -372,7 +422,7 @@ io.on("connection", async (socket: AdminSocket) => {
 
   initAdminTwistEngine(socket);
 
-  // ========================================================================
+      // ========================================================================
   // WRAPPER
   // ========================================================================
   async function handle(action: string, data: any, ack: Function) {
@@ -569,7 +619,6 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // start round (quarter/finale)
       if (action === "startRound") {
         const type = data?.type || "quarter";
         await startRound(type);
@@ -616,7 +665,6 @@ io.on("connection", async (socket: AdminSocket) => {
       // ==================================================================
       // USER ACTIONS (arena/queue)
 // ==================================================================
-
 
       if (!data?.username)
         return ack({
@@ -759,7 +807,7 @@ io.on("connection", async (socket: AdminSocket) => {
 
   // ========================================================================
   // SOCKET ROUTING
-  // ============================================================================
+  // ========================================================================
   socket.on("admin:getSettings", (d, ack) => handle("getSettings", d, ack));
   socket.on("admin:getHosts", (d, ack) => handle("getHosts", d, ack));
   socket.on("admin:createHost", (d, ack) => handle("createHost", d, ack));
