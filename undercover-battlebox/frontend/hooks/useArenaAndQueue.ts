@@ -56,12 +56,14 @@ export function useArenaAndQueue() {
       setArena(data);
     });
 
-    socket.on("updateQueue", (data: QueueEntry[]) => {
-      if (!mounted) return;
-      setQueue(data);
-    });
-
-    // Eventueel kun je hier ook toggles laten binnenkomen via een eigen event
+    // ✔ FIXED — juiste payload-structuur
+    socket.on(
+      "updateQueue",
+      (data: { open: boolean; entries: QueueEntry[] }) => {
+        if (!mounted) return;
+        setQueue(data.entries ?? []);
+      }
+    );
 
     return () => {
       mounted = false;
