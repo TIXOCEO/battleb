@@ -142,6 +142,26 @@ export interface SearchUser {
 }
 
 /* ================================
+   HOST PROFILES (admin:getHosts)
+================================ */
+export interface HostProfile {
+  id: number;
+  username: string;     // @username zonder @
+  tiktok_id: string;    // numeric TikTok user_id as string
+  active: boolean;      // welke host is actief
+}
+
+/* ================================
+   ARENA SETTINGS (admin:getSettings)
+================================ */
+export interface ArenaSettings {
+  roundDurationPre: number;
+  roundDurationFinal: number;
+  graceSeconds: number;
+  forceEliminations: boolean;
+}
+
+/* ================================
    LEADERBOARDS
 ================================ */
 export interface PlayerLeaderboardEntry {
