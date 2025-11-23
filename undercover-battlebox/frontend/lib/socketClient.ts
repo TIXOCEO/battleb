@@ -20,9 +20,9 @@ declare global {
   var __adminSocket: Socket | undefined;
 }
 
-/* ============================================================
-   INBOUND: SERVER → CLIENT EVENTS (TYPESAFE)
-============================================================ */
+/* ===========================================
+   INBOUND EVENTS (SERVER → CLIENT)
+=========================================== */
 export interface AdminSocketInbound {
   connect: () => void;
   disconnect: (reason: string) => void;
@@ -54,101 +54,138 @@ export interface AdminSocketInbound {
   "round:grace": (d: any) => void;
   "round:end": () => void;
 
-  // autocomplete
+  // search users
   "admin:searchUsers:result": (res: { users: SearchUser[] }) => void;
 
-  // VIP/FAN auto-expire
-  vipExpired: (payload: { username: string; tiktok_id: string }) => void;
-  fanExpired: (payload: { username: string; tiktok_id: string }) => void;
+  // VIP / FAN auto expiry
+  vipExpired: (res: { username: string; tiktok_id: string }) => void;
+  fanExpired: (res: { username: string; tiktok_id: string }) => void;
 
+  // HOSTS SYSTEM
+  hosts: (rows: any[]) => void; // full list
+  hostsActiveChanged: (payload: { id: number }) => void;
+
+  // heartbeat
   pong: () => void;
 }
 
-/* ============================================================
-   OUTBOUND: CLIENT → SERVER EVENTS (TYPESAFE)
-============================================================ */
+/* ===========================================
+   OUTBOUND EVENTS (CLIENT → SERVER)
+=========================================== */
 export interface AdminSocketOutbound {
-  // User actions
+  /* =====================
+      HOSTS
+  ===================== */
+  "admin:getHosts": (
+    payload?: {},
+    cb?: (res: { success: boolean; hosts: any[] }) => void
+  ) => void;
+
+  "admin:createHost": (
+    payload: { label: string; username: string; tiktok_id: string },
+    cb?: (res: AdminAckResponse) => void
+  ) => void;
+
+  "admin:deleteHost": (
+    payload: { id: number },
+    cb?: (res: AdminAckResponse) => void
+  ) => void;
+
+  "admin:setActiveHost": (
+    payload: { id: number },
+    cb?: (res: AdminAckResponse) => void
+  ) => void;
+
+  /* =====================
+      QUEUE & ARENA
+  ===================== */
   "admin:addToArena": (
     payload: { username: string },
-    cb?: (res: AdminAckResponse) => void
+    cb?: AdminAckResponse
   ) => void;
 
   "admin:addToQueue": (
     payload: { username: string },
-    cb?: (res: AdminAckResponse) => void
+    cb?: AdminAckResponse
   ) => void;
 
   "admin:removeFromQueue": (
     payload: { username: string },
-    cb?: (res: AdminAckResponse) => void
+    cb?: AdminAckResponse
   ) => void;
 
   "admin:promoteUser": (
     payload: { username: string },
-    cb?: (res: AdminAckResponse) => void
+    cb?: AdminAckResponse
   ) => void;
 
   "admin:demoteUser": (
     payload: { username: string },
-    cb?: (res: AdminAckResponse) => void
+    cb?: AdminAckResponse
   ) => void;
 
   "admin:eliminate": (
     payload: { username: string },
-    cb?: (res: AdminAckResponse) => void
+    cb?: AdminAckResponse
   ) => void;
 
-  // VIP / FAN
+  /* =====================
+      PREMIUM (VIP/FAN)
+  ===================== */
   "admin:giveVip": (
     payload: { username: string },
-    cb?: (res: AdminAckResponse) => void
+    cb?: AdminAckResponse
   ) => void;
 
   "admin:removeVip": (
     payload: { username: string },
-    cb?: (res: AdminAckResponse) => void
+    cb?: AdminAckResponse
   ) => void;
 
   "admin:giveFan": (
     payload: { username: string },
-    cb?: (res: AdminAckResponse) => void
+    cb?: AdminAckResponse
   ) => void;
 
-  // twists
+  /* =====================
+      TWISTS
+  ===================== */
   "admin:giveTwist": (
     payload: any,
-    cb?: (res: AdminAckResponse) => void
+    cb?: AdminAckResponse
   ) => void;
 
   "admin:useTwist": (
     payload: any,
-    cb?: (res: AdminAckResponse) => void
+    cb?: AdminAckResponse
   ) => void;
 
-  // rounds
+  /* =====================
+      GAME ENGINE
+  ===================== */
   "admin:startRound": (
     payload: { type: "quarter" | "finale" },
-    cb?: (res: AdminAckResponse) => void
+    cb?: AdminAckResponse
   ) => void;
 
   "admin:endRound": (
     payload?: {},
-    cb?: (res: AdminAckResponse) => void
+    cb?: AdminAckResponse
   ) => void;
 
-  // game control
   "admin:startGame": (
     payload?: {},
-    cb?: (res: AdminAckResponse) => void
+    cb?: AdminAckResponse
   ) => void;
 
   "admin:stopGame": (
     payload?: {},
-    cb?: (res: AdminAckResponse) => void
+    cb?: AdminAckResponse
   ) => void;
 
-  // settings
+  /* =====================
+      SETTINGS
+  ===================== */
   "admin:getSettings": (
     payload?: {},
     cb?: (res: any) => void
@@ -156,28 +193,31 @@ export interface AdminSocketOutbound {
 
   "admin:updateSettings": (
     payload: any,
-    cb?: (res: AdminAckResponse) => void
+    cb?: AdminAckResponse
   ) => void;
 
-  // initial sync (after reconnect)
   "admin:getInitialState": (
     payload?: {},
     cb?: (res: any) => void
   ) => void;
 
-  // autocomplete
+  /* =====================
+      SEARCH USERS
+  ===================== */
   "admin:searchUsers": (
     payload: { query: string },
     cb: (res: { users: SearchUser[] }) => void
   ) => void;
 
-  // ping
+  /* =====================
+      HEALTH CHECK
+  ===================== */
   ping: () => void;
 }
 
-/* ============================================================
-   SINGLETON SOCKET INSTANCE
-============================================================ */
+/* ===========================================
+   SINGLETON SOCKET
+=========================================== */
 export function getAdminSocket(): Socket<
   AdminSocketInbound,
   AdminSocketOutbound
@@ -200,34 +240,39 @@ export function getAdminSocket(): Socket<
     path: "/socket.io",
     auth: { token: ADMIN_TOKEN, role: "admin" },
     reconnection: true,
-    reconnectionAttempts: 80,
+    reconnectionAttempts: 60,
     reconnectionDelay: 1500,
-    timeout: 8000,
+    timeout: 9000,
   });
 
-  // RECONNECT-SYNC
+  /* ===========================================
+     AUTO-RESYNC NA CONNECT
+  ============================================ */
   socket.on("connect", () => {
     console.log("✅ Admin socket verbonden:", socket.id);
-
     socket.emit("ping");
-    socket.emit("admin:getInitialState", {}, () => {});
+
+    // Reload all static state:
+    socket.emit("admin:getInitialState", {});
+    socket.emit("admin:searchUsers", { query: "" }, () => {});
+    socket.emit("admin:getHosts", {}, () => {});
     socket.emit("admin:getSettings", {}, () => {});
   });
 
   socket.on("disconnect", (reason) => {
-    console.warn("⚠️ Socket disconnect:", reason);
+    console.warn("⚠️ Admin socket disconnect:", reason);
   });
 
   socket.on("connect_error", (err) => {
     console.error("❌ Connect error:", err?.message || err);
   });
 
-  // Heartbeat
+  /* Heartbeat */
   setInterval(() => {
     try {
       socket.emit("ping");
-    } catch {}
-  }, 12_000);
+    } catch (_) {}
+  }, 12000);
 
   globalThis.__adminSocket = socket;
   return socket;
