@@ -1,18 +1,13 @@
+
 "use client";
 
 import React, { useEffect, useState, useRef } from "react";
 import { getAdminSocket } from "@/lib/socketClient";
-import type {
-  AdminAckResponse,
-  HostProfile,
-  ArenaSettings,
-} from "@/lib/adminTypes";
-import type { AdminSocketOutbound } from "@/lib/socketClient";
+import type { AdminAckResponse } from "@/lib/adminTypes";
 
-//
 // Sanitizers
-//
 function sanitizeHostUsername(input: string): string {
+  if (!input) return "";
   return input
     .trim()
     .replace(/^@+/, "")
@@ -22,37 +17,37 @@ function sanitizeHostUsername(input: string): string {
 }
 
 function sanitizeHostId(input: string): string {
+  if (!input) return "";
   return input.replace(/[^0-9]/g, "").slice(0, 32);
 }
 
-//
-// STRICT GENERIC EMITTER
-//
-function emitAdmin<E extends keyof AdminSocketOutbound>(
-  event: E,
-  ...args: Parameters<AdminSocketOutbound[E]>
-) {
-  const socket = getAdminSocket();
-  try {
-    socket.emit(event, ...args);
-  } catch (err) {
-    console.error("Emit error:", err);
-  }
-}
+// Types
+type ArenaSettings = {
+  roundDurationPre: number;
+  roundDurationFinal: number;
+  graceSeconds: number;
+  forceEliminations: boolean;
+};
 
-//
-// Component
-//
+type HostProfile = {
+  id: number;
+  username: string;
+  tiktok_id: string;
+  active: boolean;
+};
+
 export default function SettingsPage() {
+  // Host profiles
   const [hostProfiles, setHostProfiles] = useState<HostProfile[]>([]);
   const [activeHost, setActiveHost] = useState<HostProfile | null>(null);
 
+  // New host form
   const [newHostUser, setNewHostUser] = useState("");
   const [newHostId, setNewHostId] = useState("");
-
   const manualHostIdEdit = useRef(false);
   const tiktokIdInputRef = useRef<HTMLInputElement | null>(null);
 
+  // General state
   const [settings, setSettings] = useState<ArenaSettings>({
     roundDurationPre: 180,
     roundDurationFinal: 300,
@@ -64,74 +59,77 @@ export default function SettingsPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [gameActive, setGameActive] = useState(false);
 
-  //
+  // ---------------------------------------------------------------------
   // INIT SOCKET
-  //
+  // ---------------------------------------------------------------------
   useEffect(() => {
     const socket = getAdminSocket();
 
-    // Load settings
-    emitAdmin("admin:getSettings", {}, (res: any) => {
+    socket.emit("admin:getSettings", {}, (res: any) => {
       if (!res?.success) {
-        setStatus("❌ Kon instellingen niet laden");
+        setStatus(`❌ ${res?.message || "Kon instellingen niet laden"}`);
         return;
       }
+
       if (res.settings) setSettings(res.settings);
-      if (res.gameActive) setGameActive(res.gameActive);
+      setGameActive(!!res.gameActive);
+      setConnected(true);
     });
 
-    // Load host profiles
-    emitAdmin("admin:getHosts", {}, (res: any) => {
+    // Initial host load
+    socket.emit("admin:getHosts", {}, (res: any) => {
       if (res?.success) {
-        setHostProfiles(res.hosts);
-        setActiveHost(res.hosts.find((h: HostProfile) => h.active) || null);
+        setHostProfiles(res.hosts || []);
+        const active = res.hosts?.find((h: any) => h.active) || null;
+        setActiveHost(active);
       }
     });
 
-    // Socket events
     socket.on("connect", () => setConnected(true));
     socket.on("disconnect", () => setConnected(false));
 
-    socket.on("hosts", (hosts: HostProfile[]) => {
+    // Host list update (from server)
+    socket.on("hosts", (hosts: any[]) => {
       setHostProfiles(hosts);
-      setActiveHost(hosts.find((h) => h.active) || null);
+      const active = hosts.find((h) => h.active) || null;
+      setActiveHost(active);
     });
 
+    // Active host changed
     socket.on("hostsActiveChanged", () => {
-      emitAdmin("admin:getHosts", {}, (res: any) => {
+      socket.emit("admin:getHosts", {}, (res: any) => {
         if (res?.success) {
           setHostProfiles(res.hosts);
-          setActiveHost(res.hosts.find((h: HostProfile) => h.active) || null);
+          const a = res.hosts.find((h: any) => h.active) || null;
+          setActiveHost(a);
         }
       });
     });
 
-    socket.on("gameSession", (s: { active: boolean }) =>
-      setGameActive(!!s.active)
-    );
+    socket.on("gameSession", (s: any) => setGameActive(!!s?.active));
 
-    socket.on("settings", (s: Partial<ArenaSettings>) =>
+    socket.on("settings", (s: ArenaSettings) =>
       setSettings((prev) => ({ ...prev, ...s }))
     );
 
     return () => {
-      socket.removeAllListeners("connect");
-      socket.removeAllListeners("disconnect");
-      socket.removeAllListeners("hosts");
-      socket.removeAllListeners("hostsActiveChanged");
-      socket.removeAllListeners("settings");
-      socket.removeAllListeners("gameSession");
+      socket.off("connect");
+      socket.off("disconnect");
+      socket.off("hosts");
+      socket.off("hostsActiveChanged");
+      socket.off("settings");
+      socket.off("gameSession");
     };
   }, []);
 
-  //
-  // AUTO TikTok-ID lookup
-  //
+  // ---------------------------------------------------------------------
+  // AUTO TIKTOK-ID LOOKUP
+  // ---------------------------------------------------------------------
   useEffect(() => {
     if (!newHostUser) return;
     if (manualHostIdEdit.current) return;
 
-    let cancel = false;
+    let cancelled = false;
 
     const timer = setTimeout(async () => {
       try {
@@ -139,47 +137,61 @@ export default function SettingsPage() {
         const res = await fetch(`/api/tiktok-id/${newHostUser}`);
         const json = await res.json();
 
-        if (cancel) return;
+        if (cancelled) return;
 
-        setNewHostId(json?.tiktok_id ? String(json.tiktok_id) : "");
+        if (json.success && json.tiktok_id) {
+          setNewHostId(String(json.tiktok_id));
+        } else {
+          setNewHostId("");
+        }
       } catch {
-        if (!cancel) setNewHostId("");
+        if (!cancelled) setNewHostId("");
       }
     }, 400);
 
     return () => {
-      cancel = true;
+      cancelled = true;
       clearTimeout(timer);
     };
   }, [newHostUser]);
 
-  //
+  // ---------------------------------------------------------------------
   // CREATE HOST PROFILE
-  //
+  // ---------------------------------------------------------------------
   const createHostProfile = () => {
-    const user = sanitizeHostUsername(newHostUser);
-    const id = sanitizeHostId(newHostId);
+    const cleanUser = sanitizeHostUsername(newHostUser);
+    const cleanId = sanitizeHostId(newHostId);
 
-    if (!user || !id) {
+    if (!cleanUser || !cleanId) {
       setStatus("❌ Zowel username als TikTok-ID zijn verplicht");
       return;
     }
 
-    emitAdmin(
+    const socket = getAdminSocket();
+
+    socket.emit(
       "admin:createHost",
-      { label: user, username: user, tiktok_id: id },
-      (res) => {
-        setStatus(res.success ? "✔ Host-profiel opgeslagen" : `❌ ${res.message}`);
+      {
+        label: cleanUser,
+        username: cleanUser,
+        tiktok_id: cleanId,
+      },
+      (res: AdminAckResponse) => {
+        setStatus(
+          res.success ? "✔ Host-profiel opgeslagen" : `❌ ${res.message}`
+        );
 
         if (res.success) {
           setNewHostUser("");
           setNewHostId("");
           manualHostIdEdit.current = false;
 
-          emitAdmin("admin:getHosts", {}, (r: any) => {
+          // reload
+          socket.emit("admin:getHosts", {}, (r: any) => {
             if (r.success) {
               setHostProfiles(r.hosts);
-              setActiveHost(r.hosts.find((h: HostProfile) => h.active) || null);
+              const active = r.hosts.find((h: any) => h.active) || null;
+              setActiveHost(active);
             }
           });
         }
@@ -187,34 +199,39 @@ export default function SettingsPage() {
     );
   };
 
-  //
-  // SET ACTIVE HOST
-  //
+  // ---------------------------------------------------------------------
+  // ACTIVATE HOST PROFILE
+  // ---------------------------------------------------------------------
   const activateProfile = (id: number) => {
     if (gameActive) {
       setStatus("❌ Kan host niet wisselen tijdens actief spel");
       return;
     }
 
-    emitAdmin("admin:setActiveHost", { id }, (res) => {
-      setStatus(res.success ? "✔ Actieve host ingesteld" : `❌ ${res.message}`);
+    const socket = getAdminSocket();
+    socket.emit("admin:setActiveHost", { id }, (res: any) => {
+      setStatus(
+        res.success ? "✔ Actieve host ingesteld" : `❌ ${res.message}`
+      );
     });
   };
 
-  //
-  // DELETE HOST
-  //
+  // ---------------------------------------------------------------------
+  // DELETE HOST PROFILE
+  // ---------------------------------------------------------------------
   const deleteProfile = (id: number) => {
-    emitAdmin("admin:deleteHost", { id }, (res) => {
+    const socket = getAdminSocket();
+    socket.emit("admin:deleteHost", { id }, (res: any) => {
       setStatus(res.success ? "✔ Verwijderd" : `❌ ${res.message}`);
     });
   };
 
-  //
-  // UPDATE TIMERS
-  //
+  // ---------------------------------------------------------------------
+  // TIMERS
+  // ---------------------------------------------------------------------
   const updateTimers = () => {
-    emitAdmin(
+    const socket = getAdminSocket();
+    socket.emit(
       "admin:updateSettings",
       {
         roundDurationPre: settings.roundDurationPre,
@@ -222,20 +239,24 @@ export default function SettingsPage() {
         graceSeconds: settings.graceSeconds,
         forceEliminations: settings.forceEliminations,
       },
-      (res) =>
+      (res: any) => {
         setStatus(
-          res.success ? "✔ Timer-instellingen opgeslagen" : `❌ ${res.message}`
-        )
+          res.success
+            ? "✔ Timer-instellingen opgeslagen"
+            : `❌ ${res.message}`
+        );
+      }
     );
   };
 
-  //
+  // ---------------------------------------------------------------------
   // UI
-  //
+  // ---------------------------------------------------------------------
   return (
     <div className="max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold mb-4">⚙ Admin Settings</h1>
 
+      {/* Connection status */}
       <div
         className={`text-sm mb-4 px-3 py-1 rounded-full inline-block ${
           connected ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
@@ -244,17 +265,18 @@ export default function SettingsPage() {
         {connected ? "Verbonden met server" : "❌ Niet verbonden"}
       </div>
 
+      {/* Status message */}
       {status && (
         <div className="mb-4 p-2 text-center text-sm bg-blue-50 border border-blue-200 text-blue-700 rounded-xl">
           {status}
         </div>
       )}
 
-      {/* ============================== HOST PROFILES ============================== */}
+      {/* HOST PROFILES */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
         <h2 className="text-lg font-semibold mb-3">Host-profielen</h2>
 
-        {/* ACTIVE HOST SELECT */}
+        {/* ================== ACTIVE HOST DROPDOWN (NEW) ================== */}
         <div className="mb-4">
           <div className="text-xs text-gray-500 mb-1">Actieve host:</div>
 
@@ -267,7 +289,8 @@ export default function SettingsPage() {
               value={activeHost?.id ?? ""}
               onChange={(e) => {
                 const id = Number(e.target.value);
-                if (id) activateProfile(id);
+                if (!id) return;
+                activateProfile(id);
               }}
             >
               <option value="">
@@ -282,16 +305,16 @@ export default function SettingsPage() {
             </select>
 
             {activeHost && (
-              <span className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded-full">
+              <div className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded-full">
                 Actief
-              </span>
+              </div>
             )}
           </div>
         </div>
 
-        {/* PROFILE LIST */}
+        {/* Profile list */}
         <div className="border rounded-xl p-3 bg-gray-50 max-h-80 overflow-y-auto">
-          {!hostProfiles.length ? (
+          {hostProfiles.length === 0 ? (
             <p className="text-gray-500 text-sm italic">
               Nog geen host-profielen opgeslagen.
             </p>
@@ -331,7 +354,7 @@ export default function SettingsPage() {
           )}
         </div>
 
-        {/* ADD HOST */}
+        {/* Add profile */}
         <div className="mt-5">
           <h3 className="text-sm font-semibold mb-2">
             Nieuw host-profiel toevoegen
@@ -339,6 +362,7 @@ export default function SettingsPage() {
 
           <label className="text-xs text-gray-600">Username</label>
           <input
+            type="text"
             className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             value={newHostUser}
             onChange={(e) => {
@@ -351,11 +375,12 @@ export default function SettingsPage() {
             className="text-xs text-gray-600 cursor-pointer"
             onClick={() => tiktokIdInputRef.current?.focus()}
           >
-            TikTok ID
+            TikTok ID (klik om te focussen)
           </label>
 
           <input
             ref={tiktokIdInputRef}
+            type="text"
             className="w-full border rounded-lg px-3 py-2 text-sm font-mono mb-3"
             value={newHostId}
             onChange={(e) => {
@@ -368,29 +393,27 @@ export default function SettingsPage() {
             onClick={createHostProfile}
             className="px-4 py-2 rounded-full text-sm text-white bg-blue-600 hover:bg-blue-700"
           >
-            Opslaan
+            Host-profiel opslaan
           </button>
         </div>
       </section>
 
-      {/* ============================== TIMERS ============================== */}
+      {/* TIMERS */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
         <h2 className="text-lg font-semibold mb-3">Game timers</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
-            <label className="text-xs text-gray-600">
-              Voorronde (sec)
-            </label>
+            <label className="text-xs text-gray-600">Voorronde (sec)</label>
             <input
               type="number"
               min={30}
               value={settings.roundDurationPre}
               onChange={(e) =>
-                setSettings((s) => ({
-                  ...s,
+                setSettings({
+                  ...settings,
                   roundDurationPre: Number(e.target.value),
-                }))
+                })
               }
               className="w-full border rounded-lg px-3 py-1 text-sm"
             />
@@ -403,10 +426,10 @@ export default function SettingsPage() {
               min={60}
               value={settings.roundDurationFinal}
               onChange={(e) =>
-                setSettings((s) => ({
-                  ...s,
+                setSettings({
+                  ...settings,
                   roundDurationFinal: Number(e.target.value),
-                }))
+                })
               }
               className="w-full border rounded-lg px-3 py-1 text-sm"
             />
@@ -419,25 +442,26 @@ export default function SettingsPage() {
               min={0}
               value={settings.graceSeconds}
               onChange={(e) =>
-                setSettings((s) => ({
-                  ...s,
+                setSettings({
+                  ...settings,
                   graceSeconds: Number(e.target.value),
-                }))
+                })
               }
               className="w-full border rounded-lg px-3 py-1 text-sm"
             />
           </div>
         </div>
 
+        {/* Force eliminations */}
         <label className="mt-4 flex items-center gap-2 text-xs text-gray-600">
           <input
             type="checkbox"
             checked={settings.forceEliminations}
             onChange={(e) =>
-              setSettings((s) => ({
-                ...s,
+              setSettings({
+                ...settings,
                 forceEliminations: e.target.checked,
-              }))
+              })
             }
           />
           Forceer eliminaties vereist
