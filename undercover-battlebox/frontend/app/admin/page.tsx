@@ -7,6 +7,7 @@ import type {
   QueueEntry,
   LogEntry,
   AdminAckResponse,
+  AdminSocketOutbound,
 } from "@/lib/adminTypes";
 
 type StreamStats = {
@@ -50,8 +51,11 @@ export default function AdminDashboardPage() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [streamStats, setStreamStats] = useState<StreamStats | null>(null);
 
-  const [playerLeaderboard, setPlayerLeaderboard] = useState<PlayerLeaderboardEntry[]>([]);
-  const [gifterLeaderboard, setGifterLeaderboard] = useState<GifterLeaderboardEntry[]>([]);
+  const [playerLeaderboard, setPlayerLeaderboard] =
+    useState<PlayerLeaderboardEntry[]>([]);
+
+  const [gifterLeaderboard, setGifterLeaderboard] =
+    useState<GifterLeaderboardEntry[]>([]);
 
   const [gameSession, setGameSession] = useState<GameSessionState>({
     active: false,
@@ -72,8 +76,8 @@ export default function AdminDashboardPage() {
   // AUTOCOMPLETE
   const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
   const [showResults, setShowResults] = useState(false);
-
   const [typing, setTyping] = useState("");
+
   const [activeAutoField, setActiveAutoField] = useState<
     null | "main" | "give" | "use" | "target"
   >(null);
@@ -86,22 +90,21 @@ export default function AdminDashboardPage() {
 
     socket.on("updateArena", (data: ArenaState) => setArena(data));
 
-    socket.on("updateQueue", (d: any) => {
+    socket.on("updateQueue", (d) => {
       setQueue(d.entries ?? []);
       setQueueOpen(d.open ?? true);
     });
 
-    socket.on("log", (l: LogEntry) =>
+    socket.on("log", (l) =>
       setLogs((prev) => [l, ...prev].slice(0, 200))
     );
 
-    socket.on("initialLogs", (d: LogEntry[]) => setLogs(d.slice(0, 200)));
+    socket.on("initialLogs", (d) => setLogs(d.slice(0, 200)));
 
-    socket.on("streamStats", (s: StreamStats) => setStreamStats(s));
+    socket.on("streamStats", (s) => setStreamStats(s));
+    socket.on("gameSession", (s) => setGameSession(s));
 
-    socket.on("gameSession", (s: GameSessionState) => setGameSession(s));
-
-    socket.on("leaderboardPlayers", (rows: any[]) => {
+    socket.on("leaderboardPlayers", (rows) => {
       setPlayerLeaderboard(
         rows.map((r) => ({
           username: r.username,
@@ -112,7 +115,7 @@ export default function AdminDashboardPage() {
       );
     });
 
-    socket.on("leaderboardGifters", (rows: any[]) => {
+    socket.on("leaderboardGifters", (rows) => {
       setGifterLeaderboard(
         rows.map((r) => ({
           user_id: r.user_id,
@@ -127,11 +130,11 @@ export default function AdminDashboardPage() {
       setStatus("❌ Socket verbinding weggevallen")
     );
 
-    socket.on("round:start", (d: any) =>
+    socket.on("round:start", (d) =>
       setStatus(`▶️ Ronde gestart (${d.type}) — ${d.duration}s`)
     );
 
-    socket.on("round:grace", (d: any) =>
+    socket.on("round:grace", (d) =>
       setStatus(`⏳ Grace-periode actief (${d.grace}s)`)
     );
 
@@ -160,43 +163,58 @@ export default function AdminDashboardPage() {
   // ============================================================
   useEffect(() => {
     const socket = getAdminSocket();
-    socket.emit("admin:getInitialSnapshot", {}, (snap: any) => {
-      if (!snap) return;
 
-      if (snap.arena) setArena(snap.arena);
+    socket.emit(
+      "admin:getInitialSnapshot",
+      {},
+      (snap: any) => {
+        if (!snap) return;
 
-      if (snap.queue) {
-        setQueue(snap.queue.entries ?? []);
-        setQueueOpen(snap.queue.open ?? true);
+        if (snap.arena) setArena(snap.arena);
+
+        if (snap.queue) {
+          setQueue(snap.queue.entries ?? []);
+          setQueueOpen(snap.queue.open ?? true);
+        }
+
+        if (snap.logs) setLogs(snap.logs.slice(0, 200));
+        if (snap.stats) setStreamStats(snap.stats);
+        if (snap.gameSession) setGameSession(snap.gameSession);
+
+        if (snap.playerLeaderboard)
+          setPlayerLeaderboard(snap.playerLeaderboard);
+
+        if (snap.gifterLeaderboard)
+          setGifterLeaderboard(snap.gifterLeaderboard);
       }
-
-      if (snap.logs) setLogs(snap.logs.slice(0, 200));
-      if (snap.stats) setStreamStats(snap.stats);
-      if (snap.gameSession) setGameSession(snap.gameSession);
-
-      if (snap.playerLeaderboard)
-        setPlayerLeaderboard(snap.playerLeaderboard);
-
-      if (snap.gifterLeaderboard)
-        setGifterLeaderboard(snap.gifterLeaderboard);
-    });
+    );
   }, []);
 
   // ============================================================
-  // ADMIN EMITTERS
+  // ADMIN EMITTERS (fixed type safety)
   // ============================================================
-  const emitAdmin = (event: string, payload?: any) => {
+  const emitAdmin = (
+    event: keyof AdminSocketOutbound,
+    payload?: any
+  ) => {
     const socket = getAdminSocket();
     setStatus(`Bezig met ${event}...`);
+
     socket.emit(event, payload || {}, (res: AdminAckResponse) => {
       setStatus(
-        res?.success ? "✅ Uitgevoerd" : `❌ ${res?.message ?? "Geen antwoord"}`
+        res?.success
+          ? "✅ Uitgevoerd"
+          : `❌ ${res?.message ?? "Geen antwoord"}`
       );
     });
   };
 
-  const emitAdminWithUser = (event: string, target?: string) => {
+  const emitAdminWithUser = (
+    event: keyof AdminSocketOutbound,
+    target?: string
+  ) => {
     const socket = getAdminSocket();
+
     const uname =
       target ||
       (activeAutoField === "main" ? username : null) ||
@@ -204,19 +222,29 @@ export default function AdminDashboardPage() {
 
     if (!uname.trim()) return;
 
-    const formatted = uname.startsWith("@") ? uname : `@${uname}`;
+    const formatted = uname.startsWith("@")
+      ? uname
+      : `@${uname}`;
 
     setStatus(`Bezig met ${event}...`);
 
-    socket.emit(event, { username: formatted }, (res: AdminAckResponse) => {
-      setStatus(
-        res?.success ? "✅ Uitgevoerd" : `❌ ${res?.message ?? "Geen antwoord"}`
-      );
-    });
+    socket.emit(
+      event,
+      { username: formatted },
+      (res: AdminAckResponse) => {
+        setStatus(
+          res?.success
+            ? "✅ Uitgevoerd"
+            : `❌ ${res?.message ?? "Geen antwoord"}`
+        );
+      }
+    );
   };
 
   const fmt = (n: number) =>
-    n.toLocaleString("nl-NL", { maximumFractionDigits: 0 });
+    n.toLocaleString("nl-NL", {
+      maximumFractionDigits: 0,
+    });
 
   const players = useMemo(() => arena?.players ?? [], [arena]);
 
@@ -224,9 +252,8 @@ export default function AdminDashboardPage() {
   // ARENA POSITION COLORS
   // ============================================================
   const colorForPosition = (p: any) => {
-    if (!arena || arena.status === "idle") {
+    if (!arena || arena.status === "idle")
       return "bg-gray-50 border-gray-200";
-    }
 
     switch (p.positionStatus) {
       case "immune":
@@ -241,12 +268,12 @@ export default function AdminDashboardPage() {
   };
 
   // ============================================================
-  // ROUND STATE HELPERS
+  // ROUND LOGICA
   // ============================================================
   const arenaStatus = arena?.status ?? "idle";
 
   const hasDoomed =
-    players?.some((p: any) => p.positionStatus === "elimination") ?? false;
+    players.some((p: any) => p.positionStatus === "elimination");
 
   const canStartRound =
     !!arena &&
@@ -255,12 +282,14 @@ export default function AdminDashboardPage() {
 
   const canStopRound = arenaStatus === "active";
   const canGraceEnd = arenaStatus === "grace";
+
   const needsElimination =
     (arena?.settings?.forceEliminations ?? true) &&
     arenaStatus === "ended" &&
     hasDoomed;
+
   // ============================================================
-  // AUTOCOMPLETE (werkt nu voor alle velden!)
+  // AUTOCOMPLETE
   // ============================================================
   useEffect(() => {
     if (!typing.trim() || typing.length < 2) {
@@ -268,8 +297,9 @@ export default function AdminDashboardPage() {
       return;
     }
 
-    const run = () => {
-      const socket = getAdminSocket();
+    const socket = getAdminSocket();
+
+    const timer = setTimeout(() => {
       socket.emit(
         "admin:searchUsers",
         { query: typing },
@@ -277,65 +307,47 @@ export default function AdminDashboardPage() {
           setSearchResults(res?.users || []);
         }
       );
-    };
+    }, 150);
 
-    const timer = setTimeout(run, 150);
     return () => clearTimeout(timer);
   }, [typing]);
 
-  // ========================================================================
-  // APPLY AUTOFILL (PER INPUTVELD)
-  // ========================================================================
+  // ============================================================
+  // AUTOFILL
+  // ============================================================
   const applyAutoFill = (u: SearchUser) => {
-    const formatted =
-      u.username.startsWith("@") ? u.username : `@${u.username}`;
+    const formatted = u.username.startsWith("@")
+      ? u.username
+      : `@${u.username}`;
 
-    if (activeAutoField === "main") {
-      setUsername(formatted);
-    }
+    if (activeAutoField === "main") setUsername(formatted);
+    if (activeAutoField === "give") setTwistUserGive(formatted);
+    if (activeAutoField === "use") setTwistUserUse(formatted);
+    if (activeAutoField === "target") setTwistTargetUse(formatted);
 
-    if (activeAutoField === "give") {
-      setTwistUserGive(formatted);
-    }
-
-    if (activeAutoField === "use") {
-      setTwistUserUse(formatted);
-    }
-
-    if (activeAutoField === "target") {
-      setTwistTargetUse(formatted);
-    }
-
-    setShowResults(false);
     setTyping("");
+    setShowResults(false);
     setSearchResults([]);
   };
 
-  // ============================================================
+// ============================================================
   // TIMER / PROGRESSBAR LOGICA
   // ============================================================
   const roundProgress = useMemo(() => {
     if (!arena) return 0;
 
-    const status = arena.status;
     const now = Date.now();
 
-    if (status === "active") {
+    if (arena.status === "active") {
       const start = arena.roundStartTime;
       const end = arena.roundCutoff;
-      return Math.max(
-        0,
-        Math.min(100, ((now - start) / (end - start)) * 100)
-      );
+      return Math.max(0, Math.min(100, ((now - start) / (end - start)) * 100));
     }
 
-    if (status === "grace") {
+    if (arena.status === "grace") {
       const start = arena.roundCutoff;
       const end = arena.graceEnd;
-      return Math.max(
-        0,
-        Math.min(100, ((now - start) / (end - start)) * 100)
-      );
+      return Math.max(0, Math.min(100, ((now - start) / (end - start)) * 100));
     }
 
     return 0;
@@ -345,9 +357,7 @@ export default function AdminDashboardPage() {
     if (!sec || sec < 0) sec = 0;
     const m = Math.floor(sec / 60);
     const s = sec % 60;
-    return `${m.toString().padStart(2, "0")}:${s
-      .toString()
-      .padStart(2, "0")}`;
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   }
 
   // ============================================================
@@ -369,9 +379,7 @@ export default function AdminDashboardPage() {
               </div>
               <div className="text-xs text-gray-500">
                 Verbonden als{" "}
-                <span className="font-semibold text-green-600">
-                  Admin
-                </span>
+                <span className="font-semibold text-green-600">Admin</span>
               </div>
             </div>
           </div>
@@ -387,7 +395,6 @@ export default function AdminDashboardPage() {
         {arena && arena.status !== "idle" && (
           <div className="w-full bg-gray-300 rounded-full h-4 shadow-inner relative overflow-hidden">
 
-            {/* Progress */}
             <div
               className={`
                 h-4 transition-all duration-300
@@ -398,22 +405,17 @@ export default function AdminDashboardPage() {
               style={{ width: `${roundProgress}%` }}
             />
 
-            {/* Timer Text */}
             <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold">
               {arena.status === "active" &&
                 formatTime(
-                  Math.max(
-                    0,
-                    Math.floor(
-                      (arena.roundCutoff - Date.now()) / 1000
-                    )
+                  Math.max(0,
+                    Math.floor((arena.roundCutoff - Date.now()) / 1000)
                   )
                 )}
 
               {arena.status === "grace" &&
                 formatTime(
-                  Math.max(
-                    0,
+                  Math.max(0,
                     Math.floor((arena.graceEnd - Date.now()) / 1000)
                   )
                 )}
@@ -424,9 +426,9 @@ export default function AdminDashboardPage() {
         )}
       </header>
 
-      {/* ===========================================
+      {/* ============================================================
           SPELBESTURING
-      ============================================ */}
+      ============================================================ */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="flex flex-col gap-3">
           <div className="text-sm font-semibold">Spelbesturing</div>
@@ -461,9 +463,7 @@ export default function AdminDashboardPage() {
             <div className="text-xs text-gray-600 mb-1">Ronde acties</div>
             <div className="flex gap-2 flex-wrap">
               <button
-                onClick={() =>
-                  emitAdmin("admin:startRound", { type: "quarter" })
-                }
+                onClick={() => emitAdmin("admin:startRound", { type: "quarter" })}
                 disabled={!canStartRound}
                 className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full text-xs disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
@@ -471,9 +471,7 @@ export default function AdminDashboardPage() {
               </button>
 
               <button
-                onClick={() =>
-                  emitAdmin("admin:startRound", { type: "finale" })
-                }
+                onClick={() => emitAdmin("admin:startRound", { type: "finale" })}
                 disabled={!canStartRound}
                 className="px-3 py-1.5 bg-gray-900 text-white rounded-full text-xs disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
@@ -497,11 +495,15 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* SPELERSACTIES */}
+        {/* ============================================================
+            SPELERSACTIES
+        ============================================================ */}
         <div className="lg:col-span-2 flex flex-col gap-3">
+
           <div className="text-sm font-semibold">Speleracties</div>
 
           <div className="flex flex-col md:flex-row gap-3 md:items-end relative">
+            {/* USERNAME INPUT */}
             <div className="flex-1">
               <label className="text-xs text-gray-600 font-semibold mb-1 block">
                 @username (zoek)
@@ -536,41 +538,32 @@ export default function AdminDashboardPage() {
                         onClick={() => applyAutoFill(u)}
                         className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
                       >
-                        <span className="font-semibold">
-                          {u.display_name}
-                        </span>{" "}
-                        <span className="text-gray-500">
-                          @{u.username}
-                        </span>
+                        <span className="font-semibold">{u.display_name}</span>{" "}
+                        <span className="text-gray-500">@{u.username}</span>
                       </div>
                     ))}
                   </div>
                 )}
             </div>
 
+            {/* ACTION BUTTONS */}
             <div className="flex gap-2 text-xs">
               <button
-                onClick={() =>
-                  emitAdminWithUser("admin:addToArena", username)
-                }
+                onClick={() => emitAdminWithUser("admin:addToArena", username)}
                 className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full"
               >
                 → Arena
               </button>
 
               <button
-                onClick={() =>
-                  emitAdminWithUser("admin:addToQueue", username)
-                }
+                onClick={() => emitAdminWithUser("admin:addToQueue", username)}
                 className="px-3 py-1.5 bg-gray-800 text-white rounded-full"
               >
                 → Queue
               </button>
 
               <button
-                onClick={() =>
-                  emitAdminWithUser("admin:eliminate", username)
-                }
+                onClick={() => emitAdminWithUser("admin:eliminate", username)}
                 className="px-3 py-1.5 bg-red-600 text-white rounded-full"
               >
                 Elimineer
@@ -579,17 +572,12 @@ export default function AdminDashboardPage() {
           </div>
         </div>
       </section>
-      {/* STATUS BALK */}
-      {status && (
-        <div className="mb-4 text-sm text-center bg-amber-50 border border-amber-200 text-amber-800 rounded-xl py-2">
-          {status}
-        </div>
-      )}
 
       {/* ===========================================
           ARENA + QUEUE
       ============================================ */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        
         {/* ARENA */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Arena</h2>
@@ -604,9 +592,7 @@ export default function AdminDashboardPage() {
               players.map((p, idx) => (
                 <div
                   key={p.id}
-                  className={`rounded-lg p-3 border text-sm shadow ${colorForPosition(
-                    p
-                  )}`}
+                  className={`rounded-lg p-3 border text-sm shadow ${colorForPosition(p)}`}
                 >
                   <div className="flex justify-between items-center">
                     <span className="font-bold">#{idx + 1}</span>
@@ -625,9 +611,7 @@ export default function AdminDashboardPage() {
 
                   {p.positionStatus === "elimination" && (
                     <button
-                      onClick={() =>
-                        emitAdminWithUser("admin:eliminate", p.username)
-                      }
+                      onClick={() => emitAdminWithUser("admin:eliminate", p.username)}
                       className="mt-2 px-2 py-1 text-[11px] rounded-full border border-red-300 text-red-700 bg-red-50"
                     >
                       Verwijder speler
@@ -653,13 +637,7 @@ export default function AdminDashboardPage() {
           <h2 className="text-xl font-semibold mb-2">Wachtrij</h2>
           <p className="text-sm text-gray-500 mb-3">
             {queue.length} speler{queue.length !== 1 && "s"} • Queue:{" "}
-            <span
-              className={
-                queueOpen
-                  ? "text-green-600 font-semibold"
-                  : "text-red-600 font-semibold"
-              }
-            >
+            <span className={queueOpen ? "text-green-600 font-semibold" : "text-red-600 font-semibold"}>
               {queueOpen ? "OPEN" : "DICHT"}
             </span>
           </p>
@@ -700,36 +678,28 @@ export default function AdminDashboardPage() {
 
                 <div className="flex gap-1 mt-2 sm:mt-0 justify-end">
                   <button
-                    onClick={() =>
-                      emitAdminWithUser("admin:promoteUser", q.username)
-                    }
+                    onClick={() => emitAdminWithUser("admin:promoteUser", q.username)}
                     className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
                   >
                     ▲
                   </button>
 
                   <button
-                    onClick={() =>
-                      emitAdminWithUser("admin:demoteUser", q.username)
-                    }
+                    onClick={() => emitAdminWithUser("admin:demoteUser", q.username)}
                     className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
                   >
                     ▼
                   </button>
 
                   <button
-                    onClick={() =>
-                      emitAdminWithUser("admin:addToArena", q.username)
-                    }
+                    onClick={() => emitAdminWithUser("admin:addToArena", q.username)}
                     className="px-2 py-1 rounded-full border border-[#ff4d4f] text-[#ff4d4f]"
                   >
                     → Arena
                   </button>
 
                   <button
-                    onClick={() =>
-                      emitAdminWithUser("admin:removeFromQueue", q.username)
-                    }
+                    onClick={() => emitAdminWithUser("admin:removeFromQueue", q.username)}
                     className="px-2 py-1 rounded-full border border-red-300 text-red-700 bg-red-50"
                   >
                     ✕
@@ -738,24 +708,21 @@ export default function AdminDashboardPage() {
               </div>
             ))
           ) : (
-            <div className="text-sm text-gray-500 italic">
-              Wachtrij is leeg.
-            </div>
+            <div className="text-sm text-gray-500 italic">Wachtrij is leeg.</div>
           )}
         </div>
+
       </section>
 
       {/* ===========================================
-          LEADERBOARDS (NIEUW — SPELERS & GIFTERS)
+          LEADERBOARDS
       ============================================ */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
 
-        {/* RECEIVERS (PLAYERS) */}
+        {/* RECEIVERS */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Player Leaderboard</h2>
-          <p className="text-xs text-gray-500 mb-3">
-            Diamanten ontvangen door spelers
-          </p>
+          <p className="text-xs text-gray-500 mb-3">Diamanten ontvangen</p>
 
           <div className="max-h-72 overflow-y-auto text-sm">
             {playerLeaderboard.length ? (
@@ -765,33 +732,25 @@ export default function AdminDashboardPage() {
                   className="flex items-center justify-between border-b last:border-0 border-gray-200 py-1"
                 >
                   <div>
-                    <span className="font-mono text-xs text-gray-500 mr-2">
-                      #{idx + 1}
-                    </span>
+                    <span className="font-mono text-xs text-gray-500 mr-2">#{idx + 1}</span>
                     <span className="font-semibold">
                       {e.display_name} (@{e.username})
                     </span>
                   </div>
 
-                  <span className="font-semibold">
-                    {fmt(e.diamonds_total)} 💎
-                  </span>
+                  <span className="font-semibold">{fmt(e.diamonds_total)} 💎</span>
                 </div>
               ))
             ) : (
-              <div className="text-sm text-gray-500 italic">
-                Geen data beschikbaar.
-              </div>
+              <div className="text-sm text-gray-500 italic">Geen data beschikbaar.</div>
             )}
           </div>
         </div>
 
-        {/* SENDERS (GIFTERS) */}
+        {/* GIFTERS */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Gifter Leaderboard</h2>
-          <p className="text-xs text-gray-500 mb-3">
-            Diamanten verstuurd door gifters
-          </p>
+          <p className="text-xs text-gray-500 mb-3">Diamanten verstuurd</p>
 
           <div className="max-h-72 overflow-y-auto text-sm">
             {gifterLeaderboard.length ? (
@@ -801,23 +760,17 @@ export default function AdminDashboardPage() {
                   className="flex items-center justify-between border-b last:border-0 border-gray-200 py-1"
                 >
                   <div>
-                    <span className="font-mono text-xs text-gray-500 mr-2">
-                      #{idx + 1}
-                    </span>
+                    <span className="font-mono text-xs text-gray-500 mr-2">#{idx + 1}</span>
                     <span className="font-semibold">
                       {e.display_name} (@{e.username})
                     </span>
                   </div>
 
-                  <span className="font-semibold">
-                    {fmt(e.total_diamonds)} 💎
-                  </span>
+                  <span className="font-semibold">{fmt(e.total_diamonds)} 💎</span>
                 </div>
               ))
             ) : (
-              <div className="text-sm text-gray-500 italic">
-                Geen data beschikbaar.
-              </div>
+              <div className="text-sm text-gray-500 italic">Geen data beschikbaar.</div>
             )}
           </div>
         </div>
@@ -923,7 +876,6 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
-            {/* AUTOCOMPLETE USE */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "use" && (
@@ -956,9 +908,7 @@ export default function AdminDashboardPage() {
               <option value="diamond_pistol">Diamond Pistol</option>
             </select>
 
-            <label className="text-xs font-semibold">
-              Target speler (optioneel)
-            </label>
+            <label className="text-xs font-semibold">Target speler (optioneel)</label>
             <input
               type="text"
               value={twistTargetUse}
@@ -977,7 +927,6 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-3"
             />
 
-            {/* AUTOCOMPLETE TARGET */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "target" && (
@@ -1055,4 +1004,4 @@ export default function AdminDashboardPage() {
       </footer>
     </main>
   );
-}
+                  }
