@@ -8,6 +8,8 @@ import type {
   PlayerLeaderboardEntry,
   GifterLeaderboardEntry,
   SearchUser,
+  HostProfile,
+  ArenaSettings,
 } from "./adminTypes";
 
 const BACKEND_URL = "http://178.251.232.12:4000";
@@ -54,16 +56,24 @@ export interface AdminSocketInbound {
   "round:grace": (d: any) => void;
   "round:end": () => void;
 
-  // search users
-  "admin:searchUsers:result": (res: { users: SearchUser[] }) => void;
-
-  // VIP / FAN auto expiry
-  vipExpired: (res: { username: string; tiktok_id: string }) => void;
-  fanExpired: (res: { username: string; tiktok_id: string }) => void;
-
   // HOSTS SYSTEM
-  hosts: (rows: any[]) => void; // full list
-  hostsActiveChanged: (payload: { id: number }) => void;
+  hosts: (rows: HostProfile[]) => void;
+  hostsActiveChanged: (payload: {
+    username: string;
+    tiktok_id: string;
+  }) => void;
+
+  // SETTINGS
+  settings: (s: ArenaSettings) => void;
+
+  // STATE
+  connectState: (payload: {
+    connected: boolean;
+    host?: {
+      username: string;
+      id: string;
+    };
+  }) => void;
 
   // heartbeat
   pong: () => void;
@@ -78,7 +88,7 @@ export interface AdminSocketOutbound {
   ===================== */
   "admin:getHosts": (
     payload?: {},
-    cb?: (res: { success: boolean; hosts: any[] }) => void
+    cb?: (res: { success: boolean; hosts: HostProfile[] }) => void
   ) => void;
 
   "admin:createHost": (
@@ -151,12 +161,12 @@ export interface AdminSocketOutbound {
       TWISTS
   ===================== */
   "admin:giveTwist": (
-    payload: any,
+    payload: { username: string; twist: string },
     cb?: AdminAckResponse
   ) => void;
 
   "admin:useTwist": (
-    payload: any,
+    payload: { username: string; twist: string; target?: string },
     cb?: AdminAckResponse
   ) => void;
 
@@ -188,11 +198,15 @@ export interface AdminSocketOutbound {
   ===================== */
   "admin:getSettings": (
     payload?: {},
-    cb?: (res: any) => void
+    cb?: (res: {
+      success: boolean;
+      settings: ArenaSettings;
+      gameActive: boolean;
+    }) => void
   ) => void;
 
   "admin:updateSettings": (
-    payload: any,
+    payload: ArenaSettings,
     cb?: AdminAckResponse
   ) => void;
 
@@ -202,7 +216,7 @@ export interface AdminSocketOutbound {
   ) => void;
 
   /* =====================
-      SEARCH USERS
+      SEARCH USERS (ACK)
   ===================== */
   "admin:searchUsers": (
     payload: { query: string },
@@ -245,14 +259,10 @@ export function getAdminSocket(): Socket<
     timeout: 9000,
   });
 
-  /* ===========================================
-     AUTO-RESYNC NA CONNECT
-  ============================================ */
+  /* AUTO-RESYNC NA CONNECT */
   socket.on("connect", () => {
     console.log("✅ Admin socket verbonden:", socket.id);
     socket.emit("ping");
-
-    // Reload all static state:
     socket.emit("admin:getInitialState", {});
     socket.emit("admin:searchUsers", { query: "" }, () => {});
     socket.emit("admin:getHosts", {}, () => {});
