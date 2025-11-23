@@ -4,11 +4,11 @@ import { useEffect, useState } from "react";
 import { getAdminSocket } from "@/lib/socketClient";
 import type {
   ArenaState,
-  ArenaPlayer,
   QueueEntry,
   LogEntry,
   AdminAckResponse,
 } from "@/lib/adminTypes";
+import type { AdminSocketOutbound } from "@/lib/socketClient";
 
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4000";
@@ -91,7 +91,7 @@ export function useAdminGame() {
       setLastActionStatus(`Bezig: ${event} → ${normalized}...`);
 
       socket.emit(
-        event,
+        event as keyof AdminSocketOutbound,   // ← ✔ FIXED: noodzakelijk type cast
         { username: normalized },
         (res: AdminAckResponse) => {
           if (!res) {
@@ -117,12 +117,15 @@ export function useAdminGame() {
     loading,
     error,
     lastActionStatus,
+
     addToArena: (u: string) => emitAdminAction("admin:addToArena", u),
     addToQueue: (u: string) => emitAdminAction("admin:addToQueue", u),
     eliminate: (u: string) => emitAdminAction("admin:eliminate", u),
+
     promoteQueue: (u: string) => emitAdminAction("admin:promoteQueue", u),
     demoteQueue: (u: string) => emitAdminAction("admin:demoteQueue", u),
     removeFromQueue: (u: string) => emitAdminAction("admin:removeFromQueue", u),
+
     clearStatus: () => setLastActionStatus(null),
   };
 }
