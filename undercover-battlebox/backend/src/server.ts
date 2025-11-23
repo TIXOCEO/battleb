@@ -1,6 +1,6 @@
 // ============================================================================
-// server.ts — Undercover BattleBox — v9.2
-// VIP Auto-Expire + Admin Give/Remove VIP + Logging
+// server.ts — Undercover BattleBox — v9.3
+// VIP Auto-Expire + Safe Leaderboard COALESCE Fixes
 // ============================================================================
 
 import express from "express";
@@ -77,10 +77,6 @@ async function cleanupVIP(tiktokId: string) {
     });
   }
 }
-
-// ============================================================================
-// FAN AUTO CHECK (bestond al via engines)
-// ============================================================================
 
 // ============================================================================
 // LIVE STATE
@@ -205,16 +201,24 @@ export async function emitQueue() {
 export { emitArena };
 
 // ============================================================================
-// LEADERBOARD — REALTIME MODE
+// LEADERBOARD — ***SAFE MODE***
+//  → COALESCE fixes to prevent undefined
+//  → removed WHERE diamonds_total > 0
 // ============================================================================
 let currentGameId: number | null = null;
 (io as any).currentGameId = null;
 
+// ---------------------------------------------------------------------------
+// PLAYERS
+// ---------------------------------------------------------------------------
 export async function broadcastPlayerLeaderboard() {
   const res = await pool.query(`
-    SELECT username, display_name, tiktok_id, diamonds_total
+    SELECT
+      username,
+      display_name,
+      tiktok_id,
+      COALESCE(diamonds_total, 0) AS diamonds_total
     FROM users
-    WHERE diamonds_total > 0
     ORDER BY diamonds_total DESC
     LIMIT 200
   `);
@@ -222,6 +226,9 @@ export async function broadcastPlayerLeaderboard() {
   io.emit("leaderboardPlayers", res.rows);
 }
 
+// ---------------------------------------------------------------------------
+// GIFTERS
+// ---------------------------------------------------------------------------
 export async function broadcastGifterLeaderboard() {
   if (!currentGameId) {
     io.emit("leaderboardGifters", []);
@@ -230,10 +237,11 @@ export async function broadcastGifterLeaderboard() {
 
   const res = await pool.query(
     `
-    SELECT giver_id AS user_id,
-           giver_username AS username,
-           giver_display_name AS display_name,
-           SUM(diamonds) AS total_diamonds
+    SELECT 
+      giver_id AS user_id,
+      giver_username AS username,
+      giver_display_name AS display_name,
+      COALESCE(SUM(diamonds), 0) AS total_diamonds
     FROM gifts
     WHERE game_id=$1
     GROUP BY giver_id, giver_username, giver_display_name
@@ -245,13 +253,16 @@ export async function broadcastGifterLeaderboard() {
   io.emit("leaderboardGifters", res.rows);
 }
 
+// ---------------------------------------------------------------------------
+// STREAM STATS
+// ---------------------------------------------------------------------------
 export async function broadcastStats() {
   if (!currentGameId) return;
 
   const res = await pool.query(
     `
       SELECT
-        COUNT(DISTINCT receiver_id) AS total_players,
+        COALESCE(COUNT(DISTINCT receiver_id), 0) AS total_players,
         COALESCE(SUM(diamonds), 0) AS total_diamonds
       FROM gifts WHERE game_id=$1
     `,
@@ -407,6 +418,7 @@ io.on("connection", async (socket: AdminSocket) => {
   // ========================================================================
   async function handle(action: string, data: any, ack: Function) {
     try {
+
       // --------------------------------------------
       // HOST CRUD
       // --------------------------------------------
@@ -509,46 +521,8 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       // ==================================================================
-      // VIP MANAGEMENT
-      // ==================================================================
-      if (action === "giveVIP") {
-        const tid = BigInt(data.tiktok_id);
-        const expires = new Date(Date.now() + 30 * 24 * 3600 * 1000);
-
-        await pool.query(
-          `UPDATE users
-           SET is_vip=TRUE, vip_expires_at=$1
-           WHERE tiktok_id=$2`,
-          [expires, tid]
-        );
-
-        emitLog({
-          type: "system",
-          message: `VIP gegeven aan @${data.username}`,
-        });
-
-        await emitQueue();
-        return ack({ success: true });
-      }
-
-      if (action === "removeVIP") {
-        const tid = BigInt(data.tiktok_id);
-
-        await pool.query(
-          `UPDATE users
-           SET is_vip=FALSE, vip_expires_at=NULL
-           WHERE tiktok_id=$1`,
-          [tid]
-        );
-
-        emitLog({
-          type: "system",
-          message: `VIP verwijderd bij @${data.username}`,
-        });
-
-        await emitQueue();
-        return ack({ success: true });
-      }
+      // VIP ACTIONS (remove/give are in deel 1)
+// ==================================================================
 
       // ==================================================================
       // GAME MANAGEMENT
@@ -561,7 +535,6 @@ io.on("connection", async (socket: AdminSocket) => {
         currentGameId = r.rows[0].id;
         (io as any).currentGameId = currentGameId;
 
-        // volledig leegmaken
         await pool.query(`UPDATE users SET diamonds_total = 0`);
         await pool.query(`TRUNCATE gifts`);
 
@@ -591,7 +564,6 @@ io.on("connection", async (socket: AdminSocket) => {
           [currentGameId]
         );
 
-        // reset leaderboards
         await pool.query(`UPDATE users SET diamonds_total = 0`);
         await pool.query(`TRUNCATE gifts`);
 
@@ -688,8 +660,8 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       // ==================================================================
-      // USER ACTIONS
-      // ==================================================================
+      // USER ACTIONS (arena/queue)
+// ==================================================================
       if (!data?.username)
         return ack({
           success: false,
@@ -888,5 +860,5 @@ initDB().then(async () => {
 
   await restartTikTokConnection(true);
 
-  console.log("🚀 Server klaar — VIP AUTO-EXPIRE MODE");
+  console.log("🚀 Server klaar — VIP AUTO-EXPIRE MODE + SAFE LEADERBOARD");
 });
