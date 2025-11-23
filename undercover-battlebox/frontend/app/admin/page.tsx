@@ -124,55 +124,68 @@ export default function AdminDashboardPage() {
      SOCKET INIT
   ============================================ */
   useEffect(() => {
-    const socket = getAdminSocket();
+  const socket = getAdminSocket();
 
-    /* CONNECTION STATE */
-    socket.on("connect", () => setConnected("connected"));
-    socket.on("disconnect", () => setConnected("disconnected"));
-    socket.on("connect_error", () => setConnected("disconnected"));
+  /* CONNECTION STATE */
+  socket.on("connect", () => {
+    setConnected("connected");
+    setStatus("🟢 Verbonden met server");
+  });
 
-    /* ARENA EVENTS */
-    socket.on("updateArena", (data) => setArena(data));
-    socket.on("updateQueue", (d) => {
-      setQueue(d.entries ?? []);
-      setQueueOpen(d.open ?? true);
-    });
+  socket.on("disconnect", () => {
+    setConnected("disconnected");
+    setStatus("🔴 Verbroken");
+  });
 
-    /* LOGS */
-    socket.on("log", (l) =>
-      setLogs((prev) => [l, ...prev].slice(0, 200))
-    );
-    socket.on("initialLogs", (arr) =>
-      setLogs(arr.slice(0, 200))
-    );
+  socket.on("connect_error", () => {
+    setConnected("disconnected");
+    setStatus("❌ Socket fout");
+  });
 
-    /* STREAM STATS */
-    socket.on("streamStats", (s) => setStreamStats(s));
+  /* ARENA EVENTS */
+  socket.on("updateArena", (data) => setArena(data));
+  socket.on("updateQueue", (d) => {
+    setQueue(d.entries ?? []);
+    setQueueOpen(d.open ?? true);
+  });
 
-    /* LEADERBOARDS */
-    socket.on("leaderboardPlayers", (rows) =>
-      setPlayerLeaderboard(rows ?? [])
-    );
-    socket.on("leaderboardGifters", (rows) =>
-      setGifterLeaderboard(rows ?? [])
-    );
+  /* LOGS */
+  socket.on("log", (l) =>
+    setLogs((prev) => [l, ...prev].slice(0, 200))
+  );
 
-    /* GAME SESSION */
-    socket.on("gameSession", (s) => setGameSession(s));
+  socket.on("initialLogs", (arr) =>
+    setLogs(arr.slice(0, 200))
+  );
 
-    /* ROUND STATUS */
-    socket.on("round:start", (d) =>
-      setStatus(`▶️ Ronde gestart (${d.type}) — ${d.duration}s`)
-    );
-    socket.on("round:grace", (d) =>
-      setStatus(`⏳ Grace-periode actief (${d.grace}s)`)
-    );
-    socket.on("round:end", () =>
-      setStatus("⛔ Ronde beëindigd — voer eliminaties uit")
-    );
+  /* STREAM STATS */
+  socket.on("streamStats", (s) => setStreamStats(s));
 
-    return () => socket.removeAllListeners();
-  }, []);
+  /* LEADERBOARDS */
+  socket.on("leaderboardPlayers", (rows) => setPlayerLeaderboard(rows ?? []));
+  socket.on("leaderboardGifters", (rows) => setGifterLeaderboard(rows ?? []));
+
+  /* GAME SESSION */
+  socket.on("gameSession", (s) => setGameSession(s));
+
+  /* ROUND STATUS */
+  socket.on("round:start", (d) =>
+    setStatus(`▶️ Ronde gestart (${d.type}) — ${d.duration}s`)
+  );
+
+  socket.on("round:grace", (d) =>
+    setStatus(`⏳ Grace-periode actief (${d.grace}s)`)
+  );
+
+  socket.on("round:end", () =>
+    setStatus("⛔ Ronde beëindigd — voer eliminaties uit")
+  );
+
+  /* CLEANUP */
+  return () => {
+    socket.removeAllListeners();
+  };
+}, []);
 
   /* ===========================================
      AUTOCOMPLETE
