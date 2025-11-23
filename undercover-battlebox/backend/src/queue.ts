@@ -1,6 +1,5 @@
 // ============================================================================
-// src/queue.ts — QUEUE ENGINE v4.0 FINAL
-// Fan-system + VIP priority + Boost logic + server v4.0 compatible
+// src/queue.ts — QUEUE ENGINE v4.1 FINAL (VIP FIX + FAN FIXED)
 // ============================================================================
 
 import pool from "./db";
@@ -11,13 +10,12 @@ import { emitQueue } from "./server";
 // Wordt gebruikt door: chat-engine (!join), admin, twists
 // ---------------------------------------------------------------------------
 export async function addToQueue(tiktok_id: string, username: string): Promise<void> {
-  const clean = username.replace(/^@+/, "").toLowerCase();
   const tid = BigInt(tiktok_id);
 
-  // eerst duplicates verwijderen
+  // duplicates verwijderen
   await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [tid]);
 
-  // nieuwe queue entry
+  // nieuwe entry
   await pool.query(
     `INSERT INTO queue (user_tiktok_id, boost_spots) VALUES ($1, 0)`,
     [tid]
@@ -27,7 +25,7 @@ export async function addToQueue(tiktok_id: string, username: string): Promise<v
 }
 
 // ---------------------------------------------------------------------------
-// boostQueue() — fallback (admin)
+// boostQueue() — fallback admin
 // ---------------------------------------------------------------------------
 export async function boostQueue(tiktok_id: string, spots: number): Promise<void> {
   const tid = BigInt(tiktok_id);
@@ -53,7 +51,7 @@ export async function boostQueue(tiktok_id: string, spots: number): Promise<void
     [cost, tid]
   );
 
-  // Boost opslaan
+  // Boost verhogen
   await pool.query(
     `UPDATE queue SET boost_spots = boost_spots + $1 WHERE user_tiktok_id=$2`,
     [spots, tid]
@@ -80,31 +78,34 @@ export async function leaveQueue(tiktok_id: string): Promise<number> {
   const refund = Math.floor(boost * 200 * 0.5);
 
   await pool.query(
-    `UPDATE users
-     SET bp_total = bp_total + $1,
-         bp_daily = bp_daily + $1
-     WHERE tiktok_id=$2`,
+    `
+    UPDATE users
+    SET bp_total = bp_total + $1,
+        bp_daily = bp_daily + $1
+    WHERE tiktok_id=$2
+  `,
     [refund, tid]
   );
 
   await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [tid]);
 
   await emitQueue();
-
   return refund;
 }
 
 // ============================================================================
 // PRIORITY SYSTEM
-// VIP (5 punten) → FAN (3 punten) → Boost (n punten) → joined_at
+// VIP (5 punten) → Boost (n punten) → FAN geeft GEEN priority meer
 // ============================================================================
-function calcPriority(isVip: boolean, isFan: boolean, boost: number): number {
-  return (isVip ? 5 : 0) + (isFan ? 3 : 0) + (boost || 0);
+
+function calcPriority(isVip: boolean, boost: number): number {
+  return (isVip ? 5 : 0) + (boost || 0);
 }
 
 // ============================================================================
-// GET FULL QUEUE (gematcht met jouw fan systeem)
+// GET FULL QUEUE
 // ============================================================================
+
 export async function getQueue() {
   const result = await pool.query(
     `
@@ -116,7 +117,8 @@ export async function getQueue() {
       u.display_name,
       u.is_fan,
       u.fan_expires_at,
-      u.is_vip
+      u.is_vip,
+      u.vip_expires_at
     FROM queue q
     JOIN users u ON u.tiktok_id = q.user_tiktok_id
     `
@@ -125,20 +127,26 @@ export async function getQueue() {
   const now = Date.now();
 
   const items = result.rows.map((row: any) => {
+    // FAN validatie (maar GEEN priority)
     const fanActive =
       row.is_fan &&
       row.fan_expires_at &&
       new Date(row.fan_expires_at).getTime() > now;
 
-    const isVip = !!row.is_vip;
-    const isFan = !!fanActive;
+    // VIP validatie (1 maand geldig)
+    const vipActive =
+      row.is_vip &&
+      row.vip_expires_at &&
+      new Date(row.vip_expires_at).getTime() > now;
+
     const boost = Number(row.boost_spots) || 0;
 
-    const priority = calcPriority(isVip, isFan, boost);
+    const priority = calcPriority(vipActive, boost);
 
+    // zichtbare reden
     let reason = "";
-    if (isVip) reason += "[VIP] ";
-    if (isFan) reason += "[FAN] ";
+    if (vipActive) reason += "[VIP] ";
+    if (fanActive) reason += "[FAN] "; // FAN blijft zichtbaar
     if (boost > 0) reason += `+Boost ${boost} `;
     if (reason === "") reason = "Standaard";
 
@@ -148,17 +156,16 @@ export async function getQueue() {
       username: (row.username || "onbekend").replace(/^@+/, ""),
       joined_at: row.joined_at,
       boost,
-      is_vip: isVip,
-      is_fan: isFan,
+      is_vip: vipActive,
+      is_fan: fanActive,
       priority,
       reason: reason.trim(),
     };
   });
 
-  // SORT: VIP > FAN > BOOST > time
+  // SORT: VIP > BOOST > time joined (FAN telt NIET mee!)
   items.sort((a, b) => {
     if (a.is_vip !== b.is_vip) return Number(b.is_vip) - Number(a.is_vip);
-    if (a.is_fan !== b.is_fan) return Number(b.is_fan) - Number(a.is_fan);
     if (a.boost !== b.boost) return b.boost - a.boost;
     return new Date(a.joined_at).getTime() - new Date(b.joined_at).getTime();
   });
