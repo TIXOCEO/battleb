@@ -17,10 +17,8 @@ export interface ArenaPlayer {
   diamonds: number;
   boosters: string[];
 
-  /** Server primary state */
   status: "alive" | "eliminated";
 
-  /** UI state (sorting outcome / danger zone / immunity) */
   positionStatus: ArenaPlayerStatus;
 
   is_vip?: boolean;
@@ -86,8 +84,6 @@ export interface GlobalToggles {
   twistsEnabled: boolean;
   roundType: "voorronde" | "finale";
   debugLogs: boolean;
-
-  /** Server daily reset moment HH:MM */
   dayResetTime: string;
 }
 
@@ -142,17 +138,17 @@ export interface SearchUser {
 }
 
 /* ================================
-   HOST PROFILES (admin:getHosts)
+   HOST PROFILES
 ================================ */
 export interface HostProfile {
   id: number;
-  username: string;     // @username zonder @
-  tiktok_id: string;    // numeric TikTok user_id as string
-  active: boolean;      // welke host is actief
+  username: string;
+  tiktok_id: string;
+  active: boolean;
 }
 
 /* ================================
-   ARENA SETTINGS (admin:getSettings)
+   ARENA SETTINGS
 ================================ */
 export interface ArenaSettings {
   roundDurationPre: number;
@@ -180,4 +176,46 @@ export interface GifterLeaderboardEntry {
   username: string;
   display_name: string;
   total_diamonds: number;
+}
+
+/* ================================
+   SOCKET OUTBOUND TYPES
+================================ */
+export interface AdminSocketOutbound {
+  "admin:getInitialSnapshot": (
+    payload: {},
+    ack: (snap: any) => void
+  ) => void;
+
+  "admin:searchUsers": (
+    payload: { query: string },
+    ack: (res: { users: SearchUser[] }) => void
+  ) => void;
+
+  "admin:addToArena": (payload: { username: string }, ack: AdminAckResponse) => void;
+  "admin:addToQueue": (payload: { username: string }, ack: AdminAckResponse) => void;
+  "admin:removeFromQueue": (payload: { username: string }, ack: AdminAckResponse) => void;
+  "admin:promoteUser": (payload: { username: string }, ack: AdminAckResponse) => void;
+  "admin:demoteUser": (payload: { username: string }, ack: AdminAckResponse) => void;
+  "admin:eliminate": (payload: { username: string }, ack: AdminAckResponse) => void;
+
+  "admin:startGame": (payload: {}, ack: AdminAckResponse) => void;
+  "admin:stopGame": (payload: {}, ack: AdminAckResponse) => void;
+
+  "admin:startRound": (
+    payload: { type: "quarter" | "finale" },
+    ack: AdminAckResponse
+  ) => void;
+
+  "admin:endRound": (payload: {}, ack: AdminAckResponse) => void;
+
+  "admin:giveTwist": (
+    payload: { username: string; twist: string },
+    ack: AdminAckResponse
+  ) => void;
+
+  "admin:useTwist": (
+    payload: { username: string; twist: string; target?: string },
+    ack: AdminAckResponse
+  ) => void;
 }
