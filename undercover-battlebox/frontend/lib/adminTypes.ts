@@ -1,3 +1,9 @@
+/* ============================================================================
+   adminTypes.ts — BattleBox v12.1 FINAL
+   Volledig in sync met backend (server.ts)
+   Geen ontbrekende types meer, inclusief InitialSnapshot
+============================================================================ */
+
 /* ================================
    ARENA PLAYER TYPES
 ================================ */
@@ -121,7 +127,7 @@ export interface AdminAckResponse {
 }
 
 /* ================================
-   AUTOCOMPLETE RESULTS
+   SEARCH RESULTS
 ================================ */
 export interface SearchUser {
   tiktok_id: string;
@@ -165,7 +171,11 @@ export interface PlayerLeaderboardEntry {
   display_name: string;
   tiktok_id: string;
 
-  diamonds_total: number;
+  // backend stuurt dit:
+  total_diamonds?: number;
+
+  // fallback (oude)
+  diamonds_total?: number;
 
   is_vip?: boolean;
   is_fan?: boolean;
@@ -178,13 +188,43 @@ export interface GifterLeaderboardEntry {
   total_diamonds: number;
 }
 
-/* ================================
-   SOCKET OUTBOUND TYPES
-================================ */
+/* ============================================================================
+   INITIAL SNAPSHOT (server → admin panel)
+============================================================================ */
+export interface InitialSnapshot {
+  arena: ArenaState;
+
+  queue: {
+    open: boolean;
+    entries: QueueEntry[];
+  };
+
+  logs: LogEntry[];
+
+  settings: ArenaSettings;
+
+  gameSession: {
+    active: boolean;
+    gameId: number | null;
+  };
+
+  stats: {
+    total_players?: number;
+    total_player_diamonds?: number;
+    total_host_diamonds?: number;
+  } | null;
+
+  playerLeaderboard: PlayerLeaderboardEntry[];
+  gifterLeaderboard: GifterLeaderboardEntry[];
+}
+
+/* ============================================================================
+   SOCKET OUTBOUND TYPES (admin → server)
+============================================================================ */
 export interface AdminSocketOutbound {
   "admin:getInitialSnapshot": (
     payload: {},
-    ack: (snap: any) => void
+    ack: (snap: InitialSnapshot) => void
   ) => void;
 
   "admin:searchUsers": (
@@ -192,12 +232,35 @@ export interface AdminSocketOutbound {
     ack: (res: { users: SearchUser[] }) => void
   ) => void;
 
-  "admin:addToArena": (payload: { username: string }, ack: AdminAckResponse) => void;
-  "admin:addToQueue": (payload: { username: string }, ack: AdminAckResponse) => void;
-  "admin:removeFromQueue": (payload: { username: string }, ack: AdminAckResponse) => void;
-  "admin:promoteUser": (payload: { username: string }, ack: AdminAckResponse) => void;
-  "admin:demoteUser": (payload: { username: string }, ack: AdminAckResponse) => void;
-  "admin:eliminate": (payload: { username: string }, ack: AdminAckResponse) => void;
+  "admin:addToArena": (
+    payload: { username: string },
+    ack: AdminAckResponse
+  ) => void;
+
+  "admin:addToQueue": (
+    payload: { username: string },
+    ack: AdminAckResponse
+  ) => void;
+
+  "admin:removeFromQueue": (
+    payload: { username: string },
+    ack: AdminAckResponse
+  ) => void;
+
+  "admin:promoteUser": (
+    payload: { username: string },
+    ack: AdminAckResponse
+  ) => void;
+
+  "admin:demoteUser": (
+    payload: { username: string },
+    ack: AdminAckResponse
+  ) => void;
+
+  "admin:eliminate": (
+    payload: { username: string },
+    ack: AdminAckResponse
+  ) => void;
 
   "admin:startGame": (payload: {}, ack: AdminAckResponse) => void;
   "admin:stopGame": (payload: {}, ack: AdminAckResponse) => void;
