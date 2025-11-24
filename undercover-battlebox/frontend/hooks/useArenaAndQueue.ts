@@ -1,4 +1,3 @@
-// hooks/useArenaAndQueue.ts
 "use client";
 
 import { useEffect, useState } from "react";
@@ -17,6 +16,7 @@ export function useArenaAndQueue() {
     debugLogs: false,
     dayResetTime: "03:00",
   });
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,7 +29,9 @@ export function useArenaAndQueue() {
           fetchArena(),
           fetchQueue(),
         ]);
+
         if (!mounted) return;
+
         setArena(arenaData);
         setQueue(queueData);
       } catch (e: any) {
@@ -51,24 +53,23 @@ export function useArenaAndQueue() {
       setError("Geen live verbinding (Socket.io)");
     });
 
+    // Arena live update
     socket.on("updateArena", (data: ArenaState) => {
       if (!mounted) return;
       setArena(data);
     });
 
-    // ✔ FIXED — juiste payload-structuur
-    socket.on(
-      "updateQueue",
-      (data: { open: boolean; entries: QueueEntry[] }) => {
-        if (!mounted) return;
-        setQueue(data.entries ?? []);
-      }
-    );
+    // Queue live update
+    socket.on("updateQueue", (data: { open: boolean; entries: QueueEntry[] }) => {
+      if (!mounted) return;
+      setQueue(data.entries ?? []);
+    });
 
     return () => {
       mounted = false;
       socket.off("updateArena");
       socket.off("updateQueue");
+      socket.off("connect_error");
     };
   }, []);
 
