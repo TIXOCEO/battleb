@@ -1188,7 +1188,7 @@ export default function AdminDashboardPage() {
 
     </main>
   );
-}
+};
 
         {/* ============================================================
             LOG FEED
