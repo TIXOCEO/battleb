@@ -2,32 +2,23 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { getAdminSocket } from "@/lib/socketClient";
+
 import type {
   ArenaState,
   QueueEntry,
   LogEntry,
   AdminAckResponse,
   AdminSocketOutbound,
+  HostProfile,
+  ArenaSettings,
+  PlayerLeaderboardEntry,
+  GifterLeaderboardEntry,
 } from "@/lib/adminTypes";
 
 type StreamStats = {
   totalPlayers: number;
   totalPlayerDiamonds: number;
   totalHostDiamonds: number;
-};
-
-type PlayerLeaderboardEntry = {
-  username: string;
-  display_name: string;
-  tiktok_id: string;
-  diamonds_total: number;
-};
-
-type GifterLeaderboardEntry = {
-  user_id: string;
-  username: string;
-  display_name: string;
-  total_diamonds: number;
 };
 
 type GameSessionState = {
@@ -44,10 +35,13 @@ type SearchUser = {
 };
 
 export default function AdminDashboardPage() {
-  // CORE STATES
+  // ============================================================
+  // CORE STATE
+  // ============================================================
   const [arena, setArena] = useState<ArenaState | null>(null);
   const [queue, setQueue] = useState<QueueEntry[]>([]);
   const [queueOpen, setQueueOpen] = useState(true);
+
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [streamStats, setStreamStats] = useState<StreamStats | null>(null);
 
@@ -57,12 +51,16 @@ export default function AdminDashboardPage() {
   const [gifterLeaderboard, setGifterLeaderboard] =
     useState<GifterLeaderboardEntry[]>([]);
 
+  const [activeLbTab, setActiveLbTab] = useState<"players" | "gifters">(
+    "players"
+  );
+
   const [gameSession, setGameSession] = useState<GameSessionState>({
     active: false,
     gameId: null,
   });
 
-  // INPUT STATES
+  // INPUTS
   const [username, setUsername] = useState("");
   const [status, setStatus] = useState<string | null>(null);
 
@@ -74,10 +72,9 @@ export default function AdminDashboardPage() {
   const [twistTypeUse, setTwistTypeUse] = useState("");
 
   // AUTOCOMPLETE
+  const [typing, setTyping] = useState("");
   const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
   const [showResults, setShowResults] = useState(false);
-  const [typing, setTyping] = useState("");
-
   const [activeAutoField, setActiveAutoField] = useState<
     null | "main" | "give" | "use" | "target"
   >(null);
@@ -105,25 +102,11 @@ export default function AdminDashboardPage() {
     socket.on("gameSession", (s) => setGameSession(s));
 
     socket.on("leaderboardPlayers", (rows) => {
-      setPlayerLeaderboard(
-        rows.map((r) => ({
-          username: r.username,
-          display_name: r.display_name,
-          tiktok_id: r.tiktok_id,
-          diamonds_total: r.diamonds_total,
-        }))
-      );
+      setPlayerLeaderboard(rows);
     });
 
     socket.on("leaderboardGifters", (rows) => {
-      setGifterLeaderboard(
-        rows.map((r) => ({
-          user_id: r.user_id,
-          username: r.username,
-          display_name: r.display_name,
-          total_diamonds: r.total_diamonds,
-        }))
-      );
+      setGifterLeaderboard(rows);
     });
 
     socket.on("connect_error", () =>
@@ -159,39 +142,31 @@ export default function AdminDashboardPage() {
   }, []);
 
   // ============================================================
-  // FETCH INITIAL SNAPSHOT
+  // INITIAL SNAPSHOT
   // ============================================================
   useEffect(() => {
     const socket = getAdminSocket();
 
-    socket.emit(
-      "admin:getInitialSnapshot",
-      {},
-      (snap: any) => {
-        if (!snap) return;
+    socket.emit("admin:getInitialSnapshot", {}, (snap: any) => {
+      if (!snap) return;
 
-        if (snap.arena) setArena(snap.arena);
-
-        if (snap.queue) {
-          setQueue(snap.queue.entries ?? []);
-          setQueueOpen(snap.queue.open ?? true);
-        }
-
-        if (snap.logs) setLogs(snap.logs.slice(0, 200));
-        if (snap.stats) setStreamStats(snap.stats);
-        if (snap.gameSession) setGameSession(snap.gameSession);
-
-        if (snap.playerLeaderboard)
-          setPlayerLeaderboard(snap.playerLeaderboard);
-
-        if (snap.gifterLeaderboard)
-          setGifterLeaderboard(snap.gifterLeaderboard);
+      if (snap.arena) setArena(snap.arena);
+      if (snap.queue) {
+        setQueue(snap.queue.entries ?? []);
+        setQueueOpen(snap.queue.open ?? true);
       }
-    );
+      if (snap.logs) setLogs(snap.logs.slice(0, 200));
+      if (snap.stats) setStreamStats(snap.stats);
+      if (snap.gameSession) setGameSession(snap.gameSession);
+
+      if (snap.playerLeaderboard) setPlayerLeaderboard(snap.playerLeaderboard);
+      if (snap.gifterLeaderboard)
+        setGifterLeaderboard(snap.gifterLeaderboard);
+    });
   }, []);
 
   // ============================================================
-  // ADMIN EMITTERS (fixed type safety)
+  // ADMIN EMITTERS
   // ============================================================
   const emitAdmin = (
     event: keyof AdminSocketOutbound,
@@ -214,64 +189,32 @@ export default function AdminDashboardPage() {
     target?: string
   ) => {
     const socket = getAdminSocket();
-
-    const uname =
-      target ||
-      (activeAutoField === "main" ? username : null) ||
-      "";
+    const uname = target || username;
 
     if (!uname.trim()) return;
 
-    const formatted = uname.startsWith("@")
-      ? uname
-      : `@${uname}`;
+    const formatted = uname.startsWith("@") ? uname : `@${uname}`;
 
     setStatus(`Bezig met ${event}...`);
 
-    socket.emit(
-      event,
-      { username: formatted },
-      (res: AdminAckResponse) => {
-        setStatus(
-          res?.success
-            ? "✅ Uitgevoerd"
-            : `❌ ${res?.message ?? "Geen antwoord"}`
-        );
-      }
-    );
+    socket.emit(event, { username: formatted }, (res: AdminAckResponse) => {
+      setStatus(
+        res?.success
+          ? "✅ Uitgevoerd"
+          : `❌ ${res?.message ?? "Geen antwoord"}`
+      );
+    });
   };
 
+  // ============================================================
+  // DERIVED STATE
+  // ============================================================
   const fmt = (n: number) =>
-    n.toLocaleString("nl-NL", {
-      maximumFractionDigits: 0,
-    });
+    n.toLocaleString("nl-NL", { maximumFractionDigits: 0 });
 
   const players = useMemo(() => arena?.players ?? [], [arena]);
 
-  // ============================================================
-  // ARENA POSITION COLORS
-  // ============================================================
-  const colorForPosition = (p: any) => {
-    if (!arena || arena.status === "idle")
-      return "bg-gray-50 border-gray-200";
-
-    switch (p.positionStatus) {
-      case "immune":
-        return "bg-green-100 border-green-300";
-      case "danger":
-        return "bg-orange-100 border-orange-300";
-      case "elimination":
-        return "bg-red-200 border-red-400";
-      default:
-        return "bg-gray-50 border-gray-200";
-    }
-  };
-
-  // ============================================================
-  // ROUND LOGICA
-  // ============================================================
   const arenaStatus = arena?.status ?? "idle";
-
   const hasDoomed =
     players.some((p: any) => p.positionStatus === "elimination");
 
@@ -292,13 +235,12 @@ export default function AdminDashboardPage() {
   // AUTOCOMPLETE
   // ============================================================
   useEffect(() => {
-    if (!typing.trim() || typing.length < 2) {
+    if (!typing || typing.length < 2) {
       setSearchResults([]);
       return;
     }
 
     const socket = getAdminSocket();
-
     const timer = setTimeout(() => {
       socket.emit(
         "admin:searchUsers",
@@ -312,9 +254,6 @@ export default function AdminDashboardPage() {
     return () => clearTimeout(timer);
   }, [typing]);
 
-  // ============================================================
-  // AUTOFILL
-  // ============================================================
   const applyAutoFill = (u: SearchUser) => {
     const formatted = u.username.startsWith("@")
       ? u.username
@@ -330,12 +269,11 @@ export default function AdminDashboardPage() {
     setSearchResults([]);
   };
 
-// ============================================================
-  // TIMER / PROGRESSBAR LOGICA
+  // ============================================================
+  // TIMER / PROGRESSBAR
   // ============================================================
   const roundProgress = useMemo(() => {
     if (!arena) return 0;
-
     const now = Date.now();
 
     if (arena.status === "active") {
@@ -353,21 +291,43 @@ export default function AdminDashboardPage() {
     return 0;
   }, [arena]);
 
-  function formatTime(sec: number) {
+  const formatTime = (sec: number) => {
     if (!sec || sec < 0) sec = 0;
     const m = Math.floor(sec / 60);
     const s = sec % 60;
-    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-  }
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(
+      2,
+      "0"
+    )}`;
+  };
 
   // ============================================================
-  // UI RENDER
+  // POSITION COLORS
+  // ============================================================
+  const colorForPosition = (p: any) => {
+    if (!arena || arena.status === "idle")
+      return "bg-gray-50 border-gray-200";
+
+    switch (p.positionStatus) {
+      case "immune":
+        return "bg-green-100 border-green-300";
+      case "danger":
+        return "bg-orange-100 border-orange-300";
+      case "elimination":
+        return "bg-red-200 border-red-400";
+      default:
+        return "bg-gray-50 border-gray-200";
+    }
+  };
+
+  // ============================================================
+  // UI START
   // ============================================================
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
 
       {/* ===========================================
-          HEADER MET TIMER / PROGRESSBAR
+          HEADER
       ============================================ */}
       <header className="mb-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-2">
@@ -391,7 +351,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* TIMER / PROGRESSBAR */}
+        {/* TIMER */}
         {arena && arena.status !== "idle" && (
           <div className="w-full bg-gray-300 rounded-full h-4 shadow-inner relative overflow-hidden">
 
@@ -408,14 +368,16 @@ export default function AdminDashboardPage() {
             <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold">
               {arena.status === "active" &&
                 formatTime(
-                  Math.max(0,
+                  Math.max(
+                    0,
                     Math.floor((arena.roundCutoff - Date.now()) / 1000)
                   )
                 )}
 
               {arena.status === "grace" &&
                 formatTime(
-                  Math.max(0,
+                  Math.max(
+                    0,
                     Math.floor((arena.graceEnd - Date.now()) / 1000)
                   )
                 )}
@@ -573,9 +535,9 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* ===========================================
+      {/* ============================================================
           ARENA + QUEUE
-      ============================================ */}
+      ============================================================ */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
         
         {/* ARENA */}
@@ -637,7 +599,13 @@ export default function AdminDashboardPage() {
           <h2 className="text-xl font-semibold mb-2">Wachtrij</h2>
           <p className="text-sm text-gray-500 mb-3">
             {queue.length} speler{queue.length !== 1 && "s"} • Queue:{" "}
-            <span className={queueOpen ? "text-green-600 font-semibold" : "text-red-600 font-semibold"}>
+            <span
+              className={
+                queueOpen
+                  ? "text-green-600 font-semibold"
+                  : "text-red-600 font-semibold"
+              }
+            >
               {queueOpen ? "OPEN" : "DICHT"}
             </span>
           </p>
@@ -711,67 +679,127 @@ export default function AdminDashboardPage() {
             <div className="text-sm text-gray-500 italic">Wachtrij is leeg.</div>
           )}
         </div>
-
       </section>
 
-      {/* ===========================================
-          LEADERBOARDS
+{/* ===========================================
+          LEADERBOARDS (TAB CONTAINER)
       ============================================ */}
-      <section className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+      <section className="mt-4">
 
-        {/* RECEIVERS */}
-        <div className="bg-white rounded-2xl shadow p-4">
-          <h2 className="text-xl font-semibold mb-2">Player Leaderboard</h2>
-          <p className="text-xs text-gray-500 mb-3">Diamanten ontvangen</p>
+        <div className="bg-white rounded-2xl shadow p-0 overflow-hidden">
 
-          <div className="max-h-72 overflow-y-auto text-sm">
-            {playerLeaderboard.length ? (
-              playerLeaderboard.map((e, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center justify-between border-b last:border-0 border-gray-200 py-1"
-                >
-                  <div>
-                    <span className="font-mono text-xs text-gray-500 mr-2">#{idx + 1}</span>
-                    <span className="font-semibold">
-                      {e.display_name} (@{e.username})
-                    </span>
-                  </div>
+          {/* TAB BUTTONS */}
+          <div className="w-full flex justify-end p-3 border-b border-gray-200 bg-gray-50">
+            <div className="flex gap-2">
 
-                  <span className="font-semibold">{fmt(e.diamonds_total)} 💎</span>
-                </div>
-              ))
-            ) : (
-              <div className="text-sm text-gray-500 italic">Geen data beschikbaar.</div>
-            )}
+              <button
+                onClick={() => setActiveLbTab("players")}
+                className={`
+                  px-4 py-1.5 text-sm rounded-full border 
+                  transition-all duration-150 
+                  ${
+                    activeLbTab === "players"
+                      ? "bg-[#ff4d4f] text-white border-[#ff4d4f]"
+                      : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
+                  }
+                `}
+              >
+                Players
+              </button>
+
+              <button
+                onClick={() => setActiveLbTab("gifters")}
+                className={`
+                  px-4 py-1.5 text-sm rounded-full border 
+                  transition-all duration-150 
+                  ${
+                    activeLbTab === "gifters"
+                      ? "bg-[#ff4d4f] text-white border-[#ff4d4f]"
+                      : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
+                  }
+                `}
+              >
+                Gifters
+              </button>
+
+            </div>
           </div>
-        </div>
 
-        {/* GIFTERS */}
-        <div className="bg-white rounded-2xl shadow p-4">
-          <h2 className="text-xl font-semibold mb-2">Gifter Leaderboard</h2>
-          <p className="text-xs text-gray-500 mb-3">Diamanten verstuurd</p>
+          {/* TAB CONTENT */}
+          <div className="p-4 max-h-96 overflow-y-auto text-sm">
 
-          <div className="max-h-72 overflow-y-auto text-sm">
-            {gifterLeaderboard.length ? (
-              gifterLeaderboard.map((e, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center justify-between border-b last:border-0 border-gray-200 py-1"
-                >
-                  <div>
-                    <span className="font-mono text-xs text-gray-500 mr-2">#{idx + 1}</span>
-                    <span className="font-semibold">
-                      {e.display_name} (@{e.username})
-                    </span>
+            {/* ==========================
+                PLAYERS TAB
+            =========================== */}
+            {activeLbTab === "players" && (
+              <div>
+                <h2 className="text-xl font-semibold mb-2">Player Leaderboard</h2>
+                <p className="text-xs text-gray-500 mb-3">
+                  Diamanten ontvangen (huidige stream)
+                </p>
+
+                {playerLeaderboard.length ? (
+                  playerLeaderboard.map((e, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between border-b last:border-0 border-gray-200 py-1"
+                    >
+                      <div>
+                        <span className="font-mono text-xs text-gray-500 mr-2">#{idx + 1}</span>
+                        <span className="font-semibold">
+                          {e.display_name} (@{e.username})
+                        </span>
+                      </div>
+
+                      <span className="font-semibold">
+                        {fmt(e.diamonds_total)} 💎
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-sm text-gray-500 italic">
+                    Geen spelers gevonden.
                   </div>
-
-                  <span className="font-semibold">{fmt(e.total_diamonds)} 💎</span>
-                </div>
-              ))
-            ) : (
-              <div className="text-sm text-gray-500 italic">Geen data beschikbaar.</div>
+                )}
+              </div>
             )}
+
+            {/* ==========================
+                GIFTERS TAB
+            =========================== */}
+            {activeLbTab === "gifters" && (
+              <div>
+                <h2 className="text-xl font-semibold mb-2">Gifter Leaderboard</h2>
+                <p className="text-xs text-gray-500 mb-3">
+                  Diamanten verstuurd (huidige stream)
+                </p>
+
+                {gifterLeaderboard.length ? (
+                  gifterLeaderboard.map((e, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between border-b last:border-0 border-gray-200 py-1"
+                    >
+                      <div>
+                        <span className="font-mono text-xs text-gray-500 mr-2">#{idx + 1}</span>
+                        <span className="font-semibold">
+                          {e.display_name} (@{e.username})
+                        </span>
+                      </div>
+
+                      <span className="font-semibold">
+                        {fmt(e.total_diamonds)} 💎
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-sm text-gray-500 italic">
+                    Geen gifters gevonden.
+                  </div>
+                )}
+              </div>
+            )}
+
           </div>
         </div>
       </section>
@@ -785,7 +813,7 @@ export default function AdminDashboardPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
           {/* GIVE TWIST */}
-          <div className="p-4 border rounded-xl bg-gray-50 shadow-sm">
+          <div className="p-4 border rounded-xl bg-gray-50 shadow-sm relative">
             <h3 className="font-semibold mb-3">Twist geven aan speler</h3>
 
             <label className="text-xs font-semibold">@username</label>
@@ -811,7 +839,7 @@ export default function AdminDashboardPage() {
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "give" && (
-                <div className="absolute mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto w-full">
+                <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
                   {searchResults.map((u) => (
                     <div
                       key={u.tiktok_id}
@@ -879,7 +907,7 @@ export default function AdminDashboardPage() {
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "use" && (
-                <div className="absolute mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto w-full">
+                <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
                   {searchResults.map((u) => (
                     <div
                       key={u.tiktok_id}
@@ -930,7 +958,7 @@ export default function AdminDashboardPage() {
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "target" && (
-                <div className="absolute mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto w-full">
+                <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
                   {searchResults.map((u) => (
                     <div
                       key={u.tiktok_id}
@@ -957,6 +985,7 @@ export default function AdminDashboardPage() {
               Gebruik twist
             </button>
           </div>
+
         </div>
       </section>
 
@@ -1004,4 +1033,5 @@ export default function AdminDashboardPage() {
       </footer>
     </main>
   );
-                  }
+}
+    
