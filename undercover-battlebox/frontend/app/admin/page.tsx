@@ -13,8 +13,12 @@ import type {
   ArenaSettings,
   PlayerLeaderboardEntry,
   GifterLeaderboardEntry,
+  SearchUser,
 } from "@/lib/adminTypes";
 
+/* ============================================
+   LOCAL TYPES
+============================================ */
 type StreamStats = {
   totalPlayers: number;
   totalPlayerDiamonds: number;
@@ -28,16 +32,10 @@ type GameSessionState = {
   endedAt?: string | null;
 };
 
-type SearchUser = {
-  tiktok_id: string;
-  username: string;
-  display_name: string;
-};
-
 export default function AdminDashboardPage() {
-  // ============================================================
-  // CORE STATE
-  // ============================================================
+  /* ============================================
+     CORE STATE
+  ============================================ */
   const [arena, setArena] = useState<ArenaState | null>(null);
   const [queue, setQueue] = useState<QueueEntry[]>([]);
   const [queueOpen, setQueueOpen] = useState(true);
@@ -47,29 +45,30 @@ export default function AdminDashboardPage() {
 
   const [playerLeaderboard, setPlayerLeaderboard] =
     useState<PlayerLeaderboardEntry[]>([]);
-
   const [gifterLeaderboard, setGifterLeaderboard] =
     useState<GifterLeaderboardEntry[]>([]);
 
-  const [activeLbTab, setActiveLbTab] = useState<"players" | "gifters">("players");
+  const [activeLbTab, setActiveLbTab] = useState<"players" | "gifters">(
+    "players"
+  );
 
   const [gameSession, setGameSession] = useState<GameSessionState>({
     active: false,
     gameId: null,
   });
 
-  // INPUTS
+  /* INPUTS */
   const [username, setUsername] = useState("");
   const [status, setStatus] = useState<string | null>(null);
 
-  // TWISTS
+  /* TWISTS */
   const [twistUserGive, setTwistUserGive] = useState("");
   const [twistUserUse, setTwistUserUse] = useState("");
   const [twistTargetUse, setTwistTargetUse] = useState("");
   const [twistTypeGive, setTwistTypeGive] = useState("");
   const [twistTypeUse, setTwistTypeUse] = useState("");
 
-  // AUTOCOMPLETE
+  /* AUTOCOMPLETE */
   const [typing, setTyping] = useState("");
   const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
   const [showResults, setShowResults] = useState(false);
@@ -77,9 +76,9 @@ export default function AdminDashboardPage() {
     null | "main" | "give" | "use" | "target"
   >(null);
 
-  // ============================================================
-  // SOCKET SETUP
-  // ============================================================
+  /* ============================================
+     SOCKET SETUP
+  ============================================ */
   useEffect(() => {
     const socket = getAdminSocket();
 
@@ -129,32 +128,37 @@ export default function AdminDashboardPage() {
     };
   }, []);
 
-  // ============================================================
-  // INITIAL SNAPSHOT
-  // ============================================================
+/* ============================================
+     INITIAL SNAPSHOT (no prefix)
+  ============================================ */
   useEffect(() => {
     const socket = getAdminSocket();
 
-    socket.emit("admin:getInitialSnapshot", {}, (snap: any) => {
+    socket.emit("getInitialSnapshot", {}, (snap: any) => {
       if (!snap) return;
 
       if (snap.arena) setArena(snap.arena);
+
       if (snap.queue) {
         setQueue(snap.queue.entries ?? []);
         setQueueOpen(snap.queue.open ?? true);
       }
+
       if (snap.logs) setLogs(snap.logs.slice(0, 200));
       if (snap.stats) setStreamStats(snap.stats);
       if (snap.gameSession) setGameSession(snap.gameSession);
 
-      if (snap.playerLeaderboard) setPlayerLeaderboard(snap.playerLeaderboard);
-      if (snap.gifterLeaderboard) setGifterLeaderboard(snap.gifterLeaderboard);
+      if (snap.playerLeaderboard)
+        setPlayerLeaderboard(snap.playerLeaderboard);
+
+      if (snap.gifterLeaderboard)
+        setGifterLeaderboard(snap.gifterLeaderboard);
     });
   }, []);
 
-  // ============================================================
-  // ADMIN EMITTERS — STRICT TYPES
-  // ============================================================
+  /* ============================================
+     ADMIN EMITTERS — FIXED (NO admin:)
+  ============================================ */
   const emitAdmin = (event: keyof AdminSocketOutbound, payload?: any) => {
     const socket = getAdminSocket();
     setStatus(`Bezig met ${event}...`);
@@ -172,11 +176,9 @@ export default function AdminDashboardPage() {
   ) => {
     const socket = getAdminSocket();
     const uname = target || username;
-
     if (!uname.trim()) return;
 
     const formatted = uname.startsWith("@") ? uname : `@${uname}`;
-
     setStatus(`Bezig met ${event}...`);
 
     socket.emit(event, { username: formatted }, (res: AdminAckResponse) => {
@@ -186,21 +188,23 @@ export default function AdminDashboardPage() {
     });
   };
 
-  // ============================================================
-  // DERIVED STATE & HELPERS
-  // ============================================================
+  /* ============================================
+     HELPERS & DERIVED STATE
+  ============================================ */
   const fmt = (n: number | undefined | null) =>
     (typeof n === "number" ? n : 0).toLocaleString("nl-NL", {
       maximumFractionDigits: 0,
     });
 
   const players = useMemo(() => arena?.players ?? [], [arena]);
-
   const arenaStatus = arena?.status ?? "idle";
+
   const hasDoomed = players.some((p) => p.positionStatus === "elimination");
 
   const canStartRound =
-    !!arena && (arenaStatus === "idle" || arenaStatus === "ended") && !hasDoomed;
+    !!arena &&
+    (arenaStatus === "idle" || arenaStatus === "ended") &&
+    !hasDoomed;
 
   const canStopRound = arenaStatus === "active";
   const canGraceEnd = arenaStatus === "grace";
@@ -210,9 +214,9 @@ export default function AdminDashboardPage() {
     arenaStatus === "ended" &&
     hasDoomed;
 
-  // ============================================================
-  // AUTOCOMPLETE
-  // ============================================================
+  /* ============================================
+     AUTOCOMPLETE FIXED
+  ============================================ */
   useEffect(() => {
     if (!typing || typing.length < 2) {
       setSearchResults([]);
@@ -223,7 +227,7 @@ export default function AdminDashboardPage() {
 
     const timer = setTimeout(() => {
       socket.emit(
-        "admin:searchUsers",
+        "searchUsers",
         { query: typing },
         (res: { users: SearchUser[] }) => {
           setSearchResults(res?.users || []);
@@ -247,9 +251,9 @@ export default function AdminDashboardPage() {
     setSearchResults([]);
   };
 
-  // ============================================================
-  // TIMER / PROGRESSBAR
-  // ============================================================
+  /* ============================================
+     TIMER PROGRESS
+  ============================================ */
   const roundProgress = useMemo(() => {
     if (!arena) return 0;
     const now = Date.now();
@@ -276,9 +280,9 @@ export default function AdminDashboardPage() {
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
-  // ============================================================
-  // POSITION COLORS
-  // ============================================================
+  /* ============================================
+     POSITION COLORS
+  ============================================ */
   const colorForPosition = (p: any) => {
     if (!arena || arena.status === "idle")
       return "bg-gray-50 border-gray-200";
@@ -295,9 +299,9 @@ export default function AdminDashboardPage() {
     }
   };
 
-  // ============================================================
-  // UI START
-  // ============================================================
+  /* ============================================
+     UI START
+  ============================================ */
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
       {/* HEADER */}
@@ -305,10 +309,12 @@ export default function AdminDashboardPage() {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-2">
           <div className="flex items-center gap-2">
             <div className="text-2xl font-bold text-[#ff4d4f]">UB</div>
+
             <div>
               <div className="text-xl font-semibold">
                 Undercover BattleBox – Admin
               </div>
+
               <div className="text-xs text-gray-500">
                 Verbonden als{" "}
                 <span className="font-semibold text-green-600">Admin</span>
@@ -368,7 +374,7 @@ export default function AdminDashboardPage() {
 
           <div className="flex gap-2 flex-wrap">
             <button
-              onClick={() => emitAdmin("admin:startGame")}
+              onClick={() => emitAdmin("startGame")}
               disabled={gameSession.active}
               className={`px-3 py-1.5 rounded-full text-xs ${
                 gameSession.active
@@ -380,7 +386,7 @@ export default function AdminDashboardPage() {
             </button>
 
             <button
-              onClick={() => emitAdmin("admin:stopGame")}
+              onClick={() => emitAdmin("stopGame")}
               disabled={!gameSession.active}
               className={`px-3 py-1.5 rounded-full text-xs ${
                 !gameSession.active
@@ -396,7 +402,7 @@ export default function AdminDashboardPage() {
             <div className="text-xs text-gray-600 mb-1">Ronde acties</div>
             <div className="flex gap-2 flex-wrap">
               <button
-                onClick={() => emitAdmin("admin:startRound", { type: "quarter" })}
+                onClick={() => emitAdmin("startRound", { type: "quarter" })}
                 disabled={!canStartRound}
                 className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full text-xs disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
@@ -404,7 +410,7 @@ export default function AdminDashboardPage() {
               </button>
 
               <button
-                onClick={() => emitAdmin("admin:startRound", { type: "finale" })}
+                onClick={() => emitAdmin("startRound", { type: "finale" })}
                 disabled={!canStartRound}
                 className="px-3 py-1.5 bg-gray-900 text-white rounded-full text-xs disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
@@ -412,7 +418,7 @@ export default function AdminDashboardPage() {
               </button>
 
               <button
-                onClick={() => emitAdmin("admin:endRound")}
+                onClick={() => emitAdmin("endRound")}
                 disabled={!canStopRound && !canGraceEnd}
                 className="px-3 py-1.5 bg-red-600 text-white rounded-full text-xs disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
@@ -479,21 +485,21 @@ export default function AdminDashboardPage() {
 
             <div className="flex gap-2 text-xs">
               <button
-                onClick={() => emitAdminWithUser("admin:addToArena", username)}
+                onClick={() => emitAdminWithUser("addToArena", username)}
                 className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full"
               >
                 → Arena
               </button>
 
               <button
-                onClick={() => emitAdminWithUser("admin:addToQueue", username)}
+                onClick={() => emitAdminWithUser("addToQueue", username)}
                 className="px-3 py-1.5 bg-gray-800 text-white rounded-full"
               >
                 → Queue
               </button>
 
               <button
-                onClick={() => emitAdminWithUser("admin:eliminate", username)}
+                onClick={() => emitAdminWithUser("eliminate", username)}
                 className="px-3 py-1.5 bg-red-600 text-white rounded-full"
               >
                 Elimineer
@@ -543,7 +549,7 @@ export default function AdminDashboardPage() {
                   {p.positionStatus === "elimination" && (
                     <button
                       onClick={() =>
-                        emitAdminWithUser("admin:eliminate", p.username)
+                        emitAdminWithUser("eliminate", p.username)
                       }
                       className="mt-2 px-2 py-1 text-[11px] rounded-full border border-red-300 text-red-700 bg-red-50"
                     >
@@ -618,7 +624,7 @@ export default function AdminDashboardPage() {
                 <div className="flex gap-1 mt-2 sm:mt-0 justify-end">
                   <button
                     onClick={() =>
-                      emitAdminWithUser("admin:promoteUser", q.username)
+                      emitAdminWithUser("promoteUser", q.username)
                     }
                     className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
                   >
@@ -627,7 +633,7 @@ export default function AdminDashboardPage() {
 
                   <button
                     onClick={() =>
-                      emitAdminWithUser("admin:demoteUser", q.username)
+                      emitAdminWithUser("demoteUser", q.username)
                     }
                     className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
                   >
@@ -636,7 +642,7 @@ export default function AdminDashboardPage() {
 
                   <button
                     onClick={() =>
-                      emitAdminWithUser("admin:addToArena", q.username)
+                      emitAdminWithUser("addToArena", q.username)
                     }
                     className="px-2 py-1 rounded-full border border-[#ff4d4f] text-[#ff4d4f]"
                   >
@@ -645,7 +651,7 @@ export default function AdminDashboardPage() {
 
                   <button
                     onClick={() =>
-                      emitAdminWithUser("admin:removeFromQueue", q.username)
+                      emitAdminWithUser("removeFromQueue", q.username)
                     }
                     className="px-2 py-1 rounded-full border border-red-300 text-red-700 bg-red-50"
                   >
@@ -660,7 +666,7 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-            {/* ============================================================
+      {/* ============================================================
           LEADERBOARDS
       ============================================================ */}
       <section className="mt-4">
@@ -724,7 +730,7 @@ export default function AdminDashboardPage() {
                       </div>
 
                       <span className="font-semibold">
-                        {fmt(e.diamonds_total)} 💎
+                        {fmt(e.diamonds_total ?? e.total_diamonds)} 💎
                       </span>
                     </div>
                   ))
@@ -840,7 +846,7 @@ export default function AdminDashboardPage() {
 
             <button
               onClick={() =>
-                emitAdmin("admin:giveTwist", {
+                emitAdmin("giveTwist", {
                   username: twistUserGive,
                   twist: twistTypeGive,
                 })
@@ -946,7 +952,7 @@ export default function AdminDashboardPage() {
 
             <button
               onClick={() =>
-                emitAdmin("admin:useTwist", {
+                emitAdmin("useTwist", {
                   username: twistUserUse,
                   twist: twistTypeUse,
                   target: twistTargetUse,
@@ -992,7 +998,9 @@ export default function AdminDashboardPage() {
               </div>
             ))
           ) : (
-            <div className="px-3 py-2 text-gray-500 italic">Nog geen logs ontvangen.</div>
+            <div className="px-3 py-2 text-gray-500 italic">
+              Nog geen logs ontvangen.
+            </div>
           )}
         </div>
       </section>
@@ -1002,4 +1010,4 @@ export default function AdminDashboardPage() {
       </footer>
     </main>
   );
-}
+                    }
