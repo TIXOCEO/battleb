@@ -1,9 +1,8 @@
-
 "use client";
 
 import React, { useEffect, useState, useRef } from "react";
 import { getAdminSocket } from "@/lib/socketClient";
-import type { AdminAckResponse } from "@/lib/adminTypes";
+import type { AdminAckResponse, ArenaSettings, HostProfile } from "@/lib/adminTypes";
 
 // Sanitizers
 function sanitizeHostUsername(input: string): string {
@@ -20,21 +19,6 @@ function sanitizeHostId(input: string): string {
   if (!input) return "";
   return input.replace(/[^0-9]/g, "").slice(0, 32);
 }
-
-// Types
-type ArenaSettings = {
-  roundDurationPre: number;
-  roundDurationFinal: number;
-  graceSeconds: number;
-  forceEliminations: boolean;
-};
-
-type HostProfile = {
-  id: number;
-  username: string;
-  tiktok_id: string;
-  active: boolean;
-};
 
 export default function SettingsPage() {
   // Host profiles
@@ -60,12 +44,12 @@ export default function SettingsPage() {
   const [gameActive, setGameActive] = useState(false);
 
   // ---------------------------------------------------------------------
-  // INIT SOCKET
+  // INIT SOCKET — FIXED (NO PREFIX)
   // ---------------------------------------------------------------------
   useEffect(() => {
     const socket = getAdminSocket();
 
-    socket.emit("admin:getSettings", {}, (res: any) => {
+    socket.emit("getSettings", {}, (res: any) => {
       if (!res?.success) {
         setStatus(`❌ ${res?.message || "Kon instellingen niet laden"}`);
         return;
@@ -76,8 +60,7 @@ export default function SettingsPage() {
       setConnected(true);
     });
 
-    // Initial host load
-    socket.emit("admin:getHosts", {}, (res: any) => {
+    socket.emit("getHosts", {}, (res: any) => {
       if (res?.success) {
         setHostProfiles(res.hosts || []);
         const active = res.hosts?.find((h: any) => h.active) || null;
@@ -88,16 +71,14 @@ export default function SettingsPage() {
     socket.on("connect", () => setConnected(true));
     socket.on("disconnect", () => setConnected(false));
 
-    // Host list update (from server)
-    socket.on("hosts", (hosts: any[]) => {
+    socket.on("hosts", (hosts: HostProfile[]) => {
       setHostProfiles(hosts);
       const active = hosts.find((h) => h.active) || null;
       setActiveHost(active);
     });
 
-    // Active host changed
     socket.on("hostsActiveChanged", () => {
-      socket.emit("admin:getHosts", {}, (res: any) => {
+      socket.emit("getHosts", {}, (res: any) => {
         if (res?.success) {
           setHostProfiles(res.hosts);
           const a = res.hosts.find((h: any) => h.active) || null;
@@ -156,7 +137,7 @@ export default function SettingsPage() {
   }, [newHostUser]);
 
   // ---------------------------------------------------------------------
-  // CREATE HOST PROFILE
+  // CREATE HOST PROFILE (NO PREFIX)
   // ---------------------------------------------------------------------
   const createHostProfile = () => {
     const cleanUser = sanitizeHostUsername(newHostUser);
@@ -170,7 +151,7 @@ export default function SettingsPage() {
     const socket = getAdminSocket();
 
     socket.emit(
-      "admin:createHost",
+      "createHost",
       {
         label: cleanUser,
         username: cleanUser,
@@ -186,8 +167,7 @@ export default function SettingsPage() {
           setNewHostId("");
           manualHostIdEdit.current = false;
 
-          // reload
-          socket.emit("admin:getHosts", {}, (r: any) => {
+          socket.emit("getHosts", {}, (r: any) => {
             if (r.success) {
               setHostProfiles(r.hosts);
               const active = r.hosts.find((h: any) => h.active) || null;
@@ -200,7 +180,7 @@ export default function SettingsPage() {
   };
 
   // ---------------------------------------------------------------------
-  // ACTIVATE HOST PROFILE
+  // ACTIVATE HOST (NO PREFIX)
   // ---------------------------------------------------------------------
   const activateProfile = (id: number) => {
     if (gameActive) {
@@ -209,7 +189,7 @@ export default function SettingsPage() {
     }
 
     const socket = getAdminSocket();
-    socket.emit("admin:setActiveHost", { id }, (res: any) => {
+    socket.emit("setActiveHost", { id }, (res: any) => {
       setStatus(
         res.success ? "✔ Actieve host ingesteld" : `❌ ${res.message}`
       );
@@ -217,22 +197,22 @@ export default function SettingsPage() {
   };
 
   // ---------------------------------------------------------------------
-  // DELETE HOST PROFILE
+  // DELETE HOST (NO PREFIX)
   // ---------------------------------------------------------------------
   const deleteProfile = (id: number) => {
     const socket = getAdminSocket();
-    socket.emit("admin:deleteHost", { id }, (res: any) => {
+    socket.emit("deleteHost", { id }, (res: any) => {
       setStatus(res.success ? "✔ Verwijderd" : `❌ ${res.message}`);
     });
   };
 
   // ---------------------------------------------------------------------
-  // TIMERS
+  // SAVE TIMER SETTINGS (NO PREFIX)
   // ---------------------------------------------------------------------
   const updateTimers = () => {
     const socket = getAdminSocket();
     socket.emit(
-      "admin:updateSettings",
+      "updateSettings",
       {
         roundDurationPre: settings.roundDurationPre,
         roundDurationFinal: settings.roundDurationFinal,
@@ -276,7 +256,7 @@ export default function SettingsPage() {
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
         <h2 className="text-lg font-semibold mb-3">Host-profielen</h2>
 
-        {/* ================== ACTIVE HOST DROPDOWN (NEW) ================== */}
+        {/* ACTIVE HOST SELECTOR */}
         <div className="mb-4">
           <div className="text-xs text-gray-500 mb-1">Actieve host:</div>
 
@@ -312,7 +292,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Profile list */}
+        {/* Host list */}
         <div className="border rounded-xl p-3 bg-gray-50 max-h-80 overflow-y-auto">
           {hostProfiles.length === 0 ? (
             <p className="text-gray-500 text-sm italic">
@@ -375,7 +355,7 @@ export default function SettingsPage() {
             className="text-xs text-gray-600 cursor-pointer"
             onClick={() => tiktokIdInputRef.current?.focus()}
           >
-            TikTok ID (klik om te focussen)
+            TikTok ID
           </label>
 
           <input
@@ -452,7 +432,6 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Force eliminations */}
         <label className="mt-4 flex items-center gap-2 text-xs text-gray-600">
           <input
             type="checkbox"
