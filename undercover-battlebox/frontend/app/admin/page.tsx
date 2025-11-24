@@ -153,7 +153,7 @@ export default function AdminDashboardPage() {
   }, []);
 
   // ============================================================
-  // ADMIN EMITTERS
+  // ADMIN EMITTERS — STRICT TYPES
   // ============================================================
   const emitAdmin = (event: keyof AdminSocketOutbound, payload?: any) => {
     const socket = getAdminSocket();
@@ -187,7 +187,7 @@ export default function AdminDashboardPage() {
   };
 
   // ============================================================
-  // DERIVED STATE
+  // DERIVED STATE & HELPERS
   // ============================================================
   const fmt = (n: number | undefined | null) =>
     (typeof n === "number" ? n : 0).toLocaleString("nl-NL", {
@@ -197,7 +197,7 @@ export default function AdminDashboardPage() {
   const players = useMemo(() => arena?.players ?? [], [arena]);
 
   const arenaStatus = arena?.status ?? "idle";
-  const hasDoomed = players.some((p: any) => p.positionStatus === "elimination");
+  const hasDoomed = players.some((p) => p.positionStatus === "elimination");
 
   const canStartRound =
     !!arena && (arenaStatus === "idle" || arenaStatus === "ended") && !hasDoomed;
@@ -220,6 +220,7 @@ export default function AdminDashboardPage() {
     }
 
     const socket = getAdminSocket();
+
     const timer = setTimeout(() => {
       socket.emit(
         "admin:searchUsers",
@@ -659,7 +660,7 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* ============================================================
+            {/* ============================================================
           LEADERBOARDS
       ============================================================ */}
       <section className="mt-4">
@@ -781,7 +782,7 @@ export default function AdminDashboardPage() {
         <h2 className="text-xl font-semibold mb-4">Twists</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* GIVE TWIST */}
+          {/* GIVE */}
           <div className="p-4 border rounded-xl bg-gray-50 shadow-sm relative">
             <h3 className="font-semibold mb-3">Twist geven aan speler</h3>
 
@@ -804,6 +805,7 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
+            {/* AUTOCOMPLETE GIVE */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "give" && (
@@ -849,7 +851,7 @@ export default function AdminDashboardPage() {
             </button>
           </div>
 
-          {/* USE TWIST */}
+          {/* USE */}
           <div className="p-4 border rounded-xl bg-gray-50 shadow-sm relative">
             <h3 className="font-semibold mb-3">Twist gebruiken (admin)</h3>
 
@@ -872,6 +874,7 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
+            {/* AUTOCOMPLETE USE */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "use" && (
@@ -923,6 +926,7 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-3"
             />
 
+            {/* AUTOCOMPLETE TARGET */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "target" && (
