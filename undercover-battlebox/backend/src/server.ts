@@ -41,12 +41,6 @@ import { getQueue } from "./queue";
 import { giveTwistAdmin, useTwistAdmin } from "./engines/9-admin-twist-engine";
 import { useTwist } from "./engines/8-twist-engine";
 
-// ★★ LEADERBOARD FIX IMPORTS ★★
-import {
-  broadcastPlayerLeaderboard,
-  broadcastGifterLeaderboard,
-} from "./leaderboard-fix";  // (DEZE BESTAAT NOG NIET — wordt later door mij aangeleverd als embedded module)
-
 dotenv.config();
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "supersecret123";
