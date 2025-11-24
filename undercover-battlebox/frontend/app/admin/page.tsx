@@ -1,8 +1,4 @@
 "use client";
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-export const fetchCache = "force-no-store";
-export const dynamicParams = false;
 
 import React, { useEffect, useMemo, useState } from "react";
 import { getAdminSocket } from "@/lib/socketClient";
