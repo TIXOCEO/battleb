@@ -1,5 +1,5 @@
 // ============================================================================
-// 3-gift-engine.ts — v11.2 GAME-ID SAFEGUARD EDITION
+// 3-gift-engine.ts — v11.2 GAME-ID SAFEGUARD EDITION (FIXED)
 // ============================================================================
 
 import pool from "../db";
@@ -9,7 +9,9 @@ import {
   upsertIdentityFromLooseEvent,
 } from "./2-user-engine";
 
-import { broadcastPlayerLeaderboard, broadcastGifterLeaderboard } from "../server";
+// FIX: alleen broadcastPlayerLeaderboard importeren
+import { broadcastPlayerLeaderboard } from "../server";
+
 import { addDiamonds, addBP } from "./4-points-engine";
 import { getArena, safeAddArenaDiamonds } from "./5-game-engine";
 
@@ -260,7 +262,7 @@ function isHeartMeGift(evt: any): boolean {
 
 
 // ============================================================================
-// MAIN PROCESSOR (★ PATCHED GAME-ID HANDLING)
+// MAIN PROCESSOR (FIXED VERSION)
 // ============================================================================
 async function processGift(evt: any, source: string) {
   try {
@@ -279,23 +281,29 @@ async function processGift(evt: any, source: string) {
     const diamonds = calcDiamonds(evt);
     if (diamonds <= 0) return;
 
-    // PATCH: game MUST be active
     const gameId = getActiveGameId();
     const active = await isGameActive();
 
+    // ========================================================================
+    // FIX: NO ACTIVE GAME → NIET OPSLAAN, WEL LOGGEN + PLAYER LEADERBOARD
+    // ========================================================================
+
     if (!gameId || !active) {
-      // geen actief spel → gift wel loggen maar NIET opslaan in gifts tabel
-emitLog({
-  type: "gift",
-  message: `${senderFmt} → ${receiverFmt}: ${evt.giftName} (+${diamonds}💎)`,
-});
+      const senderFmt = formatDisplay(sender);
+      const receiverFmt = "UNKNOWN"; // geen receiver in dit pad
 
-// ★ Realtime leaderboard update
-await broadcastPlayerLeaderboard();
-await broadcastGifterLeaderboard();
+      emitLog({
+        type: "gift",
+        message: `${senderFmt} → ${receiverFmt}: ${evt.giftName} (+${diamonds}💎)`,
+      });
 
+      await broadcastPlayerLeaderboard(); // realtime refresh
       return;
     }
+
+    // ========================================================================
+    // ACTIVE GAME — normaal pad
+    // ========================================================================
 
     const receiver = await resolveReceiver(evt);
     const isHostReceiver = receiver.role === "host";
@@ -331,12 +339,10 @@ await broadcastGifterLeaderboard();
       sender.display_name
     );
 
-    // arena diamonds
     if (receiver.id && is_round_gift) {
       await safeAddArenaDiamonds(String(receiver.id), diamonds);
     }
 
-    // host receiver
     if (isHostReceiver && receiver.id) {
       await pool.query(
         `
@@ -345,12 +351,11 @@ await broadcastGifterLeaderboard();
             diamonds_stream = diamonds_stream + $1,
             diamonds_current_round = diamonds_current_round + $1
         WHERE tiktok_id=$2
-      `,
+        `,
         [diamonds, BigInt(String(receiver.id))]
       );
     }
 
-    // fan gifts
     if (isHostReceiver && isHeartMeGift(evt)) {
       const expires = new Date(nowMs + 24 * 3600 * 1000);
       await pool.query(
@@ -364,7 +369,6 @@ await broadcastGifterLeaderboard();
       });
     }
 
-    // twist gifts
     const giftId = Number(evt.giftId);
     const twistType =
       (Object.keys(TWIST_MAP) as TwistType[]).find(
@@ -380,7 +384,6 @@ await broadcastGifterLeaderboard();
       });
     }
 
-    // PATCH: gameId is always valid here
     await pool.query(
       `
       INSERT INTO gifts (
@@ -397,7 +400,7 @@ await broadcastGifterLeaderboard();
       )
       VALUES ($1,$2,$3,$4,$5,$6,$7,
               $8,$9,$10,$11,$12,$13,$14,$15,NOW())
-    `,
+      `,
       [
         BigInt(sender.tiktok_id),
         sender.username,
@@ -412,7 +415,7 @@ await broadcastGifterLeaderboard();
         diamonds,
         diamonds * 0.2,
 
-        gameId,          // ✔ correct gameId
+        gameId,
         isHostReceiver,
         is_round_gift,
         round_active,
