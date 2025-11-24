@@ -211,18 +211,27 @@ let currentGameId: number | null = null;
 (io as any).currentGameId = null;
 
 // DEZE FUNCTIE WORDT STRAKS OVERSCHREVEN DOOR DE FIX MODULE
-export async function broadcastPlayerLeaderboard_OLD() {
+export async function broadcastPlayerLeaderboard() {
   const r = await pool.query(`
-    SELECT username, display_name, tiktok_id,
-           (diamonds_total + diamonds_current_round) AS total_diamonds
-    FROM users
-    WHERE (diamonds_total + diamonds_current_round) > 0
+    SELECT 
+      u.username,
+      u.display_name,
+      u.tiktok_id,
+      (u.diamonds_total + u.diamonds_current_round) AS total_diamonds
+    FROM users u
+    WHERE 
+      (u.diamonds_total + u.diamonds_current_round) > 0
+      AND EXISTS (
+        SELECT 1 FROM gifts g
+        WHERE g.receiver_id = u.tiktok_id
+      )
     ORDER BY total_diamonds DESC
     LIMIT 200
   `);
 
   io.emit("leaderboardPlayers", r.rows);
 }
+
 
 export async function broadcastGifterLeaderboard_OLD() {
   if (!currentGameId) {
@@ -384,16 +393,24 @@ async function buildInitialSnapshot() {
   // ========================================================================
   // ORIGINAL PLAYER LEADERBOARD (WORDT OVERSCHREVEN DOOR FIX)
   // ========================================================================
-  const pl = await pool.query(`
-    SELECT username, display_name, tiktok_id,
-           (diamonds_total + diamonds_current_round) AS total_diamonds
-    FROM users
-    WHERE (diamonds_total + diamonds_current_round) > 0
+const pl = await pool.query(`
+    SELECT 
+      u.username,
+      u.display_name,
+      u.tiktok_id,
+      (u.diamonds_total + u.diamonds_current_round) AS total_diamonds
+    FROM users u
+    WHERE 
+      (u.diamonds_total + u.diamonds_current_round) > 0
+      AND EXISTS (
+        SELECT 1 FROM gifts g
+        WHERE g.receiver_id = u.tiktok_id
+      )
     ORDER BY total_diamonds DESC
     LIMIT 200
-  `);
+`);
+snap.playerLeaderboard = pl.rows;
 
-  snap.playerLeaderboard = pl.rows;
 
   // ========================================================================
   // GIFTERS
