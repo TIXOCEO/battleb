@@ -340,7 +340,9 @@ export default function AdminDashboardPage() {
                     ? "bg-[#ff4d4f]"
                     : arena.status === "grace"
                     ? "bg-yellow-400"
-                    : "bg-gray-600"
+                    : arena.status === "ended"
+                    ? "bg-gray-600"
+                    : ""
                 }
               `}
               style={{ width: `${roundProgress}%` }}
