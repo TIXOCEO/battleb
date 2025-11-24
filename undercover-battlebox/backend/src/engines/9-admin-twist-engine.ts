@@ -1,14 +1,11 @@
 // ============================================================================
-// 9-admin-twist-engine.ts — v2.6 (Danny Minimal Fix Build)
+// 9-admin-twist-engine.ts — v2.7 (Danny Stable Fix Build)
 // ============================================================================
 //
-// Deze versie past ALLEEN de event-namen aan zodat de Admin UI werkt:
-//
-// UI → backend mapping:
-//  admin:giveTwist   → geef een twist
-//  admin:useTwist    → gebruik twist op target (admin force)
-//
-// Alle andere logica blijft exact zoals jij had.
+// ✔ Export giveTwistAdmin / useTwistAdmin voor server.ts
+// ✔ initAdminTwistEngine alleen voor list/clear events
+// ✔ Volledige integratie met twist-inventory + 8-twist-engine
+// ✔ Geen dubbele admin:giveTwist / admin:useTwist handlers meer
 //
 // ============================================================================
 
@@ -18,7 +15,6 @@ import { emitLog } from "../server";
 
 import {
   giveTwistToUser,
-  consumeTwistFromUser,
   listTwistsForUser,
   clearTwistsForUser,
 } from "./twist-inventory";
@@ -35,7 +31,13 @@ import { useTwist } from "./8-twist-engine";
 // INTERNAL — USER LOOKUP
 // ============================================================================
 
-async function fetchUserByUsername(username: string) {
+type TwistUserRow = {
+  tiktok_id: string;
+  username: string;
+  display_name: string;
+};
+
+async function fetchUserByUsername(username: string): Promise<TwistUserRow | null> {
   const clean = username.replace("@", "").toLowerCase().trim();
 
   const q = await pool.query(
@@ -48,105 +50,91 @@ async function fetchUserByUsername(username: string) {
     [clean]
   );
 
-  return q.rows[0] || null;
+  return (q.rows[0] as TwistUserRow) || null;
 }
 
 // ============================================================================
-// INIT ENGINE
+// SMALL HELPER
+// ============================================================================
+
+function resolvedTwist(str: string): TwistType | null {
+  const alias = resolveTwistAlias(str);
+  if (alias) return alias;
+
+  return Object.prototype.hasOwnProperty.call(TWIST_MAP, str)
+    ? (str as TwistType)
+    : null;
+}
+
+// ============================================================================
+// EXPORTED ADMIN HELPERS (server.ts gebruikt deze)
+// ============================================================================
+
+export async function giveTwistAdmin(
+  username: string,
+  twist: string
+): Promise<void> {
+  if (!username || !twist) {
+    throw new Error("Ontbrekende velden");
+  }
+
+  const cleanTwist = twist.toLowerCase().trim();
+  if (!Object.prototype.hasOwnProperty.call(TWIST_MAP, cleanTwist)) {
+    throw new Error(`Onbekende twist '${cleanTwist}'`);
+  }
+
+  const twistType = cleanTwist as TwistType;
+
+  const user = await fetchUserByUsername(username);
+  if (!user) {
+    throw new Error("Gebruiker niet gevonden");
+  }
+
+  await giveTwistToUser(user.tiktok_id.toString(), twistType);
+
+  emitLog({
+    type: "twist",
+    message: `ADMIN gaf twist '${TWIST_MAP[twistType].giftName}' aan ${user.display_name}`,
+  });
+}
+
+export async function useTwistAdmin(
+  username: string,
+  twist: string,
+  target?: string
+): Promise<void> {
+  if (!username || !twist) {
+    throw new Error("Ontbrekende velden");
+  }
+
+  const user = await fetchUserByUsername(username);
+  if (!user) {
+    throw new Error("Gebruiker niet gevonden");
+  }
+
+  const cleaned = twist.toLowerCase().trim();
+  const twistType = resolvedTwist(cleaned);
+  if (!twistType) {
+    throw new Error("Onbekende twist");
+  }
+
+  await useTwist(
+    user.tiktok_id.toString(),
+    user.display_name,
+    twistType,
+    target
+  );
+}
+
+// ============================================================================
+// INIT ENGINE — extra admin events (list / clear)
 // ============================================================================
 
 export function initAdminTwistEngine(socket: Socket) {
-  console.log("⚙️ Admin Twist Engine loaded (v2.6)");
+  console.log("⚙️ Admin Twist Engine loaded (v2.7)");
 
   // ==========================================================================
-  // ADMIN: GIVE TWIST   (UI: admin:giveTwist)
-  // ==========================================================================
-  socket.on(
-    "admin:giveTwist",
-    async (
-      { username, twist }: { username: string; twist: string },
-      ack: Function
-    ) => {
-      try {
-        if (!username || !twist)
-          return ack({ success: false, message: "Ontbrekende velden" });
-
-        const cleanTwist = twist.toLowerCase().trim();
-
-        if (!Object.prototype.hasOwnProperty.call(TWIST_MAP, cleanTwist)) {
-          return ack({
-            success: false,
-            message: `Onbekende twist '${cleanTwist}'`,
-          });
-        }
-
-        const twistType = cleanTwist as TwistType;
-
-        const user = await fetchUserByUsername(username);
-        if (!user) {
-          return ack({
-            success: false,
-            message: "Gebruiker niet gevonden",
-          });
-        }
-
-        await giveTwistToUser(user.tiktok_id.toString(), twistType);
-
-        emitLog({
-          type: "twist",
-          message: `ADMIN gaf twist '${TWIST_MAP[twistType].giftName}' aan ${user.display_name}`,
-        });
-
-        ack({ success: true });
-      } catch (err: any) {
-        ack({ success: false, message: err.message });
-      }
-    }
-  );
-
-  // ==========================================================================
-  // ADMIN: USE TWIST   (UI: admin:useTwist)
-  // ==========================================================================
-  socket.on(
-    "admin:useTwist",
-    async (
-      {
-        username,
-        twist,
-        target,
-      }: { username: string; twist: string; target?: string },
-      ack: Function
-    ) => {
-      try {
-        if (!username || !twist)
-          return ack({ success: false, message: "Ontbrekende velden" });
-
-        const user = await fetchUserByUsername(username);
-        if (!user)
-          return ack({ success: false, message: "Gebruiker niet gevonden" });
-
-        const cleaned = twist.toLowerCase().trim();
-
-        const twistType = resolvedTwist(cleaned);
-        if (!twistType)
-          return ack({ success: false, message: "Onbekende twist" });
-
-        await useTwist(
-          user.tiktok_id.toString(),
-          user.display_name,
-          twistType,
-          target
-        );
-
-        ack({ success: true });
-      } catch (err: any) {
-        ack({ success: false, message: err.message });
-      }
-    }
-  );
-
-  // ==========================================================================
-  // ADMIN: LIST (optioneel, UI gebruikt dit niet)
+  // ADMIN: LIST (optioneel, UI gebruikt dit nu niet actief)
   // ==========================================================================
   socket.on(
     "admin:twist:list",
@@ -166,7 +154,7 @@ export function initAdminTwistEngine(socket: Socket) {
   );
 
   // ==========================================================================
-  // ADMIN: CLEAR (optioneel, UI gebruikt dit niet)
+  // ADMIN: CLEAR (optioneel, UI gebruikt dit nu niet actief)
   // ==========================================================================
   socket.on(
     "admin:twist:clear",
@@ -189,17 +177,4 @@ export function initAdminTwistEngine(socket: Socket) {
       }
     }
   );
-}
-
-// ============================================================================
-// SMALL HELPER
-// ============================================================================
-
-function resolvedTwist(str: string): TwistType | null {
-  const alias = resolveTwistAlias(str);
-  if (alias) return alias;
-
-  return Object.prototype.hasOwnProperty.call(TWIST_MAP, str)
-    ? (str as TwistType)
-    : null;
 }
