@@ -121,40 +121,41 @@ export function useAdminGame() {
   // EMIT SAFE
   // -----------------------------------------
   async function emitAdminAction<E extends keyof AdminSocketOutbound>(
-    event: E,
-    username: string
-  ): Promise<void> {
-    return new Promise((resolve) => {
-      const socket = getAdminSocket();
-      const normalized = normalizeUsername(username);
+async function emitAdminAction<E extends keyof AdminSocketOutbound>(
+  event: E,
+  username: string
+): Promise<void> {
+  return new Promise((resolve) => {
+    const socket = getAdminSocket();
+    const normalized = normalizeUsername(username);
 
-      setLastActionStatus(`Bezig: ${event} → ${normalized}…`);
+    setLastActionStatus(`Bezig: ${event} → ${normalized}…`);
 
-      socket.emit(
-        event,
-        { username: normalized },
-        (res: AdminAckResponse) => {
-          if (!res) {
-            setLastActionStatus(
-              `Geen antwoord op ${event} (${normalized})`
-            );
-            return resolve();
-          }
-
-          if (!res.success) {
-            setLastActionStatus(
-              `❌ Fout: ${res.message ?? "onbekend"}`
-            );
-          } else {
-            setLastActionStatus(`✔ OK: ${res.message ?? "Done"}`);
-          }
-
-          resolve();
+    (socket.emit as any)(
+      event,                                   // cast voorkomt TS error
+      { username: normalized },                // uniform payload
+      (res: AdminAckResponse) => {             // callback werkt zoals bedoeld
+        if (!res) {
+          setLastActionStatus(
+            `Geen antwoord op ${event} (${normalized})`
+          );
+          return resolve();
         }
-      );
-    });
-  }
 
+        if (!res.success) {
+          setLastActionStatus(
+            `❌ Fout: ${res.message ?? "onbekend"}`
+          );
+        } else {
+          setLastActionStatus(`✔ OK: ${res.message ?? "Done"}`);
+        }
+
+        resolve();
+      }
+    );
+  });
+  }
+  
   return {
     arena,
     queue,
