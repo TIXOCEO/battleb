@@ -9,8 +9,6 @@ import type {
   LogEntry,
   AdminAckResponse,
   AdminSocketOutbound,
-  HostProfile,
-  ArenaSettings,
   PlayerLeaderboardEntry,
   GifterLeaderboardEntry,
 } from "@/lib/adminTypes";
@@ -156,16 +154,21 @@ export default function AdminDashboardPage() {
         setQueueOpen(snap.queue.open ?? true);
       }
       if (snap.logs) setLogs(snap.logs.slice(0, 200));
+
+      // STREAM TOTALS (BELANGRIJK!)
       if (snap.stats) setStreamStats(snap.stats);
+
       if (snap.gameSession) setGameSession(snap.gameSession);
 
-      if (snap.playerLeaderboard) setPlayerLeaderboard(snap.playerLeaderboard);
+      if (snap.playerLeaderboard)
+        setPlayerLeaderboard(snap.playerLeaderboard);
+
       if (snap.gifterLeaderboard)
         setGifterLeaderboard(snap.gifterLeaderboard);
     });
   }, []);
 
-// ============================================================
+  // ============================================================
   // ADMIN EMITTERS
   // ============================================================
   const emitAdmin = (
@@ -197,13 +200,17 @@ export default function AdminDashboardPage() {
 
     setStatus(`Bezig met ${event}...`);
 
-    socket.emit(event, { username: formatted }, (res: AdminAckResponse) => {
-      setStatus(
-        res?.success
-          ? "✅ Uitgevoerd"
-          : `❌ ${res?.message ?? "Geen antwoord"}`
-      );
-    });
+    socket.emit(
+      event,
+      { username: formatted },
+      (res: AdminAckResponse) => {
+        setStatus(
+          res?.success
+            ? "✅ Uitgevoerd"
+            : `❌ ${res?.message ?? "Geen antwoord"}`
+        );
+      }
+    );
   };
 
   // ============================================================
@@ -215,7 +222,9 @@ export default function AdminDashboardPage() {
   const players = useMemo(() => arena?.players ?? [], [arena]);
 
   const arenaStatus = arena?.status ?? "idle";
-  const hasDoomed = players.some((p: any) => p.positionStatus === "elimination");
+  const hasDoomed = players.some(
+    (p: any) => p.positionStatus === "elimination"
+  );
 
   const canStartRound =
     !!arena &&
@@ -278,13 +287,19 @@ export default function AdminDashboardPage() {
     if (arena.status === "active") {
       const start = arena.roundStartTime;
       const end = arena.roundCutoff;
-      return Math.max(0, Math.min(100, ((now - start) / (end - start)) * 100));
+      return Math.max(
+        0,
+        Math.min(100, ((now - start) / (end - start)) * 100)
+      );
     }
 
     if (arena.status === "grace") {
       const start = arena.roundCutoff;
       const end = arena.graceEnd;
-      return Math.max(0, Math.min(100, ((now - start) / (end - start)) * 100));
+      return Math.max(
+        0,
+        Math.min(100, ((now - start) / (end - start)) * 100)
+      );
     }
 
     return 0;
@@ -337,7 +352,9 @@ export default function AdminDashboardPage() {
               </div>
               <div className="text-xs text-gray-500">
                 Verbonden als{" "}
-                <span className="font-semibold text-green-600">Admin</span>
+                <span className="font-semibold text-green-600">
+                  Admin
+                </span>
               </div>
             </div>
           </div>
@@ -356,9 +373,21 @@ export default function AdminDashboardPage() {
             <div
               className={`
                 h-4 transition-all duration-300
-                ${arena.status === "active" ? "bg-[#ff4d4f]" : ""}
-                ${arena.status === "grace" ? "bg-yellow-400" : ""}
-                ${arena.status === "ended" ? "bg-gray-600" : ""}
+                ${
+                  arena.status === "active"
+                    ? "bg-[#ff4d4f]"
+                    : ""
+                }
+                ${
+                  arena.status === "grace"
+                    ? "bg-yellow-400"
+                    : ""
+                }
+                ${
+                  arena.status === "ended"
+                    ? "bg-gray-600"
+                    : ""
+                }
               `}
               style={{ width: `${roundProgress}%` }}
             />
@@ -368,7 +397,10 @@ export default function AdminDashboardPage() {
                 formatTime(
                   Math.max(
                     0,
-                    Math.floor((arena.roundCutoff - Date.now()) / 1000)
+                    Math.floor(
+                      (arena.roundCutoff - Date.now()) /
+                        1000
+                    )
                   )
                 )}
 
@@ -376,7 +408,10 @@ export default function AdminDashboardPage() {
                 formatTime(
                   Math.max(
                     0,
-                    Math.floor((arena.graceEnd - Date.now()) / 1000)
+                    Math.floor(
+                      (arena.graceEnd - Date.now()) /
+                        1000
+                    )
                   )
                 )}
 
@@ -423,12 +458,16 @@ export default function AdminDashboardPage() {
 
           {/* ROUNDS */}
           <div>
-            <div className="text-xs text-gray-600 mb-1">Ronde acties</div>
+            <div className="text-xs text-gray-600 mb-1">
+              Ronde acties
+            </div>
             <div className="flex gap-2 flex-wrap">
 
               <button
                 onClick={() =>
-                  emitAdmin("admin:startRound", { type: "quarter" })
+                  emitAdmin("admin:startRound", {
+                    type: "quarter",
+                  })
                 }
                 disabled={!canStartRound}
                 className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full text-xs disabled:bg-gray-400"
@@ -438,7 +477,9 @@ export default function AdminDashboardPage() {
 
               <button
                 onClick={() =>
-                  emitAdmin("admin:startRound", { type: "finale" })
+                  emitAdmin("admin:startRound", {
+                    type: "finale",
+                  })
                 }
                 disabled={!canStartRound}
                 className="px-3 py-1.5 bg-gray-900 text-white rounded-full text-xs disabled:bg-gray-400"
@@ -468,7 +509,9 @@ export default function AdminDashboardPage() {
         ============================================================ */}
         <div className="lg:col-span-2 flex flex-col gap-3">
 
-          <div className="text-sm font-semibold">Speleracties</div>
+          <div className="text-sm font-semibold">
+            Speleracties
+          </div>
 
           <div className="flex flex-col md:flex-row gap-3 md:items-end relative">
             {/* USERNAME INPUT */}
@@ -506,8 +549,12 @@ export default function AdminDashboardPage() {
                         onClick={() => applyAutoFill(u)}
                         className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
                       >
-                        <span className="font-semibold">{u.display_name}</span>{" "}
-                        <span className="text-gray-500">@{u.username}</span>
+                        <span className="font-semibold">
+                          {u.display_name}
+                        </span>{" "}
+                        <span className="text-gray-500">
+                          @{u.username}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -518,7 +565,10 @@ export default function AdminDashboardPage() {
             <div className="flex gap-2 text-xs">
               <button
                 onClick={() =>
-                  emitAdminWithUser("admin:addToArena", username)
+                  emitAdminWithUser(
+                    "admin:addToArena",
+                    username
+                  )
                 }
                 className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full"
               >
@@ -527,7 +577,10 @@ export default function AdminDashboardPage() {
 
               <button
                 onClick={() =>
-                  emitAdminWithUser("admin:addToQueue", username)
+                  emitAdminWithUser(
+                    "admin:addToQueue",
+                    username
+                  )
                 }
                 className="px-3 py-1.5 bg-gray-800 text-white rounded-full"
               >
@@ -536,7 +589,10 @@ export default function AdminDashboardPage() {
 
               <button
                 onClick={() =>
-                  emitAdminWithUser("admin:eliminate", username)
+                  emitAdminWithUser(
+                    "admin:eliminate",
+                    username
+                  )
                 }
                 className="px-3 py-1.5 bg-red-600 text-white rounded-full"
               >
@@ -554,7 +610,9 @@ export default function AdminDashboardPage() {
 
         {/* ------------------ ARENA ------------------ */}
         <div className="bg-white rounded-2xl shadow p-4">
-          <h2 className="text-xl font-semibold mb-2">Arena</h2>
+          <h2 className="text-xl font-semibold mb-2">
+            Arena
+          </h2>
           <p className="text-sm text-gray-500 mb-4">
             {arena
               ? `Ronde #${arena.round} • ${arena.type} • ${arena.status}`
@@ -571,7 +629,9 @@ export default function AdminDashboardPage() {
                   )}`}
                 >
                   <div className="flex justify-between items-center">
-                    <span className="font-bold">#{idx + 1}</span>
+                    <span className="font-bold">
+                      #{idx + 1}
+                    </span>
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-300 text-gray-700">
                       {p.positionStatus}
                     </span>
@@ -585,10 +645,14 @@ export default function AdminDashboardPage() {
                     Ronde: {fmt(p.diamonds)} 💎
                   </div>
 
-                  {p.positionStatus === "elimination" && (
+                  {p.positionStatus ===
+                    "elimination" && (
                     <button
                       onClick={() =>
-                        emitAdminWithUser("admin:eliminate", p.username)
+                        emitAdminWithUser(
+                          "admin:eliminate",
+                          p.username
+                        )
                       }
                       className="mt-2 px-2 py-1 text-[11px] rounded-full border border-red-300 text-red-700 bg-red-50"
                     >
@@ -598,23 +662,28 @@ export default function AdminDashboardPage() {
                 </div>
               ))
             ) : (
-              Array.from({ length: 8 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="bg-gray-100 rounded-lg p-3 text-center text-sm text-gray-700"
-                >
-                  #{i + 1} – WACHT OP SPELER
-                </div>
-              ))
+              Array.from({ length: 8 }).map(
+                (_, i) => (
+                  <div
+                    key={i}
+                    className="bg-gray-100 rounded-lg p-3 text-center text-sm text-gray-700"
+                  >
+                    #{i + 1} – WACHT OP SPELER
+                  </div>
+                )
+              )
             )}
           </div>
         </div>
 
         {/* ------------------ QUEUE ------------------ */}
         <div className="bg-white rounded-2xl shadow p-4">
-          <h2 className="text-xl font-semibold mb-2">Wachtrij</h2>
+          <h2 className="text-xl font-semibold mb-2">
+            Wachtrij
+          </h2>
           <p className="text-sm text-gray-500 mb-3">
-            {queue.length} speler{queue.length !== 1 && "s"} • Queue:{" "}
+            {queue.length} speler
+            {queue.length !== 1 && "s"} • Queue:{" "}
             <span
               className={
                 queueOpen
@@ -663,7 +732,10 @@ export default function AdminDashboardPage() {
                 <div className="flex gap-1 mt-2 sm:mt-0 justify-end">
                   <button
                     onClick={() =>
-                      emitAdminWithUser("admin:promoteUser", q.username)
+                      emitAdminWithUser(
+                        "admin:promoteUser",
+                        q.username
+                      )
                     }
                     className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
                   >
@@ -672,7 +744,10 @@ export default function AdminDashboardPage() {
 
                   <button
                     onClick={() =>
-                      emitAdminWithUser("admin:demoteUser", q.username)
+                      emitAdminWithUser(
+                        "admin:demoteUser",
+                        q.username
+                      )
                     }
                     className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
                   >
@@ -681,7 +756,10 @@ export default function AdminDashboardPage() {
 
                   <button
                     onClick={() =>
-                      emitAdminWithUser("admin:addToArena", q.username)
+                      emitAdminWithUser(
+                        "admin:addToArena",
+                        q.username
+                      )
                     }
                     className="px-2 py-1 rounded-full border border-[#ff4d4f] text-[#ff4d4f]"
                   >
@@ -690,7 +768,10 @@ export default function AdminDashboardPage() {
 
                   <button
                     onClick={() =>
-                      emitAdminWithUser("admin:removeFromQueue", q.username)
+                      emitAdminWithUser(
+                        "admin:removeFromQueue",
+                        q.username
+                      )
                     }
                     className="px-2 py-1 rounded-full border border-red-300 text-red-700 bg-red-50"
                   >
@@ -707,7 +788,7 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* ============================================================
+            {/* ============================================================
           LEADERBOARDS
       ============================================================ */}
       <section className="mt-4">
@@ -754,10 +835,35 @@ export default function AdminDashboardPage() {
             ======================== */}
             {activeLbTab === "players" && (
               <div>
-                <h2 className="text-xl font-semibold mb-2">Player Leaderboard</h2>
-                <p className="text-xs text-gray-500 mb-3">
-                  Diamanten ontvangen (huidige stream)
-                </p>
+                <div className="flex justify-between items-end mb-2">
+                  <div>
+                    <h2 className="text-xl font-semibold mb-0.5">
+                      Player Leaderboard
+                    </h2>
+                    <p className="text-xs text-gray-500">
+                      Diamanten ontvangen (huidige stream)
+                    </p>
+                  </div>
+
+                  {/* TOTALS BOX */}
+                  {streamStats && (
+                    <div className="text-right text-xs leading-tight bg-gray-100 px-3 py-1 rounded-lg shadow-inner border border-gray-300">
+                      <div className="font-semibold text-gray-800">
+                        Totaal Players:{" "}
+                        <span className="text-[#ff4d4f]">
+                          {fmt(streamStats.totalPlayerDiamonds)} 💎
+                        </span>
+                      </div>
+
+                      <div className="font-semibold text-gray-800">
+                        Totaal Host:{" "}
+                        <span className="text-blue-700">
+                          {fmt(streamStats.totalHostDiamonds)} 💎
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                 {playerLeaderboard.length ? (
                   playerLeaderboard.map((e, idx) => (
@@ -775,7 +881,7 @@ export default function AdminDashboardPage() {
                       </div>
 
                       <span className="font-semibold">
-                        {fmt(e.diamonds_total)} 💎
+                        {fmt(e.total_diamonds)} 💎
                       </span>
                     </div>
                   ))
@@ -792,10 +898,32 @@ export default function AdminDashboardPage() {
             ======================== */}
             {activeLbTab === "gifters" && (
               <div>
-                <h2 className="text-xl font-semibold mb-2">Gifter Leaderboard</h2>
-                <p className="text-xs text-gray-500 mb-3">
-                  Diamanten verstuurd (huidige stream)
-                </p>
+                <div className="flex justify-between items-end mb-2">
+                  <div>
+                    <h2 className="text-xl font-semibold mb-0.5">
+                      Gifter Leaderboard
+                    </h2>
+                    <p className="text-xs text-gray-500">
+                      Diamanten verstuurd (huidige stream)
+                    </p>
+                  </div>
+
+                  {/* TOTAL GIFTS BOX */}
+                  {streamStats && (
+                    <div className="text-right text-xs leading-tight bg-gray-100 px-3 py-1 rounded-lg shadow-inner border border-gray-300">
+                      <div className="font-semibold text-gray-800">
+                        Totaal Gifts:{" "}
+                        <span className="text-[#ff4d4f]">
+                          {fmt(
+                            streamStats.totalPlayerDiamonds +
+                              streamStats.totalHostDiamonds
+                          )}{" "}
+                          💎
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                 {gifterLeaderboard.length ? (
                   gifterLeaderboard.map((e, idx) => (
@@ -836,228 +964,235 @@ export default function AdminDashboardPage() {
         <h2 className="text-xl font-semibold mb-4">Twists</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* ============================================================
+            TWISTS
+        ============================================================ */}
+        <section className="mt-8 bg-white rounded-2xl shadow p-4">
+          <h2 className="text-xl font-semibold mb-4">Twists</h2>
 
-          {/* GIVE TWIST */}
-          <div className="p-4 border rounded-xl bg-gray-50 shadow-sm relative">
-            <h3 className="font-semibold mb-3">Twist geven</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-            <label className="text-xs font-semibold">@username</label>
-            <input
-              type="text"
-              value={twistUserGive}
-              onFocus={() => {
-                setActiveAutoField("give");
-                setShowResults(true);
-                setTyping(twistUserGive);
-              }}
-              onChange={(e) => {
-                setTwistUserGive(e.target.value);
-                setActiveAutoField("give");
-                setTyping(e.target.value);
-                setShowResults(true);
-              }}
-              placeholder="@gebruiker"
-              className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
-            />
+            {/* GIVE TWIST */}
+            <div className="p-4 border rounded-xl bg-gray-50 shadow-sm relative">
+              <h3 className="font-semibold mb-3">Twist geven</h3>
 
-            {/* autocomplete */}
-            {showResults &&
-              searchResults.length > 0 &&
-              activeAutoField === "give" && (
-                <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
-                  {searchResults.map((u) => (
-                    <div
-                      key={u.tiktok_id}
-                      onClick={() => applyAutoFill(u)}
-                      className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
-                    >
-                      <span className="font-semibold">{u.display_name}</span>{" "}
-                      <span className="text-gray-500">@{u.username}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <label className="text-xs font-semibold">@username</label>
+              <input
+                type="text"
+                value={twistUserGive}
+                onFocus={() => {
+                  setActiveAutoField("give");
+                  setShowResults(true);
+                  setTyping(twistUserGive);
+                }}
+                onChange={(e) => {
+                  setTwistUserGive(e.target.value);
+                  setActiveAutoField("give");
+                  setTyping(e.target.value);
+                  setShowResults(true);
+                }}
+                placeholder="@gebruiker"
+                className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
+              />
 
-            <label className="text-xs font-semibold">Twist</label>
-            <select
-              value={twistTypeGive}
-              onChange={(e) => setTwistTypeGive(e.target.value)}
-              className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
-            >
-              <option value="">-- Kies twist --</option>
-              <option value="galaxy">Galaxy</option>
-              <option value="moneygun">MoneyGun</option>
-              <option value="immune">Immune</option>
-              <option value="heal">Heal</option>
-              <option value="bomb">Bomb</option>
-              <option value="diamond_pistol">Diamond Pistol</option>
-            </select>
+              {/* autocomplete */}
+              {showResults &&
+                searchResults.length > 0 &&
+                activeAutoField === "give" && (
+                  <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
+                    {searchResults.map((u) => (
+                      <div
+                        key={u.tiktok_id}
+                        onClick={() => applyAutoFill(u)}
+                        className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+                      >
+                        <span className="font-semibold">{u.display_name}</span>{" "}
+                        <span className="text-gray-500">@{u.username}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
-            <button
-              onClick={() =>
-                emitAdmin("admin:giveTwist", {
-                  username: twistUserGive,
-                  twist: twistTypeGive,
-                })
-              }
-              className="mt-2 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm w-full"
-            >
-              Geef twist
-            </button>
-          </div>
-
-          {/* USE TWIST */}
-          <div className="p-4 border rounded-xl bg-gray-50 shadow-sm relative">
-            <h3 className="font-semibold mb-3">Twist gebruiken</h3>
-
-            <label className="text-xs font-semibold">Gebruiker</label>
-            <input
-              type="text"
-              value={twistUserUse}
-              onFocus={() => {
-                setActiveAutoField("use");
-                setShowResults(true);
-                setTyping(twistUserUse);
-              }}
-              onChange={(e) => {
-                setTwistUserUse(e.target.value);
-                setActiveAutoField("use");
-                setTyping(e.target.value);
-                setShowResults(true);
-              }}
-              placeholder="@gebruiker"
-              className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
-            />
-
-            {showResults &&
-              searchResults.length > 0 &&
-              activeAutoField === "use" && (
-                <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
-                  {searchResults.map((u) => (
-                    <div
-                      key={u.tiktok_id}
-                      onClick={() => applyAutoFill(u)}
-                      className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
-                    >
-                      <span className="font-semibold">{u.display_name}</span>{" "}
-                      <span className="text-gray-500">@{u.username}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-            <label className="text-xs font-semibold">Twist</label>
-            <select
-              value={twistTypeUse}
-              onChange={(e) => setTwistTypeUse(e.target.value)}
-              className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
-            >
-              <option value="">-- Kies twist --</option>
-              <option value="galaxy">Galaxy</option>
-              <option value="moneygun">MoneyGun</option>
-              <option value="immune">Immune</option>
-              <option value="heal">Heal</option>
-              <option value="bomb">Bomb</option>
-              <option value="diamond_pistol">Diamond Pistol</option>
-            </select>
-
-            <label className="text-xs font-semibold">
-              Target speler (optioneel)
-            </label>
-            <input
-              type="text"
-              value={twistTargetUse}
-              onFocus={() => {
-                setActiveAutoField("target");
-                setShowResults(true);
-                setTyping(twistTargetUse);
-              }}
-              onChange={(e) => {
-                setTwistTargetUse(e.target.value);
-                setActiveAutoField("target");
-                setTyping(e.target.value);
-                setShowResults(true);
-              }}
-              placeholder="@target"
-              className="w-full border rounded-lg px-3 py-2 text-sm mb-3"
-            />
-
-            {showResults &&
-              searchResults.length > 0 &&
-              activeAutoField === "target" && (
-                <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
-                  {searchResults.map((u) => (
-                    <div
-                      key={u.tiktok_id}
-                      onClick={() => applyAutoFill(u)}
-                      className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
-                    >
-                      <span className="font-semibold">{u.display_name}</span>{" "}
-                      <span className="text-gray-500">@{u.username}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-            <button
-              onClick={() =>
-                emitAdmin("admin:useTwist", {
-                  username: twistUserUse,
-                  twist: twistTypeUse,
-                  target: twistTargetUse,
-                })
-              }
-              className="mt-2 px-3 py-2 bg-purple-600 text-white rounded-lg text-sm w-full"
-            >
-              Gebruik twist
-            </button>
-          </div>
-
-        </div>
-      </section>
-
-      {/* ============================================================
-          LOG FEED
-      ============================================================ */}
-      <section className="mt-6 bg-white rounded-2xl shadow p-4">
-        <h2 className="text-lg font-semibold mb-2">Log feed</h2>
-
-        <div className="overflow-y-auto max-h-[400px] border border-gray-200 rounded-lg bg-gray-50 text-sm">
-          {logs.length ? (
-            logs.map((log) => (
-              <div
-                key={log.id}
-                className={`px-3 py-1 border-b last:border-0 ${
-                  log.type === "gift"
-                    ? "bg-pink-50 text-pink-800"
-                    : log.type === "elim"
-                    ? "bg-red-50 text-red-700"
-                    : log.type === "join"
-                    ? "bg-green-50 text-green-700"
-                    : log.type === "twist"
-                    ? "bg-purple-50 text-purple-700"
-                    : "bg-blue-50 text-blue-700"
-                }`}
+              <label className="text-xs font-semibold">Twist</label>
+              <select
+                value={twistTypeGive}
+                onChange={(e) => setTwistTypeGive(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
               >
-                <span className="font-mono text-xs opacity-60">
-                  {new Date(log.timestamp).toLocaleTimeString("nl-NL", {
-                    hour12: false,
-                  })}
-                </span>{" "}
-                <strong>{log.type.toUpperCase()}</strong> – {log.message}
-              </div>
-            ))
-          ) : (
-            <div className="px-3 py-2 text-gray-500 italic">
-              Nog geen logs ontvangen.
-            </div>
-          )}
-        </div>
-      </section>
+                <option value="">-- Kies twist --</option>
+                <option value="galaxy">Galaxy</option>
+                <option value="moneygun">MoneyGun</option>
+                <option value="immune">Immune</option>
+                <option value="heal">Heal</option>
+                <option value="bomb">Bomb</option>
+                <option value="diamond_pistol">Diamond Pistol</option>
+              </select>
 
-      <footer className="mt-4 text-xs text-gray-400 text-center">
-        BattleBox Engine v3.2 – Danny Stable
-      </footer>
-    </main>
-  );
+              <button
+                onClick={() =>
+                  emitAdmin("admin:giveTwist", {
+                    username: twistUserGive,
+                    twist: twistTypeGive,
+                  })
                 }
+                className="mt-2 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm w-full"
+              >
+                Geef twist
+              </button>
+            </div>
+
+            {/* USE TWIST */}
+            <div className="p-4 border rounded-xl bg-gray-50 shadow-sm relative">
+              <h3 className="font-semibold mb-3">Twist gebruiken</h3>
+
+              <label className="text-xs font-semibold">Gebruiker</label>
+              <input
+                type="text"
+                value={twistUserUse}
+                onFocus={() => {
+                  setActiveAutoField("use");
+                  setShowResults(true);
+                  setTyping(twistUserUse);
+                }}
+                onChange={(e) => {
+                  setTwistUserUse(e.target.value);
+                  setActiveAutoField("use");
+                  setTyping(e.target.value);
+                  setShowResults(true);
+                }}
+                placeholder="@gebruiker"
+                className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
+              />
+
+              {showResults &&
+                searchResults.length > 0 &&
+                activeAutoField === "use" && (
+                  <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
+                    {searchResults.map((u) => (
+                      <div
+                        key={u.tiktok_id}
+                        onClick={() => applyAutoFill(u)}
+                        className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+                      >
+                        <span className="font-semibold">{u.display_name}</span>{" "}
+                        <span className="text-gray-500">@{u.username}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+              <label className="text-xs font-semibold">Twist</label>
+              <select
+                value={twistTypeUse}
+                onChange={(e) => setTwistTypeUse(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
+              >
+                <option value="">-- Kies twist --</option>
+                <option value="galaxy">Galaxy</option>
+                <option value="moneygun">MoneyGun</option>
+                <option value="immune">Immune</option>
+                <option value="heal">Heal</option>
+                <option value="bomb">Bomb</option>
+                <option value="diamond_pistol">Diamond Pistol</option>
+              </select>
+
+              <label className="text-xs font-semibold">
+                Target speler (optioneel)
+              </label>
+              <input
+                type="text"
+                value={twistTargetUse}
+                onFocus={() => {
+                  setActiveAutoField("target");
+                  setShowResults(true);
+                  setTyping(twistTargetUse);
+                }}
+                onChange={(e) => {
+                  setTwistTargetUse(e.target.value);
+                  setActiveAutoField("target");
+                  setTyping(e.target.value);
+                  setShowResults(true);
+                }}
+                placeholder="@target"
+                className="w-full border rounded-lg px-3 py-2 text-sm mb-3"
+              />
+
+              {showResults &&
+                searchResults.length > 0 &&
+                activeAutoField === "target" && (
+                  <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
+                    {searchResults.map((u) => (
+                      <div
+                        key={u.tiktok_id}
+                        onClick={() => applyAutoFill(u)}
+                        className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+                      >
+                        <span className="font-semibold">{u.display_name}</span>{" "}
+                        <span className="text-gray-500">@{u.username}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+              <button
+                onClick={() =>
+                  emitAdmin("admin:useTwist", {
+                    username: twistUserUse,
+                    twist: twistTypeUse,
+                    target: twistTargetUse,
+                  })
+                }
+                className="mt-2 px-3 py-2 bg-purple-600 text-white rounded-lg text-sm w-full"
+              >
+                Gebruik twist
+              </button>
+            </div>
+
+          </div>
+        </section>
+
+        {/* ============================================================
+            LOG FEED
+        ============================================================ */}
+        <section className="mt-6 bg-white rounded-2xl shadow p-4">
+          <h2 className="text-lg font-semibold mb-2">Log feed</h2>
+
+          <div className="overflow-y-auto max-h-[400px] border border-gray-200 rounded-lg bg-gray-50 text-sm">
+            {logs.length ? (
+              logs.map((log) => (
+                <div
+                  key={log.id}
+                  className={`px-3 py-1 border-b last:border-0 ${
+                    log.type === "gift"
+                      ? "bg-pink-50 text-pink-800"
+                      : log.type === "elim"
+                      ? "bg-red-50 text-red-700"
+                      : log.type === "join"
+                      ? "bg-green-50 text-green-700"
+                      : log.type === "twist"
+                      ? "bg-purple-50 text-purple-700"
+                      : "bg-blue-50 text-blue-700"
+                  }`}
+                >
+                  <span className="font-mono text-xs opacity-60">
+                    {new Date(log.timestamp).toLocaleTimeString("nl-NL", {
+                      hour12: false,
+                    })}
+                  </span>{" "}
+                  <strong>{log.type.toUpperCase()}</strong> – {log.message}
+                </div>
+              ))
+            ) : (
+              <div className="px-3 py-2 text-gray-500 italic">
+                Nog geen logs ontvangen.
+              </div>
+            )}
+          </div>
+        </section>
+
+        <footer className="mt-4 text-xs text-gray-400 text-center">
+          BattleBox Engine v3.2 – Danny Stable
+        </footer>
+      </main>
+  );
+}
