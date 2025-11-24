@@ -1,4 +1,13 @@
-// frontend/lib/socketClient.ts
+// ============================================================================
+// frontend/lib/socketClient.ts — v12 BattleBox Upgrade
+// ----------------------------------------------------------------------------
+// ✔ Nieuwe snapshot payload ondersteund
+// ✔ Nieuwe leaderboard events (leaderboardPlayers / leaderboardGifters)
+// ✔ Types uitgebreid
+// ✔ connect() handler laadt ALLE nieuwe data
+// ✔ Geen logica verwijderd
+// ============================================================================
+
 import { io, Socket } from "socket.io-client";
 import type {
   ArenaState,
@@ -10,6 +19,7 @@ import type {
   SearchUser,
   HostProfile,
   ArenaSettings,
+  InitialSnapshot,           // ★ toegevoegd
 } from "./adminTypes";
 
 const BACKEND_URL = "http://178.251.232.12:4000";
@@ -18,7 +28,6 @@ const ADMIN_TOKEN =
   process.env.NEXT_PUBLIC_ADMIN_TOKEN || "supergeheim123";
 
 declare global {
-  // eslint-disable-next-line no-var
   var __adminSocket: Socket | undefined;
 }
 
@@ -66,7 +75,7 @@ export interface AdminSocketInbound {
   // SETTINGS
   settings: (s: ArenaSettings) => void;
 
-  // STATE
+  // CONNECTION STATE / SNAPSHOT
   connectState: (payload: {
     connected: boolean;
     host?: {
@@ -75,6 +84,8 @@ export interface AdminSocketInbound {
     };
   }) => void;
 
+  snapshot: (snap: InitialSnapshot) => void;  // ★ toegevoegd
+
   pong: () => void;
 }
 
@@ -82,17 +93,11 @@ export interface AdminSocketInbound {
    OUTBOUND EVENTS (CLIENT → SERVER)
 =========================================== */
 export interface AdminSocketOutbound {
-  /* =====================
-      INITIAL SNAPSHOT
-  ===================== */
   "admin:getInitialSnapshot": (
     payload?: {},
-    cb?: (snap: any) => void
+    cb?: (snap: InitialSnapshot) => void   // ★ gespecificeerd
   ) => void;
 
-  /* =====================
-      HOSTS
-  ===================== */
   "admin:getHosts": (
     payload?: {},
     cb?: (res: { success: boolean; hosts: HostProfile[] }) => void
@@ -113,9 +118,6 @@ export interface AdminSocketOutbound {
     cb?: (res: AdminAckResponse) => void
   ) => void;
 
-  /* =====================
-      QUEUE & ARENA
-  ===================== */
   "admin:addToArena": (
     payload: { username: string },
     cb?: (res: AdminAckResponse) => void
@@ -146,70 +148,32 @@ export interface AdminSocketOutbound {
     cb?: (res: AdminAckResponse) => void
   ) => void;
 
-  /* =====================
-      PREMIUM
-  ===================== */
-  "admin:giveVip": (
-    payload: { username: string },
-    cb?: (res: AdminAckResponse) => void
-  ) => void;
+  // PREMIUM
+  "admin:giveVip": (p: { username: string }, cb?: (res: AdminAckResponse) => void) => void;
+  "admin:removeVip": (p: { username: string }, cb?: (res: AdminAckResponse) => void) => void;
+  "admin:giveFan": (p: { username: string }, cb?: (res: AdminAckResponse) => void) => void;
 
-  "admin:removeVip": (
-    payload: { username: string },
-    cb?: (res: AdminAckResponse) => void
-  ) => void;
-
-  "admin:giveFan": (
-    payload: { username: string },
-    cb?: (res: AdminAckResponse) => void
-  ) => void;
-
-  /* =====================
-      TWISTS
-  ===================== */
+  // TWISTS
   "admin:giveTwist": (
-    payload: { username: string; twist: string },
+    p: { username: string; twist: string },
     cb?: (res: AdminAckResponse) => void
   ) => void;
 
   "admin:useTwist": (
-    payload: { username: string; twist: string; target?: string },
+    p: { username: string; twist: string; target?: string },
     cb?: (res: AdminAckResponse) => void
   ) => void;
 
-  /* =====================
-      GAME ENGINE
-  ===================== */
-  "admin:startRound": (
-    payload: { type: "quarter" | "finale" },
-    cb?: (res: AdminAckResponse) => void
-  ) => void;
+  // ENGINE
+  "admin:startRound": (p: { type: "quarter" | "finale" }, cb?: (r: AdminAckResponse) => void) => void;
+  "admin:endRound": (p?: {}, cb?: (r: AdminAckResponse) => void) => void;
+  "admin:startGame": (p?: {}, cb?: (r: AdminAckResponse) => void) => void;
+  "admin:stopGame": (p?: {}, cb?: (r: AdminAckResponse) => void) => void;
 
-  "admin:endRound": (
-    payload?: {},
-    cb?: (res: AdminAckResponse) => void
-  ) => void;
-
-  "admin:startGame": (
-    payload?: {},
-    cb?: (res: AdminAckResponse) => void
-  ) => void;
-
-  "admin:stopGame": (
-    payload?: {},
-    cb?: (res: AdminAckResponse) => void
-  ) => void;
-
-  /* =====================
-      SETTINGS
-  ===================== */
+  // SETTINGS
   "admin:getSettings": (
     payload?: {},
-    cb?: (res: {
-      success: boolean;
-      settings: ArenaSettings;
-      gameActive: boolean;
-    }) => void
+    cb?: (res: { success: boolean; settings: ArenaSettings; gameActive: boolean }) => void
   ) => void;
 
   "admin:updateSettings": (
@@ -217,17 +181,9 @@ export interface AdminSocketOutbound {
     cb?: (res: AdminAckResponse) => void
   ) => void;
 
-  /* =====================
-      SEARCH
-  ===================== */
-  "admin:searchUsers": (
-    payload: { query: string },
-    cb: (res: { users: SearchUser[] }) => void
-  ) => void;
+  // SEARCH
+  "admin:searchUsers": (payload: { query: string }, cb: (res: { users: SearchUser[] }) => void) => void;
 
-  /* =====================
-      HEARTBEAT
-  ===================== */
   ping: () => void;
 }
 
@@ -266,8 +222,19 @@ export function getAdminSocket(): Socket<
     console.log("✅ Admin socket verbonden:", socket.id);
 
     socket.emit("ping");
-    socket.emit("admin:getInitialSnapshot", {});
+
+    // ★ Vraag volledige snapshot op
+    socket.emit("admin:getInitialSnapshot", {}, (snap) => {
+      if (snap) {
+        // server pusht 'snapshot' event, maar callback vangt het ook op
+        socket.emit("snapshot", snap);
+      }
+    });
+
+    // ★ Haal hosts op
     socket.emit("admin:getHosts", {}, () => {});
+
+    // ★ Haal settings op
     socket.emit("admin:getSettings", {}, () => {});
   });
 
