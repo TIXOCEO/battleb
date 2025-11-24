@@ -1,8 +1,8 @@
 // ============================================================================
-// frontend/lib/socketClient.ts — v12.4 FIXED (MATCHES adminTypes.ts)
-//  ✔ GEEN "admin:" PREFIX MEER
-//  ✔ TypeScript build slaagt
-//  ✔ Events exact gelijk aan backend handle()
+// frontend/lib/socketClient.ts — FINAL NO-PREFIX VERSION
+// ✔ Matcht adminTypes.ts EXACT
+// ✔ Geen "admin:"
+// ✔ Build slaagt
 // ============================================================================
 
 import { io, Socket } from "socket.io-client";
@@ -24,18 +24,16 @@ const BACKEND_URL = "http://178.251.232.12:4000";
 const ADMIN_TOKEN = process.env.NEXT_PUBLIC_ADMIN_TOKEN || "supergeheim123";
 
 /* ============================================================================
-   SOCKET INBOUND TYPES
+   INBOUND (events from server → UI)
 ============================================================================ */
 export interface AdminSocketInbound {
   updateArena: (data: ArenaState) => void;
   updateQueue: (data: { open: boolean; entries: QueueEntry[] }) => void;
-
   log: (row: LogEntry) => void;
   initialLogs: (rows: LogEntry[]) => void;
 
   leaderboardPlayers: (rows: PlayerLeaderboardEntry[]) => void;
   leaderboardGifters: (rows: GifterLeaderboardEntry[]) => void;
-
   streamStats: (s: any) => void;
 
   gameSession: (s: {
@@ -46,9 +44,8 @@ export interface AdminSocketInbound {
   }) => void;
 
   hosts: (rows: HostProfile[]) => void;
-  hostsActiveChanged: (p: { username: string; tiktok_id: string }) => void;
-
-  settings: (s: ArenaSettings) => void;
+  hostsActiveChanged: (payload: any) => void;
+  settings: (settings: ArenaSettings) => void;
 
   "round:start": (d: any) => void;
   "round:grace": (d: any) => void;
@@ -61,7 +58,9 @@ export interface AdminSocketInbound {
 }
 
 /* ============================================================================
-   SOCKET OUTBOUND TYPES (NO PREFIX)
+   OUTBOUND (UI → server)
+   ✔ EXACT zoals adminTypes.ts
+   ✔ GEEN PREFIX
 ============================================================================ */
 export interface AdminSocketOutbound {
   ping: () => void;
@@ -76,9 +75,29 @@ export interface AdminSocketOutbound {
     ack: (response: { success: boolean; hosts: HostProfile[] }) => void
   ) => void;
 
+  createHost: (
+    payload: { label: string; username: string; tiktok_id: string },
+    ack: (res: AdminAckResponse) => void
+  ) => void;
+
+  deleteHost: (
+    payload: { id: number },
+    ack: (res: AdminAckResponse) => void
+  ) => void;
+
+  setActiveHost: (
+    payload: { id: number },
+    ack: (res: AdminAckResponse) => void
+  ) => void;
+
   getSettings: (
     payload: {},
-    ack: (response: any) => void
+    ack: (res: any) => void
+  ) => void;
+
+  updateSettings: (
+    payload: ArenaSettings,
+    ack: (res: AdminAckResponse) => void
   ) => void;
 
   searchUsers: (
@@ -86,35 +105,14 @@ export interface AdminSocketOutbound {
     ack: (res: { users: SearchUser[] }) => void
   ) => void;
 
-  addToQueue: (
-    payload: { username: string },
-    ack: (res: AdminAckResponse) => void
-  ) => void;
+  addToQueue: (payload: { username: string }, ack: (res: AdminAckResponse) => void) => void;
+  removeFromQueue: (payload: { username: string }, ack: (res: AdminAckResponse) => void) => void;
 
-  removeFromQueue: (
-    payload: { username: string },
-    ack: (res: AdminAckResponse) => void
-  ) => void;
+  promoteUser: (payload: { username: string }, ack: (res: AdminAckResponse) => void) => void;
+  demoteUser: (payload: { username: string }, ack: (res: AdminAckResponse) => void) => void;
 
-  promoteUser: (
-    payload: { username: string },
-    ack: (res: AdminAckResponse) => void
-  ) => void;
-
-  demoteUser: (
-    payload: { username: string },
-    ack: (res: AdminAckResponse) => void
-  ) => void;
-
-  addToArena: (
-    payload: { username: string },
-    ack: (res: AdminAckResponse) => void
-  ) => void;
-
-  eliminate: (
-    payload: { username: string },
-    ack: (res: AdminAckResponse) => void
-  ) => void;
+  addToArena: (payload: { username: string }, ack: (res: AdminAckResponse) => void) => void;
+  eliminate: (payload: { username: string }, ack: (res: AdminAckResponse) => void) => void;
 
   startGame: (payload: {}, ack: (res: AdminAckResponse) => void) => void;
   stopGame: (payload: {}, ack: (res: AdminAckResponse) => void) => void;
@@ -138,7 +136,7 @@ export interface AdminSocketOutbound {
 }
 
 /* ============================================================================
-   SINGLETON FACTORY
+   SINGLETON CLIENT
 ============================================================================ */
 
 declare global {
@@ -151,50 +149,31 @@ export function getAdminSocket(): Socket<
   AdminSocketInbound,
   AdminSocketOutbound
 > {
-  if (typeof window === "undefined") {
-    throw new Error("getAdminSocket moet client-side gebruikt worden.");
-  }
+  if (typeof window === "undefined")
+    throw new Error("getAdminSocket moet client-side worden gebruikt.");
 
   if (globalThis.__adminSocket) return globalThis.__adminSocket;
 
-  console.log(`⚙️ Verbinden met backend socket: ${BACKEND_URL}/admin`);
-
-  const socket: Socket<
-    AdminSocketInbound,
-    AdminSocketOutbound
-  > = io(`${BACKEND_URL}/admin`, {
+  const socket = io(`${BACKEND_URL}/admin`, {
     transports: ["polling", "websocket"],
     path: "/socket.io",
     auth: { token: ADMIN_TOKEN, role: "admin" },
-    reconnection: true,
-    reconnectionAttempts: 60,
-    reconnectionDelay: 1500,
-    timeout: 9000,
   });
 
   socket.on("connect", () => {
-    console.log("✅ Admin socket verbonden:", socket.id);
-    socket.emit("ping");
+    console.log("✔ Admin socket verbonden");
 
+    socket.emit("ping");
     socket.emit("getInitialSnapshot", {}, () => {});
     socket.emit("getHosts", {}, () => {});
     socket.emit("getSettings", {}, () => {});
   });
 
-  socket.on("disconnect", (reason) =>
-    console.warn("⚠️ Admin socket disconnect:", reason)
-  );
-
-  socket.on("connect_error", (err) =>
-    console.error("❌ Connect error:", err?.message || err)
-  );
-
-  // heartbeat
   setInterval(() => {
     try {
       socket.emit("ping");
-    } catch (_) {}
-  }, 12000);
+    } catch {}
+  }, 10000);
 
   globalThis.__adminSocket = socket;
   return socket;
