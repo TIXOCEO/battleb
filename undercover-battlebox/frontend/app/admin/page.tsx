@@ -67,6 +67,7 @@ export default function AdminDashboardPage() {
   // TWISTS
   const [twistUserGive, setTwistUserGive] = useState("");
   const [twistUserUse, setTwistUserUse] = useState("");
+  thead: any;
   const [twistTargetUse, setTwistTargetUse] = useState("");
   const [twistTypeGive, setTwistTypeGive] = useState("");
   const [twistTypeUse, setTwistTypeUse] = useState("");
@@ -165,7 +166,7 @@ export default function AdminDashboardPage() {
     });
   }, []);
 
-  // ============================================================
+// ============================================================
   // ADMIN EMITTERS
   // ============================================================
   const emitAdmin = (
@@ -207,16 +208,15 @@ export default function AdminDashboardPage() {
   };
 
   // ============================================================
-  // DERIVED STATE
+  // HELPERS
   // ============================================================
-  const fmt = (n: number) =>
-    n.toLocaleString("nl-NL", { maximumFractionDigits: 0 });
+  const fmt = (n: number | undefined) =>
+    Number(n ?? 0).toLocaleString("nl-NL", { maximumFractionDigits: 0 });
 
   const players = useMemo(() => arena?.players ?? [], [arena]);
 
   const arenaStatus = arena?.status ?? "idle";
-  const hasDoomed =
-    players.some((p: any) => p.positionStatus === "elimination");
+  const hasDoomed = players.some((p: any) => p.positionStatus === "elimination");
 
   const canStartRound =
     !!arena &&
@@ -232,7 +232,7 @@ export default function AdminDashboardPage() {
     hasDoomed;
 
   // ============================================================
-  // AUTOCOMPLETE
+  // AUTOCOMPLETE LOGIC
   // ============================================================
   useEffect(() => {
     if (!typing || typing.length < 2) {
@@ -270,7 +270,7 @@ export default function AdminDashboardPage() {
   };
 
   // ============================================================
-  // TIMER / PROGRESSBAR
+  // TIMER BEREKENING
   // ============================================================
   const roundProgress = useMemo(() => {
     if (!arena) return 0;
@@ -295,10 +295,9 @@ export default function AdminDashboardPage() {
     if (!sec || sec < 0) sec = 0;
     const m = Math.floor(sec / 60);
     const s = sec % 60;
-    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(
-      2,
-      "0"
-    )}`;
+    return `${m.toString().padStart(2, "0")}:${s
+      .toString()
+      .padStart(2, "0")}`;
   };
 
   // ============================================================
@@ -327,7 +326,7 @@ export default function AdminDashboardPage() {
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
 
       {/* ===========================================
-          HEADER
+          HEADER + TIMER
       ============================================ */}
       <header className="mb-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-2">
@@ -389,9 +388,11 @@ export default function AdminDashboardPage() {
       </header>
 
       {/* ============================================================
-          SPELBESTURING
+          SPELBESTURING + SPELERSACTIES
       ============================================================ */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+        {/* GAME CONTROL */}
         <div className="flex flex-col gap-3">
           <div className="text-sm font-semibold">Spelbesturing</div>
 
@@ -421,21 +422,27 @@ export default function AdminDashboardPage() {
             </button>
           </div>
 
+          {/* ROUNDS */}
           <div>
             <div className="text-xs text-gray-600 mb-1">Ronde acties</div>
             <div className="flex gap-2 flex-wrap">
+
               <button
-                onClick={() => emitAdmin("admin:startRound", { type: "quarter" })}
+                onClick={() =>
+                  emitAdmin("admin:startRound", { type: "quarter" })
+                }
                 disabled={!canStartRound}
-                className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full text-xs disabled:bg-gray-400 disabled:cursor-not-allowed"
+                className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full text-xs disabled:bg-gray-400"
               >
                 Start voorronde
               </button>
 
               <button
-                onClick={() => emitAdmin("admin:startRound", { type: "finale" })}
+                onClick={() =>
+                  emitAdmin("admin:startRound", { type: "finale" })
+                }
                 disabled={!canStartRound}
-                className="px-3 py-1.5 bg-gray-900 text-white rounded-full text-xs disabled:bg-gray-400 disabled:cursor-not-allowed"
+                className="px-3 py-1.5 bg-gray-900 text-white rounded-full text-xs disabled:bg-gray-400"
               >
                 Start finale
               </button>
@@ -443,7 +450,7 @@ export default function AdminDashboardPage() {
               <button
                 onClick={() => emitAdmin("admin:endRound")}
                 disabled={!canStopRound && !canGraceEnd}
-                className="px-3 py-1.5 bg-red-600 text-white rounded-full text-xs disabled:bg-gray-400 disabled:cursor-not-allowed"
+                className="px-3 py-1.5 bg-red-600 text-white rounded-full text-xs disabled:bg-gray-400"
               >
                 Stop ronde
               </button>
@@ -458,7 +465,7 @@ export default function AdminDashboardPage() {
         </div>
 
         {/* ============================================================
-            SPELERSACTIES
+            SPELER ACTIES
         ============================================================ */}
         <div className="lg:col-span-2 flex flex-col gap-3">
 
@@ -489,7 +496,7 @@ export default function AdminDashboardPage() {
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
               />
 
-              {/* AUTOCOMPLETE DROPDOWN */}
+              {/* AUTOCOMPLETE */}
               {showResults &&
                 searchResults.length > 0 &&
                 activeAutoField === "main" && (
@@ -511,21 +518,27 @@ export default function AdminDashboardPage() {
             {/* ACTION BUTTONS */}
             <div className="flex gap-2 text-xs">
               <button
-                onClick={() => emitAdminWithUser("admin:addToArena", username)}
+                onClick={() =>
+                  emitAdminWithUser("admin:addToArena", username)
+                }
                 className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full"
               >
                 → Arena
               </button>
 
               <button
-                onClick={() => emitAdminWithUser("admin:addToQueue", username)}
+                onClick={() =>
+                  emitAdminWithUser("admin:addToQueue", username)
+                }
                 className="px-3 py-1.5 bg-gray-800 text-white rounded-full"
               >
                 → Queue
               </button>
 
               <button
-                onClick={() => emitAdminWithUser("admin:eliminate", username)}
+                onClick={() =>
+                  emitAdminWithUser("admin:eliminate", username)
+                }
                 className="px-3 py-1.5 bg-red-600 text-white rounded-full"
               >
                 Elimineer
@@ -539,8 +552,8 @@ export default function AdminDashboardPage() {
           ARENA + QUEUE
       ============================================================ */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        
-        {/* ARENA */}
+
+        {/* ------------------ ARENA ------------------ */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Arena</h2>
           <p className="text-sm text-gray-500 mb-4">
@@ -554,7 +567,9 @@ export default function AdminDashboardPage() {
               players.map((p, idx) => (
                 <div
                   key={p.id}
-                  className={`rounded-lg p-3 border text-sm shadow ${colorForPosition(p)}`}
+                  className={`rounded-lg p-3 border text-sm shadow ${colorForPosition(
+                    p
+                  )}`}
                 >
                   <div className="flex justify-between items-center">
                     <span className="font-bold">#{idx + 1}</span>
@@ -573,7 +588,9 @@ export default function AdminDashboardPage() {
 
                   {p.positionStatus === "elimination" && (
                     <button
-                      onClick={() => emitAdminWithUser("admin:eliminate", p.username)}
+                      onClick={() =>
+                        emitAdminWithUser("admin:eliminate", p.username)
+                      }
                       className="mt-2 px-2 py-1 text-[11px] rounded-full border border-red-300 text-red-700 bg-red-50"
                     >
                       Verwijder speler
@@ -594,7 +611,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* QUEUE */}
+        {/* ------------------ QUEUE ------------------ */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Wachtrij</h2>
           <p className="text-sm text-gray-500 mb-3">
@@ -646,28 +663,36 @@ export default function AdminDashboardPage() {
 
                 <div className="flex gap-1 mt-2 sm:mt-0 justify-end">
                   <button
-                    onClick={() => emitAdminWithUser("admin:promoteUser", q.username)}
+                    onClick={() =>
+                      emitAdminWithUser("admin:promoteUser", q.username)
+                    }
                     className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
                   >
                     ▲
                   </button>
 
                   <button
-                    onClick={() => emitAdminWithUser("admin:demoteUser", q.username)}
+                    onClick={() =>
+                      emitAdminWithUser("admin:demoteUser", q.username)
+                    }
                     className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
                   >
                     ▼
                   </button>
 
                   <button
-                    onClick={() => emitAdminWithUser("admin:addToArena", q.username)}
+                    onClick={() =>
+                      emitAdminWithUser("admin:addToArena", q.username)
+                    }
                     className="px-2 py-1 rounded-full border border-[#ff4d4f] text-[#ff4d4f]"
                   >
                     → Arena
                   </button>
 
                   <button
-                    onClick={() => emitAdminWithUser("admin:removeFromQueue", q.username)}
+                    onClick={() =>
+                      emitAdminWithUser("admin:removeFromQueue", q.username)
+                    }
                     className="px-2 py-1 rounded-full border border-red-300 text-red-700 bg-red-50"
                   >
                     ✕
@@ -676,16 +701,17 @@ export default function AdminDashboardPage() {
               </div>
             ))
           ) : (
-            <div className="text-sm text-gray-500 italic">Wachtrij is leeg.</div>
+            <div className="text-sm text-gray-500 italic">
+              Wachtrij is leeg.
+            </div>
           )}
         </div>
       </section>
 
-{/* ===========================================
-          LEADERBOARDS (TAB CONTAINER)
-      ============================================ */}
+      {/* ============================================================
+          LEADERBOARDS
+      ============================================================ */}
       <section className="mt-4">
-
         <div className="bg-white rounded-2xl shadow p-0 overflow-hidden">
 
           {/* TAB BUTTONS */}
@@ -696,11 +722,9 @@ export default function AdminDashboardPage() {
                 onClick={() => setActiveLbTab("players")}
                 className={`
                   px-4 py-1.5 text-sm rounded-full border 
-                  transition-all duration-150 
-                  ${
-                    activeLbTab === "players"
-                      ? "bg-[#ff4d4f] text-white border-[#ff4d4f]"
-                      : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
+                  ${activeLbTab === "players"
+                    ? "bg-[#ff4d4f] text-white border-[#ff4d4f]"
+                    : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
                   }
                 `}
               >
@@ -710,12 +734,10 @@ export default function AdminDashboardPage() {
               <button
                 onClick={() => setActiveLbTab("gifters")}
                 className={`
-                  px-4 py-1.5 text-sm rounded-full border 
-                  transition-all duration-150 
-                  ${
-                    activeLbTab === "gifters"
-                      ? "bg-[#ff4d4f] text-white border-[#ff4d4f]"
-                      : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
+                  px-4 py-1.5 text-sm rounded-full border
+                  ${activeLbTab === "gifters"
+                    ? "bg-[#ff4d4f] text-white border-[#ff4d4f]"
+                    : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
                   }
                 `}
               >
@@ -728,9 +750,9 @@ export default function AdminDashboardPage() {
           {/* TAB CONTENT */}
           <div className="p-4 max-h-96 overflow-y-auto text-sm">
 
-            {/* ==========================
-                PLAYERS TAB
-            =========================== */}
+            {/* =======================
+                PLAYER LEADERBOARD
+            ======================== */}
             {activeLbTab === "players" && (
               <div>
                 <h2 className="text-xl font-semibold mb-2">Player Leaderboard</h2>
@@ -742,10 +764,12 @@ export default function AdminDashboardPage() {
                   playerLeaderboard.map((e, idx) => (
                     <div
                       key={idx}
-                      className="flex items-center justify-between border-b last:border-0 border-gray-200 py-1"
+                      className="flex items-center justify-between border-b border-gray-200 last:border-0 py-1"
                     >
                       <div>
-                        <span className="font-mono text-xs text-gray-500 mr-2">#{idx + 1}</span>
+                        <span className="font-mono text-xs text-gray-500 mr-2">
+                          #{idx + 1}
+                        </span>
                         <span className="font-semibold">
                           {e.display_name} (@{e.username})
                         </span>
@@ -764,9 +788,9 @@ export default function AdminDashboardPage() {
               </div>
             )}
 
-            {/* ==========================
-                GIFTERS TAB
-            =========================== */}
+            {/* =======================
+                GIFTER LEADERBOARD
+            ======================== */}
             {activeLbTab === "gifters" && (
               <div>
                 <h2 className="text-xl font-semibold mb-2">Gifter Leaderboard</h2>
@@ -778,10 +802,12 @@ export default function AdminDashboardPage() {
                   gifterLeaderboard.map((e, idx) => (
                     <div
                       key={idx}
-                      className="flex items-center justify-between border-b last:border-0 border-gray-200 py-1"
+                      className="flex items-center justify-between border-b border-gray-200 last:border-0 py-1"
                     >
                       <div>
-                        <span className="font-mono text-xs text-gray-500 mr-2">#{idx + 1}</span>
+                        <span className="font-mono text-xs text-gray-500 mr-2">
+                          #{idx + 1}
+                        </span>
                         <span className="font-semibold">
                           {e.display_name} (@{e.username})
                         </span>
@@ -804,9 +830,9 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* ===========================================
+      {/* ============================================================
           TWISTS
-      ============================================ */}
+      ============================================================ */}
       <section className="mt-8 bg-white rounded-2xl shadow p-4">
         <h2 className="text-xl font-semibold mb-4">Twists</h2>
 
@@ -814,7 +840,7 @@ export default function AdminDashboardPage() {
 
           {/* GIVE TWIST */}
           <div className="p-4 border rounded-xl bg-gray-50 shadow-sm relative">
-            <h3 className="font-semibold mb-3">Twist geven aan speler</h3>
+            <h3 className="font-semibold mb-3">Twist geven</h3>
 
             <label className="text-xs font-semibold">@username</label>
             <input
@@ -835,7 +861,7 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
-            {/* AUTOCOMPLETE GIVE */}
+            {/* autocomplete */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "give" && (
@@ -853,7 +879,7 @@ export default function AdminDashboardPage() {
                 </div>
               )}
 
-            <label className="text-xs font-semibold">Kies twist</label>
+            <label className="text-xs font-semibold">Twist</label>
             <select
               value={twistTypeGive}
               onChange={(e) => setTwistTypeGive(e.target.value)}
@@ -883,7 +909,7 @@ export default function AdminDashboardPage() {
 
           {/* USE TWIST */}
           <div className="p-4 border rounded-xl bg-gray-50 shadow-sm relative">
-            <h3 className="font-semibold mb-3">Twist gebruiken (admin)</h3>
+            <h3 className="font-semibold mb-3">Twist gebruiken</h3>
 
             <label className="text-xs font-semibold">Gebruiker</label>
             <input
@@ -936,7 +962,9 @@ export default function AdminDashboardPage() {
               <option value="diamond_pistol">Diamond Pistol</option>
             </select>
 
-            <label className="text-xs font-semibold">Target speler (optioneel)</label>
+            <label className="text-xs font-semibold">
+              Target speler (optioneel)
+            </label>
             <input
               type="text"
               value={twistTargetUse}
@@ -989,9 +1017,9 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* ===========================================
+      {/* ============================================================
           LOG FEED
-      ============================================ */}
+      ============================================================ */}
       <section className="mt-6 bg-white rounded-2xl shadow p-4">
         <h2 className="text-lg font-semibold mb-2">Log feed</h2>
 
@@ -1033,5 +1061,4 @@ export default function AdminDashboardPage() {
       </footer>
     </main>
   );
-}
-    
+                }
