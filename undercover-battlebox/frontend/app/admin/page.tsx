@@ -67,7 +67,6 @@ export default function AdminDashboardPage() {
   // TWISTS
   const [twistUserGive, setTwistUserGive] = useState("");
   const [twistUserUse, setTwistUserUse] = useState("");
-  thead: any;
   const [twistTargetUse, setTwistTargetUse] = useState("");
   const [twistTypeGive, setTwistTypeGive] = useState("");
   const [twistTypeUse, setTwistTypeUse] = useState("");
