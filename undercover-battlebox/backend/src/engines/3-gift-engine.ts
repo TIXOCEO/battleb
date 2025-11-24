@@ -1,5 +1,5 @@
 // ============================================================================
-// 3-gift-engine.ts — v11.1 FINAL HOST PROFILE EDITION (PATCHED)
+// 3-gift-engine.ts — v11.2 GAME-ID SAFEGUARD EDITION
 // ============================================================================
 
 import pool from "../db";
@@ -16,17 +16,38 @@ import {
   emitLog,
   io,
   broadcastStats,
-  // ❌ broadcastRoundLeaderboard verwijderd
   getActiveHost,
 } from "../server";
 
 import { TWIST_MAP, TwistType } from "./twist-definitions";
 import { addTwistByGift } from "./8-twist-engine";
 
+
+// ============================================================================
+// PATCH: SAFE GAME ID HELPERS
+// ============================================================================
+
+function getActiveGameId(): number | null {
+  const id = (io as any)?.currentGameId;
+  if (typeof id === "number" && id > 0) return id;
+  return null;
+}
+
+async function isGameActive(): Promise<boolean> {
+  const gid = getActiveGameId();
+  if (!gid) return false;
+
+  const r = await pool.query(
+    `SELECT id FROM games WHERE id=$1 AND status='running'`,
+    [gid]
+  );
+  return r.rows.length > 0;
+}
+
+
 // ============================================================================
 // DEDUPE
 // ============================================================================
-
 const dedupe = new Set<string>();
 setInterval(() => dedupe.clear(), 20000);
 
@@ -40,6 +61,7 @@ function makeDedupeKey(evt: any, source: string) {
     `${source}-${evt.giftId}-${evt.user?.userId}-${evt.receiverUserId}-${roughTs}`
   );
 }
+
 
 // ============================================================================
 // NORMALIZERS
@@ -65,6 +87,7 @@ function formatDisplay(u: any) {
   return u.display_name;
 }
 
+
 // ============================================================================
 // FAN EXPIRE
 // ============================================================================
@@ -89,6 +112,7 @@ async function cleanupFan(id: string) {
 
   return true;
 }
+
 
 // ============================================================================
 // SENDER PARSER
@@ -127,6 +151,7 @@ function extractSender(evt: any) {
   };
 }
 
+
 // ============================================================================
 // DIAMONDS
 // ============================================================================
@@ -142,6 +167,7 @@ function calcDiamonds(evt: any): number {
 
   return base;
 }
+
 
 // ============================================================================
 // RECEIVER PARSER — HOST LOCK
@@ -167,9 +193,9 @@ async function resolveReceiver(evt: any) {
 
   const un = unique ? norm(unique) : null;
 
-  // HOST match (ID)
+  // HOST match by ID
   if (HOST_ID && directId && String(directId) === String(HOST_ID)) {
-    const h = await getOrUpdateUser(String(HOST_ID), null, null);   // ✔ FIX toegepast
+    const h = await getOrUpdateUser(String(HOST_ID), null, null);
     return {
       id: HOST_ID,
       username: h.username,
@@ -178,9 +204,9 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  // HOST match (username)
+  // HOST match by username
   if (HOST_USERNAME && un === HOST_USERNAME) {
-    const h = await getOrUpdateUser(String(HOST_ID), null, null);   // ✔ FIX toegepast
+    const h = await getOrUpdateUser(String(HOST_ID), null, null);
     return {
       id: HOST_ID,
       username: h.username,
@@ -189,7 +215,7 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  // Direct receiver found
+  // Direct receiver
   if (directId) {
     const u = await getOrUpdateUser(String(directId), null, null);
     return {
@@ -200,9 +226,9 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  // Fallback → default to host if available
+  // fallback → host
   if (HOST_ID) {
-    const h = await getOrUpdateUser(String(HOST_ID), null, null);   // ✔ FIX toegepast
+    const h = await getOrUpdateUser(String(HOST_ID), null, null);
     return {
       id: HOST_ID,
       username: h.username,
@@ -219,6 +245,7 @@ async function resolveReceiver(evt: any) {
   };
 }
 
+
 // ============================================================================
 // HEART ME
 // ============================================================================
@@ -230,8 +257,9 @@ function isHeartMeGift(evt: any): boolean {
   return HEART_ME_GIFT_IDS.has(Number(evt.giftId));
 }
 
+
 // ============================================================================
-// MAIN PROCESSOR
+// MAIN PROCESSOR (★ PATCHED GAME-ID HANDLING)
 // ============================================================================
 async function processGift(evt: any, source: string) {
   try {
@@ -249,6 +277,19 @@ async function processGift(evt: any, source: string) {
 
     const diamonds = calcDiamonds(evt);
     if (diamonds <= 0) return;
+
+    // PATCH: game MUST be active
+    const gameId = getActiveGameId();
+    const active = await isGameActive();
+
+    if (!gameId || !active) {
+      // geen actief spel → gift wel loggen maar NIET opslaan in gifts tabel
+      emitLog({
+        type: "gift",
+        message: `${sender.display_name} gaf gift buiten spel (genegeerd in DB)`,
+      });
+      return;
+    }
 
     const receiver = await resolveReceiver(evt);
     const isHostReceiver = receiver.role === "host";
@@ -303,7 +344,7 @@ async function processGift(evt: any, source: string) {
       );
     }
 
-    // fan gift
+    // fan gifts
     if (isHostReceiver && isHeartMeGift(evt)) {
       const expires = new Date(nowMs + 24 * 3600 * 1000);
       await pool.query(
@@ -333,8 +374,7 @@ async function processGift(evt: any, source: string) {
       });
     }
 
-    const gameId = (io as any).currentGameId ?? null;
-
+    // PATCH: gameId is always valid here
     await pool.query(
       `
       INSERT INTO gifts (
@@ -366,7 +406,7 @@ async function processGift(evt: any, source: string) {
         diamonds,
         diamonds * 0.2,
 
-        gameId,
+        gameId,          // ✔ correct gameId
         isHostReceiver,
         is_round_gift,
         round_active,
@@ -375,7 +415,6 @@ async function processGift(evt: any, source: string) {
     );
 
     await broadcastStats();
-    // ❌ broadcastRoundLeaderboard verwijderd — jij gebruikt alleen sender & receiver leaderboards
 
     emitLog({
       type: "gift",
@@ -387,6 +426,7 @@ async function processGift(evt: any, source: string) {
   }
 }
 
+
 // ============================================================================
 // INIT ENGINE
 // ============================================================================
@@ -396,23 +436,21 @@ export function initGiftEngine(conn: any) {
     return;
   }
 
-  console.log("🎁 GiftEngine v11.1 LOADED");
+  console.log("🎁 GiftEngine v11.2 (GameId Safeguard) LOADED");
 
   conn.on("gift", (d: any) => processGift(d, "gift"));
-
   conn.on("roomMessage", (d: any) => {
     if (d?.giftId || d?.diamondCount) processGift(d, "roomMessage");
   });
-
   conn.on("member", (d: any) => {
     if (d?.giftId || d?.diamondCount) processGift(d, "member");
   });
-
   conn.on("chat", (d: any) => {
     if (d?._data?.giftId || d?._data?.diamondCount)
       processGift(d._data, "chat-hidden");
   });
 }
+
 
 // ============================================================================
 // EXPORT
