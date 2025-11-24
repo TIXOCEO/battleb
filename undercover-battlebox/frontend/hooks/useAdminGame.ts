@@ -9,21 +9,8 @@ import type {
   AdminAckResponse,
   PlayerLeaderboardEntry,
   GifterLeaderboardEntry,
+  InitialSnapshot,
 } from "@/lib/adminTypes";
-
-export type InitialSnapshot = {
-  arena: ArenaState;
-  queue: { open: boolean; entries: QueueEntry[] };
-  logs: LogEntry[];
-  settings: any;
-  gameSession: {
-    active: boolean;
-    gameId: number | null;
-  };
-  stats: any;
-  playerLeaderboard: PlayerLeaderboardEntry[];
-  gifterLeaderboard: GifterLeaderboardEntry[];
-};
 
 export function useAdminGame() {
   const [arena, setArena] = useState<ArenaState | null>(null);
@@ -33,24 +20,20 @@ export function useAdminGame() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
   const [lastActionStatus, setLastActionStatus] = useState<string | null>(null);
 
   const [playerLb, setPlayerLb] = useState<PlayerLeaderboardEntry[]>([]);
   const [gifterLb, setGifterLb] = useState<GifterLeaderboardEntry[]>([]);
-
   const [snapshotLoaded, setSnapshotLoaded] = useState(false);
 
   // --------------------------------------------------------------------
-  // SOCKET SETUP
+  // SOCKET SETUP — FIXED PREFIX-LESS
   // --------------------------------------------------------------------
   useEffect(() => {
     const socket = getAdminSocket();
     let mounted = true;
 
-    socket.on("updateArena", (data: ArenaState) => {
-      if (mounted) setArena(data);
-    });
+    socket.on("updateArena", (data: ArenaState) => mounted && setArena(data));
 
     socket.on("updateQueue", (data) => {
       if (!mounted) return;
@@ -63,20 +46,17 @@ export function useAdminGame() {
       setLogs((prev) => [log, ...prev].slice(0, 300));
     });
 
-    socket.on("leaderboardPlayers", (rows: PlayerLeaderboardEntry[]) => {
-      if (mounted) setPlayerLb(rows);
-    });
-
-    socket.on("leaderboardGifters", (rows: GifterLeaderboardEntry[]) => {
-      if (mounted) setGifterLb(rows);
-    });
+    socket.on("leaderboardPlayers", (rows) => mounted && setPlayerLb(rows));
+    socket.on("leaderboardGifters", (rows) => mounted && setGifterLb(rows));
 
     socket.on("connect_error", () => {
       if (mounted) setError("Geen verbinding met backend (socket.io)");
     });
 
-    // INITIAL SNAPSHOT
-    socket.emit("admin:getInitialSnapshot", {}, (snap: InitialSnapshot) => {
+    // ----------------------------------------------------------------
+    // INITIAL SNAPSHOT — FIXED (NO PREFIX)
+    // ----------------------------------------------------------------
+    socket.emit("getInitialSnapshot", {}, (snap: InitialSnapshot) => {
       if (!mounted || snapshotLoaded) return;
 
       setArena(snap.arena);
@@ -111,37 +91,25 @@ export function useAdminGame() {
   }
 
   // --------------------------------------------------------------------
-  // FINAL FIX — UNIVERSAL ADMIN EMITTER
-  // Always expects payload as an object { ... }
+  // GENERIC EMITTER — NO PREFIX
   // --------------------------------------------------------------------
   async function emitAdminAction(
-    event: string,
+    event: keyof import("@/lib/adminTypes").AdminSocketOutbound,
     payload: Record<string, any> = {}
-  ): Promise<void> {
-    return new Promise((resolve) => {
+  ) {
+    return new Promise<void>((resolve) => {
       const socket = getAdminSocket();
 
-      (socket.emit as any)(
-        event,
-        payload,
-        (res: AdminAckResponse) => {
-          if (!res) {
-            console.warn(`[ADMIN] No ACK for`, event, payload);
-            return resolve();
-          }
-
-          if (!res.success) {
-            console.warn(`[ADMIN] FAIL`, event, res.message);
-          }
-
-          resolve();
-        }
-      );
+      socket.emit(event, payload, (res: AdminAckResponse) => {
+        if (!res) return resolve();
+        if (!res.success) console.warn(`[ADMIN] FAIL`, event, res.message);
+        resolve();
+      });
     });
   }
 
   // --------------------------------------------------------------------
-  // RETURN API
+  // RETURN API — ALL FIXED (NO PREFIX)
   // --------------------------------------------------------------------
   return {
     arena,
@@ -156,25 +124,22 @@ export function useAdminGame() {
 
     clearStatus: () => setLastActionStatus(null),
 
-    // ----------------------------------------------------------------
-    // ADMIN ACTIONS — ALL TS-SAFE, ALL PAYLOAD FIXED
-    // ----------------------------------------------------------------
     addToArena: (u: string) =>
-      emitAdminAction("admin:addToArena", { username: normalizeUsername(u) }),
+      emitAdminAction("addToArena", { username: normalizeUsername(u) }),
 
     addToQueue: (u: string) =>
-      emitAdminAction("admin:addToQueue", { username: normalizeUsername(u) }),
+      emitAdminAction("addToQueue", { username: normalizeUsername(u) }),
 
     eliminate: (u: string) =>
-      emitAdminAction("admin:eliminate", { username: normalizeUsername(u) }),
+      emitAdminAction("eliminate", { username: normalizeUsername(u) }),
 
     promoteQueue: (u: string) =>
-      emitAdminAction("admin:promoteUser", { username: normalizeUsername(u) }),
+      emitAdminAction("promoteUser", { username: normalizeUsername(u) }),
 
     demoteQueue: (u: string) =>
-      emitAdminAction("admin:demoteUser", { username: normalizeUsername(u) }),
+      emitAdminAction("demoteUser", { username: normalizeUsername(u) }),
 
     removeFromQueue: (u: string) =>
-      emitAdminAction("admin:removeFromQueue", { username: normalizeUsername(u) }),
+      emitAdminAction("removeFromQueue", { username: normalizeUsername(u) }),
   };
 }
