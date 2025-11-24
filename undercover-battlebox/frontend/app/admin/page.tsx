@@ -155,10 +155,16 @@ export default function AdminDashboardPage() {
       }
       if (snap.logs) setLogs(snap.logs.slice(0, 200));
 
+      // STREAM TOTALS (BELANGRIJK!)
       if (snap.stats) setStreamStats(snap.stats);
+
       if (snap.gameSession) setGameSession(snap.gameSession);
-      if (snap.playerLeaderboard) setPlayerLeaderboard(snap.playerLeaderboard);
-      if (snap.gifterLeaderboard) setGifterLeaderboard(snap.gifterLeaderboard);
+
+      if (snap.playerLeaderboard)
+        setPlayerLeaderboard(snap.playerLeaderboard);
+
+      if (snap.gifterLeaderboard)
+        setGifterLeaderboard(snap.gifterLeaderboard);
     });
   }, []);
 
@@ -189,6 +195,7 @@ export default function AdminDashboardPage() {
     const uname = target || username;
 
     if (!uname.trim()) return;
+
     const formatted = uname.startsWith("@") ? uname : `@${uname}`;
 
     setStatus(`Bezig met ${event}...`);
@@ -333,7 +340,8 @@ export default function AdminDashboardPage() {
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
 
       {/* ===========================================
-          HEADER + TIMER */}
+          HEADER + TIMER
+      ============================================ */}
       <header className="mb-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-2">
           <div className="flex items-center gap-2">
@@ -358,6 +366,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
+        {/* TIMER */}
         {arena && arena.status !== "idle" && (
           <div className="w-full bg-gray-300 rounded-full h-4 shadow-inner relative overflow-hidden">
 
@@ -413,7 +422,8 @@ export default function AdminDashboardPage() {
       </header>
 
       {/* ============================================================
-          SPELBESTURING + SPELERSACTIES */}
+          SPELBESTURING + SPELERSACTIES
+      ============================================================ */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
 
         {/* GAME CONTROL */}
@@ -446,6 +456,7 @@ export default function AdminDashboardPage() {
             </button>
           </div>
 
+          {/* ROUNDS */}
           <div>
             <div className="text-xs text-gray-600 mb-1">
               Ronde acties
@@ -494,7 +505,8 @@ export default function AdminDashboardPage() {
         </div>
 
         {/* ============================================================
-            SPELER ACTIES */}
+            SPELER ACTIES
+        ============================================================ */}
         <div className="lg:col-span-2 flex flex-col gap-3">
 
           <div className="text-sm font-semibold">
@@ -502,6 +514,7 @@ export default function AdminDashboardPage() {
           </div>
 
           <div className="flex flex-col md:flex-row gap-3 md:items-end relative">
+            {/* USERNAME INPUT */}
             <div className="flex-1">
               <label className="text-xs text-gray-600 font-semibold mb-1 block">
                 @username (zoek)
@@ -525,6 +538,7 @@ export default function AdminDashboardPage() {
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
               />
 
+              {/* AUTOCOMPLETE */}
               {showResults &&
                 searchResults.length > 0 &&
                 activeAutoField === "main" && (
@@ -547,6 +561,7 @@ export default function AdminDashboardPage() {
                 )}
             </div>
 
+            {/* ACTION BUTTONS */}
             <div className="flex gap-2 text-xs">
               <button
                 onClick={() =>
@@ -589,9 +604,11 @@ export default function AdminDashboardPage() {
       </section>
 
       {/* ============================================================
-          ARENA + QUEUE */}
+          ARENA + QUEUE
+      ============================================================ */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
+        {/* ------------------ ARENA ------------------ */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">
             Arena
@@ -659,6 +676,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
+        {/* ------------------ QUEUE ------------------ */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">
             Wachtrij
@@ -770,11 +788,13 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* ============================================================
-          LEADERBOARDS */}
+            {/* ============================================================
+          LEADERBOARDS
+      ============================================================ */}
       <section className="mt-4">
         <div className="bg-white rounded-2xl shadow p-0 overflow-hidden">
 
+          {/* TAB BUTTONS */}
           <div className="w-full flex justify-end p-3 border-b border-gray-200 bg-gray-50">
             <div className="flex gap-2">
 
@@ -807,8 +827,12 @@ export default function AdminDashboardPage() {
             </div>
           </div>
 
+          {/* TAB CONTENT */}
           <div className="p-4 max-h-96 overflow-y-auto text-sm">
 
+            {/* =======================
+                PLAYER LEADERBOARD
+            ======================== */}
             {activeLbTab === "players" && (
               <div>
                 <div className="flex justify-between items-end mb-2">
@@ -821,6 +845,7 @@ export default function AdminDashboardPage() {
                     </p>
                   </div>
 
+                  {/* TOTALS BOX */}
                   {streamStats && (
                     <div className="text-right text-xs leading-tight bg-gray-100 px-3 py-1 rounded-lg shadow-inner border border-gray-300">
                       <div className="font-semibold text-gray-800">
@@ -868,6 +893,9 @@ export default function AdminDashboardPage() {
               </div>
             )}
 
+            {/* =======================
+                GIFTER LEADERBOARD
+            ======================== */}
             {activeLbTab === "gifters" && (
               <div>
                 <div className="flex justify-between items-end mb-2">
@@ -880,13 +908,17 @@ export default function AdminDashboardPage() {
                     </p>
                   </div>
 
+                  {/* TOTAL GIFTS BOX */}
                   {streamStats && (
                     <div className="text-right text-xs leading-tight bg-gray-100 px-3 py-1 rounded-lg shadow-inner border border-gray-300">
                       <div className="font-semibold text-gray-800">
                         Totaal Gifts:{" "}
                         <span className="text-[#ff4d4f]">
-                          {fmt(streamStats.totalPlayerDiamonds +
-                            streamStats.totalHostDiamonds)} 💎
+                          {fmt(
+                            streamStats.totalPlayerDiamonds +
+                              streamStats.totalHostDiamonds
+                          )}{" "}
+                          💎
                         </span>
                       </div>
                     </div>
@@ -926,232 +958,241 @@ export default function AdminDashboardPage() {
       </section>
 
       {/* ============================================================
-          TWISTS */}
+          TWISTS
+      ============================================================ */}
       <section className="mt-8 bg-white rounded-2xl shadow p-4">
         <h2 className="text-xl font-semibold mb-4">Twists</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          
-          {/* GIVE TWIST */}
-          <div className="p-4 border rounded-xl bg-gray-50 shadow-sm relative">
-            <h3 className="font-semibold mb-3">Twist geven</h3>
+        {/* ============================================================
+            TWISTS
+        ============================================================ */}
+        <section className="mt-8 bg-white rounded-2xl shadow p-4">
+          <h2 className="text-xl font-semibold mb-4">Twists</h2>
 
-            <label className="text-xs font-semibold">@username</label>
-            <input
-              type="text"
-              value={twistUserGive}
-              onFocus={() => {
-                setActiveAutoField("give");
-                setShowResults(true);
-                setTyping(twistUserGive);
-              }}
-              onChange={(e) => {
-                setTwistUserGive(e.target.value);
-                setActiveAutoField("give");
-                setTyping(e.target.value);
-                setShowResults(true);
-              }}
-              placeholder="@gebruiker"
-              className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
-            />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-            {showResults &&
-              searchResults.length > 0 &&
-              activeAutoField === "give" && (
-                <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
-                  {searchResults.map((u) => (
-                    <div
-                      key={u.tiktok_id}
-                      onClick={() => applyAutoFill(u)}
-                      className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
-                    >
-                      <span className="font-semibold">{u.display_name}</span>{" "}
-                      <span className="text-gray-500">@{u.username}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+            {/* GIVE TWIST */}
+            <div className="p-4 border rounded-xl bg-gray-50 shadow-sm relative">
+              <h3 className="font-semibold mb-3">Twist geven</h3>
 
-            <label className="text-xs font-semibold">Twist</label>
-            <select
-              value={twistTypeGive}
-              onChange={(e) => setTwistTypeGive(e.target.value)}
-              className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
-            >
-              <option value="">-- Kies twist --</option>
-              <option value="galaxy">Galaxy</option>
-              <option value="moneygun">MoneyGun</option>
-              <option value="immune">Immune</option>
-              <option value="heal">Heal</option>
-              <option value="bomb">Bomb</option>
-              <option value="diamond_pistol">Diamond Pistol</option>
-            </select>
+              <label className="text-xs font-semibold">@username</label>
+              <input
+                type="text"
+                value={twistUserGive}
+                onFocus={() => {
+                  setActiveAutoField("give");
+                  setShowResults(true);
+                  setTyping(twistUserGive);
+                }}
+                onChange={(e) => {
+                  setTwistUserGive(e.target.value);
+                  setActiveAutoField("give");
+                  setTyping(e.target.value);
+                  setShowResults(true);
+                }}
+                placeholder="@gebruiker"
+                className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
+              />
 
-            <button
-              onClick={() =>
-                emitAdmin("admin:giveTwist", {
-                  username: twistUserGive,
-                  twist: twistTypeGive,
-                })
-              }
-              className="mt-2 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm w-full"
-            >
-              Geef twist
-            </button>
-          </div>
+              {/* autocomplete */}
+              {showResults &&
+                searchResults.length > 0 &&
+                activeAutoField === "give" && (
+                  <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
+                    {searchResults.map((u) => (
+                      <div
+                        key={u.tiktok_id}
+                        onClick={() => applyAutoFill(u)}
+                        className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+                      >
+                        <span className="font-semibold">{u.display_name}</span>{" "}
+                        <span className="text-gray-500">@{u.username}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
-          {/* USE TWIST */}
-          <div className="p-4 border rounded-xl bg-gray-50 shadow-sm relative">
-            <h3 className="font-semibold mb-3">Twist gebruiken</h3>
-
-            <label className="text-xs font-semibold">Gebruiker</label>
-            <input
-              type="text"
-              value={twistUserUse}
-              onFocus={() => {
-                setActiveAutoField("use");
-                setShowResults(true);
-                setTyping(twistUserUse);
-              }}
-              onChange={(e) => {
-                setTwistUserUse(e.target.value);
-                setActiveAutoField("use");
-                setTyping(e.target.value);
-                setShowResults(true);
-              }}
-              placeholder="@gebruiker"
-              className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
-            />
-
-            {showResults &&
-              searchResults.length > 0 &&
-              activeAutoField === "use" && (
-                <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
-                  {searchResults.map((u) => (
-                    <div
-                      key={u.tiktok_id}
-                      onClick={() => applyAutoFill(u)}
-                      className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
-                    >
-                      <span className="font-semibold">{u.display_name}</span>{" "}
-                      <span className="text-gray-500">@{u.username}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-            <label className="text-xs font-semibold">Twist</label>
-            <select
-              value={twistTypeUse}
-              onChange={(e) => setTwistTypeUse(e.target.value)}
-              className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
-            >
-              <option value="">-- Kies twist --</option>
-              <option value="galaxy">Galaxy</option>
-              <option value="moneygun">MoneyGun</option>
-              <option value="immune">Immune</option>
-              <option value="heal">Heal</option>
-              <option value="bomb">Bomb</option>
-              <option value="diamond_pistol">Diamond Pistol</option>
-            </select>
-
-            <label className="text-xs font-semibold">
-              Target speler (optioneel)
-            </label>
-            <input
-              type="text"
-              value={twistTargetUse}
-              onFocus={() => {
-                setActiveAutoField("target");
-                setShowResults(true);
-                setTyping(twistTargetUse);
-              }}
-              onChange={(e) => {
-                setTwistTargetUse(e.target.value);
-                setActiveAutoField("target");
-                setTyping(e.target.value);
-                setShowResults(true);
-              }}
-              placeholder="@target"
-              className="w-full border rounded-lg px-3 py-2 text-sm mb-3"
-            />
-
-            {showResults &&
-              searchResults.length > 0 &&
-              activeAutoField === "target" && (
-                <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
-                  {searchResults.map((u) => (
-                    <div
-                      key={u.tiktok_id}
-                      onClick={() => applyAutoFill(u)}
-                      className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
-                    >
-                      <span className="font-semibold">{u.display_name}</span>{" "}
-                      <span className="text-gray-500">@{u.username}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-            <button
-              onClick={() =>
-                emitAdmin("admin:useTwist", {
-                  username: twistUserUse,
-                  twist: twistTypeUse,
-                  target: twistTargetUse,
-                })
-              }
-              className="mt-2 px-3 py-2 bg-purple-600 text-white rounded-lg text-sm w-full"
-            >
-              Gebruik twist
-            </button>
-          </div>
-
-        </div>
-      </section>
-
-      {/* ============================================================
-          LOG FEED */}
-      <section className="mt-6 bg-white rounded-2xl shadow p-4">
-        <h2 className="text-lg font-semibold mb-2">Log feed</h2>
-
-        <div className="overflow-y-auto max-h-[400px] border border-gray-200 rounded-lg bg-gray-50 text-sm">
-          {logs.length ? (
-            logs.map((log) => (
-              <div
-                key={log.id}
-                className={`px-3 py-1 border-b last:border-0 ${
-                  log.type === "gift"
-                    ? "bg-pink-50 text-pink-800"
-                    : log.type === "elim"
-                    ? "bg-red-50 text-red-700"
-                    : log.type === "join"
-                    ? "bg-green-50 text-green-700"
-                    : log.type === "twist"
-                    ? "bg-purple-50 text-purple-700"
-                    : "bg-blue-50 text-blue-700"
-                }`}
+              <label className="text-xs font-semibold">Twist</label>
+              <select
+                value={twistTypeGive}
+                onChange={(e) => setTwistTypeGive(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
               >
-                <span className="font-mono text-xs opacity-60">
-                  {new Date(log.timestamp).toLocaleTimeString("nl-NL", {
-                    hour12: false,
-                  })}
-                </span>{" "}
-                <strong>{log.type.toUpperCase()}</strong> – {log.message}
-              </div>
-            ))
-          ) : (
-            <div className="px-3 py-2 text-gray-500 italic">
-              Nog geen logs ontvangen.
+                <option value="">-- Kies twist --</option>
+                <option value="galaxy">Galaxy</option>
+                <option value="moneygun">MoneyGun</option>
+                <option value="immune">Immune</option>
+                <option value="heal">Heal</option>
+                <option value="bomb">Bomb</option>
+                <option value="diamond_pistol">Diamond Pistol</option>
+              </select>
+
+              <button
+                onClick={() =>
+                  emitAdmin("admin:giveTwist", {
+                    username: twistUserGive,
+                    twist: twistTypeGive,
+                  })
+                }
+                className="mt-2 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm w-full"
+              >
+                Geef twist
+              </button>
             </div>
-          )}
-        </div>
-      </section>
 
-      <footer className="mt-4 text-xs text-gray-400 text-center">
-        BattleBox Engine v3.2 – Danny Stable
-      </footer>
+            {/* USE TWIST */}
+            <div className="p-4 border rounded-xl bg-gray-50 shadow-sm relative">
+              <h3 className="font-semibold mb-3">Twist gebruiken</h3>
 
-    </main>
+              <label className="text-xs font-semibold">Gebruiker</label>
+              <input
+                type="text"
+                value={twistUserUse}
+                onFocus={() => {
+                  setActiveAutoField("use");
+                  setShowResults(true);
+                  setTyping(twistUserUse);
+                }}
+                onChange={(e) => {
+                  setTwistUserUse(e.target.value);
+                  setActiveAutoField("use");
+                  setTyping(e.target.value);
+                  setShowResults(true);
+                }}
+                placeholder="@gebruiker"
+                className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
+              />
+
+              {showResults &&
+                searchResults.length > 0 &&
+                activeAutoField === "use" && (
+                  <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
+                    {searchResults.map((u) => (
+                      <div
+                        key={u.tiktok_id}
+                        onClick={() => applyAutoFill(u)}
+                        className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+                      >
+                        <span className="font-semibold">{u.display_name}</span>{" "}
+                        <span className="text-gray-500">@{u.username}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+              <label className="text-xs font-semibold">Twist</label>
+              <select
+                value={twistTypeUse}
+                onChange={(e) => setTwistTypeUse(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
+              >
+                <option value="">-- Kies twist --</option>
+                <option value="galaxy">Galaxy</option>
+                <option value="moneygun">MoneyGun</option>
+                <option value="immune">Immune</option>
+                <option value="heal">Heal</option>
+                <option value="bomb">Bomb</option>
+                <option value="diamond_pistol">Diamond Pistol</option>
+              </select>
+
+              <label className="text-xs font-semibold">
+                Target speler (optioneel)
+              </label>
+              <input
+                type="text"
+                value={twistTargetUse}
+                onFocus={() => {
+                  setActiveAutoField("target");
+                  setShowResults(true);
+                  setTyping(twistTargetUse);
+                }}
+                onChange={(e) => {
+                  setTwistTargetUse(e.target.value);
+                  setActiveAutoField("target");
+                  setTyping(e.target.value);
+                  setShowResults(true);
+                }}
+                placeholder="@target"
+                className="w-full border rounded-lg px-3 py-2 text-sm mb-3"
+              />
+
+              {showResults &&
+                searchResults.length > 0 &&
+                activeAutoField === "target" && (
+                  <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
+                    {searchResults.map((u) => (
+                      <div
+                        key={u.tiktok_id}
+                        onClick={() => applyAutoFill(u)}
+                        className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+                      >
+                        <span className="font-semibold">{u.display_name}</span>{" "}
+                        <span className="text-gray-500">@{u.username}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+              <button
+                onClick={() =>
+                  emitAdmin("admin:useTwist", {
+                    username: twistUserUse,
+                    twist: twistTypeUse,
+                    target: twistTargetUse,
+                  })
+                }
+                className="mt-2 px-3 py-2 bg-purple-600 text-white rounded-lg text-sm w-full"
+              >
+                Gebruik twist
+              </button>
+            </div>
+
+          </div>
+        </section>
+
+        {/* ============================================================
+            LOG FEED
+        ============================================================ */}
+        <section className="mt-6 bg-white rounded-2xl shadow p-4">
+          <h2 className="text-lg font-semibold mb-2">Log feed</h2>
+
+          <div className="overflow-y-auto max-h-[400px] border border-gray-200 rounded-lg bg-gray-50 text-sm">
+            {logs.length ? (
+              logs.map((log) => (
+                <div
+                  key={log.id}
+                  className={`px-3 py-1 border-b last:border-0 ${
+                    log.type === "gift"
+                      ? "bg-pink-50 text-pink-800"
+                      : log.type === "elim"
+                      ? "bg-red-50 text-red-700"
+                      : log.type === "join"
+                      ? "bg-green-50 text-green-700"
+                      : log.type === "twist"
+                      ? "bg-purple-50 text-purple-700"
+                      : "bg-blue-50 text-blue-700"
+                  }`}
+                >
+                  <span className="font-mono text-xs opacity-60">
+                    {new Date(log.timestamp).toLocaleTimeString("nl-NL", {
+                      hour12: false,
+                    })}
+                  </span>{" "}
+                  <strong>{log.type.toUpperCase()}</strong> – {log.message}
+                </div>
+              ))
+            ) : (
+              <div className="px-3 py-2 text-gray-500 italic">
+                Nog geen logs ontvangen.
+              </div>
+            )}
+          </div>
+        </section>
+
+        <footer className="mt-4 text-xs text-gray-400 text-center">
+          BattleBox Engine v3.2 – Danny Stable
+        </footer>
+      </main>
   );
-              }
+                }
