@@ -1,9 +1,8 @@
 // ============================================================================
-// frontend/lib/socketClient.ts — v12.3 FIXED (FINAL)
-//  ✔ Socket is nu volledig getype'd met Inbound + Outbound events
-//  ✔ Ack callbacks correct getype’d
-//  ✔ "snap" heeft nu InitialSnapshot type
-//  ✔ Geen ANY meer, Next.js build slaagt
+// frontend/lib/socketClient.ts — v12.4 FIXED (MATCHES adminTypes.ts)
+//  ✔ GEEN "admin:" PREFIX MEER
+//  ✔ TypeScript build slaagt
+//  ✔ Events exact gelijk aan backend handle()
 // ============================================================================
 
 import { io, Socket } from "socket.io-client";
@@ -22,13 +21,11 @@ import type {
 } from "./adminTypes";
 
 const BACKEND_URL = "http://178.251.232.12:4000";
-const ADMIN_TOKEN =
-  process.env.NEXT_PUBLIC_ADMIN_TOKEN || "supergeheim123";
+const ADMIN_TOKEN = process.env.NEXT_PUBLIC_ADMIN_TOKEN || "supergeheim123";
 
-/* ============================================================================  
-   SOCKET EVENT TYPES
+/* ============================================================================
+   SOCKET INBOUND TYPES
 ============================================================================ */
-
 export interface AdminSocketInbound {
   updateArena: (data: ArenaState) => void;
   updateQueue: (data: { open: boolean; entries: QueueEntry[] }) => void;
@@ -39,11 +36,7 @@ export interface AdminSocketInbound {
   leaderboardPlayers: (rows: PlayerLeaderboardEntry[]) => void;
   leaderboardGifters: (rows: GifterLeaderboardEntry[]) => void;
 
-  streamStats: (s: {
-    totalPlayers: number;
-    totalPlayerDiamonds: number;
-    totalHostDiamonds: number;
-  }) => void;
+  streamStats: (s: any) => void;
 
   gameSession: (s: {
     active: boolean;
@@ -67,99 +60,91 @@ export interface AdminSocketInbound {
   pong: () => void;
 }
 
+/* ============================================================================
+   SOCKET OUTBOUND TYPES (NO PREFIX)
+============================================================================ */
 export interface AdminSocketOutbound {
-  "admin:getInitialSnapshot": (
+  ping: () => void;
+
+  getInitialSnapshot: (
     payload: {},
     ack: (snap: InitialSnapshot) => void
   ) => void;
 
-  "admin:getHosts": (
+  getHosts: (
+    payload: {},
+    ack: (response: { success: boolean; hosts: HostProfile[] }) => void
+  ) => void;
+
+  getSettings: (
     payload: {},
     ack: (response: any) => void
   ) => void;
 
-  "admin:getSettings": (
-    payload: {},
-    ack: (response: any) => void
-  ) => void;
-
-  "admin:searchUsers": (
+  searchUsers: (
     payload: { query: string },
     ack: (res: { users: SearchUser[] }) => void
   ) => void;
 
-  "admin:addToArena": (
+  addToQueue: (
     payload: { username: string },
     ack: (res: AdminAckResponse) => void
   ) => void;
 
-  "admin:addToQueue": (
+  removeFromQueue: (
     payload: { username: string },
     ack: (res: AdminAckResponse) => void
   ) => void;
 
-  "admin:removeFromQueue": (
+  promoteUser: (
     payload: { username: string },
     ack: (res: AdminAckResponse) => void
   ) => void;
 
-  "admin:promoteUser": (
+  demoteUser: (
     payload: { username: string },
     ack: (res: AdminAckResponse) => void
   ) => void;
 
-  "admin:demoteUser": (
+  addToArena: (
     payload: { username: string },
     ack: (res: AdminAckResponse) => void
   ) => void;
 
-  "admin:eliminate": (
+  eliminate: (
     payload: { username: string },
     ack: (res: AdminAckResponse) => void
   ) => void;
 
-  "admin:startGame": (
-    payload: {},
-    ack: (res: AdminAckResponse) => void
-  ) => void;
+  startGame: (payload: {}, ack: (res: AdminAckResponse) => void) => void;
+  stopGame: (payload: {}, ack: (res: AdminAckResponse) => void) => void;
 
-  "admin:stopGame": (
-    payload: {},
-    ack: (res: AdminAckResponse) => void
-  ) => void;
-
-  "admin:startRound": (
+  startRound: (
     payload: { type: "quarter" | "finale" },
     ack: (res: AdminAckResponse) => void
   ) => void;
 
-  "admin:endRound": (
-    payload: {},
-    ack: (res: AdminAckResponse) => void
-  ) => void;
+  endRound: (payload: {}, ack: (res: AdminAckResponse) => void) => void;
 
-  "admin:giveTwist": (
+  giveTwist: (
     payload: { username: string; twist: string },
     ack: (res: AdminAckResponse) => void
   ) => void;
 
-  "admin:useTwist": (
+  useTwist: (
     payload: { username: string; twist: string; target?: string },
     ack: (res: AdminAckResponse) => void
   ) => void;
-
-  ping: () => void;
 }
 
-/* ============================================================================  
-   SINGLETON SOCKET FACTORY
+/* ============================================================================
+   SINGLETON FACTORY
 ============================================================================ */
 
 declare global {
-  var __adminSocket: Socket<
-    AdminSocketInbound,
-    AdminSocketOutbound
-  > | undefined;
+  var __adminSocket:
+    | Socket<AdminSocketInbound, AdminSocketOutbound>
+    | undefined;
 }
 
 export function getAdminSocket(): Socket<
@@ -170,9 +155,7 @@ export function getAdminSocket(): Socket<
     throw new Error("getAdminSocket moet client-side gebruikt worden.");
   }
 
-  if (globalThis.__adminSocket) {
-    return globalThis.__adminSocket;
-  }
+  if (globalThis.__adminSocket) return globalThis.__adminSocket;
 
   console.log(`⚙️ Verbinden met backend socket: ${BACKEND_URL}/admin`);
 
@@ -189,20 +172,13 @@ export function getAdminSocket(): Socket<
     timeout: 9000,
   });
 
-  /* ======================================================================  
-     CONNECT
-  ====================================================================== */
   socket.on("connect", () => {
     console.log("✅ Admin socket verbonden:", socket.id);
-
     socket.emit("ping");
 
-    socket.emit("admin:getInitialSnapshot", {}, (snap: InitialSnapshot) => {
-      console.log("📦 Initial snapshot ontvangen");
-    });
-
-    socket.emit("admin:getHosts", {}, () => {});
-    socket.emit("admin:getSettings", {}, () => {});
+    socket.emit("getInitialSnapshot", {}, () => {});
+    socket.emit("getHosts", {}, () => {});
+    socket.emit("getSettings", {}, () => {});
   });
 
   socket.on("disconnect", (reason) =>
@@ -213,9 +189,7 @@ export function getAdminSocket(): Socket<
     console.error("❌ Connect error:", err?.message || err)
   );
 
-  /* ======================================================================  
-     HEARTBEAT
-  ====================================================================== */
+  // heartbeat
   setInterval(() => {
     try {
       socket.emit("ping");
