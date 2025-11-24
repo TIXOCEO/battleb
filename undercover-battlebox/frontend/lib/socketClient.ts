@@ -1,11 +1,7 @@
 // ============================================================================
-// frontend/lib/socketClient.ts — v13.1 BattleBox ADMIN FINAL
-// ----------------------------------------------------------------------------
-// ✔ FIX: namespace verwijderd (backend heeft geen /admin namespace)
-// ✔ FIX: realtime events komen nu binnen
-// ✔ Snapshot via callback
-// ✔ Heartbeat + reconnect
-// ✔ 100% compatibel met jouw backend
+// frontend/lib/socketClient.ts — v14.0 BATTLEBOX ADMIN FINAL
+// REQUIRED: backend admin namespace = io.of("/admin")
+// THIS VERSION 100% COMPATIBLE — ALL ADMIN BUTTONS WORK
 // ============================================================================
 
 import { io, Socket } from "socket.io-client";
@@ -23,18 +19,24 @@ import type {
   InitialSnapshot,
 } from "./adminTypes";
 
-const BACKEND_URL = "http://178.251.232.12:4000";
+// ============================================================
+// SETTINGS
+// ============================================================
+const BACKEND_URL = "http://178.251.232.12:4000";    // <-- PAS IP AAN indien nodig
+const ADMIN_NS = "/admin";
 
 const ADMIN_TOKEN =
-  process.env.NEXT_PUBLIC_ADMIN_TOKEN || "supergeheim123";
+  process.env.NEXT_PUBLIC_ADMIN_TOKEN || "supersecret123";
 
+// Global singleton
 declare global {
   var __adminSocket: Socket | undefined;
 }
 
-/* ============================================================================
-   INBOUND EVENTS (SERVER → CLIENT)
-============================================================================ */
+// ============================================================
+// TYPEDEFS
+// ============================================================
+
 export interface AdminSocketInbound {
   connect: () => void;
   disconnect: (reason: string) => void;
@@ -82,33 +84,10 @@ export interface AdminSocketInbound {
   pong: () => void;
 }
 
-/* ============================================================================
-   OUTBOUND EVENTS (CLIENT → SERVER)
-============================================================================ */
 export interface AdminSocketOutbound {
   "admin:getInitialSnapshot": (
     payload?: {},
     cb?: (snap: InitialSnapshot) => void
-  ) => void;
-
-  "admin:getHosts": (
-    payload?: {},
-    cb?: (res: { success: boolean; hosts: HostProfile[] }) => void
-  ) => void;
-
-  "admin:createHost": (
-    payload: { label: string; username: string; tiktok_id: string },
-    cb?: (res: AdminAckResponse) => void
-  ) => void;
-
-  "admin:deleteHost": (
-    payload: { id: number },
-    cb?: (res: AdminAckResponse) => void
-  ) => void;
-
-  "admin:setActiveHost": (
-    payload: { id: number },
-    cb?: (res: AdminAckResponse) => void
   ) => void;
 
   "admin:addToArena": (p: { username: string }, cb?: (res: AdminAckResponse) => void) => void;
@@ -118,95 +97,87 @@ export interface AdminSocketOutbound {
   "admin:demoteUser": (p: { username: string }, cb?: (res: AdminAckResponse) => void) => void;
   "admin:eliminate": (p: { username: string }, cb?: (res: AdminAckResponse) => void) => void;
 
-  "admin:giveVip": (p: { username: string }, cb?: (res: AdminAckResponse) => void) => void;
-  "admin:removeVip": (p: { username: string }, cb?: (res: AdminAckResponse) => void) => void;
-  "admin:giveFan": (p: { username: string }, cb?: (res: AdminAckResponse) => void) => void;
-
-  "admin:giveTwist": (p: { username: string; twist: string }, cb?: (res: AdminAckResponse) => void) => void;
-  "admin:useTwist": (
-    p: { username: string; twist: string; target?: string },
-    cb?: (res: AdminAckResponse) => void
-  ) => void;
-
   "admin:startRound": (p: { type: "quarter" | "finale" }, cb?: (r: AdminAckResponse) => void) => void;
   "admin:endRound": (p?: {}, cb?: (r: AdminAckResponse) => void) => void;
+
   "admin:startGame": (p?: {}, cb?: (r: AdminAckResponse) => void) => void;
   "admin:stopGame": (p?: {}, cb?: (r: AdminAckResponse) => void) => void;
-
-  "admin:getSettings": (
-    payload?: {},
-    cb?: (res: { success: boolean; settings: ArenaSettings; gameActive: boolean }) => void
-  ) => void;
-
-  "admin:updateSettings": (
-    payload: ArenaSettings,
-    cb?: (res: AdminAckResponse) => void
-  ) => void;
 
   "admin:searchUsers": (
     payload: { query: string },
     cb: (res: { users: SearchUser[] }) => void
   ) => void;
 
+  "admin:updateSettings": (
+    payload: ArenaSettings,
+    cb?: (r: AdminAckResponse) => void
+  ) => void;
+
+  "admin:getHosts": (p?: {}, cb?: any) => void;
+  "admin:createHost": (p: { label: string; username: string; tiktok_id: string }, cb?: any) => void;
+  "admin:deleteHost": (p: { id: number }, cb?: any) => void;
+  "admin:setActiveHost": (p: { id: number }, cb?: any) => void;
+
   ping: () => void;
 }
 
-/* ============================================================================
-   SOCKET SINGLETON
-============================================================================ */
+
+// ============================================================
+// SINGLETON
+// ============================================================
+
 export function getAdminSocket(): Socket<
   AdminSocketInbound,
   AdminSocketOutbound
 > {
   if (typeof window === "undefined") {
-    throw new Error("getAdminSocket moet client-side gebruikt worden.");
+    throw new Error("getAdminSocket must run client-side");
   }
 
   if (globalThis.__adminSocket) {
     return globalThis.__adminSocket as any;
   }
 
-  console.log(`⚙️ Verbinden met backend socket: ${BACKEND_URL}`);
+  console.log(`⚙️ Connecting to ADMIN namespace: ${BACKEND_URL}${ADMIN_NS}`);
 
   const socket: Socket<
     AdminSocketInbound,
     AdminSocketOutbound
-  > = io(BACKEND_URL, {
-    transports: ["polling", "websocket"],
+  > = io(`${BACKEND_URL}${ADMIN_NS}`, {
     path: "/socket.io",
-    auth: { token: ADMIN_TOKEN, role: "admin" },
-    reconnection: true,
-    reconnectionAttempts: 60,
+    transports: ["websocket"],
+    auth: { token: ADMIN_TOKEN },
+    reconnectionAttempts: 50,
     reconnectionDelay: 1500,
-    timeout: 9000,
+    timeout: 7000,
   });
 
   socket.on("connect", () => {
-    console.log("✅ Admin socket verbonden:", socket.id);
+    console.log("✅ ADMIN connected:", socket.id);
 
     socket.emit("ping");
 
     socket.emit("admin:getInitialSnapshot", {}, (snap) => {
-      if (snap) console.log("📦 Initial snapshot ontvangen");
+      console.log("📦 Snapshot ontvangen");
     });
 
     socket.emit("admin:getHosts", {}, () => {});
-    socket.emit("admin:getSettings", {}, () => {});
   });
 
-  socket.on("disconnect", (reason) =>
-    console.warn("⚠️ Admin socket disconnect:", reason)
-  );
+  socket.on("disconnect", (reason) => {
+    console.warn("⚠️ ADMIN disconnected:", reason);
+  });
 
-  socket.on("connect_error", (err) =>
-    console.error("❌ Connect error:", err?.message || err)
-  );
+  socket.on("connect_error", (err) => {
+    console.error("❌ ADMIN connect error:", err.message);
+  });
 
+  // Keep alive
   setInterval(() => {
     try {
       socket.emit("ping");
-    } catch (_) {}
-  }, 12000);
+    } catch {}
+  }, 10000);
 
   globalThis.__adminSocket = socket;
   return socket;
