@@ -51,9 +51,7 @@ export default function AdminDashboardPage() {
   const [gifterLeaderboard, setGifterLeaderboard] =
     useState<GifterLeaderboardEntry[]>([]);
 
-  const [activeLbTab, setActiveLbTab] = useState<"players" | "gifters">(
-    "players"
-  );
+  const [activeLbTab, setActiveLbTab] = useState<"players" | "gifters">("players");
 
   const [gameSession, setGameSession] = useState<GameSessionState>({
     active: false,
@@ -92,22 +90,14 @@ export default function AdminDashboardPage() {
       setQueueOpen(d.open ?? true);
     });
 
-    socket.on("log", (l) =>
-      setLogs((prev) => [l, ...prev].slice(0, 200))
-    );
-
+    socket.on("log", (l) => setLogs((prev) => [l, ...prev].slice(0, 200)));
     socket.on("initialLogs", (d) => setLogs(d.slice(0, 200)));
 
     socket.on("streamStats", (s) => setStreamStats(s));
     socket.on("gameSession", (s) => setGameSession(s));
 
-    socket.on("leaderboardPlayers", (rows) => {
-      setPlayerLeaderboard(rows);
-    });
-
-    socket.on("leaderboardGifters", (rows) => {
-      setGifterLeaderboard(rows);
-    });
+    socket.on("leaderboardPlayers", (rows) => setPlayerLeaderboard(rows));
+    socket.on("leaderboardGifters", (rows) => setGifterLeaderboard(rows));
 
     socket.on("connect_error", () =>
       setStatus("❌ Socket verbinding weggevallen")
@@ -116,11 +106,9 @@ export default function AdminDashboardPage() {
     socket.on("round:start", (d) =>
       setStatus(`▶️ Ronde gestart (${d.type}) — ${d.duration}s`)
     );
-
     socket.on("round:grace", (d) =>
       setStatus(`⏳ Grace-periode actief (${d.grace}s)`)
     );
-
     socket.on("round:end", () =>
       setStatus("⛔ Ronde beëindigd — voer eliminaties uit")
     );
@@ -160,26 +148,20 @@ export default function AdminDashboardPage() {
       if (snap.gameSession) setGameSession(snap.gameSession);
 
       if (snap.playerLeaderboard) setPlayerLeaderboard(snap.playerLeaderboard);
-      if (snap.gifterLeaderboard)
-        setGifterLeaderboard(snap.gifterLeaderboard);
+      if (snap.gifterLeaderboard) setGifterLeaderboard(snap.gifterLeaderboard);
     });
   }, []);
 
   // ============================================================
   // ADMIN EMITTERS
   // ============================================================
-  const emitAdmin = (
-    event: keyof AdminSocketOutbound,
-    payload?: any
-  ) => {
+  const emitAdmin = (event: keyof AdminSocketOutbound, payload?: any) => {
     const socket = getAdminSocket();
     setStatus(`Bezig met ${event}...`);
 
     socket.emit(event, payload || {}, (res: AdminAckResponse) => {
       setStatus(
-        res?.success
-          ? "✅ Uitgevoerd"
-          : `❌ ${res?.message ?? "Geen antwoord"}`
+        res?.success ? "✅ Uitgevoerd" : `❌ ${res?.message ?? "Geen antwoord"}`
       );
     });
   };
@@ -199,9 +181,7 @@ export default function AdminDashboardPage() {
 
     socket.emit(event, { username: formatted }, (res: AdminAckResponse) => {
       setStatus(
-        res?.success
-          ? "✅ Uitgevoerd"
-          : `❌ ${res?.message ?? "Geen antwoord"}`
+        res?.success ? "✅ Uitgevoerd" : `❌ ${res?.message ?? "Geen antwoord"}`
       );
     });
   };
@@ -209,19 +189,18 @@ export default function AdminDashboardPage() {
   // ============================================================
   // DERIVED STATE
   // ============================================================
-  const fmt = (n: number) =>
-    n.toLocaleString("nl-NL", { maximumFractionDigits: 0 });
+  const fmt = (n: number | undefined | null) =>
+    (typeof n === "number" ? n : 0).toLocaleString("nl-NL", {
+      maximumFractionDigits: 0,
+    });
 
   const players = useMemo(() => arena?.players ?? [], [arena]);
 
   const arenaStatus = arena?.status ?? "idle";
-  const hasDoomed =
-    players.some((p: any) => p.positionStatus === "elimination");
+  const hasDoomed = players.some((p: any) => p.positionStatus === "elimination");
 
   const canStartRound =
-    !!arena &&
-    (arenaStatus === "idle" || arenaStatus === "ended") &&
-    !hasDoomed;
+    !!arena && (arenaStatus === "idle" || arenaStatus === "ended") && !hasDoomed;
 
   const canStopRound = arenaStatus === "active";
   const canGraceEnd = arenaStatus === "grace";
@@ -255,9 +234,7 @@ export default function AdminDashboardPage() {
   }, [typing]);
 
   const applyAutoFill = (u: SearchUser) => {
-    const formatted = u.username.startsWith("@")
-      ? u.username
-      : `@${u.username}`;
+    const formatted = u.username.startsWith("@") ? u.username : `@${u.username}`;
 
     if (activeAutoField === "main") setUsername(formatted);
     if (activeAutoField === "give") setTwistUserGive(formatted);
@@ -295,10 +272,7 @@ export default function AdminDashboardPage() {
     if (!sec || sec < 0) sec = 0;
     const m = Math.floor(sec / 60);
     const s = sec % 60;
-    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(
-      2,
-      "0"
-    )}`;
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
   // ============================================================
@@ -325,10 +299,7 @@ export default function AdminDashboardPage() {
   // ============================================================
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
-
-      {/* ===========================================
-          HEADER
-      ============================================ */}
+      {/* HEADER */}
       <header className="mb-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-2">
           <div className="flex items-center gap-2">
@@ -354,7 +325,6 @@ export default function AdminDashboardPage() {
         {/* TIMER */}
         {arena && arena.status !== "idle" && (
           <div className="w-full bg-gray-300 rounded-full h-4 shadow-inner relative overflow-hidden">
-
             <div
               className={`
                 h-4 transition-all duration-300
@@ -461,7 +431,6 @@ export default function AdminDashboardPage() {
             SPELERSACTIES
         ============================================================ */}
         <div className="lg:col-span-2 flex flex-col gap-3">
-
           <div className="text-sm font-semibold">Speleracties</div>
 
           <div className="flex flex-col md:flex-row gap-3 md:items-end relative">
@@ -489,7 +458,6 @@ export default function AdminDashboardPage() {
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
               />
 
-              {/* AUTOCOMPLETE DROPDOWN */}
               {showResults &&
                 searchResults.length > 0 &&
                 activeAutoField === "main" && (
@@ -508,7 +476,6 @@ export default function AdminDashboardPage() {
                 )}
             </div>
 
-            {/* ACTION BUTTONS */}
             <div className="flex gap-2 text-xs">
               <button
                 onClick={() => emitAdminWithUser("admin:addToArena", username)}
@@ -539,7 +506,6 @@ export default function AdminDashboardPage() {
           ARENA + QUEUE
       ============================================================ */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        
         {/* ARENA */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Arena</h2>
@@ -554,7 +520,9 @@ export default function AdminDashboardPage() {
               players.map((p, idx) => (
                 <div
                   key={p.id}
-                  className={`rounded-lg p-3 border text-sm shadow ${colorForPosition(p)}`}
+                  className={`rounded-lg p-3 border text-sm shadow ${colorForPosition(
+                    p
+                  )}`}
                 >
                   <div className="flex justify-between items-center">
                     <span className="font-bold">#{idx + 1}</span>
@@ -573,7 +541,9 @@ export default function AdminDashboardPage() {
 
                   {p.positionStatus === "elimination" && (
                     <button
-                      onClick={() => emitAdminWithUser("admin:eliminate", p.username)}
+                      onClick={() =>
+                        emitAdminWithUser("admin:eliminate", p.username)
+                      }
                       className="mt-2 px-2 py-1 text-[11px] rounded-full border border-red-300 text-red-700 bg-red-50"
                     >
                       Verwijder speler
@@ -646,28 +616,36 @@ export default function AdminDashboardPage() {
 
                 <div className="flex gap-1 mt-2 sm:mt-0 justify-end">
                   <button
-                    onClick={() => emitAdminWithUser("admin:promoteUser", q.username)}
+                    onClick={() =>
+                      emitAdminWithUser("admin:promoteUser", q.username)
+                    }
                     className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
                   >
                     ▲
                   </button>
 
                   <button
-                    onClick={() => emitAdminWithUser("admin:demoteUser", q.username)}
+                    onClick={() =>
+                      emitAdminWithUser("admin:demoteUser", q.username)
+                    }
                     className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
                   >
                     ▼
                   </button>
 
                   <button
-                    onClick={() => emitAdminWithUser("admin:addToArena", q.username)}
+                    onClick={() =>
+                      emitAdminWithUser("admin:addToArena", q.username)
+                    }
                     className="px-2 py-1 rounded-full border border-[#ff4d4f] text-[#ff4d4f]"
                   >
                     → Arena
                   </button>
 
                   <button
-                    onClick={() => emitAdminWithUser("admin:removeFromQueue", q.username)}
+                    onClick={() =>
+                      emitAdminWithUser("admin:removeFromQueue", q.username)
+                    }
                     className="px-2 py-1 rounded-full border border-red-300 text-red-700 bg-red-50"
                   >
                     ✕
@@ -681,17 +659,13 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-{/* ===========================================
-          LEADERBOARDS (TAB CONTAINER)
-      ============================================ */}
+      {/* ============================================================
+          LEADERBOARDS
+      ============================================================ */}
       <section className="mt-4">
-
         <div className="bg-white rounded-2xl shadow p-0 overflow-hidden">
-
-          {/* TAB BUTTONS */}
           <div className="w-full flex justify-end p-3 border-b border-gray-200 bg-gray-50">
             <div className="flex gap-2">
-
               <button
                 onClick={() => setActiveLbTab("players")}
                 className={`
@@ -721,16 +695,11 @@ export default function AdminDashboardPage() {
               >
                 Gifters
               </button>
-
             </div>
           </div>
 
-          {/* TAB CONTENT */}
           <div className="p-4 max-h-96 overflow-y-auto text-sm">
-
-            {/* ==========================
-                PLAYERS TAB
-            =========================== */}
+            {/* PLAYERS TAB */}
             {activeLbTab === "players" && (
               <div>
                 <h2 className="text-xl font-semibold mb-2">Player Leaderboard</h2>
@@ -745,7 +714,9 @@ export default function AdminDashboardPage() {
                       className="flex items-center justify-between border-b last:border-0 border-gray-200 py-1"
                     >
                       <div>
-                        <span className="font-mono text-xs text-gray-500 mr-2">#{idx + 1}</span>
+                        <span className="font-mono text-xs text-gray-500 mr-2">
+                          #{idx + 1}
+                        </span>
                         <span className="font-semibold">
                           {e.display_name} (@{e.username})
                         </span>
@@ -764,9 +735,7 @@ export default function AdminDashboardPage() {
               </div>
             )}
 
-            {/* ==========================
-                GIFTERS TAB
-            =========================== */}
+            {/* GIFTERS TAB */}
             {activeLbTab === "gifters" && (
               <div>
                 <h2 className="text-xl font-semibold mb-2">Gifter Leaderboard</h2>
@@ -781,7 +750,9 @@ export default function AdminDashboardPage() {
                       className="flex items-center justify-between border-b last:border-0 border-gray-200 py-1"
                     >
                       <div>
-                        <span className="font-mono text-xs text-gray-500 mr-2">#{idx + 1}</span>
+                        <span className="font-mono text-xs text-gray-500 mr-2">
+                          #{idx + 1}
+                        </span>
                         <span className="font-semibold">
                           {e.display_name} (@{e.username})
                         </span>
@@ -799,19 +770,17 @@ export default function AdminDashboardPage() {
                 )}
               </div>
             )}
-
           </div>
         </div>
       </section>
 
-      {/* ===========================================
+      {/* ============================================================
           TWISTS
-      ============================================ */}
+      ============================================================ */}
       <section className="mt-8 bg-white rounded-2xl shadow p-4">
         <h2 className="text-xl font-semibold mb-4">Twists</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-
           {/* GIVE TWIST */}
           <div className="p-4 border rounded-xl bg-gray-50 shadow-sm relative">
             <h3 className="font-semibold mb-3">Twist geven aan speler</h3>
@@ -835,7 +804,6 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
-            {/* AUTOCOMPLETE GIVE */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "give" && (
@@ -985,13 +953,12 @@ export default function AdminDashboardPage() {
               Gebruik twist
             </button>
           </div>
-
         </div>
       </section>
 
-      {/* ===========================================
+      {/* ============================================================
           LOG FEED
-      ============================================ */}
+      ============================================================ */}
       <section className="mt-6 bg-white rounded-2xl shadow p-4">
         <h2 className="text-lg font-semibold mb-2">Log feed</h2>
 
@@ -1021,9 +988,7 @@ export default function AdminDashboardPage() {
               </div>
             ))
           ) : (
-            <div className="px-3 py-2 text-gray-500 italic">
-              Nog geen logs ontvangen.
-            </div>
+            <div className="px-3 py-2 text-gray-500 italic">Nog geen logs ontvangen.</div>
           )}
         </div>
       </section>
@@ -1034,4 +999,3 @@ export default function AdminDashboardPage() {
     </main>
   );
 }
-    
