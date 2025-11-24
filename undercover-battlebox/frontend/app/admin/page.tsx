@@ -2,7 +2,6 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { getAdminSocket } from "@/lib/socketClient";
-
 import type {
   ArenaState,
   QueueEntry,
@@ -10,28 +9,53 @@ import type {
   AdminAckResponse,
   PlayerLeaderboardEntry,
   GifterLeaderboardEntry,
+  SearchUser,
 } from "@/lib/adminTypes";
 
-type StreamStats = {
-  totalPlayers: number;
-  totalPlayerDiamonds: number;
-  totalHostDiamonds: number;
-};
+import type { AdminEventName } from "@/lib/adminEvents";
 
-type GameSessionState = {
-  active: boolean;
-  gameId: number | null;
-  startedAt?: string | null;
-  endedAt?: string | null;
-};
+// ============================================================
+// TYPE SAFE EMITTERS
+// ============================================================
+function useAdminEmitters() {
+  const socket: any = getAdminSocket();
 
-type SearchUser = {
-  tiktok_id: string;
-  username: string;
-  display_name: string;
-};
+  const emitAdmin = <E extends AdminEventName>(
+    event: E,
+    payload: any = {}
+  ) =>
+    new Promise<AdminAckResponse>((resolve) => {
+      socket.emit(event, payload, (res: AdminAckResponse) => {
+        resolve(res || { success: false, message: "Geen antwoord" });
+      });
+    });
 
+  const emitAdminUser = <E extends AdminEventName>(
+    event: E,
+    username: string
+  ) => {
+    if (!username?.trim()) {
+      return Promise.resolve({
+        success: false,
+        message: "Geen username opgegeven",
+      });
+    }
+
+    const formatted =
+      username.startsWith("@") ? username : `@${username}`;
+
+    return emitAdmin(event, { username: formatted });
+  };
+
+  return { emitAdmin, emitAdminUser };
+}
+
+// ============================================================================
+// COMPONENT
+// ============================================================================
 export default function AdminDashboardPage() {
+  const { emitAdmin, emitAdminUser } = useAdminEmitters();
+
   // ============================================================
   // CORE STATE
   // ============================================================
@@ -40,7 +64,13 @@ export default function AdminDashboardPage() {
   const [queueOpen, setQueueOpen] = useState(true);
 
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [streamStats, setStreamStats] = useState<StreamStats | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+
+  const [streamStats, setStreamStats] = useState<{
+    totalPlayers: number;
+    totalPlayerDiamonds: number;
+    totalHostDiamonds: number;
+  } | null>(null);
 
   const [playerLeaderboard, setPlayerLeaderboard] =
     useState<PlayerLeaderboardEntry[]>([]);
@@ -48,18 +78,16 @@ export default function AdminDashboardPage() {
   const [gifterLeaderboard, setGifterLeaderboard] =
     useState<GifterLeaderboardEntry[]>([]);
 
-  const [activeLbTab, setActiveLbTab] = useState<"players" | "gifters">(
-    "players"
-  );
+  const [activeLbTab, setActiveLbTab] =
+    useState<"players" | "gifters">("players");
 
-  const [gameSession, setGameSession] = useState<GameSessionState>({
+  const [gameSession, setGameSession] = useState({
     active: false,
-    gameId: null,
+    gameId: null as number | null,
   });
 
-  // INPUTS
+  // USER INPUTS
   const [username, setUsername] = useState("");
-  const [status, setStatus] = useState<string | null>(null);
 
   // TWISTS
   const [twistUserGive, setTwistUserGive] = useState("");
@@ -73,17 +101,16 @@ export default function AdminDashboardPage() {
   const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
   const [showResults, setShowResults] = useState(false);
   const [activeAutoField, setActiveAutoField] = useState<
-    null | "main" | "give" | "use" | "target"
+    "main" | "give" | "use" | "target" | null
   >(null);
 
   // ============================================================
-  // SOCKET SETUP
+  // SOCKET LISTENERS
   // ============================================================
   useEffect(() => {
     const socket = getAdminSocket();
 
-    socket.on("updateArena", (data: ArenaState) => setArena(data));
-
+    socket.on("updateArena", setArena);
     socket.on("updateQueue", (d) => {
       setQueue(d.entries ?? []);
       setQueueOpen(d.open ?? true);
@@ -92,49 +119,30 @@ export default function AdminDashboardPage() {
     socket.on("log", (l) =>
       setLogs((prev) => [l, ...prev].slice(0, 200))
     );
-
     socket.on("initialLogs", (d) => setLogs(d.slice(0, 200)));
 
-    socket.on("streamStats", (s) => setStreamStats(s));
-    socket.on("gameSession", (s) => setGameSession(s));
+    socket.on("streamStats", setStreamStats);
+    socket.on("gameSession", setGameSession);
 
-    socket.on("leaderboardPlayers", (rows) => {
-      setPlayerLeaderboard(rows);
-    });
-
-    socket.on("leaderboardGifters", (rows) => {
-      setGifterLeaderboard(rows);
-    });
+    socket.on("leaderboardPlayers", setPlayerLeaderboard);
+    socket.on("leaderboardGifters", setGifterLeaderboard);
 
     socket.on("connect_error", () =>
-      setStatus("❌ Socket verbinding weggevallen")
+      setStatus("❌ Socket verbinding verbroken")
     );
 
     socket.on("round:start", (d) =>
-      setStatus(`▶️ Ronde gestart (${d.type}) — ${d.duration}s`)
+      setStatus(`▶️ Ronde gestart (${d.type})`)
     );
-
-    socket.on("round:grace", (d) =>
-      setStatus(`⏳ Grace-periode actief (${d.grace}s)`)
+    socket.on("round:grace", () =>
+      setStatus(`⏳ Grace-periode actief`)
     );
-
     socket.on("round:end", () =>
-      setStatus("⛔ Ronde beëindigd — voer eliminaties uit")
+      setStatus("⛔ Ronde beëindigd")
     );
 
     return () => {
-      socket.off("updateArena");
-      socket.off("updateQueue");
-      socket.off("log");
-      socket.off("initialLogs");
-      socket.off("streamStats");
-      socket.off("gameSession");
-      socket.off("leaderboardPlayers");
-      socket.off("leaderboardGifters");
-      socket.off("connect_error");
-      socket.off("round:start");
-      socket.off("round:grace");
-      socket.off("round:end");
+      socket.off();
     };
   }, []);
 
@@ -147,88 +155,23 @@ export default function AdminDashboardPage() {
     socket.emit("admin:getInitialSnapshot", {}, (snap: any) => {
       if (!snap) return;
 
-      if (snap.arena) setArena(snap.arena);
-      if (snap.queue) {
-        setQueue(snap.queue.entries ?? []);
-        setQueueOpen(snap.queue.open ?? true);
-      }
-      if (snap.logs) setLogs(snap.logs.slice(0, 200));
+      setArena(snap.arena ?? null);
+      setQueue(snap.queue?.entries ?? []);
+      setQueueOpen(snap.queue?.open ?? true);
 
-      if (snap.stats) setStreamStats(snap.stats);
-      if (snap.gameSession) setGameSession(snap.gameSession);
-      if (snap.playerLeaderboard) setPlayerLeaderboard(snap.playerLeaderboard);
-      if (snap.gifterLeaderboard) setGifterLeaderboard(snap.gifterLeaderboard);
+      setLogs(snap.logs?.slice(0, 200) ?? []);
+      setStreamStats(snap.stats ?? null);
+      setGameSession(snap.gameSession ?? { active: false, gameId: null });
+
+      if (snap.playerLeaderboard)
+        setPlayerLeaderboard(snap.playerLeaderboard);
+      if (snap.gifterLeaderboard)
+        setGifterLeaderboard(snap.gifterLeaderboard);
     });
   }, []);
 
   // ============================================================
-  // UNIVERSAL SAFE ADMIN EMITTER (BUILD-SAFE)
-  // ============================================================
-  const emitAdmin = (event: string, payload?: any) => {
-    const socket: any = getAdminSocket();
-
-    setStatus(`Bezig met ${event}...`);
-
-    socket.emit(event as any, payload || {}, (res: AdminAckResponse) => {
-      setStatus(
-        res?.success
-          ? "✅ Uitgevoerd"
-          : `❌ ${res?.message ?? "Geen antwoord"}`
-      );
-    });
-  };
-
-  const emitAdminWithUser = (event: string, target?: string) => {
-    const socket: any = getAdminSocket();
-
-    const uname = target || username;
-    if (!uname.trim()) return;
-
-    const formatted = uname.startsWith("@") ? uname : `@${uname}`;
-
-    setStatus(`Bezig met ${event}...`);
-
-    socket.emit(
-      event as any,
-      { username: formatted },
-      (res: AdminAckResponse) => {
-        setStatus(
-          res?.success
-            ? "✅ Uitgevoerd"
-            : `❌ ${res?.message ?? "Geen antwoord"}`
-        );
-      }
-    );
-  };
-
-// ============================================================
-  // HELPERS
-  // ============================================================
-  const fmt = (n: number | undefined) =>
-    Number(n ?? 0).toLocaleString("nl-NL", { maximumFractionDigits: 0 });
-
-  const players = useMemo(() => arena?.players ?? [], [arena]);
-
-  const arenaStatus = arena?.status ?? "idle";
-  const hasDoomed = players.some(
-    (p: any) => p.positionStatus === "elimination"
-  );
-
-  const canStartRound =
-    !!arena &&
-    (arenaStatus === "idle" || arenaStatus === "ended") &&
-    !hasDoomed;
-
-  const canStopRound = arenaStatus === "active";
-  const canGraceEnd = arenaStatus === "grace";
-
-  const needsElimination =
-    (arena?.settings?.forceEliminations ?? true) &&
-    arenaStatus === "ended" &&
-    hasDoomed;
-
-  // ============================================================
-  // AUTOCOMPLETE LOGIC
+  // AUTOCOMPLETE SEARCH
   // ============================================================
   useEffect(() => {
     if (!typing || typing.length < 2) {
@@ -236,9 +179,9 @@ export default function AdminDashboardPage() {
       return;
     }
 
-    const socket = getAdminSocket();
-    const timer = setTimeout(() => {
-      socket.emit(
+    const s = getAdminSocket();
+    const tm = setTimeout(() => {
+      s.emit(
         "admin:searchUsers",
         { query: typing },
         (res: { users: SearchUser[] }) => {
@@ -247,9 +190,12 @@ export default function AdminDashboardPage() {
       );
     }, 150);
 
-    return () => clearTimeout(timer);
+    return () => clearTimeout(tm);
   }, [typing]);
 
+      // ============================================================
+  // APPLY AUTOFILL
+  // ============================================================
   const applyAutoFill = (u: SearchUser) => {
     const formatted = u.username.startsWith("@")
       ? u.username
@@ -266,27 +212,56 @@ export default function AdminDashboardPage() {
   };
 
   // ============================================================
-  // TIMER BEREKENING
+  // OTHER HELPERS
+  // ============================================================
+  const fmt = (n: number | undefined) =>
+    Number(n ?? 0).toLocaleString("nl-NL");
+
+  const players = useMemo(() => arena?.players ?? [], [arena]);
+  const arenaStatus = arena?.status ?? "idle";
+  const hasDoomed = players.some((p) => p.positionStatus === "elimination");
+
+  const canStartRound =
+    arena &&
+    ["idle", "ended"].includes(arenaStatus) &&
+    !hasDoomed;
+
+  const canStopRound = arenaStatus === "active";
+  const canGraceEnd = arenaStatus === "grace";
+
+  const needsElimination =
+    (arena?.settings?.forceEliminations ?? true) &&
+    arenaStatus === "ended" &&
+    hasDoomed;
+
+  // ============================================================
+  // ROUND TIMER BAR
   // ============================================================
   const roundProgress = useMemo(() => {
     if (!arena) return 0;
     const now = Date.now();
 
     if (arena.status === "active") {
-      const start = arena.roundStartTime;
-      const end = arena.roundCutoff;
-      return Math.max(
-        0,
-        Math.min(100, ((now - start) / (end - start)) * 100)
+      return Math.min(
+        100,
+        Math.max(
+          0,
+          ((now - arena.roundStartTime) /
+            (arena.roundCutoff - arena.roundStartTime)) *
+            100
+        )
       );
     }
 
     if (arena.status === "grace") {
-      const start = arena.roundCutoff;
-      const end = arena.graceEnd;
-      return Math.max(
-        0,
-        Math.min(100, ((now - start) / (end - start)) * 100)
+      return Math.min(
+        100,
+        Math.max(
+          0,
+          ((now - arena.roundCutoff) /
+            (arena.graceEnd - arena.roundCutoff)) *
+            100
+        )
       );
     }
 
@@ -294,9 +269,9 @@ export default function AdminDashboardPage() {
   }, [arena]);
 
   const formatTime = (sec: number) => {
-    if (!sec || sec < 0) sec = 0;
+    if (sec < 0) sec = 0;
     const m = Math.floor(sec / 60);
-    const s = sec % 60;
+    const s = Math.floor(sec % 60);
     return `${m.toString().padStart(2, "0")}:${s
       .toString()
       .padStart(2, "0")}`;
@@ -327,12 +302,13 @@ export default function AdminDashboardPage() {
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
 
-      {/* ===========================================
-          HEADER + TIMER */}
+      {/* HEADER */}
       <header className="mb-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-2">
+
           <div className="flex items-center gap-2">
             <div className="text-2xl font-bold text-[#ff4d4f]">UB</div>
+
             <div>
               <div className="text-xl font-semibold">
                 Undercover BattleBox – Admin
@@ -353,26 +329,18 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
+        {/* TIMER BAR */}
         {arena && arena.status !== "idle" && (
           <div className="w-full bg-gray-300 rounded-full h-4 shadow-inner relative overflow-hidden">
-
             <div
               className={`
                 h-4 transition-all duration-300
                 ${
                   arena.status === "active"
                     ? "bg-[#ff4d4f]"
-                    : ""
-                }
-                ${
-                  arena.status === "grace"
+                    : arena.status === "grace"
                     ? "bg-yellow-400"
-                    : ""
-                }
-                ${
-                  arena.status === "ended"
-                    ? "bg-gray-600"
-                    : ""
+                    : "bg-gray-600"
                 }
               `}
               style={{ width: `${roundProgress}%` }}
@@ -383,24 +351,16 @@ export default function AdminDashboardPage() {
                 formatTime(
                   Math.max(
                     0,
-                    Math.floor(
-                      (arena.roundCutoff - Date.now()) /
-                        1000
-                    )
+                    (arena.roundCutoff - Date.now()) / 1000
                   )
                 )}
-
               {arena.status === "grace" &&
                 formatTime(
                   Math.max(
                     0,
-                    Math.floor(
-                      (arena.graceEnd - Date.now()) /
-                        1000
-                    )
+                    (arena.graceEnd - Date.now()) / 1000
                   )
                 )}
-
               {arena.status === "ended" && "00:00"}
             </div>
           </div>
@@ -408,7 +368,7 @@ export default function AdminDashboardPage() {
       </header>
 
       {/* ============================================================
-          SPELBESTURING + SPELERSACTIES */}
+          SPELBESTURING + ACTIES */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
 
         {/* GAME CONTROL */}
@@ -417,7 +377,10 @@ export default function AdminDashboardPage() {
 
           <div className="flex gap-2 flex-wrap">
             <button
-              onClick={() => emitAdmin("admin:startGame")}
+              onClick={async () => {
+                const res = await emitAdmin("admin:startGame");
+                setStatus(res.success ? "✔ Game gestart" : `❌ ${res.message}`);
+              }}
               disabled={gameSession.active}
               className={`px-3 py-1.5 rounded-full text-xs ${
                 gameSession.active
@@ -429,7 +392,10 @@ export default function AdminDashboardPage() {
             </button>
 
             <button
-              onClick={() => emitAdmin("admin:stopGame")}
+              onClick={async () => {
+                const res = await emitAdmin("admin:stopGame");
+                setStatus(res.success ? "✔ Game gestopt" : `❌ ${res.message}`);
+              }}
               disabled={!gameSession.active}
               className={`px-3 py-1.5 rounded-full text-xs ${
                 !gameSession.active
@@ -441,156 +407,28 @@ export default function AdminDashboardPage() {
             </button>
           </div>
 
+          {/* ROUND ACTIONS */}
           <div>
             <div className="text-xs text-gray-600 mb-1">
               Ronde acties
             </div>
-            <div className="flex gap-2 flex-wrap">
 
+            <div className="flex gap-2 flex-wrap">
               <button
                 onClick={() =>
-                  emitAdmin("admin:startRound", {
-                    type: "quarter",
-                  })
+                  emitAdmin("admin:startRound", { type: "quarter" })
                 }
                 disabled={!canStartRound}
                 className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full text-xs disabled:bg-gray-400"
-              >
-                Start voorronde
-              </button>
 
-              <button
-                onClick={() =>
-                  emitAdmin("admin:startRound", {
-                    type: "finale",
-                  })
-                }
-                disabled={!canStartRound}
-                className="px-3 py-1.5 bg-gray-900 text-white rounded-full text-xs disabled:bg-gray-400"
-              >
-                Start finale
-              </button>
-
-              <button
-                onClick={() => emitAdmin("admin:endRound")}
-                disabled={!canStopRound && !canGraceEnd}
-                className="px-3 py-1.5 bg-red-600 text-white rounded-full text-xs disabled:bg-gray-400"
-              >
-                Stop ronde
-              </button>
-            </div>
-
-            {needsElimination && (
-              <p className="mt-2 text-xs text-red-600">
-                ⚠ Eerst alle eliminaties uitvoeren!
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* ============================================================
-            SPELER ACTIES */}
-        <div className="lg:col-span-2 flex flex-col gap-3">
-
-          <div className="text-sm font-semibold">
-            Speleracties
-          </div>
-
-          <div className="flex flex-col md:flex-row gap-3 md:items-end relative">
-            <div className="flex-1">
-              <label className="text-xs text-gray-600 font-semibold mb-1 block">
-                @username (zoek)
-              </label>
-
-              <input
-                type="text"
-                value={username}
-                onFocus={() => {
-                  setActiveAutoField("main");
-                  setTyping(username);
-                  setShowResults(true);
-                }}
-                onChange={(e) => {
-                  setUsername(e.target.value);
-                  setActiveAutoField("main");
-                  setTyping(e.target.value);
-                  setShowResults(true);
-                }}
-                placeholder="@zoeken"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-              />
-
-              {showResults &&
-                searchResults.length > 0 &&
-                activeAutoField === "main" && (
-                  <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
-                    {searchResults.map((u) => (
-                      <div
-                        key={u.tiktok_id}
-                        onClick={() => applyAutoFill(u)}
-                        className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
-                      >
-                        <span className="font-semibold">
-                          {u.display_name}
-                        </span>{" "}
-                        <span className="text-gray-500">
-                          @{u.username}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-            </div>
-
-            <div className="flex gap-2 text-xs">
-              <button
-                onClick={() =>
-                  emitAdminWithUser(
-                    "admin:addToArena",
-                    username
-                  )
-                }
-                className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full"
-              >
-                → Arena
-              </button>
-
-              <button
-                onClick={() =>
-                  emitAdminWithUser(
-                    "admin:addToQueue",
-                    username
-                  )
-                }
-                className="px-3 py-1.5 bg-gray-800 text-white rounded-full"
-              >
-                → Queue
-              </button>
-
-              <button
-                onClick={() =>
-                  emitAdminWithUser(
-                    "admin:eliminate",
-                    username
-                  )
-                }
-                className="px-3 py-1.5 bg-red-600 text-white rounded-full"
-              >
-                Elimineer
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ============================================================
-          ARENA + QUEUE */}
+              {/* ============================================================
+          ARENA & QUEUE */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
+        {/* ARENA */}
         <div className="bg-white rounded-2xl shadow p-4">
-          <h2 className="text-xl font-semibold mb-2">
-            Arena
-          </h2>
+          <h2 className="text-xl font-semibold mb-2">Arena</h2>
+
           <p className="text-sm text-gray-500 mb-4">
             {arena
               ? `Ronde #${arena.round} • ${arena.type} • ${arena.status}`
@@ -598,7 +436,7 @@ export default function AdminDashboardPage() {
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {players.length ? (
+            {players.length > 0 ? (
               players.map((p, idx) => (
                 <div
                   key={p.id}
@@ -607,9 +445,7 @@ export default function AdminDashboardPage() {
                   )}`}
                 >
                   <div className="flex justify-between items-center">
-                    <span className="font-bold">
-                      #{idx + 1}
-                    </span>
+                    <span className="font-bold">#{idx + 1}</span>
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-300 text-gray-700">
                       {p.positionStatus}
                     </span>
@@ -623,14 +459,10 @@ export default function AdminDashboardPage() {
                     Ronde: {fmt(p.diamonds)} 💎
                   </div>
 
-                  {p.positionStatus ===
-                    "elimination" && (
+                  {p.positionStatus === "elimination" && (
                     <button
                       onClick={() =>
-                        emitAdminWithUser(
-                          "admin:eliminate",
-                          p.username
-                        )
+                        emitAdminUser("admin:eliminate", p.username)
                       }
                       className="mt-2 px-2 py-1 text-[11px] rounded-full border border-red-300 text-red-700 bg-red-50"
                     >
@@ -640,27 +472,24 @@ export default function AdminDashboardPage() {
                 </div>
               ))
             ) : (
-              Array.from({ length: 8 }).map(
-                (_, i) => (
-                  <div
-                    key={i}
-                    className="bg-gray-100 rounded-lg p-3 text-center text-sm text-gray-700"
-                  >
-                    #{i + 1} – WACHT OP SPELER
-                  </div>
-                )
-              )
+              Array.from({ length: 8 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="bg-gray-100 rounded-lg p-3 text-center text-sm text-gray-700"
+                >
+                  #{i + 1} – WACHT OP SPELER
+                </div>
+              ))
             )}
           </div>
         </div>
 
+        {/* QUEUE */}
         <div className="bg-white rounded-2xl shadow p-4">
-          <h2 className="text-xl font-semibold mb-2">
-            Wachtrij
-          </h2>
+          <h2 className="text-xl font-semibold mb-2">Wachtrij</h2>
+
           <p className="text-sm text-gray-500 mb-3">
-            {queue.length} speler
-            {queue.length !== 1 && "s"} • Queue:{" "}
+            {queue.length} speler{queue.length !== 1 && "s"} • Queue:{" "}
             <span
               className={
                 queueOpen
@@ -672,7 +501,7 @@ export default function AdminDashboardPage() {
             </span>
           </p>
 
-          {queue.length ? (
+          {queue.length > 0 ? (
             queue.map((q) => (
               <div
                 key={q.tiktok_id}
@@ -706,13 +535,11 @@ export default function AdminDashboardPage() {
                   </div>
                 </div>
 
+                {/* ROW BUTTONS */}
                 <div className="flex gap-1 mt-2 sm:mt-0 justify-end">
                   <button
                     onClick={() =>
-                      emitAdminWithUser(
-                        "admin:promoteUser",
-                        q.username
-                      )
+                      emitAdminUser("admin:promoteUser", q.username)
                     }
                     className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
                   >
@@ -721,10 +548,7 @@ export default function AdminDashboardPage() {
 
                   <button
                     onClick={() =>
-                      emitAdminWithUser(
-                        "admin:demoteUser",
-                        q.username
-                      )
+                      emitAdminUser("admin:demoteUser", q.username)
                     }
                     className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
                   >
@@ -733,10 +557,7 @@ export default function AdminDashboardPage() {
 
                   <button
                     onClick={() =>
-                      emitAdminWithUser(
-                        "admin:addToArena",
-                        q.username
-                      )
+                      emitAdminUser("admin:addToArena", q.username)
                     }
                     className="px-2 py-1 rounded-full border border-[#ff4d4f] text-[#ff4d4f]"
                   >
@@ -745,10 +566,7 @@ export default function AdminDashboardPage() {
 
                   <button
                     onClick={() =>
-                      emitAdminWithUser(
-                        "admin:removeFromQueue",
-                        q.username
-                      )
+                      emitAdminUser("admin:removeFromQueue", q.username)
                     }
                     className="px-2 py-1 rounded-full border border-red-300 text-red-700 bg-red-50"
                   >
@@ -769,17 +587,16 @@ export default function AdminDashboardPage() {
           LEADERBOARDS */}
       <section className="mt-4">
         <div className="bg-white rounded-2xl shadow p-0 overflow-hidden">
-
           <div className="w-full flex justify-end p-3 border-b border-gray-200 bg-gray-50">
             <div className="flex gap-2">
-
               <button
                 onClick={() => setActiveLbTab("players")}
                 className={`
                   px-4 py-1.5 text-sm rounded-full border 
-                  ${activeLbTab === "players"
-                    ? "bg-[#ff4d4f] text-white border-[#ff4d4f]"
-                    : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
+                  ${
+                    activeLbTab === "players"
+                      ? "bg-[#ff4d4f] text-white border-[#ff4d4f]"
+                      : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
                   }
                 `}
               >
@@ -790,20 +607,21 @@ export default function AdminDashboardPage() {
                 onClick={() => setActiveLbTab("gifters")}
                 className={`
                   px-4 py-1.5 text-sm rounded-full border
-                  ${activeLbTab === "gifters"
-                    ? "bg-[#ff4d4f] text-white border-[#ff4d4f]"
-                    : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
+                  ${
+                    activeLbTab === "gifters"
+                      ? "bg-[#ff4d4f] text-white border-[#ff4d4f]"
+                      : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
                   }
                 `}
               >
                 Gifters
               </button>
-
             </div>
           </div>
 
           <div className="p-4 max-h-96 overflow-y-auto text-sm">
 
+            {/* PLAYER LB */}
             {activeLbTab === "players" && (
               <div>
                 <div className="flex justify-between items-end mb-2">
@@ -817,7 +635,7 @@ export default function AdminDashboardPage() {
                   </div>
 
                   {streamStats && (
-                    <div className="text-right text-xs leading-tight bg-gray-100 px-3 py-1 rounded-lg shadow-inner border border-gray-300">
+                    <div className="text-right text-xs bg-gray-100 px-3 py-1 rounded-lg border border-gray-300 shadow-inner">
                       <div className="font-semibold text-gray-800">
                         Totaal Players:{" "}
                         <span className="text-[#ff4d4f]">
@@ -835,11 +653,11 @@ export default function AdminDashboardPage() {
                   )}
                 </div>
 
-                {playerLeaderboard.length ? (
+                {playerLeaderboard.length > 0 ? (
                   playerLeaderboard.map((e, idx) => (
                     <div
                       key={idx}
-                      className="flex items-center justify-between border-b border-gray-200 last:border-0 py-1"
+                      className="flex items-center justify-between border-b border-gray-200 py-1 last:border-0"
                     >
                       <div>
                         <span className="font-mono text-xs text-gray-500 mr-2">
@@ -863,6 +681,7 @@ export default function AdminDashboardPage() {
               </div>
             )}
 
+            {/* GIFTER LB */}
             {activeLbTab === "gifters" && (
               <div>
                 <div className="flex justify-between items-end mb-2">
@@ -876,13 +695,13 @@ export default function AdminDashboardPage() {
                   </div>
 
                   {streamStats && (
-                    <div className="text-right text-xs leading-tight bg-gray-100 px-3 py-1 rounded-lg shadow-inner border border-gray-300">
+                    <div className="text-right text-xs bg-gray-100 px-3 py-1 rounded-lg border border-gray-300 shadow-inner">
                       <div className="font-semibold text-gray-800">
                         Totaal Gifts:{" "}
                         <span className="text-[#ff4d4f]">
                           {fmt(
                             streamStats.totalPlayerDiamonds +
-                            streamStats.totalHostDiamonds
+                              streamStats.totalHostDiamonds
                           )}{" "}
                           💎
                         </span>
@@ -891,11 +710,11 @@ export default function AdminDashboardPage() {
                   )}
                 </div>
 
-                {gifterLeaderboard.length ? (
+                {gifterLeaderboard.length > 0 ? (
                   gifterLeaderboard.map((e, idx) => (
                     <div
                       key={idx}
-                      className="flex items-center justify-between border-b border-gray-200 last:border-0 py-1"
+                      className="flex items-center justify-between border-b border-gray-200 py-1 last:border-0"
                     >
                       <div>
                         <span className="font-mono text-xs text-gray-500 mr-2">
@@ -918,7 +737,6 @@ export default function AdminDashboardPage() {
                 )}
               </div>
             )}
-
           </div>
         </div>
       </section>
@@ -953,10 +771,11 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
+            {/* AUTOCOMPLETE */}
             {showResults &&
-              searchResults.length > 0 &&
-              activeAutoField === "give" && (
-                <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
+              activeAutoField === "give" &&
+              searchResults.length > 0 && (
+                <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto z-20">
                   {searchResults.map((u) => (
                     <div
                       key={u.tiktok_id}
@@ -1021,10 +840,11 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
+            {/* AUTOCOMPLETE */}
             {showResults &&
-              searchResults.length > 0 &&
-              activeAutoField === "use" && (
-                <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
+              activeAutoField === "use" &&
+              searchResults.length > 0 && (
+                <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto z-20">
                   {searchResults.map((u) => (
                     <div
                       key={u.tiktok_id}
@@ -1053,9 +873,7 @@ export default function AdminDashboardPage() {
               <option value="diamond_pistol">Diamond Pistol</option>
             </select>
 
-            <label className="text-xs font-semibold">
-              Target speler (optioneel)
-            </label>
+            <label className="text-xs font-semibold">Target speler (optioneel)</label>
             <input
               type="text"
               value={twistTargetUse}
@@ -1074,10 +892,11 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-3"
             />
 
+            {/* AUTOCOMPLETE */}
             {showResults &&
-              searchResults.length > 0 &&
-              activeAutoField === "target" && (
-                <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
+              activeAutoField === "target" &&
+              searchResults.length > 0 && (
+                <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto z-20">
                   {searchResults.map((u) => (
                     <div
                       key={u.tiktok_id}
@@ -1104,16 +923,16 @@ export default function AdminDashboardPage() {
               Gebruik twist
             </button>
           </div>
-
         </div>
       </section>
 
       {/* ============================================================
-          LOG FEED */}
+          LOGS */}
       <section className="mt-6 bg-white rounded-2xl shadow p-4">
         <h2 className="text-lg font-semibold mb-2">Log feed</h2>
 
         <div className="overflow-y-auto max-h-[400px] border border-gray-200 rounded-lg bg-gray-50 text-sm">
+
           {logs.length ? (
             logs.map((log) => (
               <div
@@ -1152,4 +971,4 @@ export default function AdminDashboardPage() {
 
     </main>
   );
-            }
+                    }
