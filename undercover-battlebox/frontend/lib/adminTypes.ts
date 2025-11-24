@@ -1,7 +1,9 @@
 /* ============================================================================
-   adminTypes.ts — BattleBox v12.2
-   Volledig in sync met backend (server.ts)
-   Geen ontbrekende outbound events meer
+   adminTypes.ts — BattleBox v12.3 (FINAL, TYPE-SAFE)
+   ✔ Volledig gesynchroniseerd met backend (server.ts)
+   ✔ Compatibel met page.tsx + socketClient.ts
+   ✔ Alle outbound events gedefinieerd
+   ✔ Alle ack-types correct
 ============================================================================ */
 
 /* ================================
@@ -61,7 +63,7 @@ export interface ArenaState {
 }
 
 /* ================================
-   QUEUE ENTRIES
+   QUEUE ENTRY
 ================================ */
 export interface QueueEntry {
   position: number;
@@ -126,7 +128,7 @@ export interface AdminAckResponse {
 }
 
 /* ================================
-   SEARCH RESULTS
+   SEARCH RESULT
 ================================ */
 export interface SearchUser {
   tiktok_id: string;
@@ -143,7 +145,7 @@ export interface SearchUser {
 }
 
 /* ================================
-   HOST PROFILES
+   HOST PROFILE
 ================================ */
 export interface HostProfile {
   id: number;
@@ -196,7 +198,6 @@ export interface InitialSnapshot {
   };
 
   logs: LogEntry[];
-
   settings: ArenaSettings;
 
   gameSession: {
@@ -215,16 +216,20 @@ export interface InitialSnapshot {
 }
 
 /* ============================================================================
-   SOCKET OUTBOUND TYPES (admin → server)
-   Exact 1:1 met server.ts (socket.onAny → handle(action))
+   SOCKET OUTBOUND TYPES (Admin → Server)
+   Exact matching met server.ts
 ============================================================================ */
 export interface AdminSocketOutbound {
-  /* SNAPSHOT + SETTINGS + HOSTS */
+  /* SYSTEM */
+  ping: () => void;
+
+  /* SNAPSHOT */
   "admin:getInitialSnapshot": (
     payload: {},
     ack: (snap: InitialSnapshot) => void
   ) => void;
 
+  /* HOSTS */
   "admin:getHosts": (
     payload: {},
     ack: (res: { success: boolean; hosts: HostProfile[] }) => void
@@ -245,9 +250,14 @@ export interface AdminSocketOutbound {
     ack: (res: AdminAckResponse) => void
   ) => void;
 
+  /* SETTINGS */
   "admin:getSettings": (
     payload: {},
-    ack: (res: { success: boolean; settings: ArenaSettings; gameActive: boolean }) => void
+    ack: (res: {
+      success: boolean;
+      settings: ArenaSettings;
+      gameActive: boolean;
+    }) => void
   ) => void;
 
   "admin:updateSettings": (
@@ -294,8 +304,15 @@ export interface AdminSocketOutbound {
   ) => void;
 
   /* GAME FLOW */
-  "admin:startGame": (payload: {}, ack: (res: AdminAckResponse) => void) => void;
-  "admin:stopGame": (payload: {}, ack: (res: AdminAckResponse) => void) => void;
+  "admin:startGame": (
+    payload: {},
+    ack: (res: AdminAckResponse) => void
+  ) => void;
+
+  "admin:stopGame": (
+    payload: {},
+    ack: (res: AdminAckResponse) => void
+  ) => void;
 
   "admin:startRound": (
     payload: { type: "quarter" | "finale" },
@@ -317,7 +334,4 @@ export interface AdminSocketOutbound {
     payload: { username: string; twist: string; target?: string },
     ack: (res: AdminAckResponse) => void
   ) => void;
-
-  /* MISC */
-  ping: () => void;
 }
