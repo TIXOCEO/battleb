@@ -636,6 +636,7 @@ io.on("connection", async (socket: AdminSocket) => {
         await broadcastGifterLeaderboard();
         return ack({ success: true });
       }
+    }
 
       // ------------------------------------------
       // ROUNDS
