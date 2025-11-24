@@ -1,5 +1,5 @@
 // ============================================================================
-// 3-gift-engine.ts — v11.2 GAME-ID SAFEGUARD EDITION (FIXED)
+// 3-gift-engine.ts — v11.3 GAME-ID SAFEGUARD + PLAYER-DIAMOND FIX
 // ============================================================================
 
 import pool from "../db";
@@ -9,7 +9,7 @@ import {
   upsertIdentityFromLooseEvent,
 } from "./2-user-engine";
 
-// FIX: alleen broadcastPlayerLeaderboard importeren
+// FIX: alleen player leaderboard importeren
 import { broadcastPlayerLeaderboard } from "../server";
 
 import { addDiamonds, addBP } from "./4-points-engine";
@@ -25,11 +25,9 @@ import {
 import { TWIST_MAP, TwistType } from "./twist-definitions";
 import { addTwistByGift } from "./8-twist-engine";
 
-
 // ============================================================================
-// PATCH: SAFE GAME ID HELPERS
+// HELPERS
 // ============================================================================
-
 function getActiveGameId(): number | null {
   const id = (io as any)?.currentGameId;
   if (typeof id === "number" && id > 0) return id;
@@ -47,7 +45,6 @@ async function isGameActive(): Promise<boolean> {
   return r.rows.length > 0;
 }
 
-
 // ============================================================================
 // DEDUPE
 // ============================================================================
@@ -64,7 +61,6 @@ function makeDedupeKey(evt: any, source: string) {
     `${source}-${evt.giftId}-${evt.user?.userId}-${evt.receiverUserId}-${roughTs}`
   );
 }
-
 
 // ============================================================================
 // NORMALIZERS
@@ -89,7 +85,6 @@ function formatDisplay(u: any) {
   if (u.is_fan) return `${u.display_name} [FAN]`;
   return u.display_name;
 }
-
 
 // ============================================================================
 // FAN EXPIRE
@@ -116,9 +111,8 @@ async function cleanupFan(id: string) {
   return true;
 }
 
-
 // ============================================================================
-// SENDER PARSER
+// PARSERS
 // ============================================================================
 function extractSender(evt: any) {
   const raw =
@@ -154,10 +148,6 @@ function extractSender(evt: any) {
   };
 }
 
-
-// ============================================================================
-// DIAMONDS
-// ============================================================================
 function calcDiamonds(evt: any): number {
   const base = Number(evt.diamondCount || evt.diamond || 0);
   if (base <= 0) return 0;
@@ -170,7 +160,6 @@ function calcDiamonds(evt: any): number {
 
   return base;
 }
-
 
 // ============================================================================
 // RECEIVER PARSER — HOST LOCK
@@ -248,7 +237,6 @@ async function resolveReceiver(evt: any) {
   };
 }
 
-
 // ============================================================================
 // HEART ME
 // ============================================================================
@@ -259,7 +247,6 @@ function isHeartMeGift(evt: any): boolean {
   if (name === "heart me") return true;
   return HEART_ME_GIFT_IDS.has(Number(evt.giftId));
 }
-
 
 // ============================================================================
 // MAIN PROCESSOR (FIXED VERSION)
@@ -285,19 +272,18 @@ async function processGift(evt: any, source: string) {
     const active = await isGameActive();
 
     // ========================================================================
-    // FIX: NO ACTIVE GAME → NIET OPSLAAN, WEL LOGGEN + PLAYER LEADERBOARD
+    // NO ACTIVE GAME → NIET OPSLAAN, WEL LOG + REFRESH
     // ========================================================================
 
     if (!gameId || !active) {
       const senderFmt = formatDisplay(sender);
-      const receiverFmt = "UNKNOWN"; // geen receiver in dit pad
 
       emitLog({
         type: "gift",
-        message: `${senderFmt} → ${receiverFmt}: ${evt.giftName} (+${diamonds}💎)`,
+        message: `${senderFmt} → UNKNOWN: ${evt.giftName} (+${diamonds}💎)`,
       });
 
-      await broadcastPlayerLeaderboard(); // realtime refresh
+      await broadcastPlayerLeaderboard();
       return;
     }
 
@@ -327,7 +313,9 @@ async function processGift(evt: any, source: string) {
     const is_round_gift = inRound && !isHostReceiver;
     const round_active = arena.status === "active";
 
-    // sender points
+    // ============================================================================
+    // SENDER POINTS
+    // ============================================================================
     await addDiamonds(BigInt(sender.tiktok_id), diamonds, "total");
     await addDiamonds(BigInt(sender.tiktok_id), diamonds, "stream");
     await addDiamonds(BigInt(sender.tiktok_id), diamonds, "current_round");
@@ -339,10 +327,23 @@ async function processGift(evt: any, source: string) {
       sender.display_name
     );
 
+    // ============================================================================
+    // PLAYER RECEIVES DIAMONDS (FIX)
+    // ============================================================================
+    if (!isHostReceiver && receiver.id && is_round_gift) {
+      await addDiamonds(BigInt(receiver.id), diamonds, "current_round");
+    }
+
+    // ============================================================================
+    // ARENA DIAMONDS
+    // ============================================================================
     if (receiver.id && is_round_gift) {
       await safeAddArenaDiamonds(String(receiver.id), diamonds);
     }
 
+    // ============================================================================
+    // HOST RECEIVES DIAMONDS
+    // ============================================================================
     if (isHostReceiver && receiver.id) {
       await pool.query(
         `
@@ -356,6 +357,9 @@ async function processGift(evt: any, source: string) {
       );
     }
 
+    // ============================================================================
+    // FAN GIFTS
+    // ============================================================================
     if (isHostReceiver && isHeartMeGift(evt)) {
       const expires = new Date(nowMs + 24 * 3600 * 1000);
       await pool.query(
@@ -369,6 +373,9 @@ async function processGift(evt: any, source: string) {
       });
     }
 
+    // ============================================================================
+    // TWIST GIFTS
+    // ============================================================================
     const giftId = Number(evt.giftId);
     const twistType =
       (Object.keys(TWIST_MAP) as TwistType[]).find(
@@ -384,6 +391,9 @@ async function processGift(evt: any, source: string) {
       });
     }
 
+    // ============================================================================
+    // INSERT GIFT
+    // ============================================================================
     await pool.query(
       `
       INSERT INTO gifts (
@@ -430,14 +440,15 @@ async function processGift(evt: any, source: string) {
       message: `${senderFmt} → ${receiverFmt}: ${evt.giftName} (+${diamonds}💎)`,
     });
 
+    await broadcastPlayerLeaderboard();
+
   } catch (err) {
     console.error("❌ processGift ERROR:", err);
   }
 }
 
-
 // ============================================================================
-// INIT ENGINE
+// INIT
 // ============================================================================
 export function initGiftEngine(conn: any) {
   if (!conn || typeof conn.on !== "function") {
@@ -445,7 +456,7 @@ export function initGiftEngine(conn: any) {
     return;
   }
 
-  console.log("🎁 GiftEngine v11.2 (GameId Safeguard) LOADED");
+  console.log("🎁 GiftEngine v11.3 (Danny FIX) LOADED");
 
   conn.on("gift", (d: any) => processGift(d, "gift"));
   conn.on("roomMessage", (d: any) => {
@@ -459,7 +470,6 @@ export function initGiftEngine(conn: any) {
       processGift(d._data, "chat-hidden");
   });
 }
-
 
 // ============================================================================
 // EXPORT
