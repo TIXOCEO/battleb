@@ -117,44 +117,34 @@ export function useAdminGame() {
     return trimmed.startsWith("@") ? trimmed : `@${trimmed}`;
   }
 
-  // -----------------------------------------
-  // EMIT SAFE
-  // -----------------------------------------
-  async function emitAdminAction<E extends keyof AdminSocketOutbound>(
-async function emitAdminAction<E extends keyof AdminSocketOutbound>(
-  event: E,
-  username: string
+// ---------------------------------------------------------
+// FINAL FIX — TypeScript-safe generic admin action emitter
+// ---------------------------------------------------------
+async function emitAdminAction(
+  event: string,
+  payload: Record<string, any> = {}
 ): Promise<void> {
   return new Promise((resolve) => {
     const socket = getAdminSocket();
-    const normalized = normalizeUsername(username);
-
-    setLastActionStatus(`Bezig: ${event} → ${normalized}…`);
 
     (socket.emit as any)(
-      event,                                   // cast voorkomt TS error
-      { username: normalized },                // uniform payload
-      (res: AdminAckResponse) => {             // callback werkt zoals bedoeld
+      event,
+      payload,
+      (res: AdminAckResponse) => {
         if (!res) {
-          setLastActionStatus(
-            `Geen antwoord op ${event} (${normalized})`
-          );
+          console.warn(`[ADMIN] No ACK for`, event, payload);
           return resolve();
         }
 
         if (!res.success) {
-          setLastActionStatus(
-            `❌ Fout: ${res.message ?? "onbekend"}`
-          );
-        } else {
-          setLastActionStatus(`✔ OK: ${res.message ?? "Done"}`);
+          console.warn(`[ADMIN] FAIL`, event, res.message);
         }
 
         resolve();
       }
     );
   });
-  }
+}
   
   return {
     arena,
