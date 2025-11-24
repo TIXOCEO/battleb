@@ -9,6 +9,7 @@ import {
   upsertIdentityFromLooseEvent,
 } from "./2-user-engine";
 
+import { broadcastPlayerLeaderboard, broadcastGifterLeaderboard } from "../server";
 import { addDiamonds, addBP } from "./4-points-engine";
 import { getArena, safeAddArenaDiamonds } from "./5-game-engine";
 
@@ -284,10 +285,15 @@ async function processGift(evt: any, source: string) {
 
     if (!gameId || !active) {
       // geen actief spel → gift wel loggen maar NIET opslaan in gifts tabel
-      emitLog({
-        type: "gift",
-        message: `${sender.display_name} gaf gift buiten spel (genegeerd in DB)`,
-      });
+emitLog({
+  type: "gift",
+  message: `${senderFmt} → ${receiverFmt}: ${evt.giftName} (+${diamonds}💎)`,
+});
+
+// ★ Realtime leaderboard update
+await broadcastPlayerLeaderboard();
+await broadcastGifterLeaderboard();
+
       return;
     }
 
