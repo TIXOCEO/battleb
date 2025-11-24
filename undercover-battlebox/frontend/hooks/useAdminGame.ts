@@ -10,7 +10,6 @@ import type {
   PlayerLeaderboardEntry,
   GifterLeaderboardEntry,
 } from "@/lib/adminTypes";
-import type { AdminSocketOutbound } from "@/lib/socketClient";
 
 export type InitialSnapshot = {
   arena: ArenaState;
@@ -42,16 +41,15 @@ export function useAdminGame() {
 
   const [snapshotLoaded, setSnapshotLoaded] = useState(false);
 
+  // --------------------------------------------------------------------
+  // SOCKET SETUP
+  // --------------------------------------------------------------------
   useEffect(() => {
     const socket = getAdminSocket();
     let mounted = true;
 
-    // -----------------------------------------
-    // LIVE UPDATES
-    // -----------------------------------------
     socket.on("updateArena", (data: ArenaState) => {
-      if (!mounted) return;
-      setArena(data);
+      if (mounted) setArena(data);
     });
 
     socket.on("updateQueue", (data) => {
@@ -66,23 +64,18 @@ export function useAdminGame() {
     });
 
     socket.on("leaderboardPlayers", (rows: PlayerLeaderboardEntry[]) => {
-      if (!mounted) return;
-      setPlayerLb(rows);
+      if (mounted) setPlayerLb(rows);
     });
 
     socket.on("leaderboardGifters", (rows: GifterLeaderboardEntry[]) => {
-      if (!mounted) return;
-      setGifterLb(rows);
+      if (mounted) setGifterLb(rows);
     });
 
     socket.on("connect_error", () => {
-      if (!mounted) return;
-      setError("Geen verbinding met backend (socket.io)");
+      if (mounted) setError("Geen verbinding met backend (socket.io)");
     });
 
-    // -----------------------------------------
     // INITIAL SNAPSHOT
-    // -----------------------------------------
     socket.emit("admin:getInitialSnapshot", {}, (snap: InitialSnapshot) => {
       if (!mounted || snapshotLoaded) return;
 
@@ -108,44 +101,48 @@ export function useAdminGame() {
     };
   }, [snapshotLoaded]);
 
-  // -----------------------------------------
-  // NORMALIZE
-  // -----------------------------------------
+  // --------------------------------------------------------------------
+  // HELPERS
+  // --------------------------------------------------------------------
   function normalizeUsername(v: string): string {
     if (!v) return "";
-    const trimmed = v.trim();
-    return trimmed.startsWith("@") ? trimmed : `@${trimmed}`;
+    const trimmed = v.trim().replace(/^@+/, "");
+    return `@${trimmed}`;
   }
 
-// ---------------------------------------------------------
-// FINAL FIX — TypeScript-safe generic admin action emitter
-// ---------------------------------------------------------
-async function emitAdminAction(
-  event: string,
-  payload: Record<string, any> = {}
-): Promise<void> {
-  return new Promise((resolve) => {
-    const socket = getAdminSocket();
+  // --------------------------------------------------------------------
+  // FINAL FIX — UNIVERSAL ADMIN EMITTER
+  // Always expects payload as an object { ... }
+  // --------------------------------------------------------------------
+  async function emitAdminAction(
+    event: string,
+    payload: Record<string, any> = {}
+  ): Promise<void> {
+    return new Promise((resolve) => {
+      const socket = getAdminSocket();
 
-    (socket.emit as any)(
-      event,
-      payload,
-      (res: AdminAckResponse) => {
-        if (!res) {
-          console.warn(`[ADMIN] No ACK for`, event, payload);
-          return resolve();
+      (socket.emit as any)(
+        event,
+        payload,
+        (res: AdminAckResponse) => {
+          if (!res) {
+            console.warn(`[ADMIN] No ACK for`, event, payload);
+            return resolve();
+          }
+
+          if (!res.success) {
+            console.warn(`[ADMIN] FAIL`, event, res.message);
+          }
+
+          resolve();
         }
+      );
+    });
+  }
 
-        if (!res.success) {
-          console.warn(`[ADMIN] FAIL`, event, res.message);
-        }
-
-        resolve();
-      }
-    );
-  });
-}
-  
+  // --------------------------------------------------------------------
+  // RETURN API
+  // --------------------------------------------------------------------
   return {
     arena,
     queue,
@@ -157,15 +154,27 @@ async function emitAdminAction(
     playerLb,
     gifterLb,
 
-    // ACTIONS
-    addToArena: (u: string) => emitAdminAction("admin:addToArena", u),
-    addToQueue: (u: string) => emitAdminAction("admin:addToQueue", u),
-    eliminate: (u: string) => emitAdminAction("admin:eliminate", u),
-    promoteQueue: (u: string) => emitAdminAction("admin:promoteUser", u),
-    demoteQueue: (u: string) => emitAdminAction("admin:demoteUser", u),
-    removeFromQueue: (u: string) =>
-      emitAdminAction("admin:removeFromQueue", u),
-
     clearStatus: () => setLastActionStatus(null),
+
+    // ----------------------------------------------------------------
+    // ADMIN ACTIONS — ALL TS-SAFE, ALL PAYLOAD FIXED
+    // ----------------------------------------------------------------
+    addToArena: (u: string) =>
+      emitAdminAction("admin:addToArena", { username: normalizeUsername(u) }),
+
+    addToQueue: (u: string) =>
+      emitAdminAction("admin:addToQueue", { username: normalizeUsername(u) }),
+
+    eliminate: (u: string) =>
+      emitAdminAction("admin:eliminate", { username: normalizeUsername(u) }),
+
+    promoteQueue: (u: string) =>
+      emitAdminAction("admin:promoteUser", { username: normalizeUsername(u) }),
+
+    demoteQueue: (u: string) =>
+      emitAdminAction("admin:demoteUser", { username: normalizeUsername(u) }),
+
+    removeFromQueue: (u: string) =>
+      emitAdminAction("admin:removeFromQueue", { username: normalizeUsername(u) }),
   };
 }
