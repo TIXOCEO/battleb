@@ -227,7 +227,7 @@ export async function broadcastPlayerLeaderboard() {
 }
 
 
-export async function broadcastGifterLeaderboard_OLD() {
+export async function broadcastGifterLeaderboard() {
   if (!currentGameId) {
     io.emit("leaderboardGifters", []);
     return;
