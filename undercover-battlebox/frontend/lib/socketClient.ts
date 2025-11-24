@@ -1,8 +1,5 @@
 // ============================================================================
-// frontend/lib/socketClient.ts — FINAL NO-PREFIX VERSION
-// ✔ Matcht adminTypes.ts EXACT
-// ✔ Geen "admin:"
-// ✔ Build slaagt
+// frontend/lib/socketClient.ts — FIXED (NO NAMESPACE)
 // ============================================================================
 
 import { io, Socket } from "socket.io-client";
@@ -24,27 +21,28 @@ const BACKEND_URL = "http://178.251.232.12:4000";
 const ADMIN_TOKEN = process.env.NEXT_PUBLIC_ADMIN_TOKEN || "supergeheim123";
 
 /* ============================================================================
-   INBOUND (events from server → UI)
+   INBOUND EVENTS
 ============================================================================ */
 export interface AdminSocketInbound {
   updateArena: (data: ArenaState) => void;
   updateQueue: (data: { open: boolean; entries: QueueEntry[] }) => void;
+
   log: (row: LogEntry) => void;
   initialLogs: (rows: LogEntry[]) => void;
 
   leaderboardPlayers: (rows: PlayerLeaderboardEntry[]) => void;
   leaderboardGifters: (rows: GifterLeaderboardEntry[]) => void;
+
   streamStats: (s: any) => void;
 
   gameSession: (s: {
     active: boolean;
     gameId: number | null;
-    startedAt?: string | null;
-    endedAt?: string | null;
   }) => void;
 
   hosts: (rows: HostProfile[]) => void;
   hostsActiveChanged: (payload: any) => void;
+
   settings: (settings: ArenaSettings) => void;
 
   "round:start": (d: any) => void;
@@ -54,13 +52,12 @@ export interface AdminSocketInbound {
   connect: () => void;
   disconnect: (reason: string) => void;
   connect_error: (err: Error) => void;
+
   pong: () => void;
 }
 
 /* ============================================================================
-   OUTBOUND (UI → server)
-   ✔ EXACT zoals adminTypes.ts
-   ✔ GEEN PREFIX
+   OUTBOUND
 ============================================================================ */
 export interface AdminSocketOutbound {
   ping: () => void;
@@ -90,10 +87,7 @@ export interface AdminSocketOutbound {
     ack: (res: AdminAckResponse) => void
   ) => void;
 
-  getSettings: (
-    payload: {},
-    ack: (res: any) => void
-  ) => void;
+  getSettings: (payload: {}, ack: (res: any) => void) => void;
 
   updateSettings: (
     payload: ArenaSettings,
@@ -136,7 +130,7 @@ export interface AdminSocketOutbound {
 }
 
 /* ============================================================================
-   SINGLETON CLIENT
+   SINGLETON SOCKET — FIXED URL
 ============================================================================ */
 
 declare global {
@@ -154,7 +148,8 @@ export function getAdminSocket(): Socket<
 
   if (globalThis.__adminSocket) return globalThis.__adminSocket;
 
-  const socket = io(`${BACKEND_URL}/admin`, {
+  // ❗ FIXED — GEEN '/admin'
+  const socket = io(BACKEND_URL, {
     transports: ["polling", "websocket"],
     path: "/socket.io",
     auth: { token: ADMIN_TOKEN, role: "admin" },
