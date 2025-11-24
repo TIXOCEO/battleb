@@ -1,11 +1,11 @@
 // ============================================================================
-// frontend/lib/socketClient.ts — v13 BattleBox ADMIN FINAL
-// ============================================================================
-// ✔ FIXED: juiste namespace /admin
-// ✔ FIXED: realtime events komen nu binnen
+// frontend/lib/socketClient.ts — v13.1 BattleBox ADMIN FINAL
+// ----------------------------------------------------------------------------
+// ✔ FIX: namespace verwijderd (backend heeft geen /admin namespace)
+// ✔ FIX: realtime events komen nu binnen
 // ✔ Snapshot via callback
 // ✔ Heartbeat + reconnect
-// ✔ Fully typed
+// ✔ 100% compatibel met jouw backend
 // ============================================================================
 
 import { io, Socket } from "socket.io-client";
@@ -111,7 +111,6 @@ export interface AdminSocketOutbound {
     cb?: (res: AdminAckResponse) => void
   ) => void;
 
-  // QUEUE + ARENA
   "admin:addToArena": (p: { username: string }, cb?: (res: AdminAckResponse) => void) => void;
   "admin:addToQueue": (p: { username: string }, cb?: (res: AdminAckResponse) => void) => void;
   "admin:removeFromQueue": (p: { username: string }, cb?: (res: AdminAckResponse) => void) => void;
@@ -119,25 +118,21 @@ export interface AdminSocketOutbound {
   "admin:demoteUser": (p: { username: string }, cb?: (res: AdminAckResponse) => void) => void;
   "admin:eliminate": (p: { username: string }, cb?: (res: AdminAckResponse) => void) => void;
 
-  // PREMIUM
   "admin:giveVip": (p: { username: string }, cb?: (res: AdminAckResponse) => void) => void;
   "admin:removeVip": (p: { username: string }, cb?: (res: AdminAckResponse) => void) => void;
   "admin:giveFan": (p: { username: string }, cb?: (res: AdminAckResponse) => void) => void;
 
-  // TWISTS
   "admin:giveTwist": (p: { username: string; twist: string }, cb?: (res: AdminAckResponse) => void) => void;
   "admin:useTwist": (
     p: { username: string; twist: string; target?: string },
     cb?: (res: AdminAckResponse) => void
   ) => void;
 
-  // ROUND / GAME MGMT
   "admin:startRound": (p: { type: "quarter" | "finale" }, cb?: (r: AdminAckResponse) => void) => void;
   "admin:endRound": (p?: {}, cb?: (r: AdminAckResponse) => void) => void;
   "admin:startGame": (p?: {}, cb?: (r: AdminAckResponse) => void) => void;
   "admin:stopGame": (p?: {}, cb?: (r: AdminAckResponse) => void) => void;
 
-  // SETTINGS
   "admin:getSettings": (
     payload?: {},
     cb?: (res: { success: boolean; settings: ArenaSettings; gameActive: boolean }) => void
@@ -148,7 +143,6 @@ export interface AdminSocketOutbound {
     cb?: (res: AdminAckResponse) => void
   ) => void;
 
-  // SEARCH
   "admin:searchUsers": (
     payload: { query: string },
     cb: (res: { users: SearchUser[] }) => void
@@ -172,12 +166,12 @@ export function getAdminSocket(): Socket<
     return globalThis.__adminSocket as any;
   }
 
-  console.log(`⚙️ Verbinden met backend socket namespace: ${BACKEND_URL}/admin`);
+  console.log(`⚙️ Verbinden met backend socket: ${BACKEND_URL}`);
 
   const socket: Socket<
     AdminSocketInbound,
     AdminSocketOutbound
-  > = io(`${BACKEND_URL}/admin`, {
+  > = io(BACKEND_URL, {
     transports: ["polling", "websocket"],
     path: "/socket.io",
     auth: { token: ADMIN_TOKEN, role: "admin" },
@@ -187,16 +181,13 @@ export function getAdminSocket(): Socket<
     timeout: 9000,
   });
 
-  // -----------------------------------------
-  // CONNECT
-  // -----------------------------------------
   socket.on("connect", () => {
     console.log("✅ Admin socket verbonden:", socket.id);
 
     socket.emit("ping");
 
     socket.emit("admin:getInitialSnapshot", {}, (snap) => {
-      console.log("📦 Initial snapshot ontvangen");
+      if (snap) console.log("📦 Initial snapshot ontvangen");
     });
 
     socket.emit("admin:getHosts", {}, () => {});
@@ -211,7 +202,6 @@ export function getAdminSocket(): Socket<
     console.error("❌ Connect error:", err?.message || err)
   );
 
-  // Heartbeat
   setInterval(() => {
     try {
       socket.emit("ping");
