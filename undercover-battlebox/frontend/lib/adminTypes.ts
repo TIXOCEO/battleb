@@ -1,7 +1,7 @@
 /* ============================================================================
-   adminTypes.ts — BattleBox v12.1 FINAL
+   adminTypes.ts — BattleBox v12.2
    Volledig in sync met backend (server.ts)
-   Geen ontbrekende types meer, inclusief InitialSnapshot
+   Geen ontbrekende outbound events meer
 ============================================================================ */
 
 /* ================================
@@ -24,7 +24,6 @@ export interface ArenaPlayer {
   boosters: string[];
 
   status: "alive" | "eliminated";
-
   positionStatus: ArenaPlayerStatus;
 
   is_vip?: boolean;
@@ -171,10 +170,7 @@ export interface PlayerLeaderboardEntry {
   display_name: string;
   tiktok_id: string;
 
-  // backend stuurt dit:
   total_diamonds?: number;
-
-  // fallback (oude)
   diamonds_total?: number;
 
   is_vip?: boolean;
@@ -189,7 +185,7 @@ export interface GifterLeaderboardEntry {
 }
 
 /* ============================================================================
-   INITIAL SNAPSHOT (server → admin panel)
+   INITIAL SNAPSHOT
 ============================================================================ */
 export interface InitialSnapshot {
   arena: ArenaState;
@@ -220,65 +216,108 @@ export interface InitialSnapshot {
 
 /* ============================================================================
    SOCKET OUTBOUND TYPES (admin → server)
+   Exact 1:1 met server.ts (socket.onAny → handle(action))
 ============================================================================ */
 export interface AdminSocketOutbound {
+  /* SNAPSHOT + SETTINGS + HOSTS */
   "admin:getInitialSnapshot": (
     payload: {},
     ack: (snap: InitialSnapshot) => void
   ) => void;
 
+  "admin:getHosts": (
+    payload: {},
+    ack: (res: { success: boolean; hosts: HostProfile[] }) => void
+  ) => void;
+
+  "admin:createHost": (
+    payload: { label: string; username: string; tiktok_id: string },
+    ack: (res: AdminAckResponse) => void
+  ) => void;
+
+  "admin:deleteHost": (
+    payload: { id: number },
+    ack: (res: AdminAckResponse) => void
+  ) => void;
+
+  "admin:setActiveHost": (
+    payload: { id: number },
+    ack: (res: AdminAckResponse) => void
+  ) => void;
+
+  "admin:getSettings": (
+    payload: {},
+    ack: (res: { success: boolean; settings: ArenaSettings; gameActive: boolean }) => void
+  ) => void;
+
+  "admin:updateSettings": (
+    payload: ArenaSettings,
+    ack: (res: AdminAckResponse) => void
+  ) => void;
+
+  /* SEARCH */
   "admin:searchUsers": (
     payload: { query: string },
     ack: (res: { users: SearchUser[] }) => void
   ) => void;
 
-  "admin:addToArena": (
-    payload: { username: string },
-    ack: AdminAckResponse
-  ) => void;
-
+  /* QUEUE */
   "admin:addToQueue": (
     payload: { username: string },
-    ack: AdminAckResponse
+    ack: (res: AdminAckResponse) => void
   ) => void;
 
   "admin:removeFromQueue": (
     payload: { username: string },
-    ack: AdminAckResponse
+    ack: (res: AdminAckResponse) => void
   ) => void;
 
   "admin:promoteUser": (
     payload: { username: string },
-    ack: AdminAckResponse
+    ack: (res: AdminAckResponse) => void
   ) => void;
 
   "admin:demoteUser": (
     payload: { username: string },
-    ack: AdminAckResponse
+    ack: (res: AdminAckResponse) => void
+  ) => void;
+
+  /* ARENA */
+  "admin:addToArena": (
+    payload: { username: string },
+    ack: (res: AdminAckResponse) => void
   ) => void;
 
   "admin:eliminate": (
     payload: { username: string },
-    ack: AdminAckResponse
+    ack: (res: AdminAckResponse) => void
   ) => void;
 
-  "admin:startGame": (payload: {}, ack: AdminAckResponse) => void;
-  "admin:stopGame": (payload: {}, ack: AdminAckResponse) => void;
+  /* GAME FLOW */
+  "admin:startGame": (payload: {}, ack: (res: AdminAckResponse) => void) => void;
+  "admin:stopGame": (payload: {}, ack: (res: AdminAckResponse) => void) => void;
 
   "admin:startRound": (
     payload: { type: "quarter" | "finale" },
-    ack: AdminAckResponse
+    ack: (res: AdminAckResponse) => void
   ) => void;
 
-  "admin:endRound": (payload: {}, ack: AdminAckResponse) => void;
+  "admin:endRound": (
+    payload: {},
+    ack: (res: AdminAckResponse) => void
+  ) => void;
 
+  /* TWISTS */
   "admin:giveTwist": (
     payload: { username: string; twist: string },
-    ack: AdminAckResponse
+    ack: (res: AdminAckResponse) => void
   ) => void;
 
   "admin:useTwist": (
     payload: { username: string; twist: string; target?: string },
-    ack: AdminAckResponse
+    ack: (res: AdminAckResponse) => void
   ) => void;
+
+  /* MISC */
+  ping: () => void;
 }
