@@ -311,6 +311,7 @@ export async function restartTikTokConnection() {
     await broadcastPlayerLeaderboard();
     await broadcastGifterLeaderboard();
   }
+}
 
 // ============================================================================
 // ADMIN AUTH
