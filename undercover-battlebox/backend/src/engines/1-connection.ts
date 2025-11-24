@@ -1,12 +1,8 @@
 // ============================================================================
-// 1-connection.ts — v12.1 SAFE MODE + GIFT ENGINE FIX
+// 1-connection.ts — v12 SAFE MODE
 // Undercover BattleBox — TikTok LIVE Core Connection Engine
-//
-// ✔ SINGLE CONNECT → SINGLE RECONNECT → ELSE IDLE
-// ✔ SAFE MODE: No retry spam, no fallback loops
-// ✔ Identity sync actief
-// ✔ Host-detectie werkt
-// ✔ GIFT ENGINE KOPPELING (BELANGRIJK!) → NU WERKT ALLES WEER
+// SINGLE CONNECT → SINGLE RECONNECT → ELSE IDLE
+// SAFE MODE: No health monitor, no retry spam, no fallback loops
 // ============================================================================
 
 import { WebcastPushConnection } from "tiktok-live-connector";
@@ -14,9 +10,7 @@ import { setSetting } from "../db";
 import { upsertIdentityFromLooseEvent } from "./2-user-engine";
 import { setLiveState } from "../server";
 
-// ★ GIFT ENGINE TOEVOEGEN (ontbrak volledig!)
-import { initGiftEngine } from "./3-gift-engine";
-
+// small helper
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function norm(v: any): string {
@@ -31,9 +25,7 @@ function norm(v: any): string {
 
 let activeConn: WebcastPushConnection | null = null;
 
-// ============================================================================
-// EXPORT: ACTIVE CONNECTION
-// ============================================================================
+// exported getter for outside systems
 export function getActiveConn() {
   return activeConn;
 }
@@ -57,9 +49,6 @@ export async function startConnection(
   let connected = false;
   let hostSaved = false;
 
-  // =============================================================
-  // HOST SAVE
-  // =============================================================
   async function saveHost(id: string, uniqueId: string, nickname: string) {
     if (!id || hostSaved) return;
     hostSaved = true;
@@ -80,9 +69,6 @@ export async function startConnection(
     console.log("✔ HOST definitief vastgelegd (HARD LOCK)");
   }
 
-  // =============================================================
-  // IDENTITY ENGINE KOPPELING
-  // =============================================================
   function attachIdentitySync(c: any) {
     const update = (raw: any) => {
       upsertIdentityFromLooseEvent(
@@ -95,14 +81,12 @@ export async function startConnection(
       );
     };
 
-    const basic = [
-      "chat", "like", "follow", "share",
-      "member", "subscribe", "social",
-      "liveRoomUser", "enter"
+    const base = [
+      "chat", "like", "follow", "share", "member",
+      "subscribe", "social", "liveRoomUser", "enter"
     ];
-
-    for (const e of basic) {
-      try { c.on(e, update); } catch {}
+    for (const ev of base) {
+      try { c.on(ev, update); } catch {}
     }
 
     c.on("gift", (g: any) => {
@@ -120,9 +104,9 @@ export async function startConnection(
     console.log("👤 Identity-engine actief");
   }
 
-  // =============================================================
-  // 1) PRIMARY CONNECT
-  // =============================================================
+  // ---------------------------------------------------------
+  // 1) Single connect attempt
+  // ---------------------------------------------------------
   try {
     await conn.connect();
   } catch (err: any) {
@@ -133,9 +117,9 @@ export async function startConnection(
     return { conn: null };
   }
 
-  // =============================================================
-  // CONNECTED EVENT
-  // =============================================================
+  // ---------------------------------------------------------
+  // CONNECTED event
+  // ---------------------------------------------------------
   conn.on("connected", async (info: any) => {
     connected = true;
 
@@ -170,26 +154,13 @@ export async function startConnection(
     }
   });
 
-  // =============================================================
-  // IDENTITY SYNC INSTALLEREN
-  // =============================================================
   attachIdentitySync(conn);
 
-  // =============================================================
-  // ✔️ GIFT ENGINE KOPPELEN  (BELANGRIJK!)
-  // =============================================================
-  try {
-    initGiftEngine(conn);
-    console.log("🎁 GiftEngine gekoppeld aan TikTok-connector");
-  } catch (err) {
-    console.error("❌ GiftEngine initialisatie mislukt:", err);
-  }
-
-  // =============================================================
-  // DISCONNECT → SINGLE RECONNECT
-  // =============================================================
+  // ---------------------------------------------------------
+  // 2) Single reconnect attempt on real disconnect
+  // ---------------------------------------------------------
   conn.on("disconnected", async () => {
-    console.log("🔻 Verbinding verbroken — poging tot reconnect…");
+    console.log("🔻 Verbinding verbroken — poging tot 1 reconnect…");
 
     try {
       await conn.connect();
@@ -199,12 +170,11 @@ export async function startConnection(
       console.log("⛔ Reconnect mislukt → IDLE MODE");
       setLiveState(false);
       activeConn = null;
-      onError();
+      onError(); // notify server
       return;
     }
   });
 
-  // CONNECTIE OPSLAAN
   activeConn = conn;
   return { conn };
 }
