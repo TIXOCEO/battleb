@@ -1,5 +1,5 @@
-export const dynamic = "force-dynamic";
 "use client";
+export const dynamic = "force-dynamic";
 
 import React, { useEffect, useMemo, useState } from "react";
 import { getAdminSocket } from "@/lib/socketClient";
@@ -275,7 +275,7 @@ export default function AdminDashboardPage() {
       .padStart(2, "0")}`;
   };
 
-  // ============================================================
+        // ============================================================
   // POSITION COLORS
   // ============================================================
   const colorForPosition = (p: any) => {
@@ -441,9 +441,9 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* ARENA MENUBLOK START (sluit later in Deel 3 correct) */}
+        {/* ARENA MENUBLOK START */}
         <div className="lg:col-span-2 flex flex-col gap-4">
-          
+
           {/* ARENA SECTION */}
           <div className="bg-white rounded-2xl shadow p-4">
             <h2 className="text-xl font-semibold mb-2">Arena</h2>
@@ -602,6 +602,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
       </section>
+
       {/* ============================================================
           LEADERBOARDS
       ============================================================ */}
