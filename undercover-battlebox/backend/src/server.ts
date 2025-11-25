@@ -19,7 +19,12 @@ import {
   arenaClear,
   getArena,
   emitArena,
-  getArenaSettings
+  getArenaSettings,
+
+  // ⭐⭐⭐ TOEGEVOEGD — enige wijziging in deel 1 ⭐⭐⭐
+  startRound,
+  endRound
+
 } from "./engines/5-game-engine";
 
 import { getQueue } from "./queue";
@@ -561,7 +566,7 @@ io.on("connection", async (socket: AdminSocket) => {
         });
 
         return ack({ success: true });
-      }
+            }
 
     // ======================================================
       // GAME MANAGEMENT (start / stop / reset)
@@ -680,6 +685,40 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       // ======================================================
+      // ARENA ROUND MANAGEMENT (FULLY PATCHED)
+      // ======================================================
+      if (action === "startRound") {
+        const type = data?.type === "finale" ? "finale" : "quarter";
+
+        // backend side → echte engine call
+        const ok = require("./engines/5-game-engine").startRound(type);
+
+        if (!ok) {
+          return ack({
+            success: false,
+            message: "Ronde kon niet gestart worden"
+          });
+        }
+
+        emitArena();
+        await broadcastPlayerLeaderboard();
+
+        return ack({ success: true });
+      }
+
+      if (action === "endRound") {
+        const engine = require("./engines/5-game-engine");
+        await engine.endRound();
+
+        emitArena();
+        await broadcastPlayerLeaderboard();
+        await broadcastGifterLeaderboard();
+        await broadcastHostDiamonds();
+
+        return ack({ success: true });
+      }
+
+      // ======================================================
       // ARENA MANAGEMENT
       // ======================================================
       if (action === "addToArena") {
@@ -698,7 +737,6 @@ io.on("connection", async (socket: AdminSocket) => {
         if (!r.rows.length)
           return ack({ success: false, message: "User niet gevonden" });
 
-        // Host mag NOOIT in de arena komen
         if (String(r.rows[0].tiktok_id) === HARD_HOST_ID)
           return ack({
             success: false,
@@ -799,7 +837,6 @@ io.on("connection", async (socket: AdminSocket) => {
         if (!u.rows.length)
           return ack({ success: false, message: `User @${clean} niet gevonden` });
 
-        // Host mag nooit in queue
         if (String(u.rows[0].tiktok_id) === HARD_HOST_ID)
           return ack({
             success: false,
