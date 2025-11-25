@@ -9,11 +9,9 @@ import type {
   LogEntry,
   AdminAckResponse,
   AdminSocketOutbound,
-  HostProfile,
-  ArenaSettings,
+  SearchUser,
   PlayerLeaderboardEntry,
   GifterLeaderboardEntry,
-  SearchUser,
 } from "@/lib/adminTypes";
 
 /* ============================================
@@ -22,7 +20,7 @@ import type {
 type StreamStats = {
   totalPlayers: number;
   totalPlayerDiamonds: number;
-  totalHostDiamonds: number;   // <-- ⭐ nieuwe property
+  totalHostDiamonds: number; // obsolete but kept to avoid TS errors
 };
 
 type GameSessionState = {
@@ -56,6 +54,9 @@ export default function AdminDashboardPage() {
     active: false,
     gameId: null,
   });
+
+  // ⭐ NEW: host diamonds from backend
+  const [hostDiamonds, setHostDiamonds] = useState(0);
 
   /* INPUTS */
   const [username, setUsername] = useState("");
@@ -92,13 +93,15 @@ export default function AdminDashboardPage() {
     socket.on("log", (l) => setLogs((prev) => [l, ...prev].slice(0, 200)));
     socket.on("initialLogs", (d) => setLogs(d.slice(0, 200)));
 
-    // ⭐ UPDATED: ontvangst van nieuwe stats inclusief host diamonds
     socket.on("streamStats", (s) => setStreamStats(s));
 
     socket.on("gameSession", (s) => setGameSession(s));
 
     socket.on("leaderboardPlayers", (rows) => setPlayerLeaderboard(rows));
     socket.on("leaderboardGifters", (rows) => setGifterLeaderboard(rows));
+
+    // ⭐ NEW: host diamonds listener
+    socket.on("hostDiamonds", (d) => setHostDiamonds(d.total));
 
     socket.on("connect_error", () =>
       setStatus("❌ Socket verbinding weggevallen")
@@ -123,6 +126,7 @@ export default function AdminDashboardPage() {
       socket.off("gameSession");
       socket.off("leaderboardPlayers");
       socket.off("leaderboardGifters");
+      socket.off("hostDiamonds");
       socket.off("connect_error");
       socket.off("round:start");
       socket.off("round:grace");
@@ -147,7 +151,10 @@ export default function AdminDashboardPage() {
       }
 
       if (snap.logs) setLogs(snap.logs.slice(0, 200));
+
+      // keep streamStats but ignore host diamonds here
       if (snap.stats) setStreamStats(snap.stats);
+
       if (snap.gameSession) setGameSession(snap.gameSession);
 
       if (snap.playerLeaderboard)
@@ -155,11 +162,13 @@ export default function AdminDashboardPage() {
 
       if (snap.gifterLeaderboard)
         setGifterLeaderboard(snap.gifterLeaderboard);
+
+      // hostDiamonds is sent separately, ignore snapshot
     });
   }, []);
 
   /* ============================================
-     ADMIN EMITTERS (No prefix)
+     ADMIN EMITTERS
   ============================================ */
   const emitAdmin = (event: keyof AdminSocketOutbound, payload?: any) => {
     const socket = getAdminSocket();
@@ -254,8 +263,8 @@ export default function AdminDashboardPage() {
     setSearchResults([]);
   };
 
-/* ============================================
-     TIMER PROGRESS
+  /* ============================================
+     TIMER + COLORS
   ============================================ */
   const roundProgress = useMemo(() => {
     if (!arena) return 0;
@@ -280,12 +289,11 @@ export default function AdminDashboardPage() {
     if (!sec || sec < 0) sec = 0;
     const m = Math.floor(sec / 60);
     const s = sec % 60;
-    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+    return `${m.toString().padStart(2, "0")}:${s
+      .toString()
+      .padStart(2, "0")}`;
   };
 
-  /* ============================================
-     POSITION COLORS
-  ============================================ */
   const colorForPosition = (p: any) => {
     if (!arena || arena.status === "idle")
       return "bg-gray-50 border-gray-200";
@@ -305,31 +313,30 @@ export default function AdminDashboardPage() {
   /* ============================================
      UI START
   ============================================ */
+
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
       {/* HEADER */}
       <header className="mb-6 relative">
-
-        {/* HOST DIAMONDS BADGE ⭐️ NIEUW ★ */}
-        {streamStats && (
-          <div className="
+        {/* HOST DIAMONDS BADGE ⭐ */}
+        <div
+          className="
             absolute right-0 top-0
             bg-[#ff4d4f] text-white text-xs font-semibold
             px-3 py-1 rounded-full shadow-lg
-          ">
-            Host: {fmt(streamStats.totalHostDiamonds)} 💎
-          </div>
-        )}
+          "
+        >
+          Host: {fmt(hostDiamonds)} 💎
+        </div>
 
+        {/* Title */}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-2">
           <div className="flex items-center gap-2">
             <div className="text-2xl font-bold text-[#ff4d4f]">UB</div>
-
             <div>
               <div className="text-xl font-semibold">
                 Undercover BattleBox – Admin
               </div>
-
               <div className="text-xs text-gray-500">
                 Verbonden als{" "}
                 <span className="font-semibold text-green-600">Admin</span>
@@ -356,18 +363,21 @@ export default function AdminDashboardPage() {
               `}
               style={{ width: `${roundProgress}%` }}
             />
-
             <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold">
               {arena.status === "active" &&
                 formatTime(
-                  Math.max(0, Math.floor((arena.roundCutoff - Date.now()) / 1000))
+                  Math.max(
+                    0,
+                    Math.floor((arena.roundCutoff - Date.now()) / 1000)
+                  )
                 )}
-
               {arena.status === "grace" &&
                 formatTime(
-                  Math.max(0, Math.floor((arena.graceEnd - Date.now()) / 1000))
+                  Math.max(
+                    0,
+                    Math.floor((arena.graceEnd - Date.now()) / 1000)
+                  )
                 )}
-
               {arena.status === "ended" && "00:00"}
             </div>
           </div>
@@ -485,7 +495,9 @@ export default function AdminDashboardPage() {
                         onClick={() => applyAutoFill(u)}
                         className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
                       >
-                        <span className="font-semibold">{u.display_name}</span>{" "}
+                        <span className="font-semibold">
+                          {u.display_name}
+                        </span>{" "}
                         <span className="text-gray-500">@{u.username}</span>
                       </div>
                     ))}
@@ -552,8 +564,9 @@ export default function AdminDashboardPage() {
                     {p.display_name} (@{p.username})
                   </div>
 
+                  {/* FIXED: use diamonds_current_round */}
                   <div className="text-xs text-gray-600">
-                    Ronde: {fmt(p.diamonds)} 💎
+                    Ronde: {fmt(p.diamonds_current_round)} 💎
                   </div>
 
                   {p.positionStatus === "elimination" && (
@@ -581,7 +594,9 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* QUEUE */}
+        {/* ============================================================
+            QUEUE
+        ============================================================ */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Wachtrij</h2>
           <p className="text-sm text-gray-500 mb-3">
@@ -741,8 +756,9 @@ export default function AdminDashboardPage() {
                         </span>
                       </div>
 
+                      {/* FIXED: backend sends e.total_score so we display that */}
                       <span className="font-semibold">
-                        {fmt(e.total_diamonds)} 💎
+                        {fmt(e.total_score)} 💎
                       </span>
                     </div>
                   ))}
@@ -752,7 +768,7 @@ export default function AdminDashboardPage() {
                     Totaal:{" "}
                     {fmt(
                       playerLeaderboard.reduce(
-                        (acc, p) => acc + (p.total_diamonds || 0),
+                        (acc, p) => acc + (p.total_score || 0),
                         0
                       )
                     )}{" "}
@@ -953,7 +969,9 @@ export default function AdminDashboardPage() {
               <option value="diamond_pistol">Diamond Pistol</option>
             </select>
 
-            <label className="text-xs font-semibold">Target speler (optioneel)</label>
+            <label className="text-xs font-semibold">
+              Target speler (optioneel)
+            </label>
             <input
               type="text"
               value={twistTargetUse}
@@ -1050,4 +1068,5 @@ export default function AdminDashboardPage() {
       </footer>
     </main>
   );
-}
+            }
+      
