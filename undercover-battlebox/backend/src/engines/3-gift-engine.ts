@@ -1,5 +1,9 @@
 // ============================================================================
-// 3-gift-engine.ts — v11.3 GAME-ID SAFEGUARD + PLAYER-DIAMOND FIX
+// 3-gift-engine.ts — v12.0 CLEAN LEADERBOARD BUILD
+// ✔ Gifters krijgen GEEN player-diamonds meer
+// ✔ Receiver (speler/host) krijgt correcte diamonds
+// ✔ Perfecte scheiding player ↔ gifter leaderboards
+// ✔ Niets meer opslaan buiten actieve game
 // ============================================================================
 
 import pool from "../db";
@@ -9,29 +13,25 @@ import {
   upsertIdentityFromLooseEvent,
 } from "./2-user-engine";
 
-// FIX: alleen player leaderboard importeren
-import { broadcastPlayerLeaderboard } from "../server";
-
-import { addDiamonds, addBP } from "./4-points-engine";
-import { getArena, safeAddArenaDiamonds } from "./5-game-engine";
-
 import {
   emitLog,
   io,
   broadcastStats,
   getActiveHost,
+  broadcastPlayerLeaderboard
 } from "../server";
 
+import { addDiamonds, addBP } from "./4-points-engine";
+import { getArena, safeAddArenaDiamonds } from "./5-game-engine";
 import { TWIST_MAP, TwistType } from "./twist-definitions";
 import { addTwistByGift } from "./8-twist-engine";
 
 // ============================================================================
-// HELPERS
+// GAME STATE HELPERS
 // ============================================================================
 function getActiveGameId(): number | null {
   const id = (io as any)?.currentGameId;
-  if (typeof id === "number" && id > 0) return id;
-  return null;
+  return typeof id === "number" && id > 0 ? id : null;
 }
 
 async function isGameActive(): Promise<boolean> {
@@ -53,7 +53,6 @@ setInterval(() => dedupe.clear(), 20000);
 
 function makeDedupeKey(evt: any, source: string) {
   const roughTs = Math.round(Number(evt.timestamp || Date.now()) / 50);
-
   return (
     evt.msgId ||
     evt.logId ||
@@ -185,7 +184,6 @@ async function resolveReceiver(evt: any) {
 
   const un = unique ? norm(unique) : null;
 
-  // HOST match by ID
   if (HOST_ID && directId && String(directId) === String(HOST_ID)) {
     const h = await getOrUpdateUser(String(HOST_ID), null, null);
     return {
@@ -196,7 +194,6 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  // HOST match by username
   if (HOST_USERNAME && un === HOST_USERNAME) {
     const h = await getOrUpdateUser(String(HOST_ID), null, null);
     return {
@@ -207,7 +204,6 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  // Direct receiver
   if (directId) {
     const u = await getOrUpdateUser(String(directId), null, null);
     return {
@@ -218,7 +214,6 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  // fallback → host
   if (HOST_ID) {
     const h = await getOrUpdateUser(String(HOST_ID), null, null);
     return {
@@ -249,7 +244,7 @@ function isHeartMeGift(evt: any): boolean {
 }
 
 // ============================================================================
-// MAIN PROCESSOR (FIXED VERSION)
+// MAIN PROCESSOR — v12.0 FIXED
 // ============================================================================
 async function processGift(evt: any, source: string) {
   try {
@@ -257,6 +252,7 @@ async function processGift(evt: any, source: string) {
     if (dedupe.has(key)) return;
     dedupe.add(key);
 
+    // identity engine update
     await upsertIdentityFromLooseEvent(evt);
 
     const S = extractSender(evt);
@@ -271,25 +267,14 @@ async function processGift(evt: any, source: string) {
     const gameId = getActiveGameId();
     const active = await isGameActive();
 
-    // ========================================================================
-    // NO ACTIVE GAME → NIET OPSLAAN, WEL LOG + REFRESH
-    // ========================================================================
-
+    // NO ACTIVE GAME → LOG ONLY
     if (!gameId || !active) {
-      const senderFmt = formatDisplay(sender);
-
       emitLog({
         type: "gift",
-        message: `${senderFmt} → UNKNOWN: ${evt.giftName} (+${diamonds}💎)`,
+        message: `${formatDisplay(sender)} → UNKNOWN: ${evt.giftName} (+${diamonds}💎)`,
       });
-
-      await broadcastPlayerLeaderboard();
       return;
     }
-
-    // ========================================================================
-    // ACTIVE GAME — normaal pad
-    // ========================================================================
 
     const receiver = await resolveReceiver(evt);
     const isHostReceiver = receiver.role === "host";
@@ -311,15 +296,11 @@ async function processGift(evt: any, source: string) {
       (arena.status === "grace" && nowMs <= arena.graceEnd);
 
     const is_round_gift = inRound && !isHostReceiver;
-    const round_active = arena.status === "active";
 
-    // ============================================================================
-    // SENDER POINTS
-    // ============================================================================
-    await addDiamonds(BigInt(sender.tiktok_id), diamonds, "total");
-    await addDiamonds(BigInt(sender.tiktok_id), diamonds, "stream");
-    await addDiamonds(BigInt(sender.tiktok_id), diamonds, "current_round");
-
+    // ========================================================================
+    // SENDER: GEEN PLAYER DIAMONDS MEER (LEADERBOARD FIX)
+    // ========================================================================
+    // Sender krijgt alleen BP, fan, twist, stats-log
     await addBP(
       BigInt(sender.tiktok_id),
       diamonds * 0.2,
@@ -327,23 +308,17 @@ async function processGift(evt: any, source: string) {
       sender.display_name
     );
 
-    // ============================================================================
-    // PLAYER RECEIVES DIAMONDS (FIX)
-    // ============================================================================
+    // ========================================================================
+    // RECEIVER: PLAYER DIAMONDS
+    // ========================================================================
     if (!isHostReceiver && receiver.id && is_round_gift) {
       await addDiamonds(BigInt(receiver.id), diamonds, "current_round");
+      await addDiamonds(BigInt(receiver.id), diamonds, "total");
     }
 
-    // ============================================================================
-    // ARENA DIAMONDS
-    // ============================================================================
-    if (receiver.id && is_round_gift) {
-      await safeAddArenaDiamonds(String(receiver.id), diamonds);
-    }
-
-    // ============================================================================
-    // HOST RECEIVES DIAMONDS
-    // ============================================================================
+    // ========================================================================
+    // HOST RECEIVE
+    // ========================================================================
     if (isHostReceiver && receiver.id) {
       await pool.query(
         `
@@ -357,9 +332,16 @@ async function processGift(evt: any, source: string) {
       );
     }
 
-    // ============================================================================
+    // ========================================================================
+    // ARENA
+    // ========================================================================
+    if (!isHostReceiver && is_round_gift && receiver.id) {
+      await safeAddArenaDiamonds(String(receiver.id), diamonds);
+    }
+
+    // ========================================================================
     // FAN GIFTS
-    // ============================================================================
+    // ========================================================================
     if (isHostReceiver && isHeartMeGift(evt)) {
       const expires = new Date(nowMs + 24 * 3600 * 1000);
       await pool.query(
@@ -373,9 +355,9 @@ async function processGift(evt: any, source: string) {
       });
     }
 
-    // ============================================================================
+    // ========================================================================
     // TWIST GIFTS
-    // ============================================================================
+    // ========================================================================
     const giftId = Number(evt.giftId);
     const twistType =
       (Object.keys(TWIST_MAP) as TwistType[]).find(
@@ -384,16 +366,15 @@ async function processGift(evt: any, source: string) {
 
     if (twistType) {
       await addTwistByGift(String(sender.tiktok_id), twistType);
-
       emitLog({
         type: "twist",
         message: `${senderFmt} ontving twist: ${TWIST_MAP[twistType].giftName}`,
       });
     }
 
-    // ============================================================================
-    // INSERT GIFT
-    // ============================================================================
+    // ========================================================================
+    // INSERT GIFT LOG (VOOR GIFTER LEADERBOARD)
+    // ========================================================================
     await pool.query(
       `
       INSERT INTO gifts (
@@ -424,23 +405,21 @@ async function processGift(evt: any, source: string) {
         evt.giftName || "unknown",
         diamonds,
         diamonds * 0.2,
-
         gameId,
         isHostReceiver,
         is_round_gift,
-        round_active,
+        arena.status === "active",
         Number(arena.round),
       ]
     );
 
     await broadcastStats();
+    await broadcastPlayerLeaderboard();
 
     emitLog({
       type: "gift",
       message: `${senderFmt} → ${receiverFmt}: ${evt.giftName} (+${diamonds}💎)`,
     });
-
-    await broadcastPlayerLeaderboard();
 
   } catch (err) {
     console.error("❌ processGift ERROR:", err);
@@ -456,7 +435,7 @@ export function initGiftEngine(conn: any) {
     return;
   }
 
-  console.log("🎁 GiftEngine v11.3 (Danny FIX) LOADED");
+  console.log("🎁 GiftEngine v12.0 CLEAN LEADERBOARD LOADED");
 
   conn.on("gift", (d: any) => processGift(d, "gift"));
   conn.on("roomMessage", (d: any) => {
@@ -471,9 +450,6 @@ export function initGiftEngine(conn: any) {
   });
 }
 
-// ============================================================================
-// EXPORT
-// ============================================================================
 export default {
   initGiftEngine,
 };
