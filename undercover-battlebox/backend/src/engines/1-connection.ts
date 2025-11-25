@@ -1,13 +1,13 @@
 // ============================================================================
-// 1-connection.ts — v12 SAFE MODE
-// Undercover BattleBox — TikTok LIVE Core Connection Engine
+// 1-connection.ts — v12.3 SAFE MODE (Danny Build)
+// TikTok LIVE Core Connection Engine
 // SINGLE CONNECT → SINGLE RECONNECT → ELSE IDLE
-// SAFE MODE: No health monitor, no retry spam, no fallback loops
 // ============================================================================
 
 import { WebcastPushConnection } from "tiktok-live-connector";
 import { setSetting } from "../db";
 import { upsertIdentityFromLooseEvent } from "./2-user-engine";
+import { setLiveState } from "../server";
 
 // small helper
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -24,7 +24,7 @@ function norm(v: any): string {
 
 let activeConn: WebcastPushConnection | null = null;
 
-// exported getter for outside systems
+// getter for other modules
 export function getActiveConn() {
   return activeConn;
 }
@@ -80,11 +80,11 @@ export async function startConnection(
       );
     };
 
-    const base = [
+    const baseEvents = [
       "chat", "like", "follow", "share", "member",
       "subscribe", "social", "liveRoomUser", "enter"
     ];
-    for (const ev of base) {
+    for (const ev of baseEvents) {
       try { c.on(ev, update); } catch {}
     }
 
@@ -104,7 +104,7 @@ export async function startConnection(
   }
 
   // ---------------------------------------------------------
-  // 1) Single connect attempt
+  // 1) SINGLE CONNECT ATTEMPT
   // ---------------------------------------------------------
   try {
     await conn.connect();
@@ -117,13 +117,12 @@ export async function startConnection(
   }
 
   // ---------------------------------------------------------
-  // CONNECTED event
+  // CONNECTED EVENT
   // ---------------------------------------------------------
   conn.on("connected", async (info: any) => {
     connected = true;
 
     console.log("══════════ CONNECTED ══════════");
-
     setLiveState(true);
 
     const hostId =
@@ -156,7 +155,7 @@ export async function startConnection(
   attachIdentitySync(conn);
 
   // ---------------------------------------------------------
-  // 2) Single reconnect attempt on real disconnect
+  // 2) ONE-TIME RECONNECT ON REAL DISCONNECT
   // ---------------------------------------------------------
   conn.on("disconnected", async () => {
     console.log("🔻 Verbinding verbroken — poging tot 1 reconnect…");
@@ -165,11 +164,11 @@ export async function startConnection(
       await conn.connect();
       console.log("🔄 Reconnect gelukt");
       return;
-    } catch (err) {
+    } catch {
       console.log("⛔ Reconnect mislukt → IDLE MODE");
       setLiveState(false);
       activeConn = null;
-      onError(); // notify server
+      onError();
       return;
     }
   });
