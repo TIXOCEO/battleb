@@ -22,7 +22,7 @@ import type {
 type StreamStats = {
   totalPlayers: number;
   totalPlayerDiamonds: number;
-  totalHostDiamonds: number;
+  totalHostDiamonds: number;   // <-- ⭐ nieuwe property
 };
 
 type GameSessionState = {
@@ -92,7 +92,9 @@ export default function AdminDashboardPage() {
     socket.on("log", (l) => setLogs((prev) => [l, ...prev].slice(0, 200)));
     socket.on("initialLogs", (d) => setLogs(d.slice(0, 200)));
 
+    // ⭐ UPDATED: ontvangst van nieuwe stats inclusief host diamonds
     socket.on("streamStats", (s) => setStreamStats(s));
+
     socket.on("gameSession", (s) => setGameSession(s));
 
     socket.on("leaderboardPlayers", (rows) => setPlayerLeaderboard(rows));
@@ -128,8 +130,8 @@ export default function AdminDashboardPage() {
     };
   }, []);
 
-/* ============================================
-     INITIAL SNAPSHOT (no prefix)
+  /* ============================================
+     INITIAL SNAPSHOT
   ============================================ */
   useEffect(() => {
     const socket = getAdminSocket();
@@ -157,7 +159,7 @@ export default function AdminDashboardPage() {
   }, []);
 
   /* ============================================
-     ADMIN EMITTERS — FIXED (NO admin:)
+     ADMIN EMITTERS (No prefix)
   ============================================ */
   const emitAdmin = (event: keyof AdminSocketOutbound, payload?: any) => {
     const socket = getAdminSocket();
@@ -189,7 +191,7 @@ export default function AdminDashboardPage() {
   };
 
   /* ============================================
-     HELPERS & DERIVED STATE
+     HELPERS
   ============================================ */
   const fmt = (n: number | undefined | null) =>
     (typeof n === "number" ? n : 0).toLocaleString("nl-NL", {
@@ -215,7 +217,7 @@ export default function AdminDashboardPage() {
     hasDoomed;
 
   /* ============================================
-     AUTOCOMPLETE FIXED
+     AUTOCOMPLETE
   ============================================ */
   useEffect(() => {
     if (!typing || typing.length < 2) {
@@ -239,7 +241,8 @@ export default function AdminDashboardPage() {
   }, [typing]);
 
   const applyAutoFill = (u: SearchUser) => {
-    const formatted = u.username.startsWith("@") ? u.username : `@${u.username}`;
+    const formatted =
+      u.username.startsWith("@") ? u.username : `@${u.username}`;
 
     if (activeAutoField === "main") setUsername(formatted);
     if (activeAutoField === "give") setTwistUserGive(formatted);
@@ -251,7 +254,7 @@ export default function AdminDashboardPage() {
     setSearchResults([]);
   };
 
-  /* ============================================
+/* ============================================
      TIMER PROGRESS
   ============================================ */
   const roundProgress = useMemo(() => {
@@ -305,7 +308,19 @@ export default function AdminDashboardPage() {
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
       {/* HEADER */}
-      <header className="mb-6">
+      <header className="mb-6 relative">
+
+        {/* HOST DIAMONDS BADGE ⭐️ NIEUW ★ */}
+        {streamStats && (
+          <div className="
+            absolute right-0 top-0
+            bg-[#ff4d4f] text-white text-xs font-semibold
+            px-3 py-1 rounded-full shadow-lg
+          ">
+            Host: {fmt(streamStats.totalHostDiamonds)} 💎
+          </div>
+        )}
+
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-2">
           <div className="flex items-center gap-2">
             <div className="text-2xl font-bold text-[#ff4d4f]">UB</div>
@@ -345,18 +360,12 @@ export default function AdminDashboardPage() {
             <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold">
               {arena.status === "active" &&
                 formatTime(
-                  Math.max(
-                    0,
-                    Math.floor((arena.roundCutoff - Date.now()) / 1000)
-                  )
+                  Math.max(0, Math.floor((arena.roundCutoff - Date.now()) / 1000))
                 )}
 
               {arena.status === "grace" &&
                 formatTime(
-                  Math.max(
-                    0,
-                    Math.floor((arena.graceEnd - Date.now()) / 1000)
-                  )
+                  Math.max(0, Math.floor((arena.graceEnd - Date.now()) / 1000))
                 )}
 
               {arena.status === "ended" && "00:00"}
@@ -465,6 +474,7 @@ export default function AdminDashboardPage() {
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
               />
 
+              {/* AUTOCOMPLETE MAIN */}
               {showResults &&
                 searchResults.length > 0 &&
                 activeAutoField === "main" && (
@@ -705,53 +715,19 @@ export default function AdminDashboardPage() {
             </div>
           </div>
 
-          <div className="p-4 max-h-96 overflow-y-auto text-sm">
-            {/* PLAYERS TAB */}
-            {activeLbTab === "players" && (
-              <div>
-                <h2 className="text-xl font-semibold mb-2">Player Leaderboard</h2>
-                <p className="text-xs text-gray-500 mb-3">
-                  Diamanten ontvangen (huidige stream)
-                </p>
+          {/* ===================================================
+              PLAYER LEADERBOARD PANEL
+          =================================================== */}
+          {activeLbTab === "players" && (
+            <div className="p-4 max-h-96 overflow-y-auto text-sm">
+              <h2 className="text-xl font-semibold mb-2">Player Leaderboard</h2>
+              <p className="text-xs text-gray-500 mb-3">
+                Diamanten ontvangen (huidige stream)
+              </p>
 
-                {playerLeaderboard.length ? (
-                  playerLeaderboard.map((e, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center justify-between border-b last:border-0 border-gray-200 py-1"
-                    >
-                      <div>
-                        <span className="font-mono text-xs text-gray-500 mr-2">
-                          #{idx + 1}
-                        </span>
-                        <span className="font-semibold">
-                          {e.display_name} (@{e.username})
-                        </span>
-                      </div>
-
-                      <span className="font-semibold">
-                        {fmt(e.diamonds_total ?? e.total_diamonds)} 💎
-                      </span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-sm text-gray-500 italic">
-                    Geen spelers gevonden.
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* GIFTERS TAB */}
-            {activeLbTab === "gifters" && (
-              <div>
-                <h2 className="text-xl font-semibold mb-2">Gifter Leaderboard</h2>
-                <p className="text-xs text-gray-500 mb-3">
-                  Diamanten verstuurd (huidige stream)
-                </p>
-
-                {gifterLeaderboard.length ? (
-                  gifterLeaderboard.map((e, idx) => (
+              {playerLeaderboard.length ? (
+                <>
+                  {playerLeaderboard.map((e, idx) => (
                     <div
                       key={idx}
                       className="flex items-center justify-between border-b last:border-0 border-gray-200 py-1"
@@ -769,15 +745,79 @@ export default function AdminDashboardPage() {
                         {fmt(e.total_diamonds)} 💎
                       </span>
                     </div>
-                  ))
-                ) : (
-                  <div className="text-sm text-gray-500 italic">
-                    Geen gifters gevonden.
+                  ))}
+
+                  {/* TOTAAL PLAYERS SUM */}
+                  <div className="text-right mt-3 font-bold text-gray-700">
+                    Totaal:{" "}
+                    {fmt(
+                      playerLeaderboard.reduce(
+                        (acc, p) => acc + (p.total_diamonds || 0),
+                        0
+                      )
+                    )}{" "}
+                    💎
                   </div>
-                )}
-              </div>
-            )}
-          </div>
+                </>
+              ) : (
+                <div className="text-sm text-gray-500 italic">
+                  Geen spelers gevonden.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ===================================================
+              GIFTER LEADERBOARD PANEL
+          =================================================== */}
+          {activeLbTab === "gifters" && (
+            <div className="p-4 max-h-96 overflow-y-auto text-sm">
+              <h2 className="text-xl font-semibold mb-2">Gifter Leaderboard</h2>
+              <p className="text-xs text-gray-500 mb-3">
+                Diamanten verstuurd (huidige stream)
+              </p>
+
+              {gifterLeaderboard.length ? (
+                <>
+                  {gifterLeaderboard.map((e, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between border-b last:border-0 border-gray-200 py-1"
+                    >
+                      <div>
+                        <span className="font-mono text-xs text-gray-500 mr-2">
+                          #{idx + 1}
+                        </span>
+                        <span className="font-semibold">
+                          {e.display_name} (@{e.username})
+                        </span>
+                      </div>
+
+                      <span className="font-semibold">
+                        {fmt(e.total_diamonds)} 💎
+                      </span>
+                    </div>
+                  ))}
+
+                  {/* TOTAAL GIFTERS SUM */}
+                  <div className="text-right mt-3 font-bold text-gray-700">
+                    Totaal:{" "}
+                    {fmt(
+                      gifterLeaderboard.reduce(
+                        (acc, g) => acc + (g.total_diamonds || 0),
+                        0
+                      )
+                    )}{" "}
+                    💎
+                  </div>
+                </>
+              ) : (
+                <div className="text-sm text-gray-500 italic">
+                  Geen gifters gevonden.
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </section>
 
@@ -1006,8 +1046,8 @@ export default function AdminDashboardPage() {
       </section>
 
       <footer className="mt-4 text-xs text-gray-400 text-center">
-        BattleBox Engine v3.2 – Danny Stable
+        BattleBox Engine v3.3 – Danny Stable
       </footer>
     </main>
   );
-                    }
+}
