@@ -1,34 +1,36 @@
 // ============================================================================
-// src/queue.ts — QUEUE ENGINE v4.0 FINAL
-// Fan-system + VIP priority + Boost logic + server v4.0 compatible
+// src/queue.ts — QUEUE ENGINE v15 FINAL
+// Compatibel met server.ts v15 (geen emitQueue export, geen setLiveState)
+// Priority system: VIP (5) → FAN (3) → BOOST (n) → joined_at
 // ============================================================================
 
 import pool from "./db";
 import { io } from "./server";
 
-// ---------------------------------------------------------------------------
+// ============================================================================
 // addToQueue()
-// Wordt gebruikt door: chat-engine (!join), admin, twists
-// ---------------------------------------------------------------------------
+// Wordt gebruikt door: chat-engine (!join), admin-panel, twists
+// ============================================================================
 export async function addToQueue(tiktok_id: string, username: string): Promise<void> {
   const clean = username.replace(/^@+/, "").toLowerCase();
   const tid = BigInt(tiktok_id);
 
-  // eerst duplicates verwijderen
+  // dubbele entries verwijderen
   await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [tid]);
 
   // nieuwe queue entry
   await pool.query(
-    `INSERT INTO queue (user_tiktok_id, boost_spots) VALUES ($1, 0)`,
+    `INSERT INTO queue (user_tiktok_id, boost_spots, joined_at)
+     VALUES ($1, 0, NOW())`,
     [tid]
   );
 
-  await emitQueue();
+  await pushQueueUpdate();
 }
 
-// ---------------------------------------------------------------------------
-// boostQueue() — fallback (admin)
-// ---------------------------------------------------------------------------
+// ============================================================================
+// boostQueue() — admin fallback
+// ============================================================================
 export async function boostQueue(tiktok_id: string, spots: number): Promise<void> {
   const tid = BigInt(tiktok_id);
 
@@ -43,7 +45,7 @@ export async function boostQueue(tiktok_id: string, spots: number): Promise<void
     [tid]
   );
 
-  if (!r.rows[0] || Number(r.rows[0].bp_total) < cost) {
+  if (!r.rows.length || Number(r.rows[0].bp_total) < cost) {
     throw new Error("Niet genoeg BP");
   }
 
@@ -53,19 +55,18 @@ export async function boostQueue(tiktok_id: string, spots: number): Promise<void
     [cost, tid]
   );
 
-  // Boost opslaan
+  // Boost increasen
   await pool.query(
     `UPDATE queue SET boost_spots = boost_spots + $1 WHERE user_tiktok_id=$2`,
     [spots, tid]
   );
 
-  await emitQueue();
+  await pushQueueUpdate();
 }
 
-// ---------------------------------------------------------------------------
-// leaveQueue()
-// Returned BP refund
-// ---------------------------------------------------------------------------
+// ============================================================================
+// leaveQueue() — BP refund
+// ============================================================================
 export async function leaveQueue(tiktok_id: string): Promise<number> {
   const tid = BigInt(tiktok_id);
 
@@ -74,11 +75,12 @@ export async function leaveQueue(tiktok_id: string): Promise<number> {
     [tid]
   );
 
-  if (!r.rows[0]) return 0;
+  if (!r.rows.length) return 0;
 
   const boost = Number(r.rows[0].boost_spots);
   const refund = Math.floor(boost * 200 * 0.5);
 
+  // Refund verwerken
   await pool.query(
     `UPDATE users
      SET bp_total = bp_total + $1,
@@ -89,21 +91,19 @@ export async function leaveQueue(tiktok_id: string): Promise<number> {
 
   await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [tid]);
 
-  await emitQueue();
-
+  await pushQueueUpdate();
   return refund;
 }
 
 // ============================================================================
-// PRIORITY SYSTEM
-// VIP (5 punten) → FAN (3 punten) → Boost (n punten) → joined_at
+// PRIORITY CALCULATION
 // ============================================================================
 function calcPriority(isVip: boolean, isFan: boolean, boost: number): number {
   return (isVip ? 5 : 0) + (isFan ? 3 : 0) + (boost || 0);
 }
 
 // ============================================================================
-// GET FULL QUEUE (gematcht met jouw fan systeem)
+// getQueue() — volledige queue met VIP/FAN/Boost gedrag
 // ============================================================================
 export async function getQueue() {
   const result = await pool.query(
@@ -140,7 +140,7 @@ export async function getQueue() {
     if (isVip) reason += "[VIP] ";
     if (isFan) reason += "[FAN] ";
     if (boost > 0) reason += `+Boost ${boost} `;
-    if (reason === "") reason = "Standaard";
+    if (!reason) reason = "Standaard";
 
     return {
       tiktok_id: row.user_tiktok_id.toString(),
@@ -155,7 +155,7 @@ export async function getQueue() {
     };
   });
 
-  // SORT: VIP > FAN > BOOST > time
+  // SORT (consistent met jouw volledige systeem)
   items.sort((a, b) => {
     if (a.is_vip !== b.is_vip) return Number(b.is_vip) - Number(a.is_vip);
     if (a.is_fan !== b.is_fan) return Number(b.is_fan) - Number(a.is_fan);
@@ -173,6 +173,16 @@ export async function getQueue() {
     is_fan: item.is_fan,
     reason: item.reason,
   }));
+}
+
+// ============================================================================
+// pushQueueUpdate() — NIEUW voor server v15
+// ============================================================================
+// Wordt intern gebruikt in engines, zodat server.ts geen emitQueue hoeft te hebben
+// ============================================================================
+export async function pushQueueUpdate() {
+  const entries = await getQueue();
+  io.emit("updateQueue", { open: true, entries });
 }
 
 export default getQueue;
