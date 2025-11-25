@@ -174,11 +174,17 @@ export interface ArenaSettings {
    LEADERBOARDS
 ================================ */
 export interface PlayerLeaderboardEntry {
+  tiktok_id: string;
   username: string;
   display_name: string;
-  tiktok_id: string;
-  total_diamonds?: number;
+
+  // ⭐ Backend stuurt deze ALTIJD mee:
+  total_score: number; // diamonds_total + diamonds_current_round
+
+  // Optioneel maar oké als ze bestaan:
   diamonds_total?: number;
+  diamonds_current_round?: number;
+
   is_vip?: boolean;
   is_fan?: boolean;
 }
