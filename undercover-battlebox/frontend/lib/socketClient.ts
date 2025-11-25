@@ -1,5 +1,5 @@
 // ============================================================================
-// frontend/lib/socketClient.ts — FIXED (NO NAMESPACE)
+// frontend/lib/socketClient.ts — FIXED (NO NAMESPACE) — FULL VERSION
 // ============================================================================
 
 import { io, Socket } from "socket.io-client";
@@ -21,7 +21,7 @@ const BACKEND_URL = "http://178.251.232.12:4000";
 const ADMIN_TOKEN = process.env.NEXT_PUBLIC_ADMIN_TOKEN || "supergeheim123";
 
 /* ============================================================================
-   INBOUND EVENTS
+   INBOUND EVENTS  (LOCAL INTERFACE — MUST MATCH BACKEND)
 ============================================================================ */
 export interface AdminSocketInbound {
   updateArena: (data: ArenaState) => void;
@@ -49,6 +49,9 @@ export interface AdminSocketInbound {
   "round:grace": (d: any) => void;
   "round:end": () => void;
 
+  /* ⭐⭐⭐ FIX: HOST DIAMONDS EVENT — EXACT VAN BACKEND ⭐⭐⭐ */
+  hostDiamonds: (data: { username: string; total: number }) => void;
+
   connect: () => void;
   disconnect: (reason: string) => void;
   connect_error: (err: Error) => void;
@@ -57,7 +60,7 @@ export interface AdminSocketInbound {
 }
 
 /* ============================================================================
-   OUTBOUND
+   OUTBOUND (ongewijzigd)
 ============================================================================ */
 export interface AdminSocketOutbound {
   ping: () => void;
@@ -130,7 +133,7 @@ export interface AdminSocketOutbound {
 }
 
 /* ============================================================================
-   SINGLETON SOCKET — FIXED URL
+   SINGLETON SOCKET — EXACT ALS ORIGINEEL
 ============================================================================ */
 
 declare global {
@@ -148,7 +151,6 @@ export function getAdminSocket(): Socket<
 
   if (globalThis.__adminSocket) return globalThis.__adminSocket;
 
-  // ❗ FIXED — GEEN '/admin'
   const socket = io(BACKEND_URL, {
     transports: ["polling", "websocket"],
     path: "/socket.io",
