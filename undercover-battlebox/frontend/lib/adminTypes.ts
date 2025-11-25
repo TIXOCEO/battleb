@@ -21,7 +21,15 @@ export interface ArenaPlayer {
   display_name: string;
   username: string;
 
-  diamonds: number;
+  // NIEUW / huidige ronde
+  diamonds_current_round: number;
+
+  // Historisch totaal over eerdere rondes (telt mee voor finale totaal)
+  diamonds_total: number;
+
+  // Voorheen gebruikt in sommige UI stukken — mag blijven bestaan voor legacy
+  diamonds_stream?: number;
+
   boosters: string[];
 
   status: "alive" | "eliminated";
