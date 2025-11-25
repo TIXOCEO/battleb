@@ -1,14 +1,16 @@
 // ============================================================================
-// 5-GAME-ENGINE.ts — Arena Engine v4.2 (Finale Totals Edition + StopGame Patch)
+// 5-GAME-ENGINE.ts — Arena Engine v4.4 (Finale Totals + Live Totals Patch)
 // ----------------------------------------------------------------------------
 // ✔ Eliminatie quarter: plek 6–8 + ties
-// ✔ Eliminatie finale: laatste plek + ties
+// ✔ Eliminatie finale: laatste plek + alle ties
 // ✔ Finale sorting = diamonds_total + diamonds_current_round
-// ✔ diamonds_total bouwt op: quarter + finale
+// ✔ diamonds_total wordt opgebouwd via endRound()
 // ✔ current_round wordt na iedere ronde toegevoegd & gereset
-// ✔ Immune werkt correct
-// ✔ 100% compatibel met jouw gift-engine + server
-// ✔ ★ PATCH: Bij stopGame diamonds_current_round resetten
+// ✔ Immune boosters werken
+// ✔ 100% compatibel met jouw gift-engine v12.5
+// ✔ ★ Nieuw: realtime finale score = total_diamonds (DB) + ronde diamonds (arena)
+// ✔ ★ Nieuw: broadcastPlayerLeaderboard() werkt direct met TOTAAL scores
+// ✔ ★ Geen verdere wijzigingen buiten noodzakelijk gedrag
 // ============================================================================
 
 import { io, emitLog } from "../server";
@@ -28,12 +30,15 @@ interface Player {
   display_name: string;
   username: string;
 
-  diamonds: number; // huidige ronde
+  diamonds: number; // huidige ronde (altijd arena)
   boosters: string[];
   status: "alive" | "eliminated";
   joined_at: number;
 
   positionStatus?: PositionStatus;
+
+  // ★ Nieuw voor finale leaderboards
+  total_before_round?: number;
 }
 
 interface ArenaSettings {
@@ -140,10 +145,16 @@ async function getPlayerTotal(id: string): Promise<number> {
   return Number(r.rows[0]?.diamonds_total ?? 0);
 }
 
+// ★ UPGRADE — tijdens finale tonen we LIVE totale score:
+// total_before_round (DB) + diamonds (arena)
+function calcFinaleScore(p: Player) {
+  return Number(p.total_before_round ?? 0) + Number(p.diamonds ?? 0);
+}
+
 function sortPlayersFinale(): void {
   arena.players.sort((a, b) => {
-    const aScore = (a as any)._total + a.diamonds;
-    const bScore = (b as any)._total + b.diamonds;
+    const aScore = calcFinaleScore(a);
+    const bScore = calcFinaleScore(b);
     return bScore - aScore || a.joined_at - b.joined_at;
   });
 }
@@ -158,8 +169,7 @@ async function sortPlayers(): Promise<void> {
 
   if (arena.type === "finale") {
     for (const p of arena.players) {
-      const total = await getPlayerTotal(p.id);
-      (p as any)._total = total;
+      p.total_before_round = await getPlayerTotal(p.id);
     }
     sortPlayersFinale();
   }
@@ -190,18 +200,14 @@ async function updatePositionStatuses(): Promise<void> {
     let lowest = Infinity;
 
     if (arena.type === "finale") {
-      lowest = Math.min(
-        ...p.map(pl => (pl as any)._total + pl.diamonds)
-      );
+      lowest = Math.min(...p.map(pl => calcFinaleScore(pl)));
     } else {
       lowest = Math.min(...p.map(pl => pl.diamonds));
     }
 
     for (const pl of p) {
       const value =
-        arena.type === "finale"
-          ? (pl as any)._total + pl.diamonds
-          : pl.diamonds;
+        arena.type === "finale" ? calcFinaleScore(pl) : pl.diamonds;
 
       if (pl.boosters.includes("immune")) pl.positionStatus = "immune";
       else if (value === lowest) pl.positionStatus = "danger";
@@ -226,12 +232,10 @@ async function updatePositionStatuses(): Promise<void> {
     }
 
     else if (arena.type === "finale") {
-      const last = p[p.length - 1];
-      const lastScore = (last as any)._total + last.diamonds;
+      const lastScore = calcFinaleScore(p[p.length - 1]);
 
       for (const pl of p) {
-        const value = (pl as any)._total + pl.diamonds;
-        if (value === lastScore) pl.positionStatus = "elimination";
+        if (calcFinaleScore(pl) === lastScore) pl.positionStatus = "elimination";
       }
     }
 
@@ -270,6 +274,7 @@ export function arenaJoin(
     status: "alive",
     joined_at: Date.now(),
     positionStatus: "active",
+    total_before_round: 0   // ★ nodig voor finale live score
   });
 
   emitLog({ type: "arena", message: `${display_name} toegevoegd aan arena` });
@@ -425,7 +430,7 @@ async function tick() {
 }
 
 // ============================================================================
-// STORE ROUND DIAMONDS
+// STORE ROUND DIAMONDS (quarter + finale support)
 // ============================================================================
 
 async function storeRoundDiamonds() {
@@ -506,12 +511,12 @@ async function getTopPlayers(n: number) {
   const enhanced = [];
 
   for (const p of arena.players) {
-    const total = await getPlayerTotal(p.id);
+    const totalBefore = await getPlayerTotal(p.id);
     enhanced.push({
       id: p.id,
       display_name: p.display_name,
       username: p.username,
-      diamonds: total + p.diamonds,
+      diamonds: totalBefore + p.diamonds,
     });
   }
 
@@ -556,7 +561,6 @@ export async function resetTotalDiamonds() {
   await pool.query(`UPDATE users SET diamonds_total = 0`);
   emitLog({ type: "system", message: "Alle cumulatieve diamonds gewist" });
 
-  // ★ PATCH: Reset diamonds_current_round bij stopGame
   await pool.query(`UPDATE users SET diamonds_current_round = 0`);
   emitLog({ type: "system", message: "Alle ronde-diamonds gewist (stopGame patch)" });
 }
@@ -570,5 +574,5 @@ export async function initGame() {
   await recomputePositions();
   emitArena();
 
-  emitLog({ type: "system", message: "Arena Engine v4.2 gestart" });
-}
+  emitLog({ type: "system", message: "Arena Engine v4.4 gestart (finale totals realtime)" });
+    }
