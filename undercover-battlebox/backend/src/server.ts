@@ -35,6 +35,13 @@ import {
 import { getQueue } from "./queue";
 import { giveTwistAdmin, useTwistAdmin } from "./engines/9-admin-twist-engine";
 
+// ============================================================================
+// TYPE: AdminSocket
+// ============================================================================
+interface AdminSocket extends Socket {
+  isAdmin?: boolean;
+}
+
 dotenv.config();
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "supersecret123";
