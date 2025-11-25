@@ -8,7 +8,6 @@
 import { WebcastPushConnection } from "tiktok-live-connector";
 import { setSetting } from "../db";
 import { upsertIdentityFromLooseEvent } from "./2-user-engine";
-import { setLiveState } from "../server";
 
 // small helper
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
