@@ -10,7 +10,7 @@
 //      → Host diamonds totaal
 //      → Stream stats
 // ✔ Sender krijgt GEEN diamonds meer (alleen BP rewards)
-// ✔ FIXED: Geen conflicts met server.ts (broadcastHostDiamonds verwijderd uit imports)
+// ✔ FIXED: Geen conflicts met server.ts
 // ============================================================================
 
 import pool from "../db";
@@ -57,7 +57,7 @@ async function isGameActive(): Promise<boolean> {
 }
 
 // ============================================================================
-// DEDUPE
+// DEDUPE (20s)
 // ============================================================================
 const dedupe = new Set<string>();
 setInterval(() => dedupe.clear(), 20000);
@@ -123,7 +123,7 @@ async function cleanupFan(id: string) {
 }
 
 // ============================================================================
-// PARSERS
+// PARSE SENDER
 // ============================================================================
 function extractSender(evt: any) {
   const raw =
@@ -159,6 +159,9 @@ function extractSender(evt: any) {
   };
 }
 
+// ============================================================================
+// DIAMONDS CALC
+// ============================================================================
 function calcDiamonds(evt: any): number {
   const base = Number(evt.diamondCount || evt.diamond || 0);
   if (base <= 0) return 0;
@@ -167,14 +170,14 @@ function calcDiamonds(evt: any): number {
   const final = !!evt.repeatEnd;
   const type = Number(evt.giftType || 0);
 
-  // TikTok type=1 gifts only pay at final repeat
+  // Type=1 gifts only pay on final repeat
   if (type === 1) return final ? base * repeat : 0;
 
   return base;
 }
 
 // ============================================================================
-// RECEIVER PARSER (host locked)
+// RESOLVE RECEIVER (host locked)
 // ============================================================================
 async function resolveReceiver(evt: any) {
   const active = getActiveHost();
@@ -209,13 +212,13 @@ async function resolveReceiver(evt: any) {
     return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
   }
 
-  // User match
+  // Normal user
   if (directId) {
     const u = await getOrUpdateUser(String(directId), null, null);
     return { id: u.tiktok_id, username: u.username, display_name: u.display_name, role: "speler" };
   }
 
-  // Fallback host
+  // Fallback → host
   if (HOST_ID) {
     const h = await getOrUpdateUser(String(HOST_ID), null, null);
     return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
@@ -225,7 +228,7 @@ async function resolveReceiver(evt: any) {
 }
 
 // ============================================================================
-// HEART ME
+// "HEART ME" DETECTOR
 // ============================================================================
 const HEART_ME_GIFT_IDS = new Set([7934]);
 
@@ -236,20 +239,16 @@ function isHeartMeGift(evt: any): boolean {
 }
 
 // ============================================================================
-// MAIN PROCESSOR — V12.6
+// MAIN PROCESSOR
 // ============================================================================
 async function processGift(evt: any, source: string) {
   try {
-    // --------------------------------
     // DEDUPE
-    // --------------------------------
     const key = makeDedupeKey(evt, source);
     if (dedupe.has(key)) return;
     dedupe.add(key);
 
-    // --------------------------------
-    // IDENTITEIT
-    // --------------------------------
+    // IDENTITY
     await upsertIdentityFromLooseEvent(evt);
 
     const S = extractSender(evt);
@@ -264,9 +263,7 @@ async function processGift(evt: any, source: string) {
     const gameId = getActiveGameId();
     const active = await isGameActive();
 
-    // --------------------------------
-    // GEEN SPEL ACTIEF
-    // --------------------------------
+    // NO ACTIVE GAME → do nothing except log
     if (!gameId || !active) {
       emitLog({
         type: "gift",
@@ -275,9 +272,7 @@ async function processGift(evt: any, source: string) {
       return;
     }
 
-    // --------------------------------
     // RECEIVER
-    // --------------------------------
     const receiver = await resolveReceiver(evt);
     const isHostReceiver = receiver.role === "host";
 
@@ -292,9 +287,7 @@ async function processGift(evt: any, source: string) {
     const senderFmt = formatDisplay(sender);
     const receiverFmt = formatDisplay(receiverUser);
 
-    // --------------------------------
     // ROUND CHECK
-    // --------------------------------
     const arena = getArena();
     const nowMs = now();
 
@@ -305,7 +298,7 @@ async function processGift(evt: any, source: string) {
     const isRoundGift = inRound && !isHostReceiver;
 
     // ========================================================================
-    // SENDER KRIJGT GEEN DIAMONDS MEER  ❗
+    // SENDER GETS **NO DIAMONDS**
     // ========================================================================
     await addBP(
       BigInt(sender.tiktok_id),
@@ -315,7 +308,7 @@ async function processGift(evt: any, source: string) {
     );
 
     // ========================================================================
-    // SPELER ONTVANGT DIAMONDS (alleen ontvanger)
+    // PLAYER RECEIVING DIAMONDS
     // ========================================================================
     if (!isHostReceiver && receiver.id && isRoundGift) {
       await addDiamonds(BigInt(receiver.id), diamonds, "current_round");
@@ -325,7 +318,7 @@ async function processGift(evt: any, source: string) {
     }
 
     // ========================================================================
-    // HOST ONTVANGT DIAMONDS (tell via gifts)
+    // HOST RECEIVES DIAMONDS
     // ========================================================================
     if (isHostReceiver && receiver.id) {
       await addDiamonds(BigInt(receiver.id), diamonds, "stream");
@@ -334,7 +327,7 @@ async function processGift(evt: any, source: string) {
     }
 
     // ========================================================================
-    // FAN
+    // FAN GIFT (Heart Me)
     // ========================================================================
     if (isHostReceiver && isHeartMeGift(evt)) {
       const expires = new Date(nowMs + 24 * 3600 * 1000);
@@ -354,7 +347,6 @@ async function processGift(evt: any, source: string) {
     // TWIST GIFTS
     // ========================================================================
     const giftId = Number(evt.giftId);
-
     const twistType =
       (Object.keys(TWIST_MAP) as TwistType[]).find(
         (t) => TWIST_MAP[t].giftId === giftId
@@ -362,7 +354,6 @@ async function processGift(evt: any, source: string) {
 
     if (twistType) {
       await addTwistByGift(String(sender.tiktok_id), twistType);
-
       emitLog({
         type: "twist",
         message: `${senderFmt} ontving twist: ${TWIST_MAP[twistType].giftName}`
@@ -370,7 +361,7 @@ async function processGift(evt: any, source: string) {
     }
 
     // ========================================================================
-    // INSERT GIFT (bron voor 3 leaderboards)
+    // INSERT GIFT
     // ========================================================================
     await pool.query(
       `
@@ -411,7 +402,7 @@ async function processGift(evt: any, source: string) {
     );
 
     // ========================================================================
-    // REALTIME BROADCASTS
+    // BROADCASTS
     // ========================================================================
     await broadcastStats();
     await broadcastPlayerLeaderboard();
@@ -429,7 +420,7 @@ async function processGift(evt: any, source: string) {
 }
 
 // ============================================================================
-// HOST DIAMONDS STREAM — 100% GIFTS-BASED
+// HOST DIAMONDS STREAM
 // ============================================================================
 export async function broadcastHostDiamonds() {
   const host = getActiveHost();
@@ -460,7 +451,7 @@ export async function broadcastHostDiamonds() {
 }
 
 // ============================================================================
-// INIT — TIKTOK EVENT → processGift
+// INIT — TikTok → processGift
 // ============================================================================
 export function initGiftEngine(conn: any) {
   if (!conn || typeof conn.on !== "function") {
@@ -483,9 +474,6 @@ export function initGiftEngine(conn: any) {
   });
 }
 
-// ============================================================================
-// EXPORT
-// ============================================================================
 export default {
   initGiftEngine,
   broadcastHostDiamonds
