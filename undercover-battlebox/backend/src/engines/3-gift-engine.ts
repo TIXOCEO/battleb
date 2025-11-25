@@ -1,18 +1,20 @@
 // ============================================================================
-// 3-gift-engine.ts — v12.5 LEADERBOARD-PERFECT + HOST-DIAMONDS STREAM
+// 3-gift-engine.ts — v12.6 PERFECT LEADERBOARD + HOST-DIAMONDS STREAM
 // ============================================================================
 // ✔ Spelers krijgen alleen diamonds wanneer ze ontvanger zijn
-// ✔ Gifters krijgen 0 speler-diamonds (nooit meer player LB vervuiling)
-// ✔ Host-diamonds worden perfect apart geteld via gifts.is_host_gift
-// ✔ Realtime updates voor:
-//      - Player leaderboard
-//      - Gifter leaderboard
-//      - Host diamonds totaal
-//      - Stats
-// ✔ Geen diamonds toevoegen aan sender (alleen BP blijft bestaan)
+// ✔ Gifters krijgen nooit diamonds (geeft geen vervuiling in player LB)
+// ✔ Host-diamonds worden geteld via gifts.is_host_gift
+// ✔ Real-time updates voor:
+//      → Player leaderboard
+//      → Gifter leaderboard
+//      → Host diamonds totaal
+//      → Stream stats
+// ✔ Sender krijgt GEEN diamonds meer (alleen BP rewards)
+// ✔ FIXED: Geen conflicts met server.ts (broadcastHostDiamonds verwijderd uit imports)
 // ============================================================================
 
 import pool from "../db";
+
 import {
   getOrUpdateUser,
   getUserByTikTokId,
@@ -26,11 +28,11 @@ import {
   getActiveHost,
   broadcastPlayerLeaderboard,
   broadcastGifterLeaderboard,
-  broadcastHostDiamonds
 } from "../server";
 
 import { addDiamonds, addBP } from "./4-points-engine";
 import { getArena, safeAddArenaDiamonds } from "./5-game-engine";
+
 import { TWIST_MAP, TwistType } from "./twist-definitions";
 import { addTwistByGift } from "./8-twist-engine";
 
@@ -50,17 +52,19 @@ async function isGameActive(): Promise<boolean> {
     `SELECT id FROM games WHERE id=$1 AND status='running'`,
     [gid]
   );
+
   return r.rows.length > 0;
 }
 
 // ============================================================================
-// DEDUPLICATION
+// DEDUPE
 // ============================================================================
 const dedupe = new Set<string>();
 setInterval(() => dedupe.clear(), 20000);
 
 function makeDedupeKey(evt: any, source: string) {
   const roughTs = Math.round(Number(evt.timestamp || Date.now()) / 50);
+
   return (
     evt.msgId ||
     evt.logId ||
@@ -114,6 +118,7 @@ async function cleanupFan(id: string) {
     );
     return false;
   }
+
   return true;
 }
 
@@ -148,8 +153,8 @@ function extractSender(evt: any) {
     nick:
       raw?.nickname ||
       raw?.displayName ||
-      evt.nickname ||
       raw?.nickName ||
+      evt.nickname ||
       null,
   };
 }
@@ -162,12 +167,14 @@ function calcDiamonds(evt: any): number {
   const final = !!evt.repeatEnd;
   const type = Number(evt.giftType || 0);
 
+  // TikTok type=1 gifts only pay at final repeat
   if (type === 1) return final ? base * repeat : 0;
+
   return base;
 }
 
 // ============================================================================
-// RESOLVE RECEIVER — HOST LOCK
+// RECEIVER PARSER (host locked)
 // ============================================================================
 async function resolveReceiver(evt: any) {
   const active = getActiveHost();
@@ -190,25 +197,25 @@ async function resolveReceiver(evt: any) {
 
   const un = unique ? norm(unique) : null;
 
-  // Direct host ID match
+  // Host match (ID)
   if (HOST_ID && directId && String(directId) === String(HOST_ID)) {
     const h = await getOrUpdateUser(String(HOST_ID), null, null);
     return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
   }
 
-  // Username match
+  // Host match (username)
   if (HOST_USERNAME && un === HOST_USERNAME) {
     const h = await getOrUpdateUser(String(HOST_ID), null, null);
     return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
   }
 
-  // Otherwise → user
+  // User match
   if (directId) {
     const u = await getOrUpdateUser(String(directId), null, null);
     return { id: u.tiktok_id, username: u.username, display_name: u.display_name, role: "speler" };
   }
 
-  // Fallback → host
+  // Fallback host
   if (HOST_ID) {
     const h = await getOrUpdateUser(String(HOST_ID), null, null);
     return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
@@ -229,20 +236,20 @@ function isHeartMeGift(evt: any): boolean {
 }
 
 // ============================================================================
-// MAIN PROCESSOR — v12.5 PERFECT LEADERBOARD + HOST STREAM TELLING
+// MAIN PROCESSOR — V12.6
 // ============================================================================
 async function processGift(evt: any, source: string) {
   try {
-    // ----------------------------
+    // --------------------------------
     // DEDUPE
-    // ----------------------------
+    // --------------------------------
     const key = makeDedupeKey(evt, source);
     if (dedupe.has(key)) return;
     dedupe.add(key);
 
-    // ----------------------------
-    // IDENTITEIT UPDATEN
-    // ----------------------------
+    // --------------------------------
+    // IDENTITEIT
+    // --------------------------------
     await upsertIdentityFromLooseEvent(evt);
 
     const S = extractSender(evt);
@@ -251,18 +258,15 @@ async function processGift(evt: any, source: string) {
     const sender = await getOrUpdateUser(S.id, S.nick, S.unique);
     await cleanupFan(sender.tiktok_id);
 
-    // ----------------------------
-    // DIAMONDS
-    // ----------------------------
     const diamonds = calcDiamonds(evt);
     if (diamonds <= 0) return;
 
     const gameId = getActiveGameId();
     const active = await isGameActive();
 
-    // ----------------------------
-    // GEEN ACTIEF SPEL → LOG ONLY
-    // ----------------------------
+    // --------------------------------
+    // GEEN SPEL ACTIEF
+    // --------------------------------
     if (!gameId || !active) {
       emitLog({
         type: "gift",
@@ -271,9 +275,9 @@ async function processGift(evt: any, source: string) {
       return;
     }
 
-    // ----------------------------
+    // --------------------------------
     // RECEIVER
-    // ----------------------------
+    // --------------------------------
     const receiver = await resolveReceiver(evt);
     const isHostReceiver = receiver.role === "host";
 
@@ -288,9 +292,9 @@ async function processGift(evt: any, source: string) {
     const senderFmt = formatDisplay(sender);
     const receiverFmt = formatDisplay(receiverUser);
 
-    // ----------------------------
-    // ARENA / ROUND
-    // ----------------------------
+    // --------------------------------
+    // ROUND CHECK
+    // --------------------------------
     const arena = getArena();
     const nowMs = now();
 
@@ -301,9 +305,8 @@ async function processGift(evt: any, source: string) {
     const isRoundGift = inRound && !isHostReceiver;
 
     // ========================================================================
-    // SENDER KRIJGT GEEN DIAMONDS MEER  ❗ (BELANGRIJKSTE FIX)
+    // SENDER KRIJGT GEEN DIAMONDS MEER  ❗
     // ========================================================================
-    // Alleen BP (dus geen vervuiling player leaderboard)
     await addBP(
       BigInt(sender.tiktok_id),
       diamonds * 0.2,
@@ -312,43 +315,30 @@ async function processGift(evt: any, source: string) {
     );
 
     // ========================================================================
-    // SPELER ONTVANGT DIAMONDS (NIET HOST)
+    // SPELER ONTVANGT DIAMONDS (alleen ontvanger)
     // ========================================================================
     if (!isHostReceiver && receiver.id && isRoundGift) {
-      // ronde diamonds
       await addDiamonds(BigInt(receiver.id), diamonds, "current_round");
-
-      // total diamonds → nodig voor finale SOM
       await addDiamonds(BigInt(receiver.id), diamonds, "total");
 
-      // Arena counters
       await safeAddArenaDiamonds(String(receiver.id), diamonds);
     }
 
     // ========================================================================
-    // HOST ONTVANGT DIAMONDS
+    // HOST ONTVANGT DIAMONDS (tell via gifts)
     // ========================================================================
     if (isHostReceiver && receiver.id) {
-      await pool.query(
-        `
-        UPDATE users
-        SET diamonds_stream = diamonds_stream + $1,
-            diamonds_current_round = diamonds_current_round + $1,
-            diamonds_total = diamonds_total + $1
-        WHERE tiktok_id=$2
-      `,
-        [diamonds, BigInt(String(receiver.id))]
-      );
-
-      // Realtime host diamonds output
-      broadcastHostDiamonds();
+      await addDiamonds(BigInt(receiver.id), diamonds, "stream");
+      await addDiamonds(BigInt(receiver.id), diamonds, "current_round");
+      await addDiamonds(BigInt(receiver.id), diamonds, "total");
     }
 
     // ========================================================================
-    // FAN GIFTS
+    // FAN
     // ========================================================================
     if (isHostReceiver && isHeartMeGift(evt)) {
       const expires = new Date(nowMs + 24 * 3600 * 1000);
+
       await pool.query(
         `UPDATE users SET is_fan=TRUE, fan_expires_at=$1 WHERE tiktok_id=$2`,
         [expires, BigInt(sender.tiktok_id)]
@@ -356,7 +346,7 @@ async function processGift(evt: any, source: string) {
 
       emitLog({
         type: "fan",
-        message: `${sender.display_name} is nu FAN ❤️ (24h)`
+        message: `${sender.display_name} is nu FAN ❤️ (24u)`
       });
     }
 
@@ -364,6 +354,7 @@ async function processGift(evt: any, source: string) {
     // TWIST GIFTS
     // ========================================================================
     const giftId = Number(evt.giftId);
+
     const twistType =
       (Object.keys(TWIST_MAP) as TwistType[]).find(
         (t) => TWIST_MAP[t].giftId === giftId
@@ -371,14 +362,15 @@ async function processGift(evt: any, source: string) {
 
     if (twistType) {
       await addTwistByGift(String(sender.tiktok_id), twistType);
+
       emitLog({
         type: "twist",
-        message: `${senderFmt} kreeg twist: ${TWIST_MAP[twistType].giftName}`
+        message: `${senderFmt} ontving twist: ${TWIST_MAP[twistType].giftName}`
       });
     }
 
     // ========================================================================
-    // LOGGEN IN GIFTS TABLE  (voeding voor leaderboards)
+    // INSERT GIFT (bron voor 3 leaderboards)
     // ========================================================================
     await pool.query(
       `
@@ -396,7 +388,7 @@ async function processGift(evt: any, source: string) {
       )
       VALUES ($1,$2,$3,$4,$5,$6,$7,
               $8,$9,$10,$11,$12,$13,$14,$15,NOW())
-    `,
+      `,
       [
         BigInt(sender.tiktok_id),
         sender.username,
@@ -419,16 +411,13 @@ async function processGift(evt: any, source: string) {
     );
 
     // ========================================================================
-    // REALTIME UPDATES
+    // REALTIME BROADCASTS
     // ========================================================================
     await broadcastStats();
     await broadcastPlayerLeaderboard();
     await broadcastGifterLeaderboard();
     await broadcastHostDiamonds();
 
-    // ========================================================================
-    // LOG
-    // ========================================================================
     emitLog({
       type: "gift",
       message: `${senderFmt} → ${receiverFmt}: ${evt.giftName} (+${diamonds}💎)`
@@ -437,66 +426,65 @@ async function processGift(evt: any, source: string) {
   } catch (err) {
     console.error("❌ processGift ERROR:", err);
   }
-  }
+}
 
 // ============================================================================
-// REALTIME HOST DIAMOND STREAM
+// HOST DIAMONDS STREAM — 100% GIFTS-BASED
 // ============================================================================
 export async function broadcastHostDiamonds() {
-  const active = getActiveHost();
-  if (!active?.id) {
-    io.emit("hostDiamonds", 0);
+  const host = getActiveHost();
+  if (!host?.id) {
+    io.emit("hostDiamonds", { username: "", total: 0 });
     return;
   }
 
-  // Pak diamonds_stream uit users tabel
+  const gameId = getActiveGameId();
+  if (!gameId) {
+    io.emit("hostDiamonds", { username: host.username, total: 0 });
+    return;
+  }
+
   const r = await pool.query(
     `
-    SELECT COALESCE(diamonds_stream,0) AS total
-    FROM users
-    WHERE tiktok_id = $1
+    SELECT COALESCE(SUM(diamonds),0) AS total
+    FROM gifts
+    WHERE game_id=$1 AND is_host_gift=TRUE
     `,
-    [BigInt(active.id)]
+    [gameId]
   );
 
-  const total = Number(r.rows[0]?.total || 0);
-
-  io.emit("hostDiamonds", total);
+  io.emit("hostDiamonds", {
+    username: host.username,
+    total: Number(r.rows[0]?.total || 0)
+  });
 }
 
-
 // ============================================================================
-// INIT — Sluizen voor alle gift-events
+// INIT — TIKTOK EVENT → processGift
 // ============================================================================
 export function initGiftEngine(conn: any) {
   if (!conn || typeof conn.on !== "function") {
-    console.log("⚠ initGiftEngine: no connection");
+    console.log("⚠ initGiftEngine: invalid connection");
     return;
   }
 
-  console.log("🎁 GiftEngine v12.5 LOADED — clean leaderboards + host total tracking");
+  console.log("🎁 GiftEngine v12.6 LOADED");
 
-  // raw TikTok connector events → funnel naar processGift()
   conn.on("gift", (d: any) => processGift(d, "gift"));
-
   conn.on("roomMessage", (d: any) => {
     if (d?.giftId || d?.diamondCount) processGift(d, "roomMessage");
   });
-
   conn.on("member", (d: any) => {
     if (d?.giftId || d?.diamondCount) processGift(d, "member");
   });
-
   conn.on("chat", (d: any) => {
-    if (d?._data?.giftId || d?._data?.diamondCount) {
+    if (d?._data?.giftId || d?._data?.diamondCount)
       processGift(d._data, "chat-hidden");
-    }
   });
 }
 
-
 // ============================================================================
-// DEFAULT EXPORT
+// EXPORT
 // ============================================================================
 export default {
   initGiftEngine,
