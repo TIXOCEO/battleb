@@ -1,10 +1,9 @@
 // ============================================================================
-// 6-chat-engine.ts — v10.1 ULTRA FINAL (Host Profiles compat patch)
-// Fan-only join + VIP labels + Host rules + HARD HOST LOCK
+// 6-chat-engine.ts — v10.4 FINAL (Danny Build)
 // ============================================================================
 
 import pool from "../db";
-import { io, emitLog, getActiveHost } from "../server";
+import { io, emitLog, getActiveHost, isStreamLive } from "../server";
 
 import { addToQueue, leaveQueue, getQueue } from "../queue";
 import { getOrUpdateUser } from "./2-user-engine";
@@ -30,7 +29,7 @@ async function ensureFanStatus(userId: bigint): Promise<boolean> {
     `
     SELECT is_fan, fan_expires_at
     FROM users
-    WHERE tiktok_id = $1
+    WHERE tiktok_id=$1
     `,
     [userId]
   );
@@ -38,7 +37,6 @@ async function ensureFanStatus(userId: bigint): Promise<boolean> {
   if (!r.rows[0]) return false;
 
   const { is_fan, fan_expires_at } = r.rows[0];
-
   if (!is_fan || !fan_expires_at) return false;
 
   const exp = new Date(fan_expires_at);
@@ -46,7 +44,7 @@ async function ensureFanStatus(userId: bigint): Promise<boolean> {
 
   if (exp <= now) {
     await pool.query(
-      `UPDATE users SET is_fan = FALSE, fan_expires_at = NULL WHERE tiktok_id = $1`,
+      `UPDATE users SET is_fan=FALSE, fan_expires_at=NULL WHERE tiktok_id=$1`,
       [userId]
     );
     return false;
@@ -56,10 +54,10 @@ async function ensureFanStatus(userId: bigint): Promise<boolean> {
 }
 
 // ============================================================================
-// MAIN CHAT ENGINE
+// MAIN ENGINE
 // ============================================================================
 export function initChatEngine(conn: any) {
-  console.log("💬 CHAT ENGINE v10.1 LOADED (Host Profiles Compatible)");
+  console.log("💬 CHAT ENGINE v10.4 LOADED");
 
   conn.on("chat", async (msg: any) => {
     try {
@@ -85,7 +83,7 @@ export function initChatEngine(conn: any) {
 
       const { cmd } = command;
 
-      // user ophalen & syncen
+      // sync user
       const user = await getOrUpdateUser(
         String(userId),
         msg.user?.nickname || msg.sender?.nickname,
@@ -94,10 +92,10 @@ export function initChatEngine(conn: any) {
 
       const dbUserId = BigInt(userId);
 
-      // FAN status
+      // fan
       const fan = await ensureFanStatus(dbUserId);
 
-      // VIP status
+      // vip
       const vipRow = await pool.query(
         `SELECT is_vip FROM users WHERE tiktok_id=$1`,
         [dbUserId]
@@ -106,24 +104,18 @@ export function initChatEngine(conn: any) {
 
       const tag = isVip ? "[VIP] " : fan ? "[FAN] " : "";
 
-      // NEW HOST PROFILE CHECK
-      const activeHost = getActiveHost(); // { id, username }
+      // host check
+      const activeHost = getActiveHost();
       const isHost =
         activeHost && String(activeHost.id) === String(userId);
 
       // =====================================================================
-      // !join — FAN ONLY (behalve host mag joinen als stream NIET live is)
+      // !join
       // =====================================================================
       if (cmd === "!join") {
-
         // host mag joinen als stream NIET live is
         if (isHost && !isStreamLive()) {
-          try {
-            await addToQueue(String(userId), user.username);
-          } catch (err: any) {
-            emitLog({ type: "queue", message: err.message });
-            return;
-          }
+          await addToQueue(String(userId), user.username);
 
           io.emit("updateQueue", {
             open: true,
@@ -147,7 +139,7 @@ export function initChatEngine(conn: any) {
           return;
         }
 
-        // normale speler → FAN ONLY
+        // spelers → FAN ONLY
         if (!fan) {
           emitLog({
             type: "queue",
@@ -156,12 +148,7 @@ export function initChatEngine(conn: any) {
           return;
         }
 
-        try {
-          await addToQueue(String(userId), user.username);
-        } catch (err: any) {
-          emitLog({ type: "queue", message: err.message });
-          return;
-        }
+        await addToQueue(String(userId), user.username);
 
         io.emit("updateQueue", {
           open: true,
