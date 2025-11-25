@@ -212,6 +212,36 @@ export interface InitialSnapshot {
 }
 
 /* ============================================================================
+   SOCKET INBOUND (FROM BACKEND → FRONTEND)
+============================================================================ */
+export interface AdminSocketInbound {
+  updateArena: (arena: ArenaState) => void;
+
+  updateQueue: (data: {
+    open: boolean;
+    entries: QueueEntry[];
+  }) => void;
+
+  log: (log: LogEntry) => void;
+  initialLogs: (logs: LogEntry[]) => void;
+
+  streamStats: (stats: {
+    totalPlayers: number;
+    totalPlayerDiamonds: number;
+    totalHostDiamonds: number;
+  }) => void;
+
+  leaderboardPlayers: (rows: PlayerLeaderboardEntry[]) => void;
+  leaderboardGifters: (rows: GifterLeaderboardEntry[]) => void;
+
+  connectState: (state: any) => void;
+  gameSession: (session: any) => void;
+
+  /* ⭐⭐⭐  NIEUW — 1-op-1 met backend  ⭐⭐⭐ */
+  hostDiamonds: (data: { username: string; total: number }) => void;
+}
+
+/* ============================================================================
    SOCKET OUTBOUND (SYNC WITH BACKEND handle())
 ============================================================================ */
 export interface AdminSocketOutbound {
