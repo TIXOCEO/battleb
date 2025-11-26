@@ -774,7 +774,7 @@ io.on("connection", async (socket: AdminSocket) => {
           FROM users
           WHERE LOWER(username) LIKE LOWER($1)
              OR LOWER(display_name) LIKE LOWER($1)
-          ORDER BY last_seen_at DESC NULLS LAST
+          ORDER BY username ASC
           LIMIT 25
           `,
           [like]
