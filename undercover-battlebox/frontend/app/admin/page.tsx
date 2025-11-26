@@ -598,24 +598,7 @@ const players = useMemo(() => arena?.players ?? [], [arena]);
                 </div>
 
                 <div className="flex gap-1 mt-2 sm:mt-0 justify-end">
-                  <button
-                    onClick={() =>
-                      emitAdminWithUser("promoteUser", q.username)
-                    }
-                    className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
-                  >
-                    ▲
-                  </button>
-
-                  <button
-                    onClick={() =>
-                      emitAdminWithUser("demoteUser", q.username)
-                    }
-                    className="px-2 py-1 rounded-full bg-purple-50 border border-purple-300 text-purple-800 hover:bg-purple-100"
-                  >
-                    ▼
-                  </button>
-
+                
                   <button
                     onClick={() =>
                       emitAdminWithUser("addToArena", q.username)
