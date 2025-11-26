@@ -1,15 +1,13 @@
 // ============================================================================
-// 5-GAME-ENGINE.ts — Arena Engine v5.0 (Realtime Totals Edition)
+// 5-GAME-ENGINE.ts — Arena Engine v6.0 (Gifts-Driven Edition)
 // ----------------------------------------------------------------------------
-// ✔ Finale score = diamonds_total (DB) → GEEN total_before_round nodig
-// ✔ Quarter sorting = arena.diamonds (huidige ronde)
-// ✔ Player diamonds worden realtime opgeslagen via gift-engine v13
-// ✔ Arena-diamonds zijn puur visueel voor ronde-sorting
-// ✔ Geen storeRoundDiamonds() meer (voorkomt dubbele opslag!)
-// ✔ Eliminatie quarter: posities 6–8 + ties
-// ✔ Eliminatie finale: laatste plek (op basis van diamonds_total) + ties
-// ✔ Immune boosters werken
-// ✔ 100% synchroon met jouw nieuwe gift-engine v13.0
+// ✔ Geen diamonds meer in users-table
+// ✔ Geen safeAddArenaDiamonds() meer
+// ✔ Quarter scores = SUM(diamonds) FROM gifts WHERE game_id + round_id
+// ✔ Finale scores = SUM(diamonds) FROM gifts WHERE game_id
+// ✔ Arena players hebben GEEN diamonds property meer
+// ✔ Dangerous / elimination volledig gifts-driven
+// ✔ Perfecte sync met gift-engine v14
 // ============================================================================
 
 import { io, emitLog } from "../server";
@@ -27,9 +25,6 @@ interface Player {
   id: string;
   display_name: string;
   username: string;
-
-  // ⚠ Alleen ronde-score voor sorting
-  diamonds: number;
 
   boosters: string[];
   status: "alive" | "eliminated";
@@ -134,16 +129,33 @@ export function getArenaSettings(): ArenaSettings {
 }
 
 // ============================================================================
-// SCORE HELPERS
+// GIFTS-DRIVEN SCORE HELPERS
 // ============================================================================
 
-// Finale score = realtime DB diamonds_total
-async function getFinaleScore(id: string): Promise<number> {
+// Quarter score (per ronde)
+async function getRoundScore(playerId: string, roundId: number, gameId: number): Promise<number> {
   const r = await pool.query(
-    `SELECT diamonds_total FROM users WHERE tiktok_id=$1`,
-    [BigInt(id)]
+    `
+    SELECT COALESCE(SUM(diamonds), 0) AS total
+    FROM gifts
+    WHERE receiver_id=$1 AND round_id=$2 AND game_id=$3
+    `,
+    [BigInt(playerId), roundId, gameId]
   );
-  return Number(r.rows[0]?.diamonds_total ?? 0);
+  return Number(r.rows[0]?.total ?? 0);
+}
+
+// Finale score (totaal in hele game)
+async function getFinaleScore(playerId: string, gameId: number): Promise<number> {
+  const r = await pool.query(
+    `
+    SELECT COALESCE(SUM(diamonds), 0) AS total
+    FROM gifts
+    WHERE receiver_id=$1 AND game_id=$2
+    `,
+    [BigInt(playerId), gameId]
+  );
+  return Number(r.rows[0]?.total ?? 0);
 }
 
 // ============================================================================
@@ -151,27 +163,28 @@ async function getFinaleScore(id: string): Promise<number> {
 // ============================================================================
 
 async function sortPlayers(): Promise<void> {
+  const gameId = (io as any)?.currentGameId ?? null;
+  if (!gameId) return;
+
+  const scores = new Map<string, number>();
+
   if (arena.type === "finale") {
-    // Finale: sorteren op diamonds_total (DB)
-    const scores = new Map<string, number>();
-
+    // Finale = total game score
     for (const p of arena.players) {
-      scores.set(p.id, await getFinaleScore(p.id));
+      scores.set(p.id, await getFinaleScore(p.id, gameId));
     }
-
-    arena.players.sort((a, b) => {
-      const aScore = scores.get(a.id) ?? 0;
-      const bScore = scores.get(b.id) ?? 0;
-      return bScore - aScore || a.joined_at - b.joined_at;
-    });
+  } else {
+    // Quarter = round score only
+    for (const p of arena.players) {
+      scores.set(p.id, await getRoundScore(p.id, arena.round, gameId));
+    }
   }
 
-  else {
-    // Quarter: sorteren op ronde-diamonds
-    arena.players.sort(
-      (a, b) => b.diamonds - a.diamonds || a.joined_at - b.joined_at
-    );
-  }
+  arena.players.sort((a, b) => {
+    const as = scores.get(a.id) ?? 0;
+    const bs = scores.get(b.id) ?? 0;
+    return bs - as || a.joined_at - b.joined_at;
+  });
 
   arena.lastSortedAt = Date.now();
 }
@@ -184,60 +197,61 @@ async function updatePositionStatuses(): Promise<void> {
   const p = arena.players;
   if (!p.length) return;
 
+  const gameId = (io as any)?.currentGameId ?? null;
+  if (!gameId) return;
+
+  const scores = new Map<string, number>();
+
+  if (arena.type === "finale") {
+    for (const pl of p) scores.set(pl.id, await getFinaleScore(pl.id, gameId));
+  } else {
+    for (const pl of p)
+      scores.set(pl.id, await getRoundScore(pl.id, arena.round, gameId));
+  }
+
+  const values = [...scores.values()];
+  const lowest = Math.min(...values);
+
   for (const pl of p) pl.positionStatus = "active";
 
   if (arena.status === "active") {
-    let lowest = Infinity;
-
-    if (arena.type === "finale") {
-      const scores = await Promise.all(
-        p.map(pl => getFinaleScore(pl.id))
-      );
-      lowest = Math.min(...scores);
-    } else {
-      lowest = Math.min(...p.map(pl => pl.diamonds));
-    }
-
     for (const pl of p) {
-      let value = arena.type === "finale"
-        ? await getFinaleScore(pl.id)
-        : pl.diamonds;
-
+      const val = scores.get(pl.id) ?? 0;
       if (pl.boosters.includes("immune")) pl.positionStatus = "immune";
-      else if (value === lowest) pl.positionStatus = "danger";
+      else if (val === lowest) pl.positionStatus = "danger";
     }
-
     return;
   }
 
-  // Grace or Ended → eliminations
-  if (arena.status === "grace" || arena.status === "ended") {
-    await sortPlayers();
+  // Grace or end → elimination
+  await sortPlayers();
 
-    if (arena.type === "quarter") {
-      // elim posities 6–8 (index 5–7)
-      const elimPos = [5, 6, 7].filter(i => p[i]);
-      for (const pos of elimPos) {
-        const target = p[pos].diamonds;
-        for (const pl of p) {
-          if (pl.diamonds === target) pl.positionStatus = "elimination";
+  if (arena.type === "quarter") {
+    const qPlayers = [...p];
+    const elimPos = [5, 6, 7].filter((i) => qPlayers[i]);
+
+    for (const pos of elimPos) {
+      const target = qPlayers[pos];
+      const score = scores.get(target.id);
+
+      for (const pl of p) {
+        if ((scores.get(pl.id) ?? -1) === score) {
+          pl.positionStatus = "elimination";
         }
       }
     }
-
-    if (arena.type === "finale") {
-      const lastScore = await getFinaleScore(p[p.length - 1].id);
-      for (const pl of p) {
-        const s = await getFinaleScore(pl.id);
-        if (s === lastScore) pl.positionStatus = "elimination";
-      }
-    }
-
-    for (const pl of p)
-      if (pl.boosters.includes("immune")) pl.positionStatus = "immune";
-
-    return;
   }
+
+  if (arena.type === "finale") {
+    const lastScore = scores.get(p[p.length - 1].id) ?? 0;
+    for (const pl of p) {
+      if ((scores.get(pl.id) ?? -1) === lastScore)
+        pl.positionStatus = "elimination";
+    }
+  }
+
+  for (const pl of p)
+    if (pl.boosters.includes("immune")) pl.positionStatus = "immune";
 }
 
 async function recomputePositions(): Promise<void> {
@@ -257,13 +271,12 @@ export function arenaJoin(
   if (!tiktok_id) return false;
 
   const id = String(tiktok_id);
-  if (arena.players.some(p => p.id === id)) return false;
+  if (arena.players.some((p) => p.id === id)) return false;
 
   arena.players.push({
     id,
     display_name: display_name ?? "Onbekend",
     username: (username ?? "").replace(/^@+/, ""),
-    diamonds: 0,
     boosters: [],
     status: "alive",
     joined_at: Date.now(),
@@ -279,7 +292,7 @@ export function arenaJoin(
 
 export function arenaLeave(tiktok_id: string): void {
   const id = String(tiktok_id);
-  arena.players = arena.players.filter(p => p.id !== id);
+  arena.players = arena.players.filter((p) => p.id !== id);
 
   emitLog({ type: "arena", message: `Speler ${id} verwijderd uit arena` });
 
@@ -300,24 +313,6 @@ export async function arenaClear(): Promise<void> {
 }
 
 // ============================================================================
-// SAFE ADD DIAMONDS (ronde-score → GEEN DB)
-// ============================================================================
-
-export async function safeAddArenaDiamonds(id: string, amount: number) {
-  if (arena.status !== "active") return;
-
-  const pl = arena.players.find(p => p.id === id);
-  if (!pl) return;
-
-  pl.diamonds += Number(amount);
-
-  emitLog({ type: "gift", message: `${pl.display_name} ontving ${amount} 💎` });
-
-  await recomputePositions();
-  emitArena();
-}
-
-// ============================================================================
 // ROUND MANAGEMENT
 // ============================================================================
 
@@ -326,11 +321,11 @@ let roundTick: NodeJS.Timeout | null = null;
 export function startRound(type: RoundType): boolean {
   if (
     arena.settings.forceEliminations &&
-    arena.players.some(p => p.positionStatus === "elimination")
+    arena.players.some((p) => p.positionStatus === "elimination")
   ) {
     emitLog({
       type: "error",
-      message: `Kan geen ronde starten: pending eliminaties`
+      message: `Kan geen ronde starten: pending eliminaties`,
     });
     return false;
   }
@@ -354,12 +349,9 @@ export function startRound(type: RoundType): boolean {
   arena.roundCutoff = arena.roundStartTime + duration * 1000;
   arena.graceEnd = arena.roundCutoff + arena.settings.graceSeconds * 1000;
 
-  // reset ronde diamonds
-  for (const p of arena.players) p.diamonds = 0;
-
   emitLog({
     type: "arena",
-    message: `Ronde gestart (#${arena.round}) type: ${type}`
+    message: `Ronde gestart (#${arena.round}) type: ${type}`,
   });
 
   recomputePositions();
@@ -368,7 +360,7 @@ export function startRound(type: RoundType): boolean {
   io.emit("round:start", {
     round: arena.round,
     type,
-    duration
+    duration,
   });
 
   if (roundTick) clearInterval(roundTick);
@@ -384,22 +376,18 @@ export function startRound(type: RoundType): boolean {
 async function tick() {
   const now = Date.now();
 
-  // ---------------------------------------
-  // ACTIVE PHASE
-  // ---------------------------------------
   if (arena.status === "active") {
     const left = Math.max(0, Math.ceil((arena.roundCutoff - now) / 1000));
     arena.timeLeft = left;
 
     if (left <= 0) {
-      // START GRACE PERIOD
       arena.status = "grace";
       arena.isRunning = false;
       arena.timeLeft = 0;
 
       emitLog({
         type: "arena",
-        message: `Grace-periode gestart (${arena.settings.graceSeconds}s)`
+        message: `Grace-periode gestart (${arena.settings.graceSeconds}s)`,
       });
 
       await recomputePositions();
@@ -407,7 +395,7 @@ async function tick() {
 
       io.emit("round:grace", {
         round: arena.round,
-        grace: arena.settings.graceSeconds
+        grace: arena.settings.graceSeconds,
       });
     } else {
       await recomputePositions();
@@ -416,9 +404,6 @@ async function tick() {
     return;
   }
 
-  // ---------------------------------------
-  // GRACE PHASE
-  // ---------------------------------------
   if (arena.status === "grace") {
     if (now >= arena.graceEnd) {
       await endRound();
@@ -429,9 +414,6 @@ async function tick() {
     return;
   }
 
-  // ---------------------------------------
-  // IDLE / ENDED → STOP TICK
-  // ---------------------------------------
   if (arena.status === "ended" || arena.status === "idle") {
     if (roundTick) clearInterval(roundTick);
     roundTick = null;
@@ -439,21 +421,20 @@ async function tick() {
 }
 
 // ============================================================================
-// END ROUND  — NO STORE → DB STAYS REALTIME
+// END ROUND — gifts-driven
 // ============================================================================
 
 export async function endRound(): Promise<void> {
   await recomputePositions();
 
   const pending = arena.players.filter(
-    p => p.positionStatus === "elimination"
+    (p) => p.positionStatus === "elimination"
   );
 
-  // FORCE ELIMINATIONS BEFORE NEW ROUND
   if (arena.settings.forceEliminations && pending.length > 0) {
     emitLog({
       type: "system",
-      message: `Ronde beëindigd — pending eliminaties (${pending.length})`
+      message: `Ronde beëindigd — pending eliminaties (${pending.length})`,
     });
 
     arena.status = "ended";
@@ -465,21 +446,20 @@ export async function endRound(): Promise<void> {
     io.emit("round:end", {
       round: arena.round,
       type: arena.type,
-      pendingEliminations: pending.map(p => p.id),
+      pendingEliminations: pending.map((p) => p.id),
       top3: await getTopPlayers(3),
     });
 
     return;
   }
 
-  // NORMAL ROUND END
   arena.status = "idle";
   arena.isRunning = false;
   arena.timeLeft = 0;
 
   emitLog({
     type: "arena",
-    message: `Ronde afgerond (#${arena.round})`
+    message: `Ronde afgerond (#${arena.round})`,
   });
 
   emitArena();
@@ -496,19 +476,21 @@ export async function endRound(): Promise<void> {
 }
 
 // ============================================================================
-// TOP PLAYERS — FINALE & QUARTER SUPPORT
+// TOP PLAYERS — gifts-driven
 // ============================================================================
 
 async function getTopPlayers(n: number) {
   const out = [];
+  const gameId = (io as any)?.currentGameId ?? null;
+  if (!gameId) return [];
 
   for (const p of arena.players) {
-    const total = await getFinaleScore(p.id); // realtime DB total
+    const total = await getFinaleScore(p.id, gameId);
     out.push({
       id: p.id,
       display_name: p.display_name,
       username: p.username,
-      diamonds: total
+      diamonds: total,
     });
   }
 
@@ -544,18 +526,6 @@ export function emitArena() {
 }
 
 // ============================================================================
-// RESET TOTAL DIAMONDS BIJ STOPGAME
-// (Wél nodig voor nieuwe game, maar niet per ronde)
-// ============================================================================
-
-export async function resetTotalDiamonds() {
-  await pool.query(`UPDATE users SET diamonds_total = 0`);
-  await pool.query(`UPDATE users SET diamonds_current_round = 0`);
-
-  emitLog({ type: "system", message: "Alle diamonds volledig gereset" });
-}
-
-// ============================================================================
 // INIT
 // ============================================================================
 
@@ -566,6 +536,6 @@ export async function initGame() {
 
   emitLog({
     type: "system",
-    message: "Arena Engine v5.0 gereed (realtime totals volledig actief)"
+    message: "Arena Engine v6.0 gereed (gifts-driven scores actief)",
   });
 }
