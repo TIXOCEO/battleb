@@ -1,8 +1,9 @@
 /* ============================================================================
-   adminTypes.ts — BattleBox v12.3 (SYNC WITH BACKEND)
-   ✔ Prefix "admin:" VERWIJDERD
-   ✔ Events exact gelijk aan handle() in backend
-   ✔ UI/builder compatible
+   adminTypes.ts — BattleBox v13.0 (GIFTS-DRIVEN EDITION)
+   ✔ Volledig gesynchroniseerd met backend v13
+   ✔ ArenaPlayer heeft geen diamonds meer in backend
+   ✔ Frontend-friendly: score veld toegevoegd (quarter=round-score, finale=total)
+   ✔ Leaderboards volledig gifts-driven
 ============================================================================ */
 
 /* ================================
@@ -21,17 +22,19 @@ export interface ArenaPlayer {
   display_name: string;
   username: string;
 
-  // NIEUW / huidige ronde
-  diamonds_current_round: number;
+  /*
+    👉 LET OP:
+    Backend stuurt GEEN diamonds mee in arena-engine.
+    Maar frontend MOET iets kunnen tonen:
+    - Quarter: ronde diamonds (via gifts-sum)
+    - Finale: total diamonds (via gifts-sum)
 
-  // Historisch totaal over eerdere rondes (telt mee voor finale totaal)
-  diamonds_total: number;
-
-  // Voorheen gebruikt in sommige UI stukken — mag blijven bestaan voor legacy
-  diamonds_stream?: number;
+    Daarom: één UI-vriendelijk veld "score".
+    Dit wordt aan frontend geleverd door server.ts → updateArena().
+  */
+  score: number;
 
   boosters: string[];
-
   status: "alive" | "eliminated";
   positionStatus: ArenaPlayerStatus;
 
@@ -48,7 +51,7 @@ export interface ArenaPlayer {
 export interface ArenaState {
   players: ArenaPlayer[];
   round: number;
-  type: "quarter" | "semi" | "finale";
+  type: "quarter" | "finale";
 
   status: "idle" | "active" | "grace" | "ended";
   timeLeft: number;
@@ -171,29 +174,20 @@ export interface ArenaSettings {
 }
 
 /* ================================
-   LEADERBOARDS
+   LEADERBOARDS (GIFTS-DRIVEN)
 ================================ */
 export interface PlayerLeaderboardEntry {
   tiktok_id: string;
   username: string;
   display_name: string;
-
-  // ⭐ Backend stuurt deze ALTIJD mee:
-  total_score: number; // diamonds_total + diamonds_current_round
-
-  // Optioneel maar oké als ze bestaan:
-  diamonds_total?: number;
-  diamonds_current_round?: number;
-
-  is_vip?: boolean;
-  is_fan?: boolean;
+  total_score: number; // SUM(diamonds) FROM gifts
 }
 
 export interface GifterLeaderboardEntry {
   user_id: string;
   username: string;
   display_name: string;
-  total_diamonds: number;
+  total_diamonds: number; // SUM(diamonds) FROM gifts
 }
 
 /* ============================================================================
@@ -251,7 +245,6 @@ export interface AdminSocketInbound {
   connectState: (state: any) => void;
   gameSession: (session: any) => void;
 
-  /* ⭐⭐⭐  NIEUW — 1-op-1 met backend  ⭐⭐⭐ */
   hostDiamonds: (data: { username: string; total: number }) => void;
 }
 
@@ -315,16 +308,6 @@ export interface AdminSocketOutbound {
   ) => void;
 
   removeFromQueue: (
-    payload: { username: string },
-    ack: (res: AdminAckResponse) => void
-  ) => void;
-
-  promoteUser: (
-    payload: { username: string },
-    ack: (res: AdminAckResponse) => void
-  ) => void;
-
-  demoteUser: (
     payload: { username: string },
     ack: (res: AdminAckResponse) => void
   ) => void;
