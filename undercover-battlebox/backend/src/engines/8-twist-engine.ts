@@ -1,16 +1,12 @@
 // ============================================================================
-// 8-twist-engine.ts — Twist Engine v3.0 (Danny Stable Build)
+// 8-twist-engine.ts — Twist Engine v3.1 (Danny Stable, Diamonds-Agnostic)
 // ============================================================================
 //
-// ✔ FULL SUPPORT: Galaxy, MoneyGun, Bomb, Shield, Immune, Heal, DiamondPistol
-// ✔ Volledige integratie met arena-engine v4.x
-// ✔ Live overlays voor OBS
-// ✔ Live logs voor admin panel
-// ✔ Geen race conditions
-// ✔ Targeted twists correct
-// ✔ Heal = ALIVE herstellen (anti-MoneyGun / anti-Bomb)
-// ✔ Immune = aanval blokkeren
-// ✔ DiamondPistol = slechts 1 overlevende
+// ✔ Does NOT use player.diamonds (arena v13 has no diamonds field)
+// ✔ Galaxy fallback = sort on display_name (stable, predictable)
+// ✔ Fully compatible with Arena Engine v5 (score only)
+// ✔ MoneyGun, Bomb, Heal, Immune, DiamondPistol unchanged
+// ✔ No TypeScript errors
 //
 // ============================================================================
 
@@ -34,7 +30,7 @@ import pool from "../db";
 // HELPERS
 // ============================================================================
 
-// Zoek user in database op username
+// Zoek user
 async function findUserByUsername(raw: string) {
   const clean = raw.replace("@", "").trim().toLowerCase();
 
@@ -57,12 +53,10 @@ async function findUserByUsername(raw: string) {
   };
 }
 
-// Overlay event
 function emitOverlay(name: string, data: any) {
   io.emit(`twist:${name}`, data);
 }
 
-// Arena lookup
 function getPlayer(id: string) {
   const arena = getArena();
   return arena.players.find((p) => p.id === id) || null;
@@ -104,15 +98,15 @@ function applyImmuneStatus(id: string) {
 }
 
 // ============================================================================
-// TWIST IMPLEMENTATIES
+// TWISTS
 // ============================================================================
 
-// 1 — GALAXY
+// GALAXY — sorteer op naam (fallback sinds arena v13 geen diamonds meer heeft)
 async function applyGalaxy(sender: string) {
   const arena = getArena();
 
-  const sorted = [...arena.players].sort(
-    (a, b) => a.diamonds - b.diamonds
+  const sorted = [...arena.players].sort((a, b) =>
+    a.display_name.localeCompare(b.display_name)
   );
 
   arena.players.splice(0, arena.players.length, ...sorted);
@@ -126,14 +120,14 @@ async function applyGalaxy(sender: string) {
   emitOverlay("galaxy", { by: sender });
 }
 
-// 2 — MONEY GUN (direct eliminate)
+// MONEY GUN
 async function applyMoneyGun(sender: string, target: any) {
   if (!target) return;
 
   if (hasImmune(target.id)) {
     emitLog({
       type: "twist",
-      message: `${sender} probeerde MoneyGun op ${target.display_name}, maar die is IMMUNE!`,
+      message: `${sender} probeerde MoneyGun op ${target.display_name}, maar IMMUNE!`,
     });
     return;
   }
@@ -151,7 +145,7 @@ async function applyMoneyGun(sender: string, target: any) {
   });
 }
 
-// 3 — BOMB (random enemy)
+// BOMB
 async function applyBomb(sender: string) {
   const arena = getArena();
 
@@ -162,7 +156,7 @@ async function applyBomb(sender: string) {
   if (!candidates.length) {
     emitLog({
       type: "twist",
-      message: `${sender} probeerde een Bomb, maar geen targets!`,
+      message: `${sender} probeerde Bomb, maar geen targets.`,
     });
     return;
   }
@@ -174,7 +168,7 @@ async function applyBomb(sender: string) {
 
   emitLog({
     type: "twist",
-    message: `${sender} bombardeerde ${target.display_name}!`,
+    message: `${sender} BOMB → ${target.display_name}!`,
   });
 
   emitOverlay("bomb", {
@@ -184,7 +178,7 @@ async function applyBomb(sender: string) {
   });
 }
 
-// 4 — IMMUNE
+// IMMUNE
 async function applyImmune(sender: string, target: any) {
   if (!target) return;
 
@@ -201,14 +195,14 @@ async function applyImmune(sender: string, target: any) {
   });
 }
 
-// 5 — HEAL (herstel ALIVE)
+// HEAL
 async function applyHeal(sender: string, target: any) {
   if (!target) return;
 
   if (!isEliminated(target.id)) {
     emitLog({
       type: "twist",
-      message: `${sender} probeerde HEAL op ${target.display_name}, maar die is niet eliminated.`,
+      message: `${sender} probeerde HEAL op ${target.display_name}, maar niet eliminated.`,
     });
     return;
   }
@@ -217,7 +211,7 @@ async function applyHeal(sender: string, target: any) {
 
   emitLog({
     type: "twist",
-    message: `${sender} HEAL → ${target.display_name} is weer ALIVE!`,
+    message: `${sender} HEAL → ${target.display_name} is terug!`,
   });
 
   emitOverlay("heal", {
@@ -226,22 +220,21 @@ async function applyHeal(sender: string, target: any) {
   });
 }
 
-// 6 — DIAMOND PISTOL (alleen target overleeft)
+// DIAMOND PISTOL
 async function applyDiamondPistol(sender: string, survivor: any) {
   if (!survivor) return;
 
   const arena = getArena();
 
   for (const p of arena.players) {
-    if (p.id !== survivor.id) p.status = "eliminated";
-    else p.status = "alive";
+    p.status = p.id === survivor.id ? "alive" : "eliminated";
   }
 
   emitArena();
 
   emitLog({
     type: "twist",
-    message: `${sender} gebruikte DIAMOND PISTOL! Alleen ${survivor.display_name} overleeft.`,
+    message: `${sender} DIAMOND PISTOL → ${survivor.display_name} overleeft alleen!`,
   });
 
   emitOverlay("diamondpistol", {
@@ -251,7 +244,7 @@ async function applyDiamondPistol(sender: string, survivor: any) {
 }
 
 // ============================================================================
-// MAIN — execute twist
+// MAIN — EXECUTE TWIST
 // ============================================================================
 
 export async function useTwist(
@@ -265,17 +258,18 @@ export async function useTwist(
   if (arena.status !== "active" && arena.status !== "grace") {
     emitLog({
       type: "twist",
-      message: `${senderName} probeerde ${twist}, maar buiten een ronde.`,
+      message: `${senderName} probeerde ${twist}, maar buiten ronde.`,
     });
     return;
   }
 
-  // user must own twist
   const consumed = await consumeTwistFromUser(senderId, twist);
   if (!consumed) {
     emitLog({
       type: "twist",
-      message: `${senderName} probeerde ${TWIST_MAP[twist].giftName}, maar heeft geen twist.`,
+      message: `${senderName} probeerde ${
+        TWIST_MAP[twist].giftName
+      }, maar heeft geen twist.`,
     });
     return;
   }
@@ -286,7 +280,9 @@ export async function useTwist(
     if (!rawTarget) {
       emitLog({
         type: "twist",
-        message: `${senderName} gebruikte ${TWIST_MAP[twist].giftName} zonder doelwit.`,
+        message: `${senderName} gebruikte ${
+          TWIST_MAP[twist].giftName
+        } zonder doelwit.`,
       });
       return;
     }
@@ -295,34 +291,28 @@ export async function useTwist(
     if (!target) {
       emitLog({
         type: "twist",
-        message: `${senderName} gebruikte ${TWIST_MAP[twist].giftName} op '${rawTarget}', maar speler bestaat niet.`,
+        message: `${senderName} gebruikte ${
+          TWIST_MAP[twist].giftName
+        } op '${rawTarget}', bestaat niet.`,
       });
       return;
     }
   }
 
-  // execute twist
   switch (twist) {
     case "galaxy":
       return applyGalaxy(senderName);
-
     case "moneygun":
       return applyMoneyGun(senderName, target);
-
     case "bomb":
       return applyBomb(senderName);
-
     case "immune":
       return applyImmune(senderName, target);
-
     case "heal":
       return applyHeal(senderName, target);
-
     case "diamondpistol":
       return applyDiamondPistol(senderName, target);
-
     case "shield":
-      // wordt elders gebruikt als booster, maar blijft ondersteund
       return applyImmune(senderName, target);
   }
 }
@@ -341,7 +331,7 @@ export async function addTwistByGift(userId: string, twist: TwistType) {
 }
 
 // ============================================================================
-// Parser — !use heal @user
+// Parser (!use heal @user)
 // ============================================================================
 
 export async function parseUseCommand(
