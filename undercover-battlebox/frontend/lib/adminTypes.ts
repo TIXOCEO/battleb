@@ -1,8 +1,8 @@
 /* ============================================================================
-   adminTypes.ts — BattleBox v12.4 (FULL SYNC WITH BACKEND)
-   ✔ total_score verplicht
-   ✔ diamonds_total verplicht
-   ✔ diamonds_current_round verplicht
+   adminTypes.ts — BattleBox v12.3 (SYNC WITH BACKEND)
+   ✔ Prefix "admin:" VERWIJDERD
+   ✔ Events exact gelijk aan handle() in backend
+   ✔ UI/builder compatible
 ============================================================================ */
 
 /* ================================
@@ -21,9 +21,13 @@ export interface ArenaPlayer {
   display_name: string;
   username: string;
 
-  diamonds_current_round: number;  // verplicht
-  diamonds_total: number;          // verplicht
+  // NIEUW / huidige ronde
+  diamonds_current_round: number;
 
+  // Historisch totaal over eerdere rondes (telt mee voor finale totaal)
+  diamonds_total: number;
+
+  // Voorheen gebruikt in sommige UI stukken — mag blijven bestaan voor legacy
   diamonds_stream?: number;
 
   boosters: string[];
@@ -69,6 +73,7 @@ export interface ArenaState {
 ================================ */
 export interface QueueEntry {
   position: number;
+
   tiktok_id: string;
   display_name: string;
   username: string;
@@ -173,9 +178,12 @@ export interface PlayerLeaderboardEntry {
   username: string;
   display_name: string;
 
-  diamonds_total: number;          // verplicht
-  diamonds_current_round: number;  // verplicht
-  total_score: number;             // verplicht
+  // ⭐ Backend stuurt deze ALTIJD mee:
+  total_score: number; // diamonds_total + diamonds_current_round
+
+  // Optioneel maar oké als ze bestaan:
+  diamonds_total?: number;
+  diamonds_current_round?: number;
 
   is_vip?: boolean;
   is_fan?: boolean;
@@ -218,7 +226,7 @@ export interface InitialSnapshot {
 }
 
 /* ============================================================================
-   SOCKET INBOUND (BACKEND → FRONTEND)
+   SOCKET INBOUND (FROM BACKEND → FRONTEND)
 ============================================================================ */
 export interface AdminSocketInbound {
   updateArena: (arena: ArenaState) => void;
@@ -243,11 +251,12 @@ export interface AdminSocketInbound {
   connectState: (state: any) => void;
   gameSession: (session: any) => void;
 
+  /* ⭐⭐⭐  NIEUW — 1-op-1 met backend  ⭐⭐⭐ */
   hostDiamonds: (data: { username: string; total: number }) => void;
 }
 
 /* ============================================================================
-   SOCKET OUTBOUND (FRONTEND → BACKEND)
+   SOCKET OUTBOUND (SYNC WITH BACKEND handle())
 ============================================================================ */
 export interface AdminSocketOutbound {
   ping: () => void;
@@ -257,6 +266,7 @@ export interface AdminSocketOutbound {
     ack: (snap: InitialSnapshot) => void
   ) => void;
 
+  /* HOSTS */
   getHosts: (
     payload: {},
     ack: (res: { success: boolean; hosts: HostProfile[] }) => void
@@ -277,6 +287,7 @@ export interface AdminSocketOutbound {
     ack: (res: AdminAckResponse) => void
   ) => void;
 
+  /* SETTINGS */
   getSettings: (
     payload: {},
     ack: (res: {
@@ -291,11 +302,13 @@ export interface AdminSocketOutbound {
     ack: (res: AdminAckResponse) => void
   ) => void;
 
+  /* SEARCH */
   searchUsers: (
     payload: { query: string },
     ack: (res: { users: SearchUser[] }) => void
   ) => void;
 
+  /* QUEUE */
   addToQueue: (
     payload: { username: string },
     ack: (res: AdminAckResponse) => void
@@ -316,6 +329,7 @@ export interface AdminSocketOutbound {
     ack: (res: AdminAckResponse) => void
   ) => void;
 
+  /* ARENA */
   addToArena: (
     payload: { username: string },
     ack: (res: AdminAckResponse) => void
@@ -326,6 +340,7 @@ export interface AdminSocketOutbound {
     ack: (res: AdminAckResponse) => void
   ) => void;
 
+  /* GAME FLOW */
   startGame: (payload: {}, ack: (res: AdminAckResponse) => void) => void;
   stopGame: (payload: {}, ack: (res: AdminAckResponse) => void) => void;
 
@@ -339,6 +354,7 @@ export interface AdminSocketOutbound {
     ack: (res: AdminAckResponse) => void
   ) => void;
 
+  /* TWISTS */
   giveTwist: (
     payload: { username: string; twist: string },
     ack: (res: AdminAckResponse) => void
