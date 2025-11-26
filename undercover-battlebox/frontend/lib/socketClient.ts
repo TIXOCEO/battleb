@@ -60,11 +60,7 @@ export function getAdminSocket(): Socket<
 
     socket.emit("ping");
 
-    // SNAPSHOT LADEN
-    socket.emit("getInitialSnapshot", {}, (snap: InitialSnapshot) => {
-      // De componenten verwerken de snapshot — geen extra event meer
-    });
-
+    socket.emit("getInitialSnapshot", {}, (snap: InitialSnapshot) => {});
     socket.emit("getHosts", {}, () => {});
     socket.emit("getSettings", {}, () => {});
   });
@@ -90,7 +86,7 @@ export function getAdminSocket(): Socket<
   }, 10000);
 
   // ==========================================================================
-  // INBOUND EVENTS — worden beschikbaar gemaakt maar niet verwerkt
+  // INBOUND EVENTS
   // ==========================================================================
   socket.on("updateArena", (_arena: ArenaState) => {});
   socket.on("updateQueue", (_q: { open: boolean; entries: QueueEntry[] }) => {});
@@ -110,7 +106,7 @@ export function getAdminSocket(): Socket<
 
   socket.on("hostDiamonds", (_d: { username: string; total: number }) => {});
 
-  socket.on("pong", () => {});
+  // ❌ VERWIJDERD: socket.on("pong")
 
   globalThis.__adminSocket = socket;
   return socket;
