@@ -54,7 +54,7 @@ export function useAdminGame() {
     });
 
     // ----------------------------------------------------------------
-    // INITIAL SNAPSHOT — FIXED (NO PREFIX)
+    // INITIAL SNAPSHOT
     // ----------------------------------------------------------------
     socket.emit("getInitialSnapshot", {}, (snap: InitialSnapshot) => {
       if (!mounted || snapshotLoaded) return;
@@ -91,7 +91,7 @@ export function useAdminGame() {
   }
 
   // --------------------------------------------------------------------
-  // GENERIC EMITTER — NO PREFIX
+  // GENERIC EMITTER
   // --------------------------------------------------------------------
   async function emitAdminAction(
     event: keyof import("@/lib/adminTypes").AdminSocketOutbound,
@@ -109,7 +109,7 @@ export function useAdminGame() {
   }
 
   // --------------------------------------------------------------------
-  // RETURN API — ALL FIXED (NO PREFIX)
+  // RETURN API — CLEANED & VALID
   // --------------------------------------------------------------------
   return {
     arena,
@@ -132,12 +132,6 @@ export function useAdminGame() {
 
     eliminate: (u: string) =>
       emitAdminAction("eliminate", { username: normalizeUsername(u) }),
-
-    promoteQueue: (u: string) =>
-      emitAdminAction("promoteUser", { username: normalizeUsername(u) }),
-
-    demoteQueue: (u: string) =>
-      emitAdminAction("demoteUser", { username: normalizeUsername(u) }),
 
     removeFromQueue: (u: string) =>
       emitAdminAction("removeFromQueue", { username: normalizeUsername(u) }),
