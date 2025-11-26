@@ -28,7 +28,6 @@ const ADMIN_TOKEN =
 // ============================================================================
 // SINGLETON
 // ============================================================================
-
 declare global {
   // eslint-disable-next-line no-var
   var __adminSocket: Socket<AdminSocketInbound, AdminSocketOutbound> | undefined;
@@ -37,7 +36,6 @@ declare global {
 // ============================================================================
 // MAIN SOCKET
 // ============================================================================
-
 export function getAdminSocket(): Socket<
   AdminSocketInbound,
   AdminSocketOutbound
@@ -64,8 +62,7 @@ export function getAdminSocket(): Socket<
 
     // SNAPSHOT LADEN
     socket.emit("getInitialSnapshot", {}, (snap: InitialSnapshot) => {
-      // Jij verwerkt de snapshot verder in je componenten
-      socket.emit("initialSnapshot:loaded", {});
+      // De componenten verwerken de snapshot — geen extra event meer
     });
 
     socket.emit("getHosts", {}, () => {});
@@ -93,12 +90,8 @@ export function getAdminSocket(): Socket<
   }, 10000);
 
   // ==========================================================================
-  // INBOUND EVENTS (NIET VERWERKT — WORDEN ALLEEN BESCHIKBAAR GEMAAKT)
+  // INBOUND EVENTS — worden beschikbaar gemaakt maar niet verwerkt
   // ==========================================================================
-  // Jij vangt ze op via:
-  // const socket = getAdminSocket();
-  // socket.on("updateArena", (arena) => {...})
-
   socket.on("updateArena", (_arena: ArenaState) => {});
   socket.on("updateQueue", (_q: { open: boolean; entries: QueueEntry[] }) => {});
   socket.on("log", (_log: LogEntry) => {});
@@ -117,12 +110,8 @@ export function getAdminSocket(): Socket<
 
   socket.on("hostDiamonds", (_d: { username: string; total: number }) => {});
 
-  // Pong
   socket.on("pong", () => {});
 
-  // ==========================================================================
-  // Done
-  // ==========================================================================
   globalThis.__adminSocket = socket;
   return socket;
 }
