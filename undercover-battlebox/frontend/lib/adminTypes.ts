@@ -226,8 +226,17 @@ export interface AdminSocketInbound {
 
   hostDiamonds: (data: { username: string; total: number }) => void;
 
-  /** SETTINGS — this fixes your build */
+  /** SETTINGS (nodig) */
   settings: (settings: ArenaSettings) => void;
+
+  /** HOSTS (ontbrak → build error) */
+  hosts: (rows: HostProfile[]) => void;
+
+  /** HOSTS ACTIVE CHANGE (backend stuurt dit ook) */
+  hostsActiveChanged: (payload: {
+    username: string;
+    tiktok_id: string;
+  }) => void;
 
   /** Ronde events */
   "round:start": (payload: {
