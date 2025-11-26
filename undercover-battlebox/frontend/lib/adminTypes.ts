@@ -1,9 +1,10 @@
 /* ============================================================================
-   adminTypes.ts — BattleBox v13.0 (GIFTS-DRIVEN EDITION)
-   ✔ Volledig gesynchroniseerd met backend v13
-   ✔ ArenaPlayer heeft geen diamonds meer in backend
-   ✔ Frontend-friendly: score veld toegevoegd (quarter=round-score, finale=total)
-   ✔ Leaderboards volledig gifts-driven
+   adminTypes.ts — BattleBox v13.1 (GIFTS-DRIVEN EDITION, FINAL)
+   ✔ Gesynchroniseerd met backend v13 (gifts-only scoring)
+   ✔ ArenaPlayer heeft GEEN diamonds meer, alleen score voor UI
+   ✔ Finale/quarter logica wordt door server bepaald
+   ✔ Leaderboards gifts-driven (SUM FROM gifts-table)
+   ✔ Inclusief round:start, round:grace, round:end events
 ============================================================================ */
 
 /* ================================
@@ -23,14 +24,12 @@ export interface ArenaPlayer {
   username: string;
 
   /*
-    👉 LET OP:
-    Backend stuurt GEEN diamonds mee in arena-engine.
-    Maar frontend MOET iets kunnen tonen:
-    - Quarter: ronde diamonds (via gifts-sum)
-    - Finale: total diamonds (via gifts-sum)
+    Backend stuurt:
+      - score: number
+        quarter → ronde-score
+        finale  → total-score (DB SUM)
 
-    Daarom: één UI-vriendelijk veld "score".
-    Dit wordt aan frontend geleverd door server.ts → updateArena().
+    Arena-engine bevat geen diamonds meer in v13.
   */
   score: number;
 
@@ -50,6 +49,7 @@ export interface ArenaPlayer {
 ================================ */
 export interface ArenaState {
   players: ArenaPlayer[];
+
   round: number;
   type: "quarter" | "finale";
 
@@ -180,14 +180,14 @@ export interface PlayerLeaderboardEntry {
   tiktok_id: string;
   username: string;
   display_name: string;
-  total_score: number; // SUM(diamonds) FROM gifts
+  total_score: number; // SUM(diamonds) via gifts-table
 }
 
 export interface GifterLeaderboardEntry {
   user_id: string;
   username: string;
   display_name: string;
-  total_diamonds: number; // SUM(diamonds) FROM gifts
+  total_diamonds: number; // SUM(diamonds) via gifts-table
 }
 
 /* ============================================================================
@@ -246,6 +246,30 @@ export interface AdminSocketInbound {
   gameSession: (session: any) => void;
 
   hostDiamonds: (data: { username: string; total: number }) => void;
+
+  /** Ronde events (BACKEND v13) */
+  "round:start": (payload: {
+    round: number;
+    type: "quarter" | "finale";
+    duration: number;
+  }) => void;
+
+  "round:grace": (payload: {
+    round: number;
+    grace: number;
+  }) => void;
+
+  "round:end": (payload: {
+    round: number;
+    type: "quarter" | "finale";
+    pendingEliminations: string[];
+    top3: {
+      id: string;
+      display_name: string;
+      username: string;
+      diamonds: number;
+    }[];
+  }) => void;
 }
 
 /* ============================================================================
@@ -259,7 +283,6 @@ export interface AdminSocketOutbound {
     ack: (snap: InitialSnapshot) => void
   ) => void;
 
-  /* HOSTS */
   getHosts: (
     payload: {},
     ack: (res: { success: boolean; hosts: HostProfile[] }) => void
@@ -280,7 +303,6 @@ export interface AdminSocketOutbound {
     ack: (res: AdminAckResponse) => void
   ) => void;
 
-  /* SETTINGS */
   getSettings: (
     payload: {},
     ack: (res: {
@@ -295,13 +317,11 @@ export interface AdminSocketOutbound {
     ack: (res: AdminAckResponse) => void
   ) => void;
 
-  /* SEARCH */
   searchUsers: (
     payload: { query: string },
     ack: (res: { users: SearchUser[] }) => void
   ) => void;
 
-  /* QUEUE */
   addToQueue: (
     payload: { username: string },
     ack: (res: AdminAckResponse) => void
@@ -312,7 +332,6 @@ export interface AdminSocketOutbound {
     ack: (res: AdminAckResponse) => void
   ) => void;
 
-  /* ARENA */
   addToArena: (
     payload: { username: string },
     ack: (res: AdminAckResponse) => void
@@ -323,7 +342,6 @@ export interface AdminSocketOutbound {
     ack: (res: AdminAckResponse) => void
   ) => void;
 
-  /* GAME FLOW */
   startGame: (payload: {}, ack: (res: AdminAckResponse) => void) => void;
   stopGame: (payload: {}, ack: (res: AdminAckResponse) => void) => void;
 
@@ -337,7 +355,6 @@ export interface AdminSocketOutbound {
     ack: (res: AdminAckResponse) => void
   ) => void;
 
-  /* TWISTS */
   giveTwist: (
     payload: { username: string; twist: string },
     ack: (res: AdminAckResponse) => void
