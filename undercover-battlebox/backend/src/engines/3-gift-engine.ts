@@ -1,8 +1,8 @@
 /* ============================================================================
-   3-gift-engine.ts — v14.0
+   3-gift-engine.ts — v14.1 FIXED
    GIFTS-ONLY ARCHITECTURE (NO USER DIAMOND COLUMNS)
    -------------------------------------------------
-   ✔ Alle diamonds worden ALLEEN opgeslagen in `gifts`
+   ✔ Receiver fallback ALTIJD host → GIFTS KOMEN ALTIJD BINNEN
    ✔ Player gifts → receiver_role='speler'
    ✔ Host gifts → receiver_role='host'
    ✔ Self-gifts → automatisch host
@@ -17,7 +17,6 @@ import pool from "../db";
 
 import {
   getOrUpdateUser,
-  getUserByTikTokId,
   upsertIdentityFromLooseEvent,
 } from "./2-user-engine";
 
@@ -93,6 +92,9 @@ function extractSender(evt: any) {
     evt.fromUser ||
     evt.msgUser ||
     evt.userIdentity ||
+    evt.data?.user ||
+    evt.extended?.user ||
+    evt.common?.user ||
     evt._data ||
     evt;
 
@@ -107,10 +109,11 @@ function extractSender(evt: any) {
 
     unique: norm(
       raw?.uniqueId ||
-        raw?.unique_id ||
-        evt.uniqueId ||
-        evt.unique_id ||
-        null
+      raw?.unique_id ||
+      evt.uniqueId ||
+      evt.unique_id ||
+      raw?.user?.uniqueId ||
+      null
     ),
 
     nick:
@@ -118,6 +121,7 @@ function extractSender(evt: any) {
       raw?.displayName ||
       raw?.nickName ||
       evt.nickname ||
+      raw?.user?.nickname ||
       null,
   };
 }
@@ -134,14 +138,12 @@ function calcDiamonds(evt: any): number {
   const final = !!evt.repeatEnd;
   const type = Number(evt.giftType || 0);
 
-  // type=1 → only final
   if (type === 1) return final ? base * repeat : 0;
-
   return base;
 }
 
 /* ============================================================================ */
-/* RECEIVER RESOLUTION */
+/* RECEIVER RESOLUTION — FIXED (NEVER RETURNS NULL) */
 /* ============================================================================ */
 
 async function resolveReceiver(evt: any) {
@@ -149,40 +151,19 @@ async function resolveReceiver(evt: any) {
   const HOST_ID = host?.id ? String(host.id) : null;
   const HOST_USERNAME = host?.username ? norm(host.username) : "";
 
-  const directId =
+  /* 1) DIRECT ID ----------------------------------------- */
+  const direct =
     evt.receiverUserId ||
     evt.toUserId ||
     evt.toUser?.userId ||
     evt.receiver?.userId ||
+    evt.data?.receiverUserId ||
+    evt.extended?.receiver?.userId ||
     null;
 
-  const username =
-    evt.receiver?.uniqueId ||
-    evt.receiver?.unique_id ||
-    evt.toUser?.uniqueId ||
-    evt.toUser?.unique_id ||
-    null;
-
-  const un = username ? norm(username) : null;
-
-  /* ---------------- SELF-GIFT = HOST ---------------- */
-  if (evt.userId && directId && String(evt.userId) === String(directId)) {
-    if (!HOST_ID) return null;
-
-    const h = await getOrUpdateUser(HOST_ID, null, null);
-
-    return {
-      id: HOST_ID,
-      role: "host",
-      username: h.username,
-      display_name: h.display_name,
-    };
-  }
-
-  /* ---------------- DIRECT ID ---------------- */
-  if (directId) {
-    const u = await getOrUpdateUser(String(directId), null, null);
-    const isHost = HOST_ID && String(directId) === String(HOST_ID);
+  if (direct) {
+    const u = await getOrUpdateUser(String(direct), null, null);
+    const isHost = HOST_ID && String(direct) === HOST_ID;
 
     return {
       id: String(u.tiktok_id),
@@ -192,10 +173,17 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  /* ---------------- USERNAME FALLBACK ---------------- */
-  if (un && HOST_USERNAME && un === HOST_USERNAME && HOST_ID) {
-    const h = await getOrUpdateUser(HOST_ID, null, null);
+  /* 2) USERNAME MATCH ------------------------------------- */
+  const username =
+    evt.receiver?.uniqueId ||
+    evt.receiver?.unique_id ||
+    evt.toUser?.uniqueId ||
+    evt.toUser?.unique_id ||
+    evt.data?.receiver?.uniqueId ||
+    null;
 
+  if (username && HOST_USERNAME && norm(username) === HOST_USERNAME && HOST_ID) {
+    const h = await getOrUpdateUser(HOST_ID, null, null);
     return {
       id: HOST_ID,
       role: "host",
@@ -204,10 +192,20 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  /* ---------------- DEFAULT → HOST ---------------- */
+  /* 3) SELF GIFT → HOST ---------------------------------- */
+  if (evt.userId && evt.userId === direct && HOST_ID) {
+    const h = await getOrUpdateUser(HOST_ID, null, null);
+    return {
+      id: HOST_ID,
+      role: "host",
+      username: h.username,
+      display_name: h.display_name,
+    };
+  }
+
+  /* 4) DEFAULT FALLBACK → ALWAYS HOST --------------------- */
   if (HOST_ID) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
-
     return {
       id: HOST_ID,
       role: "host",
@@ -216,7 +214,13 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  return null;
+  /* 5) Fallback dummy player (NO NULL ALLOWED) ------------ */
+  return {
+    id: "0",
+    role: "speler",
+    username: "unknown",
+    display_name: "UNKNOWN",
+  };
 }
 
 /* ============================================================================ */
@@ -230,7 +234,7 @@ async function processGift(evt: any, source: string) {
     if (dedupe.has(key)) return;
     dedupe.add(key);
 
-    /* ---------------- IDENTITY ---------------- */
+    /* ---------------- IDENTITY SYNC ---------------- */
     await upsertIdentityFromLooseEvent(evt);
 
     const S = extractSender(evt);
@@ -245,17 +249,15 @@ async function processGift(evt: any, source: string) {
     const active = await isGameActive();
     if (!gameId || !active) return;
 
-    /* ---------------- RESOLVE RECEIVER ---------------- */
+    /* ---------------- RESOLVE RECEIVER (FIX) ---------------- */
     const receiver = await resolveReceiver(evt);
-    if (!receiver || !receiver.id) return;
 
     const arena = getArena();
     const inRound = arena.status === "active" || arena.status === "grace";
 
-    /* ---------------- ROUND ID ---------------- */
     const roundId = arena.round ?? 0;
 
-    /* ---------------- ARENA (visual only) ---------------- */
+    /* ---------------- ARENA (visual score) ---------------- */
     if (receiver.role === "speler" && inRound) {
       await safeAddArenaDiamonds(receiver.id, diamonds);
     }
@@ -267,7 +269,7 @@ async function processGift(evt: any, source: string) {
     );
     if (twist) await addTwistByGift(String(sender.tiktok_id), twist);
 
-    /* ---------------- INSERT GIFT (ALWAYS) ---------------- */
+    /* ---------------- STORE GIFT ---------------- */
     await pool.query(
       `
       INSERT INTO gifts (
@@ -299,7 +301,7 @@ async function processGift(evt: any, source: string) {
       ]
     );
 
-    /* ---------------- BROADCASTS ---------------- */
+    /* ---------------- BROADCAST ---------------- */
     await broadcastStats();
     await broadcastPlayerLeaderboard();
     await broadcastGifterLeaderboard();
@@ -322,15 +324,18 @@ async function processGift(evt: any, source: string) {
 export function initGiftEngine(conn: any) {
   if (!conn || typeof conn.on !== "function") return;
 
-  console.log("🎁 GiftEngine v14 LOADED");
+  console.log("🎁 GiftEngine v14.1 FIXED LOADED");
 
   conn.on("gift", (d: any) => processGift(d, "gift"));
+
   conn.on("roomMessage", (d: any) => {
     if (d?.giftId || d?.diamondCount) processGift(d, "roomMessage");
   });
+
   conn.on("member", (d: any) => {
     if (d?.giftId || d?.diamondCount) processGift(d, "member");
   });
+
   conn.on("chat", (d: any) => {
     if (d?._data?.giftId || d?._data?.diamondCount)
       processGift(d._data, "chat-hidden");
