@@ -349,6 +349,17 @@ export async function initGame() {
   await recomputePositions();
   emitArena();
 
+  export {
+  startRound,
+  endRound,
+  arenaJoin,
+  arenaLeave,
+  arenaClear,
+  getArena,
+  emitArena,
+  getArenaSettings,
+};
+
   emitLog({
     type: "system",
     message: "Arena Engine v6.2 actief (gifts-driven realtime scores)",
