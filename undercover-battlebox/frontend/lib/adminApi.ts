@@ -1,80 +1,55 @@
-// lib/adminApi.ts
-import type { ArenaState, QueueEntry, GlobalToggles } from "./adminTypes";
+// lib/adminApi.ts — BattleBox v13.x (Gifts-Driven Edition)
+
+import type { ArenaState, QueueEntry } from "./adminTypes";
 
 const BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4000";
 const ADMIN_TOKEN = process.env.NEXT_PUBLIC_ADMIN_TOKEN ?? "";
 
-async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${ADMIN_TOKEN}`,
-      ...(options.headers || {}),
-    },
+// Basic headers for admin auth
+function headers() {
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${ADMIN_TOKEN}`,
+  };
+}
+
+// Fetch Arena snapshot (gift-driven)
+export async function fetchArena(): Promise<ArenaState> {
+  const r = await fetch(`${BASE_URL}/admin/arena`, {
+    method: "GET",
+    headers: headers(),
   });
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`API ${path} error ${res.status}: ${text}`);
+  if (!r.ok) throw new Error("Arena kon niet geladen worden");
+  return await r.json();
+}
+
+// Fetch Queue entries
+export async function fetchQueue(): Promise<QueueEntry[]> {
+  const r = await fetch(`${BASE_URL}/admin/queue`, {
+    method: "GET",
+    headers: headers(),
+  });
+
+  if (!r.ok) throw new Error("Queue kon niet geladen worden");
+  const json = await r.json();
+
+  // Backend returns: { open: boolean, entries: QueueEntry[] }
+  return json.entries ?? [];
+}
+
+// Optional generic POST helper
+export async function adminPost(path: string, body: any = {}) {
+  const r = await fetch(`${BASE_URL}${path}`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify(body),
+  });
+
+  if (!r.ok) {
+    const msg = await r.text();
+    throw new Error(`Fout bij POST ${path}: ${msg}`);
   }
 
-  return res.json() as Promise<T>;
-}
-
-// REST fallback voor arena/queue
-export function fetchArena(): Promise<ArenaState> {
-  return apiFetch<ArenaState>("/arena");
-}
-
-export function fetchQueue(): Promise<QueueEntry[]> {
-  return apiFetch<QueueEntry[]>("/queue");
-}
-
-// Admin actions (jij bouwt de backend endpoints morgen)
-export function eliminatePlayer(tiktok_id: string) {
-  return apiFetch<{ success: boolean }>("/api/admin/eliminate", {
-    method: "POST",
-    body: JSON.stringify({ tiktok_id }),
-  });
-}
-
-export function startRound(type: "quarter" | "semi" | "finale") {
-  return apiFetch<{ success: boolean }>("/api/admin/start-round", {
-    method: "POST",
-    body: JSON.stringify({ type }),
-  });
-}
-
-export function toggleQueue(open: boolean) {
-  return apiFetch<{ success: boolean; open: boolean }>("/api/admin/toggle-queue", {
-    method: "POST",
-    body: JSON.stringify({ open }),
-  });
-}
-
-export function forceReset() {
-  return apiFetch<{ success: boolean }>("/api/admin/force-reset", {
-    method: "POST",
-  });
-}
-
-export function setMultiplier(tiktok_id: string, multiplier: number) {
-  return apiFetch<{ success: boolean }>("/api/admin/set-multiplier", {
-    method: "POST",
-    body: JSON.stringify({ tiktok_id, multiplier }),
-  });
-}
-
-// User flags (queue/boosters/twists per user) – backend moet je zelf maken
-export function updateUserFlags(payload: {
-  tiktok_id: string;
-  queue?: boolean;
-  boosters?: boolean;
-  twists?: boolean;
-}) {
-  return apiFetch<{ success: boolean }>("/api/admin/user-flags", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  return await r.json().catch(() => ({}));
 }
