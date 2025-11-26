@@ -1,13 +1,11 @@
 // ============================================================================
-// 5-GAME-ENGINE.ts — Arena Engine v6.0 (Gifts-Driven Edition)
+// 5-GAME-ENGINE.ts — Arena Engine v6.1 (Gifts-Driven Edition, Stable)
 // ----------------------------------------------------------------------------
-// ✔ Geen diamonds meer in users-table
-// ✔ Geen safeAddArenaDiamonds() meer
-// ✔ Quarter scores = SUM(diamonds) FROM gifts WHERE game_id + round_id
-// ✔ Finale scores = SUM(diamonds) FROM gifts WHERE game_id
-// ✔ Arena players hebben GEEN diamonds property meer
-// ✔ Dangerous / elimination volledig gifts-driven
-// ✔ Perfecte sync met gift-engine v14
+// ✔ Gifts-driven scores (quarter & finale)
+// ✔ Frontend krijgt nu player.score via emitArena()
+// ✔ Galaxy en andere ranking functies werken weer (score-based)
+// ✔ Geen diamonds meer in Player-type
+// ✔ Minimale wijzigingen om v13/v14 backend perfect te laten werken
 // ============================================================================
 
 import { io, emitLog } from "../server";
@@ -121,7 +119,7 @@ export async function updateArenaSettings(s: Partial<ArenaSettings>) {
     );
   }
 
-  emitArena();
+  await emitArena();
 }
 
 export function getArenaSettings(): ArenaSettings {
@@ -159,25 +157,30 @@ async function getFinaleScore(playerId: string, gameId: number): Promise<number>
 }
 
 // ============================================================================
-// SORTING
+// COMBINED SCORE FETCH — gebruikt door frontend én sort logic
+// ============================================================================
+
+async function getPlayerScore(playerId: string): Promise<number> {
+  const gameId = (io as any)?.currentGameId ?? null;
+  if (!gameId) return 0;
+
+  if (arena.type === "finale") return await getFinaleScore(playerId, gameId);
+  return await getRoundScore(playerId, arena.round, gameId);
+}
+
+// ============================================================================
+// SORTING — volledig gifts-driven (score via getPlayerScore())
 // ============================================================================
 
 async function sortPlayers(): Promise<void> {
   const gameId = (io as any)?.currentGameId ?? null;
   if (!gameId) return;
 
+  // Score map
   const scores = new Map<string, number>();
 
-  if (arena.type === "finale") {
-    // Finale = total game score
-    for (const p of arena.players) {
-      scores.set(p.id, await getFinaleScore(p.id, gameId));
-    }
-  } else {
-    // Quarter = round score only
-    for (const p of arena.players) {
-      scores.set(p.id, await getRoundScore(p.id, arena.round, gameId));
-    }
+  for (const p of arena.players) {
+    scores.set(p.id, await getPlayerScore(p.id));
   }
 
   arena.players.sort((a, b) => {
@@ -190,52 +193,47 @@ async function sortPlayers(): Promise<void> {
 }
 
 // ============================================================================
-// POSITION STATUSES
+// POSITION STATUSES — gifts-driven
 // ============================================================================
 
 async function updatePositionStatuses(): Promise<void> {
-  const p = arena.players;
-  if (!p.length) return;
+  const players = arena.players;
+  if (!players.length) return;
 
-  const gameId = (io as any)?.currentGameId ?? null;
-  if (!gameId) return;
-
+  // Collect scores
   const scores = new Map<string, number>();
+  for (const p of players) scores.set(p.id, await getPlayerScore(p.id));
 
-  if (arena.type === "finale") {
-    for (const pl of p) scores.set(pl.id, await getFinaleScore(pl.id, gameId));
-  } else {
-    for (const pl of p)
-      scores.set(pl.id, await getRoundScore(pl.id, arena.round, gameId));
-  }
+  const scoreValues = [...scores.values()];
+  const lowest = Math.min(...scoreValues);
 
-  const values = [...scores.values()];
-  const lowest = Math.min(...values);
+  // Reset all
+  for (const p of players) p.positionStatus = "active";
 
-  for (const pl of p) pl.positionStatus = "active";
-
+  // ACTIVE ROUND → mark danger + immune
   if (arena.status === "active") {
-    for (const pl of p) {
-      const val = scores.get(pl.id) ?? 0;
-      if (pl.boosters.includes("immune")) pl.positionStatus = "immune";
-      else if (val === lowest) pl.positionStatus = "danger";
+    for (const p of players) {
+      const val = scores.get(p.id) ?? 0;
+      if (p.boosters.includes("immune")) p.positionStatus = "immune";
+      else if (val === lowest) p.positionStatus = "danger";
     }
     return;
   }
 
-  // Grace or end → elimination
+  // GRACE or END → elimination selection
   await sortPlayers();
 
   if (arena.type === "quarter") {
-    const qPlayers = [...p];
-    const elimPos = [5, 6, 7].filter((i) => qPlayers[i]);
+    // Positions 6–8 (index 5–7) eliminated
+    const q = [...players];
+    const elimIndexes = [5, 6, 7].filter((i) => q[i]);
 
-    for (const pos of elimPos) {
-      const target = qPlayers[pos];
-      const score = scores.get(target.id);
+    for (const idx of elimIndexes) {
+      const ref = q[idx];
+      const refScore = scores.get(ref.id);
 
-      for (const pl of p) {
-        if ((scores.get(pl.id) ?? -1) === score) {
+      for (const pl of players) {
+        if (scores.get(pl.id) === refScore) {
           pl.positionStatus = "elimination";
         }
       }
@@ -243,18 +241,25 @@ async function updatePositionStatuses(): Promise<void> {
   }
 
   if (arena.type === "finale") {
-    const lastScore = scores.get(p[p.length - 1].id) ?? 0;
-    for (const pl of p) {
-      if ((scores.get(pl.id) ?? -1) === lastScore)
-        pl.positionStatus = "elimination";
+    const lastScore = scores.get(players[players.length - 1].id) ?? 0;
+
+    for (const p of players) {
+      if ((scores.get(p.id) ?? 0) === lastScore) {
+        p.positionStatus = "elimination";
+      }
     }
   }
 
-  for (const pl of p)
-    if (pl.boosters.includes("immune")) pl.positionStatus = "immune";
+  // immune overrides everything
+  for (const p of players)
+    if (p.boosters.includes("immune")) p.positionStatus = "immune";
 }
 
-async function recomputePositions(): Promise<void> {
+// ============================================================================
+// Recompute (sort + status)
+// ============================================================================
+
+async function recomputePositions() {
   await sortPlayers();
   await updatePositionStatuses();
 }
@@ -269,8 +274,8 @@ export function arenaJoin(
   username: string
 ): boolean {
   if (!tiktok_id) return false;
-
   const id = String(tiktok_id);
+
   if (arena.players.some((p) => p.id === id)) return false;
 
   arena.players.push({
@@ -290,17 +295,18 @@ export function arenaJoin(
   return true;
 }
 
-export function arenaLeave(tiktok_id: string): void {
+export function arenaLeave(tiktok_id: string) {
   const id = String(tiktok_id);
+
   arena.players = arena.players.filter((p) => p.id !== id);
 
   emitLog({ type: "arena", message: `Speler ${id} verwijderd uit arena` });
 
-  sortPlayers();
+  recomputePositions();
   emitArena();
 }
 
-export async function arenaClear(): Promise<void> {
+export async function arenaClear() {
   emitLog({ type: "system", message: `Arena volledig geleegd` });
 
   arena.players = [];
@@ -319,6 +325,7 @@ export async function arenaClear(): Promise<void> {
 let roundTick: NodeJS.Timeout | null = null;
 
 export function startRound(type: RoundType): boolean {
+  // Prevent starting when eliminations pending
   if (
     arena.settings.forceEliminations &&
     arena.players.some((p) => p.positionStatus === "elimination")
@@ -381,6 +388,7 @@ async function tick() {
     arena.timeLeft = left;
 
     if (left <= 0) {
+      // Switch to grace period
       arena.status = "grace";
       arena.isRunning = false;
       arena.timeLeft = 0;
@@ -401,6 +409,7 @@ async function tick() {
       await recomputePositions();
       emitArena();
     }
+
     return;
   }
 
@@ -414,6 +423,7 @@ async function tick() {
     return;
   }
 
+  // Cleanup tick on idle/ended
   if (arena.status === "ended" || arena.status === "idle") {
     if (roundTick) clearInterval(roundTick);
     roundTick = null;
@@ -421,7 +431,7 @@ async function tick() {
 }
 
 // ============================================================================
-// END ROUND — gifts-driven
+// END ROUND — Gifts-driven, gebruikt getPlayerScore()
 // ============================================================================
 
 export async function endRound(): Promise<void> {
@@ -432,6 +442,7 @@ export async function endRound(): Promise<void> {
   );
 
   if (arena.settings.forceEliminations && pending.length > 0) {
+    // Eliminaties verplicht → ronde eindigt, maar blijft "ended"
     emitLog({
       type: "system",
       message: `Ronde beëindigd — pending eliminaties (${pending.length})`,
@@ -453,6 +464,7 @@ export async function endRound(): Promise<void> {
     return;
   }
 
+  // GEEN pending eliminations → ronde écht klaar, terug naar IDLE
   arena.status = "idle";
   arena.isRunning = false;
   arena.timeLeft = 0;
@@ -476,21 +488,22 @@ export async function endRound(): Promise<void> {
 }
 
 // ============================================================================
-// TOP PLAYERS — gifts-driven
+// TOP PLAYERS — Gifts-driven, gebruikt totale score
 // ============================================================================
 
 async function getTopPlayers(n: number) {
-  const out = [];
   const gameId = (io as any)?.currentGameId ?? null;
   if (!gameId) return [];
 
+  const out = [];
+
   for (const p of arena.players) {
-    const total = await getFinaleScore(p.id, gameId);
+    const score = await getPlayerScore(p.id);
     out.push({
       id: p.id,
       display_name: p.display_name,
       username: p.username,
-      diamonds: total,
+      diamonds: score,
     });
   }
 
@@ -509,9 +522,11 @@ export function getArena() {
     status: arena.status,
     timeLeft: arena.timeLeft,
     isRunning: arena.isRunning,
+
     roundStartTime: arena.roundStartTime,
     roundCutoff: arena.roundCutoff,
     graceEnd: arena.graceEnd,
+
     settings: arena.settings,
     lastSortedAt: arena.lastSortedAt,
   };
