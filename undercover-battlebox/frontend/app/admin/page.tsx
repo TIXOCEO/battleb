@@ -20,7 +20,7 @@ import type {
 type StreamStats = {
   totalPlayers: number;
   totalPlayerDiamonds: number;
-  totalHostDiamonds: number;
+  totalHostDiamonds: number; // obsolete but kept to avoid TS errors
 };
 
 type GameSessionState = {
@@ -55,7 +55,7 @@ export default function AdminDashboardPage() {
     gameId: null,
   });
 
-  // ⭐ Host diamonds
+  // ⭐ NEW: host diamonds from backend
   const [hostDiamonds, setHostDiamonds] = useState(0);
 
   /* INPUTS */
@@ -100,6 +100,7 @@ export default function AdminDashboardPage() {
     socket.on("leaderboardPlayers", (rows) => setPlayerLeaderboard(rows));
     socket.on("leaderboardGifters", (rows) => setGifterLeaderboard(rows));
 
+    // ⭐ NEW: host diamonds listener
     socket.on("hostDiamonds", (d) => setHostDiamonds(d.total));
 
     socket.on("connect_error", () =>
@@ -133,7 +134,7 @@ export default function AdminDashboardPage() {
     };
   }, []);
 
-/* ============================================
+  /* ============================================
      INITIAL SNAPSHOT
   ============================================ */
   useEffect(() => {
@@ -151,6 +152,7 @@ export default function AdminDashboardPage() {
 
       if (snap.logs) setLogs(snap.logs.slice(0, 200));
 
+      // keep streamStats but ignore host diamonds here
       if (snap.stats) setStreamStats(snap.stats);
 
       if (snap.gameSession) setGameSession(snap.gameSession);
@@ -161,7 +163,7 @@ export default function AdminDashboardPage() {
       if (snap.gifterLeaderboard)
         setGifterLeaderboard(snap.gifterLeaderboard);
 
-      // hostDiamonds → wordt later via event gestuurd
+      // hostDiamonds is sent separately, ignore snapshot
     });
   }, []);
 
@@ -316,7 +318,7 @@ export default function AdminDashboardPage() {
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
       {/* HEADER */}
       <header className="mb-6 relative">
-        {/* HOST DIAMONDS */}
+        {/* HOST DIAMONDS BADGE ⭐ */}
         <div
           className="
             absolute right-0 top-0
@@ -349,7 +351,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* TIMER BAR */}
+        {/* TIMER */}
         {arena && arena.status !== "idle" && (
           <div className="w-full bg-gray-300 rounded-full h-4 shadow-inner relative overflow-hidden">
             <div
@@ -562,7 +564,7 @@ export default function AdminDashboardPage() {
                     {p.display_name} (@{p.username})
                   </div>
 
-                  {/* FIXED: rondepunten correct */}
+                  {/* FIXED: use diamonds_current_round */}
                   <div className="text-xs text-gray-600">
                     Ronde: {fmt(p.diamonds_current_round)} 💎
                   </div>
@@ -754,6 +756,7 @@ export default function AdminDashboardPage() {
                         </span>
                       </div>
 
+                      {/* FIXED: backend sends e.total_score so we display that */}
                       <span className="font-semibold">
                         {fmt(e.total_score)} 💎
                       </span>
@@ -1065,4 +1068,5 @@ export default function AdminDashboardPage() {
       </footer>
     </main>
   );
-                  }
+            }
+      
