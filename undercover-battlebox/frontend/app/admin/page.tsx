@@ -20,14 +20,12 @@ import type {
 type StreamStats = {
   totalPlayers: number;
   totalPlayerDiamonds: number;
-  totalHostDiamonds: number; // obsolete but kept to avoid TS errors
+  totalHostDiamonds: number;
 };
 
 type GameSessionState = {
   active: boolean;
   gameId: number | null;
-  startedAt?: string | null;
-  endedAt?: string | null;
 };
 
 export default function AdminDashboardPage() {
@@ -55,7 +53,7 @@ export default function AdminDashboardPage() {
     gameId: null,
   });
 
-  // ⭐ NEW: host diamonds from backend
+  // ⭐ host diamonds (nu volledig realtime via backend)
   const [hostDiamonds, setHostDiamonds] = useState(0);
 
   /* INPUTS */
@@ -78,11 +76,12 @@ export default function AdminDashboardPage() {
   >(null);
 
   /* ============================================
-     SOCKET SETUP
+     SOCKET SETUP — LIVE CONNECTION
   ============================================ */
   useEffect(() => {
     const socket = getAdminSocket();
 
+    // ARENA UPDATES
     socket.on("updateArena", (data: ArenaState) => setArena(data));
 
     socket.on("updateQueue", (d) => {
@@ -100,13 +99,14 @@ export default function AdminDashboardPage() {
     socket.on("leaderboardPlayers", (rows) => setPlayerLeaderboard(rows));
     socket.on("leaderboardGifters", (rows) => setGifterLeaderboard(rows));
 
-    // ⭐ NEW: host diamonds listener
+    // ⭐ HOST DIAMONDS
     socket.on("hostDiamonds", (d) => setHostDiamonds(d.total));
 
     socket.on("connect_error", () =>
       setStatus("❌ Socket verbinding weggevallen")
     );
 
+    // ROUND EVENTS
     socket.on("round:start", (d) =>
       setStatus(`▶️ Ronde gestart (${d.type}) — ${d.duration}s`)
     );
@@ -135,7 +135,7 @@ export default function AdminDashboardPage() {
   }, []);
 
   /* ============================================
-     INITIAL SNAPSHOT
+     INITIAL SNAPSHOT LOAD
   ============================================ */
   useEffect(() => {
     const socket = getAdminSocket();
@@ -152,7 +152,6 @@ export default function AdminDashboardPage() {
 
       if (snap.logs) setLogs(snap.logs.slice(0, 200));
 
-      // keep streamStats but ignore host diamonds here
       if (snap.stats) setStreamStats(snap.stats);
 
       if (snap.gameSession) setGameSession(snap.gameSession);
@@ -163,7 +162,7 @@ export default function AdminDashboardPage() {
       if (snap.gifterLeaderboard)
         setGifterLeaderboard(snap.gifterLeaderboard);
 
-      // hostDiamonds is sent separately, ignore snapshot
+      // hostDiamonds komt live binnen — snapshot NIET gebruiken
     });
   }, []);
 
@@ -225,45 +224,7 @@ export default function AdminDashboardPage() {
     arenaStatus === "ended" &&
     hasDoomed;
 
-  /* ============================================
-     AUTOCOMPLETE
-  ============================================ */
-  useEffect(() => {
-    if (!typing || typing.length < 2) {
-      setSearchResults([]);
-      return;
-    }
-
-    const socket = getAdminSocket();
-
-    const timer = setTimeout(() => {
-      socket.emit(
-        "searchUsers",
-        { query: typing },
-        (res: { users: SearchUser[] }) => {
-          setSearchResults(res?.users || []);
-        }
-      );
-    }, 150);
-
-    return () => clearTimeout(timer);
-  }, [typing]);
-
-  const applyAutoFill = (u: SearchUser) => {
-    const formatted =
-      u.username.startsWith("@") ? u.username : `@${u.username}`;
-
-    if (activeAutoField === "main") setUsername(formatted);
-    if (activeAutoField === "give") setTwistUserGive(formatted);
-    if (activeAutoField === "use") setTwistUserUse(formatted);
-    if (activeAutoField === "target") setTwistTargetUse(formatted);
-
-    setTyping("");
-    setShowResults(false);
-    setSearchResults([]);
-  };
-
-  /* ============================================
+/* ============================================
      TIMER + COLORS
   ============================================ */
   const roundProgress = useMemo(() => {
@@ -564,9 +525,11 @@ export default function AdminDashboardPage() {
                     {p.display_name} (@{p.username})
                   </div>
 
-                  {/* FIXED: use diamonds_current_round */}
+                  {/* ⭐ FIXED: quarter → current_round, finale → total */}
                   <div className="text-xs text-gray-600">
-                    Ronde: {fmt(p.diamonds_current_round)} 💎
+                    {arena?.type === "finale"
+                      ? `Totaal: ${fmt(p.diamonds_total)} 💎`
+                      : `Ronde: ${fmt(p.diamonds_current_round)} 💎`}
                   </div>
 
                   {p.positionStatus === "elimination" && (
@@ -737,7 +700,7 @@ export default function AdminDashboardPage() {
             <div className="p-4 max-h-96 overflow-y-auto text-sm">
               <h2 className="text-xl font-semibold mb-2">Player Leaderboard</h2>
               <p className="text-xs text-gray-500 mb-3">
-                Diamanten ontvangen (huidige stream)
+                Diamanten ontvangen in deze stream (total_score)
               </p>
 
               {playerLeaderboard.length ? (
@@ -756,7 +719,6 @@ export default function AdminDashboardPage() {
                         </span>
                       </div>
 
-                      {/* FIXED: backend sends e.total_score so we display that */}
                       <span className="font-semibold">
                         {fmt(e.total_score)} 💎
                       </span>
@@ -1068,5 +1030,4 @@ export default function AdminDashboardPage() {
       </footer>
     </main>
   );
-            }
-      
+              }
