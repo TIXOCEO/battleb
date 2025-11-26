@@ -1,16 +1,14 @@
 /* ============================================================================
-   3-gift-engine.ts — v14.0
-   GIFTS-ONLY SCORING ENGINE (Danny Build)
-   ---------------------------------------
-   ✔ Geen diamonds meer in users-table
-   ✔ Geen addDiamonds() meer
-   ✔ Geen arena diamonds opslaan
-   ✔ Scoring 100% in gifts-table (game_id + round_id)
-   ✔ Host gifts blijven correct
-   ✔ BP voor sender blijft bestaan
-   ✔ Twists blijven
-   ✔ Dedupe blijft
-   ✔ Fallback receiver = host
+   3-gift-engine.ts — v14.1
+   GIFTS-ONLY SCORING ENGINE (Danny Fix Build)
+   -------------------------------------------
+   ✔ 100% gifts-driven diamonds
+   ✔ Scores live doorgegeven via emitArena()
+   ✔ Host fallback intact
+   ✔ Twists blijven werken
+   ✔ BP werkt
+   ✔ Geen user.diamonds meer
+   ✔ Compatibel met server.ts v6.0 en arena-engine v6.1
 ============================================================================ */
 
 import pool from "../db";
@@ -32,7 +30,7 @@ import {
 } from "../server";
 
 import { addBP } from "./4-points-engine";
-import { getArena } from "./5-game-engine";
+import { getArena, emitArena } from "./5-game-engine";
 
 import { TWIST_MAP, TwistType } from "./twist-definitions";
 import { addTwistByGift } from "./8-twist-engine";
@@ -99,7 +97,7 @@ function formatDisplay(u: any) {
 }
 
 /* ============================================================================
-   SENDER PARSER (gefixte versie)
+   SENDER PARSER
 ============================================================================ */
 
 function extractSender(evt: any) {
@@ -152,12 +150,14 @@ function calcDiamonds(evt: any): number {
   const final = !!evt.repeatEnd;
   const type = Number(evt.giftType || 0);
 
+  // type 1 = multi gift
   if (type === 1) return final ? base * repeat : 0;
+
   return base;
 }
 
 /* ============================================================================
-   RECEIVER RESOLUTION (same logic)
+   RECEIVER RESOLUTION
 ============================================================================ */
 
 async function resolveReceiver(evt: any) {
@@ -181,7 +181,7 @@ async function resolveReceiver(evt: any) {
 
   const un = unique ? norm(unique) : null;
 
-  // 1. Self-gift => host
+  // 1 — SELF-GIFT → HOST
   if (evt.userId && directId && String(evt.userId) === String(directId)) {
     if (HOST_ID) {
       const h = await getOrUpdateUser(String(HOST_ID), null, null);
@@ -189,32 +189,31 @@ async function resolveReceiver(evt: any) {
     }
   }
 
-  // 2. Direct receiver
+  // 2 — DIRECT RECEIVER
   if (directId) {
     const u = await getOrUpdateUser(String(directId), null, null);
-    if (HOST_ID && String(directId) === String(HOST_ID))
-      return { id: HOST_ID, username: u.username, display_name: u.display_name, role: "host" };
+    const isHost = HOST_ID && String(directId) === String(HOST_ID);
     return {
       id: u.tiktok_id,
       username: u.username,
       display_name: u.display_name,
-      role: "speler",
+      role: isHost ? "host" : "speler",
     };
   }
 
-  // 3. Username fallback
+  // 3 — Username fallback (rare)
   if (un && HOST_USERNAME && un === HOST_USERNAME && HOST_ID) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
   }
 
-  // 4. Full fallback => host
+  // 4 — Fallback → always host
   if (HOST_ID) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
   }
 
-  // 5. Dummy
+  // 5 — Last resort
   return { id: null, username: "", display_name: "UNKNOWN", role: "speler" };
 }
 
@@ -231,7 +230,7 @@ function isHeartMeGift(evt: any): boolean {
 }
 
 /* ============================================================================
-   MAIN PROCESSOR (no user-diamonds anymore)
+   MAIN PROCESSOR — GIFTS-ONLY
 ============================================================================ */
 
 async function processGift(evt: any, source: string) {
@@ -244,17 +243,16 @@ async function processGift(evt: any, source: string) {
     dedupe.add(key);
 
     // ----------------------------------------
-    // Identity update
+    // Identity save
     // ----------------------------------------
     await upsertIdentityFromLooseEvent(evt);
 
-    // Sender extract
+    // Sender extraction
     const S = extractSender(evt);
     if (!S.id) return;
 
     const sender = await getOrUpdateUser(S.id, S.nick, S.unique);
 
-    // Diamonds
     const diamonds = calcDiamonds(evt);
     if (diamonds <= 0) return;
 
@@ -269,7 +267,7 @@ async function processGift(evt: any, source: string) {
       return;
     }
 
-    // Receiver resolution
+    // Receiver
     const receiver = await resolveReceiver(evt);
     const isHostReceiver = receiver.role === "host";
 
@@ -280,13 +278,11 @@ async function processGift(evt: any, source: string) {
     const senderFmt = formatDisplay(sender);
     const receiverFmt = receiverUser ? receiverUser.display_name : "UNKNOWN";
 
-    // Determine round state
+    // Arena state
     const arena = getArena();
     const inRound = arena.status === "active" || arena.status === "grace";
 
-    /* =========================================================================
-       1. BP FOR SENDER (remains)
-       ======================================================================== */
+    /* ------------------------- BP ------------------------- */
     await addBP(
       BigInt(sender.tiktok_id),
       diamonds * 0.2,
@@ -294,9 +290,7 @@ async function processGift(evt: any, source: string) {
       sender.display_name
     );
 
-    /* =========================================================================
-       2. FAN GIFT (unchanged)
-       ======================================================================== */
+    /* ---------------------- FAN / HEART ME ---------------------- */
     if (isHostReceiver && isHeartMeGift(evt)) {
       const expires = new Date(now() + 24 * 3600 * 1000);
       await pool.query(
@@ -310,9 +304,7 @@ async function processGift(evt: any, source: string) {
       });
     }
 
-    /* =========================================================================
-       3. TWISTS (unchanged)
-       ======================================================================== */
+    /* ------------------------- TWISTS ------------------------- */
     const giftId = Number(evt.giftId);
     const twistType: TwistType | null =
       (Object.keys(TWIST_MAP) as TwistType[]).find(
@@ -327,9 +319,7 @@ async function processGift(evt: any, source: string) {
       });
     }
 
-    /* =========================================================================
-       4. INSERT GIFT (scoring ONLY here)
-       ======================================================================== */
+    /* ------------------------ INSERT GIFT ------------------------ */
     await pool.query(
       `
       INSERT INTO gifts (
@@ -371,12 +361,14 @@ async function processGift(evt: any, source: string) {
     );
 
     /* =========================================================================
-       5. BROADCASTS (will use gifts-only system after server.ts refactor)
-       ======================================================================== */
+       BROADCASTS + ★ FIX ★ emitArena() toegevoegd
+    ========================================================================= */
     await broadcastStats();
     await broadcastPlayerLeaderboard();
     await broadcastGifterLeaderboard();
     await broadcastHostDiamonds();
+
+    await emitArena(); // ★ BELANGRIJK: realtime score update naar frontend
 
     emitLog({
       type: "gift",
@@ -398,7 +390,7 @@ export function initGiftEngine(conn: any) {
     return;
   }
 
-  console.log("🎁 GiftEngine v14.0 LOADED (gifts-only scoring)");
+  console.log("🎁 GiftEngine v14.1 LOADED (gifts-only scoring + live score updates)");
 
   conn.on("gift", (d: any) => processGift(d, "gift"));
   conn.on("roomMessage", (d: any) => {
