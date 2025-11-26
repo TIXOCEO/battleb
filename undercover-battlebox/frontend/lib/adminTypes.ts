@@ -1,10 +1,9 @@
 /* ============================================================================
-   adminTypes.ts — BattleBox v13.1 (GIFTS-DRIVEN EDITION, FINAL)
-   ✔ Gesynchroniseerd met backend v13 (gifts-only scoring)
-   ✔ ArenaPlayer heeft GEEN diamonds meer, alleen score voor UI
-   ✔ Finale/quarter logica wordt door server bepaald
-   ✔ Leaderboards gifts-driven (SUM FROM gifts-table)
-   ✔ Inclusief round:start, round:grace, round:end events
+   adminTypes.ts — BattleBox v13.2 (GIFTS-DRIVEN EDITION, FIXED)
+   ✔ Volledig gesynchroniseerd met backend
+   ✔ Alle inbound events correct toegevoegd (hosts, hostsActiveChanged)
+   ✔ Promote/demote verwijderd
+   ✔ Geen build errors meer
 ============================================================================ */
 
 /* ================================
@@ -22,17 +21,7 @@ export interface ArenaPlayer {
   id: string;
   display_name: string;
   username: string;
-
-  /*
-    Backend stuurt:
-      - score: number
-        quarter → ronde-score
-        finale  → total-score (DB SUM)
-
-    Arena-engine bevat geen diamonds meer in v13.
-  */
   score: number;
-
   boosters: string[];
   status: "alive" | "eliminated";
   positionStatus: ArenaPlayerStatus;
@@ -76,7 +65,6 @@ export interface ArenaState {
 ================================ */
 export interface QueueEntry {
   position: number;
-
   tiktok_id: string;
   display_name: string;
   username: string;
@@ -89,18 +77,6 @@ export interface QueueEntry {
 
   vip_expires_at?: string | null;
   fan_expires_at?: string | null;
-}
-
-/* ================================
-   GLOBAL TOGGLES
-================================ */
-export interface GlobalToggles {
-  queueOpen: boolean;
-  boostersEnabled: boolean;
-  twistsEnabled: boolean;
-  roundType: "voorronde" | "finale";
-  debugLogs: boolean;
-  dayResetTime: string;
 }
 
 /* ================================
@@ -180,14 +156,14 @@ export interface PlayerLeaderboardEntry {
   tiktok_id: string;
   username: string;
   display_name: string;
-  total_score: number; // SUM(diamonds) via gifts-table
+  total_score: number;
 }
 
 export interface GifterLeaderboardEntry {
   user_id: string;
   username: string;
   display_name: string;
-  total_diamonds: number; // SUM(diamonds) via gifts-table
+  total_diamonds: number;
 }
 
 /* ============================================================================
@@ -209,18 +185,21 @@ export interface InitialSnapshot {
     gameId: number | null;
   };
 
-  stats: {
-    total_players?: number;
-    total_player_diamonds?: number;
-    total_host_diamonds?: number;
-  } | null;
+  stats:
+    | {
+        total_players?: number;
+        total_player_diamonds?: number;
+        total_host_diamonds?: number;
+      }
+    | null;
 
   playerLeaderboard: PlayerLeaderboardEntry[];
   gifterLeaderboard: GifterLeaderboardEntry[];
 }
 
 /* ============================================================================
-   SOCKET INBOUND (FROM BACKEND → FRONTEND)
+   SOCKET INBOUND (BACKEND → FRONTEND)
+   MUST MATCH server.ts EXACTLY
 ============================================================================ */
 export interface AdminSocketInbound {
   updateArena: (arena: ArenaState) => void;
@@ -247,7 +226,11 @@ export interface AdminSocketInbound {
 
   hostDiamonds: (data: { username: string; total: number }) => void;
 
-  /** Ronde events (BACKEND v13) */
+  /** ★ FIXED — events die jouw backend stuurt */
+  hosts: (rows: HostProfile[]) => void;
+  hostsActiveChanged: (payload: { username: string; tiktok_id: string }) => void;
+
+  /** Ronde-events */
   "round:start": (payload: {
     round: number;
     type: "quarter" | "finale";
@@ -273,7 +256,7 @@ export interface AdminSocketInbound {
 }
 
 /* ============================================================================
-   SOCKET OUTBOUND (SYNC WITH BACKEND handle())
+   SOCKET OUTBOUND (FRONTEND → BACKEND)
 ============================================================================ */
 export interface AdminSocketOutbound {
   ping: () => void;
