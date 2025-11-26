@@ -172,7 +172,28 @@ export default function AdminDashboardPage() {
   };
 
   /* ============================================
-     AUTOFILL FIX (MISSENDE FUNCTIE)
+     AUTOFILL FIX — DIT IS NIEUW
+  ============================================ */
+  useEffect(() => {
+    const q = typing.trim().replace(/^@+/, "");
+    if (!q || q.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+
+    const socket = getAdminSocket();
+
+    const handle = setTimeout(() => {
+      socket.emit("searchUsers", { query: q }, (res: { users: SearchUser[] }) => {
+        setSearchResults(res?.users || []);
+      });
+    }, 250);
+
+    return () => clearTimeout(handle);
+  }, [typing]);
+
+  /* ============================================
+     AUTOFILL APPLY
   ============================================ */
   function applyAutoFill(user: SearchUser) {
     if (!user) return;
@@ -196,8 +217,10 @@ export default function AdminDashboardPage() {
   /* ============================================
      HELPERS
   ============================================ */
-  const fmt = (n: number | undefined | null) =>
-    (typeof n === "number" ? n : 0).toLocaleString("nl-NL");
+
+  // FIXED fmt → accepteert numbers én strings
+  const fmt = (n: number | string | undefined | null) =>
+    Number(n ?? 0).toLocaleString("nl-NL");
 
 const players = useMemo(() => arena?.players ?? [], [arena]);
   const arenaStatus = arena?.status ?? "idle";
@@ -482,7 +505,7 @@ const players = useMemo(() => arena?.players ?? [], [arena]);
         </div>
       </section>
 
-      {/* ============================================================
+{/* ============================================================
           ARENA + QUEUE
       ============================================================ */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -515,7 +538,7 @@ const players = useMemo(() => arena?.players ?? [], [arena]);
                     {p.display_name} (@{p.username})
                   </div>
 
-                  {/* GIFTS DRIVEN SCORE — ALWAYS p.score */}
+                  {/* GIFTS-DRIVEN SCORE */}
                   <div className="text-xs text-gray-600">
                     Score: {fmt(p.score)} 💎
                   </div>
@@ -1001,4 +1024,5 @@ const players = useMemo(() => arena?.players ?? [], [arena]);
       </footer>
     </main>
   );
-              }
+                  }
+      
