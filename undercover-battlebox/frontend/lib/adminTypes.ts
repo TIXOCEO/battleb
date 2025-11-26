@@ -226,11 +226,10 @@ export interface AdminSocketInbound {
 
   hostDiamonds: (data: { username: string; total: number }) => void;
 
-  /** ★ FIXED — events die jouw backend stuurt */
-  hosts: (rows: HostProfile[]) => void;
-  hostsActiveChanged: (payload: { username: string; tiktok_id: string }) => void;
+  /** SETTINGS — this fixes your build */
+  settings: (settings: ArenaSettings) => void;
 
-  /** Ronde-events */
+  /** Ronde events */
   "round:start": (payload: {
     round: number;
     type: "quarter" | "finale";
