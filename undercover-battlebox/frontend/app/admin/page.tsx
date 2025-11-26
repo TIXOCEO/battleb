@@ -44,16 +44,14 @@ export default function AdminDashboardPage() {
   const [gifterLeaderboard, setGifterLeaderboard] =
     useState<GifterLeaderboardEntry[]>([]);
 
-  const [activeLbTab, setActiveLbTab] = useState<"players" | "gifters">(
-    "players"
-  );
+  const [activeLbTab, setActiveLbTab] =
+    useState<"players" | "gifters">("players");
 
   const [gameSession, setGameSession] = useState<GameSessionState>({
     active: false,
     gameId: null,
   });
 
-  // ⭐ host diamonds (nu volledig realtime via backend)
   const [hostDiamonds, setHostDiamonds] = useState(0);
 
   /* INPUTS */
@@ -76,13 +74,12 @@ export default function AdminDashboardPage() {
   >(null);
 
   /* ============================================
-     SOCKET SETUP — LIVE CONNECTION
+     SOCKET SETUP
   ============================================ */
   useEffect(() => {
     const socket = getAdminSocket();
 
-    // ARENA UPDATES
-    socket.on("updateArena", (data: ArenaState) => setArena(data));
+    socket.on("updateArena", (data) => setArena(data));
 
     socket.on("updateQueue", (d) => {
       setQueue(d.entries ?? []);
@@ -93,49 +90,34 @@ export default function AdminDashboardPage() {
     socket.on("initialLogs", (d) => setLogs(d.slice(0, 200)));
 
     socket.on("streamStats", (s) => setStreamStats(s));
-
     socket.on("gameSession", (s) => setGameSession(s));
 
     socket.on("leaderboardPlayers", (rows) => setPlayerLeaderboard(rows));
     socket.on("leaderboardGifters", (rows) => setGifterLeaderboard(rows));
 
-    // ⭐ HOST DIAMONDS
     socket.on("hostDiamonds", (d) => setHostDiamonds(d.total));
 
     socket.on("connect_error", () =>
       setStatus("❌ Socket verbinding weggevallen")
     );
 
-    // ROUND EVENTS
     socket.on("round:start", (d) =>
-      setStatus(`▶️ Ronde gestart (${d.type}) — ${d.duration}s`)
+      setStatus(`▶️ Ronde gestart (${d.type}) – ${d.duration}s`)
     );
     socket.on("round:grace", (d) =>
-      setStatus(`⏳ Grace-periode actief (${d.grace}s)`)
+      setStatus(`⏳ Grace periode (${d.grace}s)`)
     );
     socket.on("round:end", () =>
-      setStatus("⛔ Ronde beëindigd — voer eliminaties uit")
+      setStatus("⛔ Ronde gestopt – voer eliminaties uit")
     );
 
     return () => {
-      socket.off("updateArena");
-      socket.off("updateQueue");
-      socket.off("log");
-      socket.off("initialLogs");
-      socket.off("streamStats");
-      socket.off("gameSession");
-      socket.off("leaderboardPlayers");
-      socket.off("leaderboardGifters");
-      socket.off("hostDiamonds");
-      socket.off("connect_error");
-      socket.off("round:start");
-      socket.off("round:grace");
-      socket.off("round:end");
+      socket.removeAllListeners();
     };
   }, []);
 
   /* ============================================
-     INITIAL SNAPSHOT LOAD
+     INITIAL SNAPSHOT
   ============================================ */
   useEffect(() => {
     const socket = getAdminSocket();
@@ -144,69 +126,80 @@ export default function AdminDashboardPage() {
       if (!snap) return;
 
       if (snap.arena) setArena(snap.arena);
-
       if (snap.queue) {
         setQueue(snap.queue.entries ?? []);
         setQueueOpen(snap.queue.open ?? true);
       }
 
       if (snap.logs) setLogs(snap.logs.slice(0, 200));
-
       if (snap.stats) setStreamStats(snap.stats);
-
       if (snap.gameSession) setGameSession(snap.gameSession);
 
-      if (snap.playerLeaderboard)
-        setPlayerLeaderboard(snap.playerLeaderboard);
-
-      if (snap.gifterLeaderboard)
-        setGifterLeaderboard(snap.gifterLeaderboard);
-
-      // hostDiamonds komt live binnen — snapshot NIET gebruiken
+      if (snap.playerLeaderboard) setPlayerLeaderboard(snap.playerLeaderboard);
+      if (snap.gifterLeaderboard) setGifterLeaderboard(snap.gifterLeaderboard);
     });
   }, []);
 
   /* ============================================
-     ADMIN EMITTERS
+     EMITTER HELPERS
   ============================================ */
-  const emitAdmin = (event: keyof AdminSocketOutbound, payload?: any) => {
+  const emitAdmin = (
+    event: keyof AdminSocketOutbound,
+    payload?: any
+  ) => {
     const socket = getAdminSocket();
     setStatus(`Bezig met ${event}...`);
 
-    socket.emit(event, payload || {}, (res: AdminAckResponse) => {
-      setStatus(
-        res?.success ? "✅ Uitgevoerd" : `❌ ${res?.message ?? "Geen antwoord"}`
-      );
+    socket.emit(event, payload ?? {}, (res: AdminAckResponse) => {
+      setStatus(res?.success ? "✅ Uitgevoerd" : `❌ ${res?.message ?? "Geen antwoord"}`);
     });
   };
 
   const emitAdminWithUser = (
     event: keyof AdminSocketOutbound,
-    target?: string
+    userTarget?: string
   ) => {
+    const uname = (userTarget || username || "").trim();
+    if (!uname) return;
+
     const socket = getAdminSocket();
-    const uname = target || username;
-    if (!uname.trim()) return;
-
     const formatted = uname.startsWith("@") ? uname : `@${uname}`;
-    setStatus(`Bezig met ${event}...`);
 
+    setStatus(`Bezig met ${event}...`);
     socket.emit(event, { username: formatted }, (res: AdminAckResponse) => {
-      setStatus(
-        res?.success ? "✅ Uitgevoerd" : `❌ ${res?.message ?? "Geen antwoord"}`
-      );
+      setStatus(res?.success ? "✅ Uitgevoerd" : `❌ ${res?.message}`);
     });
   };
+
+  /* ============================================
+     AUTOFILL FIX (MISSENDE FUNCTIE)
+  ============================================ */
+  function applyAutoFill(user: SearchUser) {
+    if (!user) return;
+
+    const formatted =
+      user.username.startsWith("@")
+        ? user.username
+        : `@${user.username}`;
+
+    if (activeAutoField === "main") setUsername(formatted);
+    if (activeAutoField === "give") setTwistUserGive(formatted);
+    if (activeAutoField === "use") setTwistUserUse(formatted);
+    if (activeAutoField === "target") setTwistTargetUse(formatted);
+
+    setTyping("");
+    setShowResults(false);
+    setSearchResults([]);
+    setActiveAutoField(null);
+  }
 
   /* ============================================
      HELPERS
   ============================================ */
   const fmt = (n: number | undefined | null) =>
-    (typeof n === "number" ? n : 0).toLocaleString("nl-NL", {
-      maximumFractionDigits: 0,
-    });
+    (typeof n === "number" ? n : 0).toLocaleString("nl-NL");
 
-  const players = useMemo(() => arena?.players ?? [], [arena]);
+const players = useMemo(() => arena?.players ?? [], [arena]);
   const arenaStatus = arena?.status ?? "idle";
 
   const hasDoomed = players.some((p) => p.positionStatus === "elimination");
@@ -224,7 +217,7 @@ export default function AdminDashboardPage() {
     arenaStatus === "ended" &&
     hasDoomed;
 
-/* ============================================
+  /* ============================================
      TIMER + COLORS
   ============================================ */
   const roundProgress = useMemo(() => {
@@ -234,13 +227,13 @@ export default function AdminDashboardPage() {
     if (arena.status === "active") {
       const start = arena.roundStartTime;
       const end = arena.roundCutoff;
-      return Math.max(0, Math.min(100, ((now - start) / (end - start)) * 100));
+      return Math.min(100, Math.max(0, ((now - start) / (end - start)) * 100));
     }
 
     if (arena.status === "grace") {
       const start = arena.roundCutoff;
       const end = arena.graceEnd;
-      return Math.max(0, Math.min(100, ((now - start) / (end - start)) * 100));
+      return Math.min(100, Math.max(0, ((now - start) / (end - start)) * 100));
     }
 
     return 0;
@@ -250,9 +243,7 @@ export default function AdminDashboardPage() {
     if (!sec || sec < 0) sec = 0;
     const m = Math.floor(sec / 60);
     const s = sec % 60;
-    return `${m.toString().padStart(2, "0")}:${s
-      .toString()
-      .padStart(2, "0")}`;
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   };
 
   const colorForPosition = (p: any) => {
@@ -274,12 +265,11 @@ export default function AdminDashboardPage() {
   /* ============================================
      UI START
   ============================================ */
-
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
       {/* HEADER */}
       <header className="mb-6 relative">
-        {/* HOST DIAMONDS BADGE ⭐ */}
+        {/* HOST DIAMONDS BADGE */}
         <div
           className="
             absolute right-0 top-0
@@ -525,11 +515,9 @@ export default function AdminDashboardPage() {
                     {p.display_name} (@{p.username})
                   </div>
 
-                  {/* ⭐ FIXED: quarter → current_round, finale → total */}
+                  {/* GIFTS DRIVEN SCORE — ALWAYS p.score */}
                   <div className="text-xs text-gray-600">
-                    {arena?.type === "finale"
-                      ? `Totaal: ${fmt(p.diamonds_total)} 💎`
-                      : `Ronde: ${fmt(p.diamonds_current_round)} 💎`}
+                    Score: {fmt(p.score)} 💎
                   </div>
 
                   {p.positionStatus === "elimination" && (
@@ -859,7 +847,7 @@ export default function AdminDashboardPage() {
               <option value="immune">Immune</option>
               <option value="heal">Heal</option>
               <option value="bomb">Bomb</option>
-              <option value="diamond_pistol">Diamond Pistol</option>
+              <option value="diamondpistol">Diamond Pistol</option>
             </select>
 
             <button
@@ -928,7 +916,7 @@ export default function AdminDashboardPage() {
               <option value="immune">Immune</option>
               <option value="heal">Heal</option>
               <option value="bomb">Bomb</option>
-              <option value="diamond_pistol">Diamond Pistol</option>
+              <option value="diamondpistol">Diamond Pistol</option>
             </select>
 
             <label className="text-xs font-semibold">
