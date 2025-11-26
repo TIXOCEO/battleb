@@ -1,5 +1,6 @@
 // ============================================================================
-// server.ts — BATTLEBOX BACKEND v5.3 (REALTIME TOTALS + CLEAN FIXES)
+// server.ts — BATTLEBOX BACKEND v5.4
+// REALTIME TOTALS + FULL FRONTEND SYNC FIXES
 // ============================================================================
 
 import express from "express";
@@ -146,7 +147,7 @@ let currentGameId: number | null = null;
 (io as any).currentGameId = null;
 
 // ============================================================================
-// LEADERBOARD: PLAYERS (HOST UITGESLOTEN) — FIXED REALTIME TOTALS
+// LEADERBOARD: PLAYERS — FIXED (stuur ALLE velden die UI verwacht!)
 // ============================================================================
 export async function broadcastPlayerLeaderboard() {
   if (!currentGameId) {
@@ -157,14 +158,19 @@ export async function broadcastPlayerLeaderboard() {
 
   const hostId = HARD_HOST_ID ? BigInt(HARD_HOST_ID) : null;
 
-  // FIXED: Gebruik realtime totals: diamonds_total (db) + diamonds_current_round
+  // ✨ Belangrijk: stuur diamonds_total + diamonds_current_round + total_score
   const q = await pool.query(
     `
     SELECT
       u.tiktok_id,
       u.username,
       u.display_name,
+
+      u.diamonds_total,
+      u.diamonds_current_round,
+
       (u.diamonds_total + u.diamonds_current_round) AS total_score
+
     FROM users u
     WHERE (u.diamonds_total + u.diamonds_current_round) > 0
       AND u.tiktok_id <> $1
@@ -181,7 +187,7 @@ export async function broadcastPlayerLeaderboard() {
 }
 
 // ============================================================================
-// LEADERBOARD GIFTERS — HOST GIFTS WORDEN GECOUNTERD (GOED)
+// LEADERBOARD: GIFTERS — FIXED (BIGINT casts, NULL protection)
 // ============================================================================
 export async function broadcastGifterLeaderboard() {
   if (!currentGameId) {
@@ -193,13 +199,13 @@ export async function broadcastGifterLeaderboard() {
   const r = await pool.query(
     `
     SELECT 
-      giver_id AS user_id,
+      giver_id::text AS user_id,
       giver_username AS username,
       giver_display_name AS display_name,
-      SUM(diamonds) AS total_diamonds
+      SUM(COALESCE(diamonds,0)) AS total_diamonds
     FROM gifts
-    WHERE game_id=$1
-    GROUP BY giver_id, giver_username, giver_display_name
+    WHERE game_id = $1 AND giver_id IS NOT NULL
+    GROUP BY giver_id::text, giver_username, giver_display_name
     ORDER BY total_diamonds DESC
     LIMIT 200
     `,
@@ -213,7 +219,7 @@ export async function broadcastGifterLeaderboard() {
 }
 
 // ============================================================================
-// HOST DIAMONDS
+// HOST DIAMONDS — unchanged but consistent
 // ============================================================================
 export async function broadcastHostDiamonds() {
   if (!currentGameId || !HARD_HOST_ID) {
@@ -266,7 +272,7 @@ export async function broadcastStats() {
 }
 
 // ============================================================================
-// TIKTOK CONNECT MANAGEMENT
+// TIKTOK CONNECT
 // ============================================================================
 let tiktokConn: any = null;
 
@@ -274,7 +280,6 @@ async function fullyDisconnect() {
   try {
     if (tiktokConn) await stopConnection(tiktokConn);
   } catch {}
-
   tiktokConn = null;
   setLiveState(false);
 }
@@ -318,12 +323,12 @@ export async function restartTikTokConnection() {
 }
 
 // ============================================================================
-// SNAPSHOT BUILDER — realtime totals
+// SNAPSHOT — *volledig gefixt voor arena + leaderboards*
 // ============================================================================
 async function buildInitialSnapshot() {
   const snap: any = {};
 
-  snap.arena = getArena();
+  snap.arena = normalizeArenaForAdmin(getArena());
   snap.queue = { open: true, entries: await getQueue() };
   snap.logs = logBuffer;
   snap.settings = getArenaSettings();
@@ -343,13 +348,12 @@ async function buildInitialSnapshot() {
       `,
       [currentGameId]
     );
-
     snap.stats = r.rows[0] || {};
   } else {
     snap.stats = null;
   }
 
-  // PLAYER LEADERBOARD (realtime total = total + round)
+  // PLAYER LEADERBOARD
   if (currentGameId) {
     const hostId = HARD_HOST_ID ? BigInt(HARD_HOST_ID) : null;
 
@@ -359,6 +363,8 @@ async function buildInitialSnapshot() {
         u.tiktok_id,
         u.username,
         u.display_name,
+        u.diamonds_total,
+        u.diamonds_current_round,
         (u.diamonds_total + u.diamonds_current_round) AS total_score
       FROM users u
       WHERE (u.diamonds_total + u.diamonds_current_round) > 0
@@ -383,13 +389,13 @@ async function buildInitialSnapshot() {
   if (currentGameId) {
     const gf = await pool.query(
       `
-      SELECT giver_id AS user_id,
+      SELECT giver_id::text AS user_id,
              giver_username AS username,
              giver_display_name AS display_name,
-             SUM(diamonds) AS total_diamonds
+             SUM(COALESCE(diamonds,0)) AS total_diamonds
       FROM gifts
-      WHERE game_id=$1
-      GROUP BY giver_id, giver_username, giver_display_name
+      WHERE game_id=$1 AND giver_id IS NOT NULL
+      GROUP BY giver_id::text, giver_username, giver_display_name
       ORDER BY total_diamonds DESC
       LIMIT 200
       `,
@@ -429,6 +435,22 @@ async function buildInitialSnapshot() {
 }
 
 // ============================================================================
+// NORMALIZER — zodat arena players rondepunten tonen
+// ============================================================================
+function normalizeArenaForAdmin(arena: any) {
+  if (!arena || !Array.isArray(arena.players)) return arena;
+
+  return {
+    ...arena,
+    players: arena.players.map((p: any) => ({
+      ...p,
+      diamonds_current_round: p.diamonds ?? 0,
+      diamonds_total: p.totalDiamonds ?? 0
+    }))
+  };
+}
+
+// ============================================================================
 // SOCKET CONNECT HANDLER
 // ============================================================================
 io.on("connection", async (socket: AdminSocket) => {
@@ -436,7 +458,7 @@ io.on("connection", async (socket: AdminSocket) => {
 
   // Direct initial push
   socket.emit("initialLogs", logBuffer);
-  socket.emit("updateArena", getArena());
+  socket.emit("updateArena", normalizeArenaForAdmin(getArena()));
   socket.emit("updateQueue", { open: true, entries: await getQueue() });
   socket.emit("settings", getArenaSettings());
 
@@ -467,9 +489,9 @@ io.on("connection", async (socket: AdminSocket) => {
     ack(snap);
   });
 
-      // ========================================================================
+  // ============================================================================
   // UNIVERSAL ADMIN ACTION HANDLER
-  // ========================================================================
+  // ============================================================================
   async function handle(action: string, data: any, ack: Function) {
     try {
       // ======================================================
@@ -492,12 +514,11 @@ io.on("connection", async (socket: AdminSocket) => {
           return ack({ success: false, message: "label, username en tiktok_id verplicht" });
 
         await pool.query(`
-          INSERT INTO hosts (label, username, tiktok_id, active)
-          VALUES ($1,$2,$3,FALSE)
+            INSERT INTO hosts (label, username, tiktok_id, active)
+            VALUES ($1,$2,$3,FALSE)
         `, [label, un, id]);
 
         emitLog({ type: "system", message: `Host toegevoegd: ${label} (@${un})` });
-
         return ack({ success: true });
       }
 
@@ -556,7 +577,7 @@ io.on("connection", async (socket: AdminSocket) => {
         currentGameId = r.rows[0].id;
         (io as any).currentGameId = currentGameId;
 
-        // Reset alle diamonds (maar alleen bij startGame — niet bij rondes)
+        // Reset totals (goede plek!)
         await pool.query(`
           UPDATE users
           SET diamonds_total = 0,
@@ -582,7 +603,8 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       if (action === "stopGame") {
-        if (!currentGameId) return ack({ success: true });
+        if (!currentGameId)
+          return ack({ success: true });
 
         await pool.query(`
           UPDATE games
@@ -590,15 +612,14 @@ io.on("connection", async (socket: AdminSocket) => {
           WHERE id=$1
         `, [currentGameId]);
 
-        // LET OP: diamonds worden alleen gereset bij stopGame (correct)
         await pool.query(`
           UPDATE users
           SET diamonds_total = 0,
               diamonds_current_round = 0,
               diamonds_stream = 0
         `);
-
         await pool.query(`TRUNCATE gifts`);
+        await arenaClear();
 
         currentGameId = null;
         (io as any).currentGameId = null;
@@ -654,7 +675,6 @@ io.on("connection", async (socket: AdminSocket) => {
 
         emitArena();
         await broadcastPlayerLeaderboard();
-
         return ack({ success: true });
       }
 
@@ -731,12 +751,12 @@ io.on("connection", async (socket: AdminSocket) => {
 
         const r = await pool.query(
           `
-          SELECT tiktok_id, username, display_name
-          FROM users
-          WHERE LOWER(username) LIKE LOWER($1)
-             OR LOWER(display_name) LIKE LOWER($1)
-          ORDER BY last_seen_at DESC NULLS LAST
-          LIMIT 25
+            SELECT tiktok_id, username, display_name
+            FROM users
+            WHERE LOWER(username) LIKE LOWER($1)
+              OR LOWER(display_name) LIKE LOWER($1)
+            ORDER BY last_seen_at DESC NULLS LAST
+            LIMIT 25
         `,
           [like]
         );
@@ -746,7 +766,6 @@ io.on("connection", async (socket: AdminSocket) => {
 
       if (action === "addToQueue") {
         const clean = (data?.username || "").trim().replace(/^@+/, "").toLowerCase();
-
         if (!clean)
           return ack({ success: false, message: "Geen username opgegeven" });
 
@@ -763,9 +782,9 @@ io.on("connection", async (socket: AdminSocket) => {
 
         await pool.query(
           `
-          INSERT INTO queue (user_tiktok_id, boost_spots, joined_at)
-          VALUES ($1,0,NOW())
-          ON CONFLICT (user_tiktok_id) DO NOTHING
+            INSERT INTO queue (user_tiktok_id, boost_spots, joined_at)
+            VALUES ($1,0,NOW())
+            ON CONFLICT (user_tiktok_id) DO NOTHING
         `,
           [u.rows[0].tiktok_id]
         );
@@ -869,7 +888,7 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       // ======================================================
-      // ONBEKEND COMMANDO
+      // ONBEKEND
       // ======================================================
       return ack({
         success: false,
@@ -897,3 +916,4 @@ io.on("connection", async (socket: AdminSocket) => {
 server.listen(PORT, () => {
   console.log(`🚀 Backend live op poort ${PORT}`);
 });
+
