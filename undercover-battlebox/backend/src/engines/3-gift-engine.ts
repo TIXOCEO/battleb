@@ -1,14 +1,6 @@
 /* ============================================================================
-   3-gift-engine.ts — v14.1
-   GIFTS-ONLY SCORING ENGINE (Danny Fix Build)
-   -------------------------------------------
-   ✔ 100% gifts-driven diamonds
-   ✔ Scores live doorgegeven via emitArena()
-   ✔ Host fallback intact
-   ✔ Twists blijven werken
-   ✔ BP werkt
-   ✔ Geen user.diamonds meer
-   ✔ Compatibel met server.ts v6.0 en arena-engine v6.1
+   3-gift-engine.ts — v14.2
+   GIFTS-ONLY ENGINE — FIXED FOR 21-COLUMN GIFTS TABLE
 ============================================================================ */
 
 import pool from "../db";
@@ -36,9 +28,8 @@ import { TWIST_MAP, TwistType } from "./twist-definitions";
 import { addTwistByGift } from "./8-twist-engine";
 
 /* ============================================================================
-   GAME HELPERS
+   HELPER: Get active game id
 ============================================================================ */
-
 function getActiveGameId(): number | null {
   const id = (io as any)?.currentGameId;
   return typeof id === "number" && id > 0 ? id : null;
@@ -59,7 +50,6 @@ async function isGameActive(): Promise<boolean> {
 /* ============================================================================
    DEDUPE
 ============================================================================ */
-
 const dedupe = new Set<string>();
 setInterval(() => dedupe.clear(), 20000);
 
@@ -76,7 +66,6 @@ function makeDedupeKey(evt: any, source: string) {
 /* ============================================================================
    HELPERS
 ============================================================================ */
-
 function norm(v: any) {
   return (v || "")
     .toString()
@@ -97,9 +86,8 @@ function formatDisplay(u: any) {
 }
 
 /* ============================================================================
-   SENDER PARSER
+   EXTRACT SENDER
 ============================================================================ */
-
 function extractSender(evt: any) {
   const raw =
     evt.user ||
@@ -122,6 +110,7 @@ function extractSender(evt: any) {
       evt.userId ||
       evt.senderUserId ||
       null,
+
     unique: norm(
       raw?.uniqueId ||
         raw?.unique_id ||
@@ -129,6 +118,7 @@ function extractSender(evt: any) {
         evt.unique_id ||
         null
     ),
+
     nick:
       raw?.nickname ||
       raw?.displayName ||
@@ -139,9 +129,8 @@ function extractSender(evt: any) {
 }
 
 /* ============================================================================
-   DIAMOND CALCULATION
+   DIAMOND CALC
 ============================================================================ */
-
 function calcDiamonds(evt: any): number {
   const base = Number(evt.diamondCount || evt.diamond || 0);
   if (base <= 0) return 0;
@@ -150,16 +139,13 @@ function calcDiamonds(evt: any): number {
   const final = !!evt.repeatEnd;
   const type = Number(evt.giftType || 0);
 
-  // type 1 = multi gift
   if (type === 1) return final ? base * repeat : 0;
-
   return base;
 }
 
 /* ============================================================================
    RECEIVER RESOLUTION
 ============================================================================ */
-
 async function resolveReceiver(evt: any) {
   const host = getActiveHost();
   const HOST_ID = host?.id ? String(host.id) : null;
@@ -181,15 +167,18 @@ async function resolveReceiver(evt: any) {
 
   const un = unique ? norm(unique) : null;
 
-  // 1 — SELF-GIFT → HOST
   if (evt.userId && directId && String(evt.userId) === String(directId)) {
     if (HOST_ID) {
       const h = await getOrUpdateUser(String(HOST_ID), null, null);
-      return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
+      return {
+        id: HOST_ID,
+        username: h.username,
+        display_name: h.display_name,
+        role: "host"
+      };
     }
   }
 
-  // 2 — DIRECT RECEIVER
   if (directId) {
     const u = await getOrUpdateUser(String(directId), null, null);
     const isHost = HOST_ID && String(directId) === String(HOST_ID);
@@ -197,30 +186,36 @@ async function resolveReceiver(evt: any) {
       id: u.tiktok_id,
       username: u.username,
       display_name: u.display_name,
-      role: isHost ? "host" : "speler",
+      role: isHost ? "host" : "speler"
     };
   }
 
-  // 3 — Username fallback (rare)
   if (un && HOST_USERNAME && un === HOST_USERNAME && HOST_ID) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
-    return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
+    return {
+      id: HOST_ID,
+      username: h.username,
+      display_name: h.display_name,
+      role: "host"
+    };
   }
 
-  // 4 — Fallback → always host
   if (HOST_ID) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
-    return { id: HOST_ID, username: h.username, display_name: h.display_name, role: "host" };
+    return {
+      id: HOST_ID,
+      username: h.username,
+      display_name: h.display_name,
+      role: "host"
+    };
   }
 
-  // 5 — Last resort
   return { id: null, username: "", display_name: "UNKNOWN", role: "speler" };
 }
 
 /* ============================================================================
-   FAN / HEART ME
+   HEART ME
 ============================================================================ */
-
 const HEART_ME_GIFT_IDS = new Set([7934]);
 
 function isHeartMeGift(evt: any): boolean {
@@ -232,22 +227,20 @@ function isHeartMeGift(evt: any): boolean {
 /* ============================================================================
    MAIN PROCESSOR — GIFTS-ONLY
 ============================================================================ */
-
 async function processGift(evt: any, source: string) {
   try {
-    // ----------------------------------------
-    // DEDUPE
-    // ----------------------------------------
+    /* ----------------------------------------
+       DEDUPE
+    ---------------------------------------- */
     const key = makeDedupeKey(evt, source);
     if (dedupe.has(key)) return;
     dedupe.add(key);
 
-    // ----------------------------------------
-    // Identity save
-    // ----------------------------------------
+    /* ----------------------------------------
+       IDENTITY SYNC
+    ---------------------------------------- */
     await upsertIdentityFromLooseEvent(evt);
 
-    // Sender extraction
     const S = extractSender(evt);
     if (!S.id) return;
 
@@ -256,9 +249,12 @@ async function processGift(evt: any, source: string) {
     const diamonds = calcDiamonds(evt);
     if (diamonds <= 0) return;
 
-    // Check game active
+    /* ----------------------------------------
+       CHECK GAME ACTIVE
+    ---------------------------------------- */
     const gameId = getActiveGameId();
     const active = await isGameActive();
+
     if (!gameId || !active) {
       emitLog({
         type: "gift",
@@ -267,7 +263,9 @@ async function processGift(evt: any, source: string) {
       return;
     }
 
-    // Receiver
+    /* ----------------------------------------
+       RESOLVE RECEIVER
+    ---------------------------------------- */
     const receiver = await resolveReceiver(evt);
     const isHostReceiver = receiver.role === "host";
 
@@ -278,11 +276,16 @@ async function processGift(evt: any, source: string) {
     const senderFmt = formatDisplay(sender);
     const receiverFmt = receiverUser ? receiverUser.display_name : "UNKNOWN";
 
-    // Arena state
+    /* ----------------------------------------
+       ARENA CONTEXT
+    ---------------------------------------- */
     const arena = getArena();
     const inRound = arena.status === "active" || arena.status === "grace";
+    const arena_id = arena?.round ?? null;
 
-    /* ------------------------- BP ------------------------- */
+    /* ----------------------------------------
+       BP ADD
+    ---------------------------------------- */
     await addBP(
       BigInt(sender.tiktok_id),
       diamonds * 0.2,
@@ -290,11 +293,15 @@ async function processGift(evt: any, source: string) {
       sender.display_name
     );
 
-    /* ---------------------- FAN / HEART ME ---------------------- */
+    /* ----------------------------------------
+       FAN / HEART ME
+    ---------------------------------------- */
     if (isHostReceiver && isHeartMeGift(evt)) {
       const expires = new Date(now() + 24 * 3600 * 1000);
+
       await pool.query(
-        `UPDATE users SET is_fan=TRUE, fan_expires_at=$1 WHERE tiktok_id=$2`,
+        `UPDATE users SET is_fan=TRUE, fan_expires_at=$1
+         WHERE tiktok_id=$2`,
         [expires, BigInt(sender.tiktok_id)]
       );
 
@@ -304,7 +311,9 @@ async function processGift(evt: any, source: string) {
       });
     }
 
-    /* ------------------------- TWISTS ------------------------- */
+    /* ----------------------------------------
+       TWISTS
+    ---------------------------------------- */
     const giftId = Number(evt.giftId);
     const twistType: TwistType | null =
       (Object.keys(TWIST_MAP) as TwistType[]).find(
@@ -319,56 +328,85 @@ async function processGift(evt: any, source: string) {
       });
     }
 
-    /* ------------------------ INSERT GIFT ------------------------ */
+    /* =========================================================================
+       DATABASE INSERT — FULL 21-COLUMN GIFTS TABLE
+    ========================================================================= */
     await pool.query(
       `
       INSERT INTO gifts (
-        giver_id, giver_username, giver_display_name,
-        receiver_id, receiver_username, receiver_display_name,
+        giver_id,
+        giver_username,
+        giver_display_name,
+
+        gift_name,
+        diamonds,
+        bp,
+        created_at,
+
+        receiver_id,
+        receiver_username,
+        receiver_display_name,
         receiver_role,
-        gift_name, diamonds, bp,
+
         game_id,
         is_host_gift,
         is_round_gift,
+        arena_id,
         round_active,
+
+        sender_display_name,
+        sender_username,
         round_id,
-        created_at
+        source_event
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,
-              $8,$9,$10,$11,$12,$13,$14,$15,NOW())
+      VALUES (
+        $1,$2,$3,
+        $4,$5,$6,NOW(),
+        $7,$8,$9,$10,
+        $11,$12,$13,$14,$15,
+        $16,$17,$18,$19
+      )
       `,
       [
-        BigInt(sender.tiktok_id),
-        sender.username,
-        sender.display_name,
+        /* giver */
+        BigInt(sender.tiktok_id),  // $1
+        sender.username,           // $2
+        sender.display_name,       // $3
 
-        receiver.id ? BigInt(String(receiver.id)) : null,
-        receiver.username,
-        receiver.display_name,
-        receiver.role,
+        /* gift details */
+        evt.giftName || "unknown", // $4
+        diamonds,                  // $5
+        diamonds * 0.2,            // $6
 
-        evt.giftName || "unknown",
-        diamonds,
-        diamonds * 0.2,
+        /* receiver */
+        receiver.id ? BigInt(String(receiver.id)) : null, // $7
+        receiver.username,         // $8
+        receiver.display_name,     // $9
+        receiver.role,             // $10
 
-        gameId,
-        isHostReceiver,
-        !isHostReceiver && inRound,
-        inRound,
+        /* game info */
+        gameId,                    // $11
+        isHostReceiver,            // $12
+        !isHostReceiver && inRound,// $13
+        arena_id,                  // $14
+        inRound,                   // $15
 
-        arena.round ?? 0
+        /* added columns */
+        sender.display_name,       // $16
+        sender.username,           // $17
+        arena.round ?? 0,          // $18
+        source                     // $19
       ]
     );
 
     /* =========================================================================
-       BROADCASTS + ★ FIX ★ emitArena() toegevoegd
+       BROADCAST FIXES
     ========================================================================= */
     await broadcastStats();
     await broadcastPlayerLeaderboard();
     await broadcastGifterLeaderboard();
     await broadcastHostDiamonds();
-
-    await emitArena(); // ★ BELANGRIJK: realtime score update naar frontend
+    await emitArena(); // realtime arena scores
 
     emitLog({
       type: "gift",
@@ -381,7 +419,7 @@ async function processGift(evt: any, source: string) {
 }
 
 /* ============================================================================
-   INIT
+   INIT GIFT ENGINE — TikTok Event Binding
 ============================================================================ */
 
 export function initGiftEngine(conn: any) {
@@ -390,20 +428,58 @@ export function initGiftEngine(conn: any) {
     return;
   }
 
-  console.log("🎁 GiftEngine v14.1 LOADED (gifts-only scoring + live score updates)");
+  console.log(
+    "🎁 GiftEngine v14.2 LOADED (gifts-only scoring • arena inject • leaderboard sync • 21-col DB)"
+  );
 
-  conn.on("gift", (d: any) => processGift(d, "gift"));
+  /* -----------------------------
+     OFFICIAL EVENT SOURCES
+  ----------------------------- */
+
+  // Standard TikTok gift packet
+  conn.on("gift", (d: any) => {
+    processGift(d, "gift");
+  });
+
+  // Room messages can contain disguised gift objects
   conn.on("roomMessage", (d: any) => {
-    if (d?.giftId || d?.diamondCount) processGift(d, "roomMessage");
+    if (d?.giftId || d?.diamondCount) {
+      processGift(d, "roomMessage");
+    }
   });
+
+  // Member packets sometimes also contain gifts
   conn.on("member", (d: any) => {
-    if (d?.giftId || d?.diamondCount) processGift(d, "member");
+    if (d?.giftId || d?.diamondCount) {
+      processGift(d, "member");
+    }
   });
+
+  // Hidden structure: chat → gift encoded inside _data
   conn.on("chat", (d: any) => {
-    if (d?._data?.giftId || d?._data?.diamondCount)
+    if (d?._data?.giftId || d?._data?.diamondCount) {
       processGift(d._data, "chat-hidden");
+    }
+  });
+
+  // Some TikTok connectors emit “giftMessage”
+  conn.on("giftMessage", (d: any) => {
+    if (d?.giftId || d?.diamondCount) {
+      processGift(d, "giftMessage");
+    }
+  });
+
+  // Redundant safety packet (rarely used)
+  conn.on("social", (d: any) => {
+    if (d?.giftId || d?.diamondCount) {
+      processGift(d, "social");
+    }
   });
 }
+
+/* ============================================================================
+   EXPORT DEFAULT
+============================================================================ */
 
 export default {
   initGiftEngine,
