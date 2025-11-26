@@ -3,19 +3,12 @@
 import { useEffect, useState } from "react";
 import { getAdminSocket } from "@/lib/socketClient";
 import { fetchArena, fetchQueue } from "@/lib/adminApi";
-import type { ArenaState, QueueEntry, GlobalToggles } from "@/lib/adminTypes";
+import type { ArenaState, QueueEntry } from "@/lib/adminTypes";
 
 export function useArenaAndQueue() {
   const [arena, setArena] = useState<ArenaState | null>(null);
   const [queue, setQueue] = useState<QueueEntry[]>([]);
-  const [toggles, setToggles] = useState<GlobalToggles>({
-    queueOpen: true,
-    boostersEnabled: true,
-    twistsEnabled: true,
-    roundType: "voorronde",
-    debugLogs: false,
-    dayResetTime: "03:00",
-  });
+  const [queueOpen, setQueueOpen] = useState(true);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -53,16 +46,17 @@ export function useArenaAndQueue() {
       setError("Geen live verbinding (Socket.io)");
     });
 
-    // Arena live update
+    // Arena live update (gifts-driven)
     socket.on("updateArena", (data: ArenaState) => {
       if (!mounted) return;
       setArena(data);
     });
 
-    // Queue live update
+    // Queue live update (v13 format)
     socket.on("updateQueue", (data: { open: boolean; entries: QueueEntry[] }) => {
       if (!mounted) return;
       setQueue(data.entries ?? []);
+      setQueueOpen(data.open ?? true);
     });
 
     return () => {
@@ -73,5 +67,11 @@ export function useArenaAndQueue() {
     };
   }, []);
 
-  return { arena, queue, toggles, setToggles, loading, error };
+  return {
+    arena,
+    queue,
+    queueOpen,
+    loading,
+    error,
+  };
 }
