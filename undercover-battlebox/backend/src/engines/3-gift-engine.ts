@@ -33,9 +33,10 @@ import { getArena, emitArena } from "./5-game-engine";
 import { TWIST_MAP, TwistType } from "./twist-definitions";
 import { addTwistByGift } from "./8-twist-engine";
 
-/* ============================================================================
-   GAME ID CHECK
-============================================================================ */
+/* ============================================================================ */
+/* GAME ID / ACTIVE GAME */
+/* ============================================================================ */
+
 function getActiveGameId(): number | null {
   const id = (io as any)?.currentGameId;
   return typeof id === "number" && id > 0 ? id : null;
@@ -53,9 +54,10 @@ async function isGameActive(): Promise<boolean> {
   return r.rows.length > 0;
 }
 
-/* ============================================================================
-   DEDUPE
-============================================================================ */
+/* ============================================================================ */
+/* DEDUPE */
+/* ============================================================================ */
+
 const dedupe = new Set<string>();
 setInterval(() => dedupe.clear(), 20000);
 
@@ -69,9 +71,10 @@ function makeDedupeKey(evt: any, source: string) {
   );
 }
 
-/* ============================================================================
-   HELPERS
-============================================================================ */
+/* ============================================================================ */
+/* HELPERS */
+/* ============================================================================ */
+
 function norm(v: any) {
   return (v || "")
     .toString()
@@ -86,38 +89,103 @@ function now() {
   return Date.now();
 }
 
-function formatDisplay(u: any) {
-  return u ? u.display_name : "Onbekend";
+function extractSender(evt: any) {
+  const u =
+    evt?.user ||
+    evt?.sender ||
+    evt?.userIdentity ||
+    evt?.fromUser ||
+    evt?.profile ||
+    evt;
+
+  const id = u?.userId || evt?.userId || null;
+  const unique = norm(u?.uniqueId || evt?.uniqueId || "");
+  const nick = u?.nickname || unique;
+
+  return {
+    id,
+    unique,
+    nick,
+  };
 }
 
-/* ============================================================================
-   MAIN PROCESSOR — GIFTS (ROUND-BASED SCORING FIXED v15)
-============================================================================ */
+function calcDiamonds(evt: any): number {
+  return (
+    Number(evt?.diamondCount) ||
+    Number(evt?.repeatCount * evt?.diamondCost) ||
+    Number(evt?.giftDiamondCount) ||
+    0
+  );
+}
+
+function isHeartMeGift(evt: any): boolean {
+  const name =
+    evt?.giftName?.toLowerCase?.() ||
+    evt?.name?.toLowerCase?.() ||
+    "";
+
+  return name.includes("heart me") || name.includes("hartje");
+}
+
+async function resolveReceiver(evt: any) {
+  const host = getActiveHost();
+  if (!host) {
+    return {
+      id: null,
+      username: "",
+      display_name: "",
+      role: "speler",
+    };
+  }
+
+  const senderId = String(
+    evt?.user?.userId ||
+    evt?.sender?.userId ||
+    evt?.userId
+  );
+
+  if (!senderId || senderId === host.id) {
+    return {
+      id: host.id,
+      username: host.username,
+      display_name: host.display_name,
+      role: "host",
+    };
+  }
+
+  return {
+    id: senderId,
+    username: norm(evt?.user?.uniqueId || evt?.uniqueId || ""),
+    display_name: evt?.user?.nickname || evt?.nickname || "",
+    role: "speler",
+  };
+}
+
+/* ============================================================================ */
+/* MAIN GIFT PROCESSOR */
+/* ============================================================================ */
+
 async function processGift(evt: any, source: string) {
   try {
-    /* ----------------------------------------
-       DEDUPE
-    ---------------------------------------- */
+    /* ----- DEDUPE ----- */
     const key = makeDedupeKey(evt, source);
     if (dedupe.has(key)) return;
     dedupe.add(key);
 
-    /* ----------------------------------------
-       SYNC IDENTITY
-    ---------------------------------------- */
+    /* ----- IDENTITY SYNC ----- */
     await upsertIdentityFromLooseEvent(evt);
 
+    /* ----- SENDER ----- */
     const S = extractSender(evt);
     if (!S.id) return;
 
     const sender = await getOrUpdateUser(S.id, S.nick, S.unique);
 
+    /* ----- DIAMONDS ----- */
     const diamonds = calcDiamonds(evt);
     if (diamonds <= 0) return;
 
-    /* ----------------------------------------
-       GAME ACTIVE?
-    ---------------------------------------- */
+    /* ----- GAME ACTIVE? ----- */
     const gameId = getActiveGameId();
     const active = await isGameActive();
 
@@ -129,9 +197,7 @@ async function processGift(evt: any, source: string) {
       return;
     }
 
-    /* ----------------------------------------
-       RESOLVE RECEIVER
-    ---------------------------------------- */
+    /* ----- RECEIVER ----- */
     const receiver = await resolveReceiver(evt);
     const isHostReceiver = receiver.role === "host";
 
@@ -139,29 +205,17 @@ async function processGift(evt: any, source: string) {
       ? await getUserByTikTokId(String(receiver.id))
       : null;
 
-    const senderFmt = formatDisplay(sender);
+    const senderFmt = sender.display_name;
     const receiverFmt = receiverUser ? receiverUser.display_name : "UNKNOWN";
 
-    /* ----------------------------------------
-       ARENA CONTEXT (NEW v15)
-    ---------------------------------------- */
+    /* ----- ARENA CONTEXT ----- */
     const arena = getArena();
-    const inRound =
-      arena.status === "active" || arena.status === "grace";
+    const inRound = arena.status === "active" || arena.status === "grace";
 
-    /*  
-       CRUCIAL FIX:
-       Gifts buiten ronde → round_id = 0
-       Gifts in ronde → round_id = arena.round
-    */
     const roundId = inRound ? arena.round : 0;
-
-    /* arena_id = zelfde als round_id */
     const arena_id = roundId;
 
-    /* ----------------------------------------
-       ADD BP
-    ---------------------------------------- */
+    /* ----- ADD BP ----- */
     await addBP(
       BigInt(sender.tiktok_id),
       diamonds * 0.2,
@@ -169,9 +223,7 @@ async function processGift(evt: any, source: string) {
       sender.display_name
     );
 
-    /* ----------------------------------------
-       FAN / HEART ME
-    ---------------------------------------- */
+    /* ----- FAN HEART ME ----- */
     if (isHostReceiver && isHeartMeGift(evt)) {
       const expires = new Date(now() + 24 * 3600 * 1000);
 
@@ -187,9 +239,7 @@ async function processGift(evt: any, source: string) {
       });
     }
 
-    /* ----------------------------------------
-       TWISTS
-    ---------------------------------------- */
+    /* ----- TWISTS ----- */
     const giftId = Number(evt.giftId);
     const twistType: TwistType | null =
       (Object.keys(TWIST_MAP) as TwistType[]).find(
@@ -204,9 +254,9 @@ async function processGift(evt: any, source: string) {
       });
     }
 
-    /* =========================================================================
-       INSERT GIFT ROW — 21 COLUMNS — ROUND LOGIC FIXED
-    ========================================================================= */
+    /* ========================================================================
+       INSERT GIFT ROW
+    ======================================================================== */
     await pool.query(
       `
       INSERT INTO gifts (
@@ -232,7 +282,7 @@ async function processGift(evt: any, source: string) {
 
         sender_display_name,
         sender_username,
-        round_id,          -- CRUCIAL: 0 outside round
+        round_id,
         source_event
       )
       VALUES (
@@ -244,44 +294,37 @@ async function processGift(evt: any, source: string) {
       )
       `,
       [
-        /* giver */
-        BigInt(sender.tiktok_id),    // $1
-        sender.username,             // $2
-        sender.display_name,         // $3
+        BigInt(sender.tiktok_id),
+        sender.username,
+        sender.display_name,
 
-        /* gift info */
-        evt.giftName || "unknown",   // $4
-        diamonds,                    // $5
-        diamonds * 0.2,              // $6
+        evt.giftName || "unknown",
+        diamonds,
+        diamonds * 0.2,
 
-        /* receiver */
-        receiver.id ? BigInt(String(receiver.id)) : null, // $7
-        receiver.username,           // $8
-        receiver.display_name,       // $9
-        receiver.role,               // $10
+        receiver.id ? BigInt(String(receiver.id)) : null,
+        receiver.username,
+        receiver.display_name,
+        receiver.role,
 
-        /* game info */
-        gameId,                      // $11
-        isHostReceiver,              // $12
-        (!isHostReceiver && inRound),// $13
-        arena_id,                    // $14
-        inRound,                     // $15
+        gameId,
+        isHostReceiver,
+        (!isHostReceiver && inRound),
+        arena_id,
+        inRound,
 
-        /* sender echo */
-        sender.display_name,         // $16
-        sender.username,             // $17
+        sender.display_name,
+        sender.username,
+        roundId,
 
-        /* ROUND LOGIC v15 */
-        roundId,                     // $18
-
-        /* misc */
-        source                       // $19
+        source
       ]
     );
 
-    /* =========================================================================
-       BROADCAST — REALTIME
-    ========================================================================= */
+    /* ========================================================================
+       REALTIME UPDATES
+    ======================================================================== */
+
     await broadcastStats();
     await broadcastPlayerLeaderboard();
     await broadcastGifterLeaderboard();
@@ -298,9 +341,9 @@ async function processGift(evt: any, source: string) {
   }
 }
 
-/* ============================================================================
-   INIT GIFT ENGINE — TikTok Event Binding (v15)
-============================================================================ */
+/* ============================================================================ */
+/* INIT ENGINE */
+/* ============================================================================ */
 
 export function initGiftEngine(conn: any) {
   if (!conn || typeof conn.on !== "function") {
@@ -312,62 +355,24 @@ export function initGiftEngine(conn: any) {
     "🎁 GiftEngine v15.0 LOADED (round-based scoring • no idle scoring • 21-col DB)"
   );
 
-  // ---------------------------------------------
-  // OFFICIAL TikTok gift packet
-  // ---------------------------------------------
-  conn.on("gift", (d: any) => {
-    processGift(d, "gift");
-  });
-
-  // ---------------------------------------------
-  // RoomMessage → may contain gifts
-  // ---------------------------------------------
+  conn.on("gift", (d: any) => processGift(d, "gift"));
   conn.on("roomMessage", (d: any) => {
-    if (d?.giftId || d?.diamondCount) {
-      processGift(d, "roomMessage");
-    }
+    if (d?.giftId || d?.diamondCount) processGift(d, "roomMessage");
   });
-
-  // ---------------------------------------------
-  // Member packets → sometimes gifts
-  // ---------------------------------------------
   conn.on("member", (d: any) => {
-    if (d?.giftId || d?.diamondCount) {
-      processGift(d, "member");
-    }
+    if (d?.giftId || d?.diamondCount) processGift(d, "member");
   });
-
-  // ---------------------------------------------
-  // Chat packets that hide gift data in _data
-  // ---------------------------------------------
   conn.on("chat", (d: any) => {
-    if (d?._data?.giftId || d?._data?.diamondCount) {
+    if (d?._data?.giftId || d?._data?.diamondCount)
       processGift(d._data, "chat-hidden");
-    }
   });
-
-  // ---------------------------------------------
-  // giftMessage (rare TikTok connectors)
-  // ---------------------------------------------
   conn.on("giftMessage", (d: any) => {
-    if (d?.giftId || d?.diamondCount) {
-      processGift(d, "giftMessage");
-    }
+    if (d?.giftId || d?.diamondCount) processGift(d, "giftMessage");
   });
-
-  // ---------------------------------------------
-  // Social gift structures
-  // ---------------------------------------------
   conn.on("social", (d: any) => {
-    if (d?.giftId || d?.diamondCount) {
-      processGift(d, "social");
-    }
+    if (d?.giftId || d?.diamondCount) processGift(d, "social");
   });
 }
-
-/* ============================================================================
-   EXPORT DEFAULT
-============================================================================ */
 
 export default {
   initGiftEngine,
