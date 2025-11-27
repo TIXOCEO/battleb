@@ -195,186 +195,82 @@ export default function AdminDashboardPage() {
   };
 
   /* ============================================
-     AUTOFILL SEARCH — DEBOUNCED
-  ============================================ */
-  useEffect(() => {
-    const q = typing.trim().replace(/^@+/, "");
-    if (!q || q.length < 2) {
-      setSearchResults([]);
-      return;
-    }
-
-    const socket = getAdminSocket();
-    const handle = setTimeout(() => {
-      socket.emit(
-        "searchUsers",
-        { query: q },
-        (res: { users: SearchUser[] }) => {
-          setSearchResults(res?.users || []);
-        }
-      );
-    }, 250);
-
-    return () => clearTimeout(handle);
-  }, [typing]);
-
-  /* ============================================
-     AUTOFILL APPLY
-  ============================================ */
-  function applyAutoFill(user: SearchUser) {
-    if (!user) return;
-
-    const formatted = user.username.startsWith("@")
-      ? user.username
-      : `@${user.username}`;
-
-    if (activeAutoField === "main") setUsername(formatted);
-    if (activeAutoField === "give") setTwistUserGive(formatted);
-    if (activeAutoField === "use") setTwistUserUse(formatted);
-    if (activeAutoField === "target") setTwistTargetUse(formatted);
-
-    setTyping("");
-    setSearchResults([]);
-    setShowResults(false);
-    setActiveAutoField(null);
-  }
-
-  /* ============================================
-     HELPERS
-  ============================================ */
-  const fmt = (n: number | string | undefined | null) =>
-    Number(n ?? 0).toLocaleString("nl-NL");
-
-  const players = useMemo(() => arena?.players ?? [], [arena]);
-  const arenaStatus = arena?.status ?? "idle";
-
-  const hasDoomed = players.some((p) => p.positionStatus === "elimination");
-
-  const canStartRound =
-    !!arena &&
-    (arenaStatus === "idle" || arenaStatus === "ended") &&
-    !hasDoomed;
-
-  const canStopRound = arenaStatus === "active";
-  const canGraceEnd = arenaStatus === "grace";
-
-  const needsElimination =
-    (arena?.settings?.forceEliminations ?? true) &&
-    arenaStatus === "ended" &&
-    hasDoomed;
-
-  /* ============================================
-     TIMER + PROGRESS BAR
-  ============================================ */
-  const roundProgress = useMemo(() => {
-    if (!arena) return 0;
-    const now = Date.now();
-
-    if (arena.status === "active") {
-      const start = arena.roundStartTime;
-      const end = arena.roundCutoff;
-      return Math.min(100, Math.max(0, ((now - start) / (end - start)) * 100));
-    }
-
-    if (arena.status === "grace") {
-      const start = arena.roundCutoff;
-      const end = arena.graceEnd;
-      return Math.min(100, Math.max(0, ((now - start) / (end - start)) * 100));
-    }
-
-    return 0;
-  }, [arena]);
-
-  const formatTime = (sec: number) => {
-    if (!sec || sec < 0) sec = 0;
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  };
-
-  const colorForPosition = (p: any) => {
-    if (!arena || arena.status === "idle")
-      return "bg-gray-50 border-gray-200";
-
-    switch (p.positionStatus) {
-      case "immune":
-        return "bg-green-100 border-green-300";
-      case "danger":
-        return "bg-orange-100 border-orange-300";
-      case "elimination":
-        return "bg-red-200 border-red-400";
-      default:
-        return "bg-gray-50 border-gray-200";
-    }
-  };
-
-  /* ============================================
      UI START
   ============================================ */
+
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
+
       {/* HEADER */}
       <header className="mb-6 relative">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-2">
-          <div className="flex items-center gap-2">
-            <div className="text-2xl font-bold text-[#ff4d4f]">UB</div>
-            <div>
-              <div className="text-xl font-semibold">
-                Undercover BattleBox – Admin
-              </div>
-              <div className="text-xs text-gray-500">
-                Verbonden als{" "}
-                <span className="font-semibold text-green-600">Admin</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="text-xs px-3 py-1 rounded-full bg-gray-200 text-gray-800">
-            {gameSession.active
-              ? `Spel actief (#${gameSession.gameId})`
-              : "Geen spel actief"}
-          </div>
-        </div>
-
-        {/* TIMER BAR */}
-        {arena && arena.status !== "idle" && (
-          <div className="w-full bg-gray-300 rounded-full h-4 shadow-inner relative overflow-hidden">
-            <div
-              className={`
-                h-4 transition-all duration-300
-                ${arena.status === "active" ? "bg-[#ff4d4f]" : ""}
-                ${arena.status === "grace" ? "bg-yellow-400" : ""}
-                ${arena.status === "ended" ? "bg-gray-600" : ""}
-              `}
-              style={{ width: `${roundProgress}%` }}
-            />
-            <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold">
-              {arena.status === "active" &&
-                formatTime(
-                  Math.max(
-                    0,
-                    Math.floor((arena.roundCutoff - Date.now()) / 1000)
-                  )
-                )}
-              {arena.status === "grace" &&
-                formatTime(
-                  Math.max(
-                    0,
-                    Math.floor((arena.graceEnd - Date.now()) / 1000)
-                  )
-                )}
-              {arena.status === "ended" && "00:00"}
-            </div>
-          </div>
-        )}
+        ...
       </header>
 
       {/* ============================================================
-          SPELBESTURING
+          SPELBESTURING — KNOPPEN TERUGGEZET
       ============================================================ */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+        {/* LINKER KOLOM — HIER KWAMEN DE KNOPPEN TERUG */}
         <div className="flex flex-col gap-3">
           <div className="text-sm font-semibold">Spelbesturing</div>
+
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={() => emitAdmin("startGame")}
+              disabled={gameSession.active}
+              className={`px-3 py-1.5 rounded-full text-xs ${
+                gameSession.active
+                  ? "bg-gray-400 text-white cursor-not-allowed"
+                  : "bg-green-600 text-white"
+              }`}
+            >
+              Start spel
+            </button>
+
+            <button
+              onClick={() => emitAdmin("stopGame")}
+              disabled={!gameSession.active}
+              className={`px-3 py-1.5 rounded-full text-xs ${
+                !gameSession.active
+                  ? "bg-gray-400 text-white cursor-not-allowed"
+                  : "bg-yellow-500 text-white"
+              }`}
+            >
+              Stop spel
+            </button>
+          </div>
+
+          {/* RONDE ACTIES */}
+          <div>
+            <div className="text-xs text-gray-600 mb-1">Ronde acties</div>
+
+            <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={() => emitAdmin("startRound", { type: "quarter" })}
+                disabled={!canStartRound}
+                className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full text-xs disabled:bg-gray-400"
+              >
+                Start voorronde
+              </button>
+
+              <button
+                onClick={() => emitAdmin("startRound", { type: "finale" })}
+                disabled={!canStartRound}
+                className="px-3 py-1.5 bg-gray-900 text-white rounded-full text-xs disabled:bg-gray-400"
+              >
+                Start finale
+              </button>
+
+              <button
+                onClick={() => emitAdmin("endRound")}
+                disabled={!canStopRound && !canGraceEnd}
+                className="px-3 py-1.5 bg-red-600 text-white rounded-full text-xs disabled:bg-gray-400"
+              >
+                Stop ronde
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* ============================================================
@@ -461,6 +357,7 @@ export default function AdminDashboardPage() {
           ARENA + QUEUE
       ============================================================ */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4 relative">
+
         {/* HOST DIAMONDS BADGE */}
         <div className="absolute md:left-1/2 md:-translate-x-1/2 md:translate-y-[-10px] right-2 top-[-6px] md:right-auto md:top-[-10px] z-20">
           <div
@@ -492,9 +389,14 @@ export default function AdminDashboardPage() {
                   )}`}
                 >
 
-                  {/* REMOVE BUTTON TOP-RIGHT */}
+                  {/* ============================================
+                      REMOVE BUTTON TOP-RIGHT — with CONFIRMATION
+                  ============================================ */}
                   <button
-                    onClick={() => emitAdminWithUser("eliminate", p.username)}
+                    onClick={() => {
+                      if (!confirm(`🔥 Weet je zeker dat je ${p.display_name} uit de arena wilt verwijderen?`)) return;
+                      emitAdminWithUser("eliminate", p.username);
+                    }}
                     className="absolute top-1 right-1 text-[10px] bg-red-600 text-white px-1.5 py-0.5 rounded shadow"
                   >
                     ✕
@@ -511,17 +413,19 @@ export default function AdminDashboardPage() {
                     {p.display_name} (@{p.username})
                   </div>
 
-                  {/* GIFTS-DRIVEN SCORE */}
                   <div className="text-xs text-gray-600">
                     Score: {fmt(p.score)} 💎
                   </div>
 
-                  {/* OLD delete button (kept!) */}
+                  {/* ============================================
+                      ELIMINATION BUTTON — also with CONFIRMATION
+                  ============================================ */}
                   {p.positionStatus === "elimination" && (
                     <button
-                      onClick={() =>
-                        emitAdminWithUser("eliminate", p.username)
-                      }
+                      onClick={() => {
+                        if (!confirm(`❗ ${p.display_name} is in eliminatie — verwijderen uit arena?`)) return;
+                        emitAdminWithUser("eliminate", p.username);
+                      }}
                       className="mt-2 px-2 py-1 text-[11px] rounded-full border border-red-300 text-red-700 bg-red-50"
                     >
                       Verwijder speler
@@ -542,9 +446,9 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* ===============================
+        {/* ============================================================
             QUEUE
-        =============================== */}
+        ============================================================ */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Wachtrij</h2>
           <p className="text-sm text-gray-500 mb-3">
@@ -807,9 +711,7 @@ export default function AdminDashboardPage() {
                       onClick={() => applyAutoFill(u)}
                       className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
                     >
-                      <span className="font-semibold">
-                        {u.display_name}
-                      </span>{" "}
+                      <span className="font-semibold">{u.display_name}</span>{" "}
                       <span className="text-gray-500">@{u.username}</span>
                     </div>
                   ))}
@@ -878,9 +780,7 @@ export default function AdminDashboardPage() {
                       onClick={() => applyAutoFill(u)}
                       className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
                     >
-                      <span className="font-semibold">
-                        {u.display_name}
-                      </span>{" "}
+                      <span className="font-semibold">{u.display_name}</span>{" "}
                       <span className="text-gray-500">@{u.username}</span>
                     </div>
                   ))}
@@ -934,9 +834,7 @@ export default function AdminDashboardPage() {
                       onClick={() => applyAutoFill(u)}
                       className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
                     >
-                      <span className="font-semibold">
-                        {u.display_name}
-                      </span>{" "}
+                      <span className="font-semibold">{u.display_name}</span>{" "}
                       <span className="text-gray-500">@{u.username}</span>
                     </div>
                   ))}
@@ -985,7 +883,8 @@ export default function AdminDashboardPage() {
                     hour12: false,
                   })}
                 </span>{" "}
-                <strong>{log.type.toUpperCase()}</strong> – {log.message}
+                <strong>{log.type.toUpperCase()}</strong> –{" "}
+                {log.message}
               </div>
             ))
           ) : (
@@ -1001,4 +900,4 @@ export default function AdminDashboardPage() {
       </footer>
     </main>
   );
-}
+              }
