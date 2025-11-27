@@ -1,8 +1,10 @@
 // ============================================================================
-// server.ts — BATTLEBOX BACKEND v7.3 REALTIME PATCH
+// server.ts — BATTLEBOX BACKEND v7.3 REALTIME PATCH (CORRECTED FINAL)
 // Gifts-Driven Engine + Round Flags (is_round_gift / round_active)
 // Correct Leaderboards + Host Diamonds + Username Autofill
 // Realtime Arena Diamond Updates (minimal required changes)
+// Idle gifts → NIET tellen (speler), WEL tellen (host)
+// Gifter leaderboard volgt beide regels correct
 // ============================================================================
 
 import express from "express";
@@ -152,7 +154,7 @@ let currentGameId: number | null = null;
 (io as any).currentGameId = null;
 
 // ============================================================================
-// ARENA WRAPPERS (NOODZAKELIJKE REALTIME PATCH: export intact gehouden)
+// ARENA WRAPPERS
 // ============================================================================
 export async function emitArena() {
   await emitArenaRaw();
@@ -163,13 +165,11 @@ export function getArena() {
 }
 
 // ============================================================================
-// LEADERBOARDS
-// Gebruik gift-engine flags:
-// - is_round_gift = TRUE → speler-gifts in actieve/grace ronde (niet host)
-// - round_active = TRUE  → gift is tijdens ronde gegeven (voor o.a. host)
+// LEADERBOARDS — FIXED RULES
+// is_round_gift = speler score telt alleen tijdens ronde
+// is_host_gift = host score telt altijd (idle + ronde)
+// round_active = gifts gegeven tijdens actieve of grace ronde
 // ============================================================================
-
-// Speler-leaderboard: alleen gifts naar spelers, in ronde, excl. host
 export async function broadcastPlayerLeaderboard() {
   if (!currentGameId) {
     io.emit("leaderboardPlayers", []);
@@ -189,7 +189,7 @@ export async function broadcastPlayerLeaderboard() {
     FROM gifts
     WHERE game_id=$1
       AND is_round_gift = TRUE
-      AND COALESCE(receiver_role, 'speler')='speler'
+      AND COALESCE(receiver_role,'speler')='speler'
       AND receiver_id IS NOT NULL
       AND ( $2::bigint IS NULL OR receiver_id <> $2 )
     GROUP BY receiver_id, receiver_username, receiver_display_name
@@ -208,7 +208,6 @@ export async function broadcastPlayerLeaderboard() {
   io.emit("leaderboardPlayersSummary", summary);
 }
 
-// Gifter-leaderboard: alle gifters tijdens rondes (naar host of spelers)
 export async function broadcastGifterLeaderboard() {
   if (!currentGameId) {
     io.emit("leaderboardGifters", []);
@@ -225,7 +224,10 @@ export async function broadcastGifterLeaderboard() {
       SUM(diamonds) AS total_diamonds
     FROM gifts
     WHERE game_id=$1
-      AND round_active = TRUE
+      AND (
+        round_active = TRUE  -- gifts gegeven tijdens ronde
+        OR is_host_gift = TRUE -- gifts naar host tellen altijd mee
+      )
     GROUP BY giver_id, giver_username, giver_display_name
     ORDER BY total_diamonds DESC
     LIMIT 200
@@ -242,7 +244,7 @@ export async function broadcastGifterLeaderboard() {
   io.emit("leaderboardGiftersSummary", sum);
 }
 
-// Host diamonds: alleen host gifts tijdens rondes
+// HOST DIAMONDS (host gifts tellen altijd mee)
 export async function broadcastHostDiamonds() {
   if (!currentGameId || !HARD_HOST_ID) {
     io.emit("hostDiamonds", { username: "", total: 0 });
@@ -255,7 +257,6 @@ export async function broadcastHostDiamonds() {
     FROM gifts
     WHERE game_id=$1
       AND is_host_gift=TRUE
-      AND round_active=TRUE
     `,
     [currentGameId]
   );
@@ -266,7 +267,7 @@ export async function broadcastHostDiamonds() {
   });
 }
 
-// STREAM STATS — alleen ronde-gifts voor spelers + host in ronde
+// STREAM STATS
 export async function broadcastStats() {
   if (!currentGameId) {
     return io.emit("streamStats", {
@@ -295,7 +296,6 @@ export async function broadcastStats() {
     FROM gifts
     WHERE game_id=$1
       AND is_host_gift=TRUE
-      AND round_active=TRUE
     `,
     [currentGameId]
   );
@@ -348,11 +348,9 @@ export async function restartTikTokConnection() {
     host: { username: HARD_HOST_USERNAME, id: HARD_HOST_ID }
   });
 
-  // Engines activeren
   initGiftEngine(conn);
   initChatEngine(conn);
 
-  // LB + stats na reconnect
   if (currentGameId) {
     await broadcastPlayerLeaderboard();
     await broadcastGifterLeaderboard();
@@ -362,30 +360,21 @@ export async function restartTikTokConnection() {
 }
 
 // ============================================================================
-// SNAPSHOT — gebruikt door admin dashboard
+// SNAPSHOT
 // ============================================================================
 async function buildInitialSnapshot() {
   const snap: any = {};
 
-  // Arena snapshot (engine computed)
   snap.arena = getArena();
-
-  // Queue
   snap.queue = { open: true, entries: await getQueue() };
-
-  // Logs
   snap.logs = logBuffer;
-
-  // Instellingen
   snap.settings = getArenaSettings();
-
-  // Game session
   snap.gameSession = {
     active: currentGameId !== null,
     gameId: currentGameId
   };
 
-  // STREAMSTATS
+// STREAMSTATS (snapshot)
   if (currentGameId) {
     const r = await pool.query(
       `
@@ -405,7 +394,6 @@ async function buildInitialSnapshot() {
       FROM gifts
       WHERE game_id=$1
         AND is_host_gift=TRUE
-        AND round_active=TRUE
       `,
       [currentGameId]
     );
@@ -419,7 +407,7 @@ async function buildInitialSnapshot() {
     snap.stats = null;
   }
 
-  // PLAYER LEADERBOARD
+  // PLAYER LEADERBOARD (snapshot)
   if (currentGameId) {
     const hostId = HARD_HOST_ID ? BigInt(HARD_HOST_ID) : null;
 
@@ -452,7 +440,7 @@ async function buildInitialSnapshot() {
     snap.playerLeaderboardSummary = 0;
   }
 
-  // GIFTER LEADERBOARD
+  // GIFTER LEADERBOARD (snapshot)
   if (currentGameId) {
     const gf = await pool.query(
       `
@@ -462,7 +450,10 @@ async function buildInitialSnapshot() {
              SUM(diamonds) AS total_diamonds
       FROM gifts
       WHERE game_id=$1
-        AND round_active=TRUE
+        AND (
+          round_active = TRUE
+          OR is_host_gift = TRUE
+        )
       GROUP BY giver_id, giver_username, giver_display_name
       ORDER BY total_diamonds DESC
       LIMIT 200
@@ -480,7 +471,7 @@ async function buildInitialSnapshot() {
     snap.gifterLeaderboardSummary = 0;
   }
 
-  // HOST DIAMONDS
+  // HOST DIAMONDS (snapshot)
   if (currentGameId && HARD_HOST_ID) {
     const hx = await pool.query(
       `
@@ -488,7 +479,6 @@ async function buildInitialSnapshot() {
       FROM gifts
       WHERE game_id=$1
         AND is_host_gift=TRUE
-        AND round_active=TRUE
       `,
       [currentGameId]
     );
@@ -520,7 +510,7 @@ io.on("connection", async (socket: AdminSocket) => {
     host: { username: HARD_HOST_USERNAME, id: HARD_HOST_ID }
   });
 
-  // Hostlijst
+  // Hosts lijst
   const hosts = await pool.query(`
     SELECT id, label, username, tiktok_id, active
     FROM hosts ORDER BY id
@@ -549,14 +539,16 @@ io.on("connection", async (socket: AdminSocket) => {
 });
 
 // ============================================================================
-// UNIVERSAL ADMIN ACTION HANDLER
+// UNIVERSAL ADMIN ACTION HANDLER — Deel 2
 // ============================================================================
 io.on("connection", async (socket: AdminSocket) => {
   if (!socket.isAdmin) return socket.disconnect();
 
   async function handle(action: string, data: any, ack: Function) {
     try {
-      // --- HOST MANAGEMENT ---
+      // ======================================================================
+      // HOST MANAGEMENT
+      // ======================================================================
       if (action === "getHosts") {
         const r = await pool.query(
           `SELECT id, label, username, tiktok_id, active FROM hosts ORDER BY id`
@@ -625,9 +617,9 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // ----------------------------------------------------------------------
+      // ======================================================================
       // GAME MANAGEMENT
-      // ----------------------------------------------------------------------
+      // ======================================================================
       if (action === "startGame") {
         const r = await pool.query(`
           INSERT INTO games (status, started_at)
@@ -696,11 +688,11 @@ io.on("connection", async (socket: AdminSocket) => {
         await broadcastStats();
 
         return ack({ success: true });
-      }
+}
 
-      // ----------------------------------------------------------------------
+    // ======================================================================
       // ROUND: START / END
-      // ----------------------------------------------------------------------
+      // ======================================================================
       if (action === "startRound") {
         const type = data?.type === "finale" ? "finale" : "quarter";
 
@@ -729,9 +721,9 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // ----------------------------------------------------------------------
+      // ======================================================================
       // ROUND SETTINGS UPDATE
-      // ----------------------------------------------------------------------
+      // ======================================================================
       if (action === "updateRoundSettings") {
         const pre = Number(data?.pre);
         const fin = Number(data?.final);
@@ -758,9 +750,9 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // ----------------------------------------------------------------------
+      // ======================================================================
       // ARENA MGMT
-      // ----------------------------------------------------------------------
+      // ======================================================================
       if (action === "addToArena") {
         const clean = (data?.username || "").trim().replace(/^@+/, "").toLowerCase();
 
@@ -798,8 +790,7 @@ io.on("connection", async (socket: AdminSocket) => {
 
         const r = await pool.query(
           `SELECT tiktok_id, username, display_name
-           FROM users
-           WHERE LOWER(username)=LOWER($1)
+           FROM users WHERE LOWER(username)=LOWER($1)
            LIMIT 1`,
           [clean]
         );
@@ -821,9 +812,9 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // ----------------------------------------------------------------------
-      // SEARCH USERS (AUTOFILL)
-      // ----------------------------------------------------------------------
+      // ======================================================================
+      // SEARCH USERS
+      // ======================================================================
       if (action === "searchUsers") {
         const q = (data?.query || "").trim().toLowerCase();
         if (!q || q.length < 2) return ack({ users: [] });
@@ -845,9 +836,9 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ users: r.rows });
       }
 
-      // ----------------------------------------------------------------------
-      // QUEUE MANAGEMENT
-      // ----------------------------------------------------------------------
+      // ======================================================================
+      // QUEUE MGMT
+      // ======================================================================
       if (action === "addToQueue") {
         const clean = (data?.username || "").trim().replace(/^@+/, "").toLowerCase();
 
@@ -944,9 +935,9 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // ----------------------------------------------------------------------
+      // ======================================================================
       // VIP / FAN
-      // ----------------------------------------------------------------------
+      // ======================================================================
       if (action === "giveVip") {
         const clean = (data?.username || "").trim().replace(/^@+/, "").toLowerCase();
 
@@ -1005,9 +996,9 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // ----------------------------------------------------------------------
+      // ======================================================================
       // TWISTS
-      // ----------------------------------------------------------------------
+      // ======================================================================
       if (action === "giveTwist") {
         await giveTwistAdmin(data.username, data.twist);
         return ack({ success: true });
@@ -1019,19 +1010,18 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // ----------------------------------------------------------------------
+      // ======================================================================
       // UNKNOWN COMMAND
-      // ----------------------------------------------------------------------
+      // ======================================================================
       return ack({ success: false, message: "Onbekend admin commando" });
+
     } catch (err: any) {
       console.error("Admin error:", err);
       return ack({ success: false, message: err?.message || "Serverfout" });
     }
   }
 
-  // ===========================================================================
-  // UNIVERSAL DISPATCH WRAPPER
-  // ===========================================================================
+  // DISPATCH WRAPPER
   socket.onAny((event, payload, ack) => {
     if (typeof ack !== "function") ack = () => {};
     handle(event, payload, ack);
