@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import { getAdminSocket } from "@/lib/socketClient";
 
 import type {
@@ -73,8 +73,24 @@ export default function AdminDashboardPage() {
     null | "main" | "give" | "use" | "target"
   >(null);
 
+  const autoRef = useRef<HTMLDivElement | null>(null);
+
   /* ============================================
-     SOCKET SETUP
+     CLICK OUTSIDE FIX for AUTOCOMPLETE
+  ============================================ */
+  useEffect(() => {
+    function handler(e: any) {
+      if (autoRef.current && !autoRef.current.contains(e.target)) {
+        setShowResults(false);
+        setActiveAutoField(null);
+      }
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  /* ============================================
+     SOCKET SETUP — UPGRADED (v15)
   ============================================ */
   useEffect(() => {
     const socket = getAdminSocket();
@@ -97,10 +113,7 @@ export default function AdminDashboardPage() {
 
     socket.on("hostDiamonds", (d) => setHostDiamonds(d.total));
 
-    socket.on("connect_error", () =>
-      setStatus("❌ Socket verbinding weggevallen")
-    );
-
+    /* ROUND STATUS TEXTS */
     socket.on("round:start", (d) =>
       setStatus(`▶️ Ronde gestart (${d.type}) – ${d.duration}s`)
     );
@@ -108,7 +121,11 @@ export default function AdminDashboardPage() {
       setStatus(`⏳ Grace periode (${d.grace}s)`)
     );
     socket.on("round:end", () =>
-      setStatus("⛔ Ronde gestopt – voer eliminaties uit")
+      setStatus("⛔ Ronde beëindigd – eliminatiefase")
+    );
+
+    socket.on("connect_error", () =>
+      setStatus("❌ Socket verbinding weggevallen")
     );
 
     return () => {
@@ -117,7 +134,7 @@ export default function AdminDashboardPage() {
   }, []);
 
   /* ============================================
-     INITIAL SNAPSHOT
+     INITIAL SNAPSHOT — v15 CORRECTED
   ============================================ */
   useEffect(() => {
     const socket = getAdminSocket();
@@ -126,6 +143,7 @@ export default function AdminDashboardPage() {
       if (!snap) return;
 
       if (snap.arena) setArena(snap.arena);
+
       if (snap.queue) {
         setQueue(snap.queue.entries ?? []);
         setQueueOpen(snap.queue.open ?? true);
@@ -151,7 +169,9 @@ export default function AdminDashboardPage() {
     setStatus(`Bezig met ${event}...`);
 
     socket.emit(event, payload ?? {}, (res: AdminAckResponse) => {
-      setStatus(res?.success ? "✅ Uitgevoerd" : `❌ ${res?.message ?? "Geen antwoord"}`);
+      setStatus(
+        res?.success ? "✅ Uitgevoerd" : `❌ ${res?.message ?? "Geen antwoord"}`
+      );
     });
   };
 
@@ -171,8 +191,8 @@ export default function AdminDashboardPage() {
     });
   };
 
-  /* ============================================
-     AUTOFILL FIX — DIT IS NIEUW
+/* ============================================
+     AUTOFILL SEARCH — DEBOUNCED
   ============================================ */
   useEffect(() => {
     const q = typing.trim().replace(/^@+/, "");
@@ -182,7 +202,6 @@ export default function AdminDashboardPage() {
     }
 
     const socket = getAdminSocket();
-
     const handle = setTimeout(() => {
       socket.emit("searchUsers", { query: q }, (res: { users: SearchUser[] }) => {
         setSearchResults(res?.users || []);
@@ -209,20 +228,18 @@ export default function AdminDashboardPage() {
     if (activeAutoField === "target") setTwistTargetUse(formatted);
 
     setTyping("");
-    setShowResults(false);
     setSearchResults([]);
+    setShowResults(false);
     setActiveAutoField(null);
   }
 
   /* ============================================
      HELPERS
   ============================================ */
-
-  // FIXED fmt → accepteert numbers én strings
   const fmt = (n: number | string | undefined | null) =>
     Number(n ?? 0).toLocaleString("nl-NL");
 
-const players = useMemo(() => arena?.players ?? [], [arena]);
+  const players = useMemo(() => arena?.players ?? [], [arena]);
   const arenaStatus = arena?.status ?? "idle";
 
   const hasDoomed = players.some((p) => p.positionStatus === "elimination");
@@ -241,7 +258,7 @@ const players = useMemo(() => arena?.players ?? [], [arena]);
     hasDoomed;
 
   /* ============================================
-     TIMER + COLORS
+     TIMER + PROGRESS BAR
   ============================================ */
   const roundProgress = useMemo(() => {
     if (!arena) return 0;
@@ -292,17 +309,6 @@ const players = useMemo(() => arena?.players ?? [], [arena]);
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
       {/* HEADER */}
       <header className="mb-6 relative">
-        {/* HOST DIAMONDS BADGE */}
-        <div
-          className="
-            absolute right-0 top-0
-            bg-[#ff4d4f] text-white text-xs font-semibold
-            px-3 py-1 rounded-full shadow-lg
-          "
-        >
-          Host: {fmt(hostDiamonds)} 💎
-        </div>
-
         {/* Title */}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-2">
           <div className="flex items-center gap-2">
@@ -325,7 +331,7 @@ const players = useMemo(() => arena?.players ?? [], [arena]);
           </div>
         </div>
 
-        {/* TIMER */}
+        {/* TIMER BAR */}
         {arena && arena.status !== "idle" && (
           <div className="w-full bg-gray-300 rounded-full h-4 shadow-inner relative overflow-hidden">
             <div
@@ -340,17 +346,11 @@ const players = useMemo(() => arena?.players ?? [], [arena]);
             <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold">
               {arena.status === "active" &&
                 formatTime(
-                  Math.max(
-                    0,
-                    Math.floor((arena.roundCutoff - Date.now()) / 1000)
-                  )
+                  Math.max(0, Math.floor((arena.roundCutoff - Date.now()) / 1000))
                 )}
               {arena.status === "grace" &&
                 formatTime(
-                  Math.max(
-                    0,
-                    Math.floor((arena.graceEnd - Date.now()) / 1000)
-                  )
+                  Math.max(0, Math.floor((arena.graceEnd - Date.now()) / 1000))
                 )}
               {arena.status === "ended" && "00:00"}
             </div>
@@ -440,43 +440,45 @@ const players = useMemo(() => arena?.players ?? [], [arena]);
                 @username (zoek)
               </label>
 
-              <input
-                type="text"
-                value={username}
-                onFocus={() => {
-                  setActiveAutoField("main");
-                  setTyping(username);
-                  setShowResults(true);
-                }}
-                onChange={(e) => {
-                  setUsername(e.target.value);
-                  setActiveAutoField("main");
-                  setTyping(e.target.value);
-                  setShowResults(true);
-                }}
-                placeholder="@zoeken"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-              />
+              <div className="relative" ref={autoRef}>
+                <input
+                  type="text"
+                  value={username}
+                  onFocus={() => {
+                    setActiveAutoField("main");
+                    setTyping(username);
+                    setShowResults(true);
+                  }}
+                  onChange={(e) => {
+                    setUsername(e.target.value);
+                    setActiveAutoField("main");
+                    setTyping(e.target.value);
+                    setShowResults(true);
+                  }}
+                  placeholder="@zoeken"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
 
-              {/* AUTOCOMPLETE MAIN */}
-              {showResults &&
-                searchResults.length > 0 &&
-                activeAutoField === "main" && (
-                  <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
-                    {searchResults.map((u) => (
-                      <div
-                        key={u.tiktok_id}
-                        onClick={() => applyAutoFill(u)}
-                        className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
-                      >
-                        <span className="font-semibold">
-                          {u.display_name}
-                        </span>{" "}
-                        <span className="text-gray-500">@{u.username}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {/* AUTOCOMPLETE MAIN */}
+                {showResults &&
+                  searchResults.length > 0 &&
+                  activeAutoField === "main" && (
+                    <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
+                      {searchResults.map((u) => (
+                        <div
+                          key={u.tiktok_id}
+                          onClick={() => applyAutoFill(u)}
+                          className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+                        >
+                          <span className="font-semibold">
+                            {u.display_name}
+                          </span>{" "}
+                          <span className="text-gray-500">@{u.username}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+              </div>
             </div>
 
             <div className="flex gap-2 text-xs">
@@ -505,10 +507,24 @@ const players = useMemo(() => arena?.players ?? [], [arena]);
         </div>
       </section>
 
-{/* ============================================================
+      {/* ============================================================
           ARENA + QUEUE
       ============================================================ */}
-      <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <section className="grid grid-cols-1 md:grid-cols-2 gap-4 relative">
+        {/* ============================================================
+            HOST DIAMONDS BADGE — VERPLAATST NAAR ARENA CONTAINER
+        ============================================================ */}
+        <div className="absolute md:left-1/2 md:-translate-x-1/2 md:translate-y-[-10px] right-2 top-[-6px] md:right-auto md:top-[-10px] z-20">
+          <div
+            className="
+              bg-[#ff4d4f] text-white text-xs font-semibold
+              px-3 py-1 rounded-full shadow-lg
+            "
+          >
+            Host: {fmt(hostDiamonds)} 💎
+          </div>
+        </div>
+
         {/* ARENA */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Arena</h2>
@@ -621,20 +637,15 @@ const players = useMemo(() => arena?.players ?? [], [arena]);
                 </div>
 
                 <div className="flex gap-1 mt-2 sm:mt-0 justify-end">
-                
                   <button
-                    onClick={() =>
-                      emitAdminWithUser("addToArena", q.username)
-                    }
+                    onClick={() => emitAdminWithUser("addToArena", q.username)}
                     className="px-2 py-1 rounded-full border border-[#ff4d4f] text-[#ff4d4f]"
                   >
                     → Arena
                   </button>
 
                   <button
-                    onClick={() =>
-                      emitAdminWithUser("removeFromQueue", q.username)
-                    }
+                    onClick={() => emitAdminWithUser("removeFromQueue", q.username)}
                     className="px-2 py-1 rounded-full border border-red-300 text-red-700 bg-red-50"
                   >
                     ✕
@@ -687,9 +698,7 @@ const players = useMemo(() => arena?.players ?? [], [arena]);
             </div>
           </div>
 
-          {/* ===================================================
-              PLAYER LEADERBOARD PANEL
-          =================================================== */}
+          {/* PLAYER LB */}
           {activeLbTab === "players" && (
             <div className="p-4 max-h-96 overflow-y-auto text-sm">
               <h2 className="text-xl font-semibold mb-2">Player Leaderboard</h2>
@@ -719,7 +728,6 @@ const players = useMemo(() => arena?.players ?? [], [arena]);
                     </div>
                   ))}
 
-                  {/* TOTAAL PLAYERS SUM */}
                   <div className="text-right mt-3 font-bold text-gray-700">
                     Totaal:{" "}
                     {fmt(
@@ -739,9 +747,7 @@ const players = useMemo(() => arena?.players ?? [], [arena]);
             </div>
           )}
 
-          {/* ===================================================
-              GIFTER LEADERBOARD PANEL
-          =================================================== */}
+          {/* GIFTER LB */}
           {activeLbTab === "gifters" && (
             <div className="p-4 max-h-96 overflow-y-auto text-sm">
               <h2 className="text-xl font-semibold mb-2">Gifter Leaderboard</h2>
@@ -771,7 +777,6 @@ const players = useMemo(() => arena?.players ?? [], [arena]);
                     </div>
                   ))}
 
-                  {/* TOTAAL GIFTERS SUM */}
                   <div className="text-right mt-3 font-bold text-gray-700">
                     Totaal:{" "}
                     {fmt(
@@ -925,9 +930,7 @@ const players = useMemo(() => arena?.players ?? [], [arena]);
               <option value="diamondpistol">Diamond Pistol</option>
             </select>
 
-            <label className="text-xs font-semibold">
-              Target speler (optioneel)
-            </label>
+            <label className="text-xs font-semibold">Target speler (optioneel)</label>
             <input
               type="text"
               value={twistTargetUse}
@@ -1025,4 +1028,3 @@ const players = useMemo(() => arena?.players ?? [], [arena]);
     </main>
   );
                   }
-      
