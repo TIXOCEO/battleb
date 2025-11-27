@@ -1,9 +1,10 @@
 /* ============================================================================
-   adminTypes.ts — BattleBox v15
+   adminTypes.ts — BattleBox v15 (patched for realtime diamonds)
    ✔ Gesynchroniseerd met server.ts v7 & game-engine v15
    ✔ Round-based scoring compatible
    ✔ Correcte arena structuur
-   ✔ Correcte leaderboards & stats
+   ✔ Realtime arena diamonds (NEW)
+   ✔ Realtime host diamonds (NEW)
 ============================================================================ */
 
 /* ================================
@@ -21,10 +22,26 @@ export interface ArenaPlayer {
   id: string;
   display_name: string;
   username: string;
+
+  /** 
+   * v15 legacy field (UI static scoring)
+   * blijft bestaan zodat frontend niet breekt
+   */
   score: number;
 
+  /**
+   * ✔ NIEUW — Realtime diamonds field
+   * Wordt live geüpdatet door 3-gift-engine.ts v15.2
+   */
+  diamonds: number;
+
   boosters: string[];
-  status: "alive" | "eliminated"; // legacy, UI uses positionStatus
+
+  /**
+   * legacy, niet gebruikt voor sorting — positionStatus bepaalt dit
+   */
+  status: "alive" | "eliminated";
+
   positionStatus: ArenaPlayerStatus;
 
   is_vip?: boolean;
@@ -51,12 +68,12 @@ export interface ArenaState {
   /** shortcut: status === "active" */
   isRunning: boolean;
 
-  /** Real timestamps (ms) */
+  /** timestamps */
   roundStartTime: number;
   roundCutoff: number;
   graceEnd: number;
 
-  /** TOTAL settings */
+  /** settings */
   settings: {
     roundDurationPre: number;
     roundDurationFinal: number;
@@ -64,11 +81,17 @@ export interface ArenaState {
     forceEliminations: boolean;
   };
 
-  /** Finale baseline indicator */
+  /** baseline indicator */
   firstFinalRound: number | null;
 
-  /** Used for UI resorting logic */
+  /** UI internal sorting timestamp */
   lastSortedAt: number;
+
+  /**
+   * ✔ NIEUW — realtime host diamonds
+   * Updatet live via gift-engine
+   */
+  host_diamonds?: number;
 }
 
 /* ================================
@@ -177,9 +200,9 @@ export interface GifterLeaderboardEntry {
   total_diamonds: number;
 }
 
-/* ============================================================================
-   INITIAL SNAPSHOT — DIRECTE COPY UIT BACKEND
-============================================================================ */
+/* ================================
+   INITIAL SNAPSHOT
+================================ */
 export interface InitialSnapshot {
   arena: ArenaState;
 
@@ -208,9 +231,9 @@ export interface InitialSnapshot {
   gifterLeaderboard: GifterLeaderboardEntry[];
 }
 
-/* ============================================================================
-   SOCKET INBOUND (BACKEND → FRONTEND)
-============================================================================ */
+/* ================================
+   SOCKET INBOUND
+================================ */
 export interface AdminSocketInbound {
   updateArena: (arena: ArenaState) => void;
 
@@ -239,7 +262,6 @@ export interface AdminSocketInbound {
 
   hostsActiveChanged: (payload: { username: string; tiktok_id: string }) => void;
 
-  /** Round events */
   "round:start": (payload: {
     round: number;
     type: "quarter" | "finale";
@@ -261,9 +283,9 @@ export interface AdminSocketInbound {
   }) => void;
 }
 
-/* ============================================================================
-   SOCKET OUTBOUND (FRONTEND → BACKEND)
-============================================================================ */
+/* ================================
+   SOCKET OUTBOUND
+================================ */
 export interface AdminSocketOutbound {
   ping: () => void;
 
@@ -334,7 +356,6 @@ export interface AdminSocketOutbound {
     ack: (res: AdminAckResponse) => void
   ) => void;
 
-  /** ✔ NIEUW VOOR v15 — ronde tijdsinstellingen */
   updateRoundSettings: (
     payload: {
       pre: number;
