@@ -28,6 +28,14 @@ type GameSessionState = {
   gameId: number | null;
 };
 
+/* ============================================
+   CONFIRM POPUP TYPES
+============================================ */
+type ConfirmData = {
+  message: string;
+  action: () => void;
+};
+
 export default function AdminDashboardPage() {
   /* ============================================
      CORE STATE
@@ -76,6 +84,22 @@ export default function AdminDashboardPage() {
   const autoRef = useRef<HTMLDivElement | null>(null);
 
   /* ============================================
+     CONFIRM POPUP STATE
+  ============================================ */
+  const [confirmData, setConfirmData] = useState<ConfirmData | null>(null);
+
+  const askConfirm = (message: string, action: () => void) => {
+    setConfirmData({ message, action });
+  };
+
+  const cancelConfirm = () => setConfirmData(null);
+
+  const doConfirm = () => {
+    confirmData?.action();
+    setConfirmData(null);
+  };
+
+  /* ============================================
      CLICK OUTSIDE FOR AUTOCOMPLETE
   ============================================ */
   useEffect(() => {
@@ -90,34 +114,28 @@ export default function AdminDashboardPage() {
   }, []);
 
   /* ============================================
-     SOCKET SETUP — FIXED (no return)
+     SOCKET SETUP — FIXED
   ============================================ */
   useEffect(() => {
     const socket = getAdminSocket();
 
-    // Arena and queue
     socket.on("updateArena", (data) => setArena(data));
     socket.on("updateQueue", (d) => {
       setQueue(d.entries ?? []);
       setQueueOpen(d.open ?? true);
     });
 
-    // Logs
     socket.on("log", (l) => setLogs((p) => [l, ...p].slice(0, 200)));
     socket.on("initialLogs", (d) => setLogs(d.slice(0, 200)));
 
-    // Stats / Session
     socket.on("streamStats", (s) => setStreamStats(s));
     socket.on("gameSession", (s) => setGameSession(s));
 
-    // Leaderboards
     socket.on("leaderboardPlayers", (rows) => setPlayerLeaderboard(rows));
     socket.on("leaderboardGifters", (rows) => setGifterLeaderboard(rows));
 
-    // Host diamonds
     socket.on("hostDiamonds", (d) => setHostDiamonds(d.total));
 
-    // Round events
     socket.on("round:start", (d) =>
       setStatus(`▶️ Ronde gestart (${d.type}) – ${d.duration}s`)
     );
@@ -132,9 +150,7 @@ export default function AdminDashboardPage() {
       setStatus("❌ Socket verbinding weggevallen")
     );
 
-    return () => {
-      socket.removeAllListeners();
-    };
+    return () => socket.removeAllListeners();
   }, []);
 
   /* ============================================
@@ -163,7 +179,7 @@ export default function AdminDashboardPage() {
     });
   }, []);
 
-  /* ============================================
+/* ============================================
      EMITTER HELPERS
   ============================================ */
   const emitAdmin = (
@@ -187,23 +203,42 @@ export default function AdminDashboardPage() {
     const uname = (userTarget || username || "").trim();
     if (!uname) return;
 
-    const socket = getAdminSocket();
     const formatted = uname.startsWith("@") ? uname : `@${uname}`;
 
-    if (
-      event === "eliminate" &&
-      !confirm(`Weet je zeker dat je ${formatted} wilt verwijderen?`)
-    ) {
+    // Replace browser confirm() with global popup
+    if (event === "eliminate") {
+      askConfirm(
+        `Weet je zeker dat je ${formatted} wilt verwijderen uit de arena?`,
+        () => {
+          const socket = getAdminSocket();
+          setStatus(`Bezig met ${event}...`);
+
+          socket.emit(
+            event,
+            { username: formatted },
+            (res: AdminAckResponse) => {
+              setStatus(
+                res?.success
+                  ? "✅ Uitgevoerd"
+                  : `❌ ${res?.message ?? "Fout"}`
+              );
+            }
+          );
+        }
+      );
       return;
     }
 
+    // default: normal emit
+    const socket = getAdminSocket();
     setStatus(`Bezig met ${event}...`);
+
     socket.emit(event, { username: formatted }, (res: AdminAckResponse) => {
       setStatus(res?.success ? "✅ Uitgevoerd" : `❌ ${res?.message}`);
     });
   };
 
-/* ============================================
+  /* ============================================
      AUTOCOMPLETE SEARCH
   ============================================ */
   useEffect(() => {
@@ -511,7 +546,9 @@ export default function AdminDashboardPage() {
               players.map((p, idx) => (
                 <div
                   key={p.id}
-                  className={`relative rounded-lg p-3 border text-sm shadow ${colorForPosition(p)}`}
+                  className={`relative rounded-lg p-3 border text-sm shadow ${colorForPosition(
+                    p
+                  )}`}
                 >
 
                   {/* delete top right */}
@@ -638,143 +675,8 @@ export default function AdminDashboardPage() {
               </div>
             ))
           ) : (
-            <div className="text-sm text-gray-500 italic">Wachtrij is leeg.</div>
-          )}
-        </div>
-      </section>
-
-      {/* ============================================================
-          LEADERBOARDS
-      ============================================================ */}
-      <section className="mt-4">
-        <div className="bg-white rounded-2xl shadow p-0 overflow-hidden">
-          
-          {/* Tabs */}
-          <div className="w-full flex justify-end p-3 border-b border-gray-200 bg-gray-50">
-            <div className="flex gap-2">
-              <button
-                onClick={() => setActiveLbTab("players")}
-                className={`
-                  px-4 py-1.5 text-sm rounded-full border 
-                  transition-all duration-150 
-                  ${
-                    activeLbTab === "players"
-                      ? "bg-[#ff4d4f] text-white border-[#ff4d4f]"
-                      : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
-                  }
-                `}
-              >
-                Players
-              </button>
-
-              <button
-                onClick={() => setActiveLbTab("gifters")}
-                className={`
-                  px-4 py-1.5 text-sm rounded-full border 
-                  transition-all duration-150 
-                  ${
-                    activeLbTab === "gifters"
-                      ? "bg-[#ff4d4f] text-white border-[#ff4d4f]"
-                      : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
-                  }
-                `}
-              >
-                Gifters
-              </button>
-            </div>
-          </div>
-
-          {/* PLAYER LB */}
-          {activeLbTab === "players" && (
-            <div className="p-4 max-h-96 overflow-y-auto text-sm">
-
-              <h2 className="text-xl font-semibold mb-2">Player Leaderboard</h2>
-              <p className="text-xs text-gray-500 mb-3">
-                Diamanten ontvangen in deze stream (total_score)
-              </p>
-
-              {playerLeaderboard.length ? (
-                <>
-                  {playerLeaderboard.map((e, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center justify-between border-b last:border-0 border-gray-200 py-1"
-                    >
-                      <div>
-                        <span className="font-mono text-xs text-gray-500 mr-2">
-                          #{idx + 1}
-                        </span>
-                        <span className="font-semibold">
-                          {e.display_name} (@{e.username})
-                        </span>
-                      </div>
-
-                      <span className="font-semibold">
-                        {fmt(e.total_score)} 💎
-                      </span>
-                    </div>
-                  ))}
-
-                  <div className="text-right mt-3 font-bold text-gray-700">
-                    Totaal:{" "}
-                    {fmt(
-                      playerLeaderboard.reduce(
-                        (acc, p) => acc + (p.total_score || 0),
-                        0
-                      )
-                    )} 💎
-                  </div>
-                </>
-              ) : (
-                <div className="text-sm text-gray-500 italic">Geen spelers gevonden.</div>
-              )}
-            </div>
-          )}
-
-          {/* GIFTER LB */}
-          {activeLbTab === "gifters" && (
-            <div className="p-4 max-h-96 overflow-y-auto text-sm">
-
-              <h2 className="text-xl font-semibold mb-2">Gifter Leaderboard</h2>
-              <p className="text-xs text-gray-500 mb-3">
-                Diamanten verstuurd in deze stream
-              </p>
-
-              {gifterLeaderboard.length ? (
-                <>
-                  {gifterLeaderboard.map((e, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center justify-between border-b last:border-0 border-gray-200 py-1"
-                    >
-                      <div>
-                        <span className="font-mono text-xs text-gray-500 mr-2">
-                          #{idx + 1}
-                        </span>
-                        <span className="font-semibold">
-                          {e.display_name} (@{e.username})
-                        </span>
-                      </div>
-
-                      <span className="font-semibold">
-                        {fmt(e.total_diamonds)} 💎
-                      </span>
-                    </div>
-                  ))}
-
-                  <div className="text-right mt-3 font-bold text-gray-700">
-                    Totaal:{" "}
-                    {fmt(
-                      gifterLeaderboard.reduce(
-                        (acc, g) => acc + (g.total_diamonds || 0),
-                        0
-                      )
-                    )} 💎
-                  </div>
-                </>
-              ) : (
-                <div className="text-sm text-gray-500 italic">Geen gifters gevonden.</div>
-              )}
+            <div className="text-sm text-gray-500 italic">
+              Wachtrij is leeg.
             </div>
           )}
         </div>
@@ -792,6 +694,7 @@ export default function AdminDashboardPage() {
           <div className="p-4 border rounded-xl bg-gray-50 shadow-sm relative">
             <h3 className="font-semibold mb-3">Twist geven aan speler</h3>
 
+            {/* Username */}
             <label className="text-xs font-semibold">@username</label>
             <input
               type="text"
@@ -829,6 +732,7 @@ export default function AdminDashboardPage() {
                 </div>
               )}
 
+            {/* Twist choice */}
             <label className="text-xs font-semibold">Kies twist</label>
             <select
               value={twistTypeGive}
@@ -1038,4 +942,4 @@ export default function AdminDashboardPage() {
       )}
     </main>
   );
-                          }
+            }
