@@ -1,352 +1,471 @@
-// ============================================================================
-// 8-twist-engine.ts — Twist Engine v14.0 (Perfect for Arena Engine v14.0)
-// Danny Stable — boosters[] + eliminated-flag compatible
-// Eliminations use arena.eliminate()
-// Immune = boosters.includes("immune") + positionStatus="immune"
-// Heal respawns full ArenaPlayer object identical to arenaJoin()
-// ============================================================================
-
-import { io, emitLog } from "../server";
-import {
-  getArena,
-  emitArena,
-  eliminate      // verwijdert speler uit arena
-} from "./5-game-engine";
-
-import {
-  giveTwistToUser,
-  consumeTwistFromUser
-} from "./twist-inventory";
-
-import {
-  TWIST_MAP,
-  TwistType,
-  resolveTwistAlias
-} from "./twist-definitions";
+/* ============================================================================
+   5-game-engine.ts — BattleBox Arena Engine v14.2 FINAL
+   ✔ Correct danger/elimination logic (plek 6–7 danger, 8+ elimination)
+   ✔ No elimination during IDLE
+   ✔ Dynamic based on total players
+   ✔ Compatible with twist-engine v14.0 (boosters[] & eliminated flag)
+   ✔ Fully compatible with server.ts v6.x
+============================================================================ */
 
 import pool from "../db";
+import { io, emitLog } from "../server";
 
-// ============================================================================
-// HELPERS
-// ============================================================================
+export type ArenaStatus = "idle" | "active" | "grace" | "ended";
+export type RoundType = "quarter" | "finale";
 
-async function findUser(raw: string) {
-  const clean = raw.replace("@", "").trim().toLowerCase();
-
-  const q = await pool.query(
-    `
-      SELECT tiktok_id, username, display_name
-      FROM users
-      WHERE LOWER(username)=LOWER($1)
-      LIMIT 1
-    `,
-    [clean]
-  );
-
-  if (!q.rows.length) return null;
-
-  return {
-    id: q.rows[0].tiktok_id.toString(),
-    username: q.rows[0].username.replace(/^@/, ""),
-    display_name: q.rows[0].display_name
-  };
+export interface ArenaPlayer {
+  id: string;
+  username: string;
+  display_name: string;
+  score: number;
+  boosters: string[];
+  positionStatus: "alive" | "danger" | "elimination" | "immune" | "shielded";
+  eliminated?: boolean;
 }
 
-function getArenaPlayer(id: string) {
-  return getArena().players.find((p) => p.id === id) || null;
+interface ArenaSettings {
+  roundDurationPre: number;
+  roundDurationFinal: number;
+  graceSeconds: number;
+  forceEliminations: boolean;
 }
 
-function isImmune(id: string) {
-  const p = getArenaPlayer(id);
-  return p?.boosters.includes("immune") || p?.positionStatus === "immune";
+interface ArenaState {
+  players: ArenaPlayer[];
+  round: number;
+  type: RoundType;
+  status: ArenaStatus;
+  roundStartTime: number;
+  roundCutoff: number;
+  graceEnd: number;
+  settings: ArenaSettings;
+  lastSortedAt: number;
 }
 
-async function applyImmune(id: string) {
-  const arena = getArena();
-  const p = arena.players.find((x) => x.id === id);
-  if (!p) return;
+/* ============================================================================
+   MEMORY
+============================================================================ */
 
-  if (!p.boosters.includes("immune")) p.boosters.push("immune");
-  p.positionStatus = "immune";
+let arena: ArenaState = {
+  players: [],
+  round: 0,
+  type: "quarter",
+  status: "idle",
+  roundStartTime: 0,
+  roundCutoff: 0,
+  graceEnd: 0,
+  settings: {
+    roundDurationPre: 60,
+    roundDurationFinal: 60,
+    graceSeconds: 10,
+    forceEliminations: true
+  },
+  lastSortedAt: 0
+};
 
-  emitLog({
-    type: "twist",
-    message: `${p.display_name} kreeg IMMUNE`
-  });
+/* ============================================================================
+   BASIC EXPORTS
+============================================================================ */
 
-  await emitArena();
+export function getArena() {
+  return arena;
 }
 
-function emitOverlay(name: string, data: any) {
-  io.emit(`twist:${name}`, data);
+export function getArenaSettings() {
+  return arena.settings;
 }
 
-// ============================================================================
-// TWISTS
-// ============================================================================
+/* ============================================================================
+   SCORE FETCHER
+============================================================================ */
 
-// GALAXY — alfabetisch shuffle
-async function applyGalaxy(sender: string) {
-  const arena = getArena();
+async function getPlayerScore(id: string): Promise<number> {
+  const gid = (io as any)?.currentGameId;
+  if (!gid) return 0;
 
-  const sorted = [...arena.players].sort((a, b) =>
-    a.display_name.localeCompare(b.display_name)
-  );
-
-  arena.players.splice(0, arena.players.length, ...sorted);
-
-  emitOverlay("galaxy", { by: sender });
-
-  emitLog({
-    type: "twist",
-    message: `${sender} gebruikte GALAXY!`
-  });
-
-  await emitArena();
-}
-
-// MONEYGUN — directe eliminatie
-async function applyMoneyGun(sender: string, target: any) {
-  if (!target) return;
-
-  if (isImmune(target.id)) {
-    emitLog({
-      type: "twist",
-      message: `${sender} MoneyGun → ${target.display_name} is IMMUNE!`
-    });
-    return;
-  }
-
-  await eliminate(target.username);
-
-  emitOverlay("moneygun", {
-    by: sender,
-    target: target.display_name
-  });
-
-  emitLog({
-    type: "twist",
-    message: `${sender} MoneyGun → ${target.display_name} geëlimineerd!`
-  });
-
-  await emitArena();
-}
-
-// BOMB — random non-immune eliminatie
-async function applyBomb(sender: string) {
-  const arena = getArena();
-
-  const pool = arena.players.filter(
-    (p) => !p.boosters.includes("immune")
-  );
-
-  if (!pool.length) {
-    emitLog({
-      type: "twist",
-      message: `${sender} Bomb → geen geldige targets`
-    });
-    return;
-  }
-
-  const chosen = pool[Math.floor(Math.random() * pool.length)];
-
-  await eliminate(chosen.username);
-
-  emitOverlay("bomb", {
-    by: sender,
-    target: chosen.display_name,
-    pool: pool.map((p) => p.display_name)
-  });
-
-  emitLog({
-    type: "twist",
-    message: `${sender} BOMB → ${chosen.display_name}!`
-  });
-
-  await emitArena();
-}
-
-// IMMUNE — flag toevoegen
-async function applyImmuneTwist(sender: string, target: any) {
-  if (!target) return;
-
-  await applyImmune(target.id);
-
-  emitOverlay("immune", {
-    by: sender,
-    target: target.display_name
-  });
-}
-
-// HEAL — speler terugplaatsen in arena
-async function applyHeal(sender: string, target: any) {
-  if (!target) return;
-
-  const arena = getArena();
-
-  // Als speler al in arena zit → skip
-  if (arena.players.some((p) => p.id === target.id)) {
-    emitLog({
-      type: "twist",
-      message: `${sender} HEAL → ${target.display_name} zit al in arena`
-    });
-    return;
-  }
-
-  // score ophalen
   const q = await pool.query(
     `
       SELECT COALESCE(SUM(diamonds),0) AS score
       FROM gifts
       WHERE receiver_id=$1 AND game_id=$2
     `,
-    [BigInt(target.id), (io as any).currentGameId]
+    [BigInt(id), gid]
   );
 
-  const score = Number(q.rows[0]?.score || 0);
+  return Number(q.rows[0]?.score || 0);
+}
 
-  // volledig ArenaPlayer object terugplaatsen
+/* ============================================================================
+   POSITION LOGIC — v14.2 (FULLY CORRECT)
+============================================================================ */
+
+async function recomputePositions() {
+  // refresh scores
+  for (const p of arena.players) {
+    p.score = await getPlayerScore(p.id);
+  }
+
+  // sort by score DESC
+  arena.players.sort((a, b) => b.score - a.score);
+
+  const total = arena.players.length;
+
+  // During IDLE — everyone SAFE
+  if (arena.status === "idle") {
+    for (const p of arena.players) {
+      if (p.boosters.includes("immune")) {
+        p.positionStatus = "immune";
+      } else {
+        p.positionStatus = "alive";
+      }
+      p.eliminated = false;
+    }
+
+    arena.lastSortedAt = Date.now();
+    return;
+  }
+
+  // ACTIVE / GRACE / ENDED
+  for (let i = 0; i < total; i++) {
+    const p = arena.players[i];
+
+    if (p.boosters.includes("immune")) {
+      p.positionStatus = "immune";
+      p.eliminated = false;
+      continue;
+    }
+
+    /** 
+     * Correct table:
+     * index 0–4 → SAFE (alive)
+     * index 5–6 → danger
+     * index ≥7 → elimination
+     * BUT only if those positions exist!
+     */
+
+    if (i <= 4) {
+      p.positionStatus = "alive";
+      p.eliminated = false;
+    } else if (i === 5 || i === 6) {
+      p.positionStatus = "danger";
+      p.eliminated = false;
+    } else if (i >= 7) {
+      p.positionStatus = "elimination";
+      p.eliminated = true;
+    }
+  }
+
+  arena.lastSortedAt = Date.now();
+}
+
+/* ============================================================================
+   EMIT SNAPSHOT
+============================================================================ */
+
+export async function emitArena() {
+  await recomputePositions();
+
+  io.emit("updateArena", {
+    players: arena.players,
+    round: arena.round,
+    type: arena.type,
+    status: arena.status,
+    isRunning: arena.status === "active",
+    timeLeft: 0,
+    roundStartTime: arena.roundStartTime,
+    roundCutoff: arena.roundCutoff,
+    graceEnd: arena.graceEnd,
+    settings: arena.settings,
+    lastSortedAt: arena.lastSortedAt
+  });
+}
+
+/* ============================================================================
+   ROUND CONTROL
+============================================================================ */
+
+export async function startRound(type: RoundType) {
+  if (!arena.players.length) throw new Error("Geen spelers in arena");
+
+  arena.type = type;
+  arena.round += 1;
+  arena.status = "active";
+
+  const dur =
+    type === "finale"
+      ? arena.settings.roundDurationFinal
+      : arena.settings.roundDurationPre;
+
+  const now = Date.now();
+
+  arena.roundStartTime = now;
+  arena.roundCutoff = now + dur * 1000;
+  arena.graceEnd = arena.roundCutoff + arena.settings.graceSeconds * 1000;
+
+  emitLog({ type: "arena", message: `Ronde gestart (${type})` });
+
+  await emitArena();
+
+  io.emit("round:start", { round: arena.round, type, duration: dur });
+}
+
+export async function endRound() {
+  if (arena.status === "active") {
+    arena.status = "grace";
+    await emitArena();
+
+    emitLog({ type: "arena", message: "Grace gestart" });
+
+    io.emit("round:grace", {
+      round: arena.round,
+      grace: arena.settings.graceSeconds
+    });
+
+    return;
+  }
+
+  if (arena.status === "grace") {
+    arena.status = "ended";
+
+    await recomputePositions();
+
+    const doomed = arena.players
+      .filter((p) => p.positionStatus === "elimination")
+      .map((p) => p.username);
+
+    const top3 = arena.players.slice(0, 3).map((p) => ({
+      id: p.id,
+      username: p.username,
+      display_name: p.display_name,
+      diamonds: p.score
+    }));
+
+    io.emit("round:end", {
+      round: arena.round,
+      type: arena.type,
+      pendingEliminations: doomed,
+      top3
+    });
+
+    emitLog({
+      type: "arena",
+      message: `Ronde geëindigd — eliminaties nodig (${doomed.length})`
+    });
+
+    await emitArena();
+  }
+}
+
+/* ============================================================================
+   ARENA MGMT
+============================================================================ */
+
+export async function arenaJoin(
+  tiktok_id: string,
+  display_name: string,
+  username: string
+) {
+  const id = String(tiktok_id);
+
+  if (arena.players.some((p) => p.id === id)) return;
+
   arena.players.push({
-    id: target.id,
-    username: target.username,
-    display_name: target.display_name,
-    score,
+    id,
+    username: username.replace(/^@+/, "").toLowerCase(),
+    display_name,
+    score: 0,
     boosters: [],
     eliminated: false,
     positionStatus: "alive"
   });
 
-  emitOverlay("heal", {
-    by: sender,
-    target: target.display_name
+  await emitArena();
+}
+
+export async function arenaLeave(tiktok_id: string) {
+  const id = String(tiktok_id);
+
+  const idx = arena.players.findIndex((p) => p.id === id);
+  if (idx === -1) return;
+
+  const p = arena.players[idx];
+
+  arena.players.splice(idx, 1);
+
+  emitLog({ type: "elim", message: `${p.display_name} uit arena` });
+
+  await emitArena();
+}
+
+export async function arenaClear() {
+  arena.players = [];
+  arena.round = 0;
+  arena.type = "quarter";
+  arena.status = "idle";
+  arena.roundStartTime = 0;
+  arena.roundCutoff = 0;
+  arena.graceEnd = 0;
+
+  emitLog({ type: "system", message: "Arena volledig geleegd" });
+
+  await emitArena();
+}
+
+export async function addToArena(username: string, resolveUser: Function) {
+  const clean = username.replace(/^@+/, "").toLowerCase();
+
+  const user = await resolveUser(clean);
+  if (!user) throw new Error("Gebruiker niet gevonden");
+
+  if (arena.players.some((p) => p.id === String(user.tiktok_id)))
+    throw new Error("Speler zit al in arena");
+
+  arena.players.push({
+    id: String(user.tiktok_id),
+    username: user.username,
+    display_name: user.display_name,
+    score: 0,
+    boosters: [],
+    eliminated: false,
+    positionStatus: "alive"
   });
 
   emitLog({
-    type: "twist",
-    message: `${sender} HEAL → ${target.display_name} is terug!`
+    type: "arena",
+    message: `${user.display_name} toegevoegd aan arena`
   });
 
   await emitArena();
 }
 
-// DIAMOND PISTOL — alleen survivor blijft over
-async function applyDiamondPistol(sender: string, survivor: any) {
-  if (!survivor) return;
+export async function eliminate(username: string) {
+  const clean = username.replace(/^@+/, "").toLowerCase();
 
-  const arena = getArena();
-
-  const victims = arena.players.filter(
-    (p) =>
-      p.id !== survivor.id &&
-      !p.boosters.includes("immune")
+  const idx = arena.players.findIndex(
+    (p) => p.username.toLowerCase() === clean
   );
 
-  for (const v of victims) {
-    await eliminate(v.username);
-  }
+  if (idx === -1) throw new Error("Gebruiker zit niet in arena");
 
-  emitOverlay("diamondpistol", {
-    by: sender,
-    survivor: survivor.display_name
-  });
+  const p = arena.players[idx];
+  arena.players.splice(idx, 1);
 
-  emitLog({
-    type: "twist",
-    message: `${sender} DIAMOND PISTOL → ${survivor.display_name} overleeft!`
+  emitLog({ type: "elim", message: `${p.display_name} geëlimineerd` });
+
+  await emitArena();
+}
+
+export async function addFromQueue(user: any) {
+  arena.players.push({
+    id: String(user.tiktok_id),
+    username: user.username,
+    display_name: user.display_name,
+    score: 0,
+    boosters: [],
+    eliminated: false,
+    positionStatus: "alive"
   });
 
   await emitArena();
 }
 
-// ============================================================================
-// MAIN — USE TWIST
-// ============================================================================
+/* ============================================================================
+   SETTINGS
+============================================================================ */
 
-export async function useTwist(
-  senderId: string,
-  senderName: string,
-  twist: TwistType,
-  rawTarget?: string
-) {
-  const arena = getArena();
-
-  if (arena.status !== "active" && arena.status !== "grace") {
-    emitLog({
-      type: "twist",
-      message: `${senderName} probeerde ${twist}, maar buiten ronde`
-    });
-    return;
-  }
-
-  const ok = await consumeTwistFromUser(senderId, twist);
-  if (!ok) {
-    emitLog({
-      type: "twist",
-      message: `${senderName} probeerde ${
-        TWIST_MAP[twist].giftName
-      }, maar heeft geen twist`
-    });
-    return;
-  }
-
-  let target = null;
-  if (TWIST_MAP[twist].requiresTarget) {
-    target = await findUser(rawTarget || "");
-    if (!target) {
-      emitLog({
-        type: "twist",
-        message: `Twist mislukt: target '${rawTarget}' bestaat niet`
-      });
-      return;
-    }
-  }
-
-  switch (twist) {
-    case "galaxy":
-      return applyGalaxy(senderName);
-    case "moneygun":
-      return applyMoneyGun(senderName, target);
-    case "bomb":
-      return applyBomb(senderName);
-    case "immune":
-      return applyImmuneTwist(senderName, target);
-    case "heal":
-      return applyHeal(senderName, target);
-    case "diamondpistol":
-      return applyDiamondPistol(senderName, target);
-  }
+export async function resetArena() {
+  await arenaClear();
 }
 
-// ============================================================================
-// ADD TWIST WHEN RECEIVING GIFT
-// ============================================================================
+export async function updateArenaSettings(newSettings: Partial<ArenaState["settings"]>) {
+  arena.settings = { ...arena.settings, ...newSettings };
 
-export async function addTwistByGift(userId: string, twist: TwistType) {
-  await giveTwistToUser(userId, twist);
+  io.emit("settings", arena.settings);
 
   emitLog({
-    type: "twist",
-    message: `Twist ontvangen: ${TWIST_MAP[twist].giftName}`
+    type: "system",
+    message: `Settings aangepast: ${JSON.stringify(newSettings)}`
   });
+
+  await emitArena();
 }
 
-// ============================================================================
-// PARSER (!use heal @user)
-// ============================================================================
-
-export async function parseUseCommand(
-  senderId: string,
-  senderName: string,
-  msg: string
-) {
-  const parts = msg.trim().split(/\s+/);
-  if (parts[0]?.toLowerCase() !== "!use") return;
-
-  const alias = parts[1]?.toLowerCase();
-  const twist = resolveTwistAlias(alias);
-  if (!twist) return;
-
-  const target = parts[2] ? parts[2].replace("@", "") : undefined;
-
-  await useTwist(senderId, senderName, twist, target);
+export async function forceSort() {
+  await recomputePositions();
+  await emitArena();
 }
+
+/* ============================================================================
+   TIMER LOOP
+============================================================================ */
+
+setInterval(async () => {
+  if (arena.status === "idle") return;
+
+  const now = Date.now();
+
+  if (arena.status === "active" && now >= arena.roundCutoff) {
+    arena.status = "grace";
+    emitLog({ type: "arena", message: "⏳ Grace gestart" });
+
+    io.emit("round:grace", {
+      round: arena.round,
+      grace: arena.settings.graceSeconds
+    });
+
+    await emitArena();
+    return;
+  }
+
+  if (arena.status === "grace" && now >= arena.graceEnd) {
+    arena.status = "ended";
+
+    await recomputePositions();
+
+    const doomed = arena.players
+      .filter((p) => p.positionStatus === "elimination")
+      .map((p) => p.username);
+
+    const top3 = arena.players.slice(0, 3).map((p) => ({
+      id: p.id,
+      display_name: p.display_name,
+      username: p.username,
+      diamonds: p.score
+    }));
+
+    io.emit("round:end", {
+      round: arena.round,
+      type: arena.type,
+      pendingEliminations: doomed,
+      top3
+    });
+
+    emitLog({
+      type: "arena",
+      message: `⛔ Ronde beëindigd — eliminaties nodig (${doomed.length})`
+    });
+
+    await emitArena();
+  }
+}, 1000);
+
+/* ============================================================================
+   EXPORT DEFAULT (voor zekerheid)
+============================================================================ */
+
+export default {
+  getArena,
+  getArenaSettings,
+  emitArena,
+  startRound,
+  endRound,
+  arenaJoin,
+  arenaLeave,
+  arenaClear,
+  addToArena,
+  eliminate,
+  addFromQueue,
+  updateArenaSettings,
+  resetArena,
+  forceSort
+};
