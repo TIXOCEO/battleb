@@ -56,7 +56,7 @@ export interface ArenaState {
   roundCutoff: number;
   graceEnd: number;
 
-  /** TOTAL settings structure */
+  /** TOTAL settings */
   settings: {
     roundDurationPre: number;
     roundDurationFinal: number;
@@ -124,7 +124,7 @@ export interface AdminAckResponse {
 }
 
 /* ================================
-   SEARCH RESULT
+   SEARCH USER RESULT
 ================================ */
 export interface SearchUser {
   tiktok_id: string;
@@ -178,7 +178,7 @@ export interface GifterLeaderboardEntry {
 }
 
 /* ============================================================================
-   INITIAL SNAPSHOT — EXACT copy of server.ts
+   INITIAL SNAPSHOT — DIRECTE COPY UIT BACKEND
 ============================================================================ */
 export interface InitialSnapshot {
   arena: ArenaState;
@@ -331,6 +331,16 @@ export interface AdminSocketOutbound {
 
   useTwist: (
     payload: { username: string; twist: string; target?: string },
+    ack: (res: AdminAckResponse) => void
+  ) => void;
+
+  /** ✔ NIEUW VOOR v15 — ronde tijdsinstellingen */
+  updateRoundSettings: (
+    payload: {
+      pre: number;
+      final: number;
+      grace: number;
+    },
     ack: (res: AdminAckResponse) => void
   ) => void;
 }
