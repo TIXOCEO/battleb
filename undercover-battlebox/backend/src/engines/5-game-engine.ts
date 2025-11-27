@@ -1,9 +1,10 @@
 /* ============================================================================
-   5-game-engine.ts — BattleBox Arena Engine v13.2 — CLEAN & SERVER-COMPAT
-   ✔ Compatibel met server.ts v6.x (arenaJoin/arenaLeave/arenaClear/getArenaSettings)
+   5-game-engine.ts — BattleBox Arena Engine v14.0 FINAL
+   ✔ Compatibel met server.ts v6.x
+   ✔ Compatible met twist-engine v3.x (boosters & state mapping)
    ✔ Gifts-driven scores
-   ✔ Correcte sorting + danger + elimination
-   ✔ positionStatus: alive | danger | elimination | immune | shielded
+   ✔ Full queue support
+   ✔ No disable buttons bug
 ============================================================================ */
 
 import pool from "../db";
@@ -21,7 +22,15 @@ export interface ArenaPlayer {
   username: string;
   display_name: string;
   score: number;
+
+  // engine v14 uses boosters[] + positionStatus = twist compatible
+  boosters: string[];
+
+  // UI-driven state
   positionStatus: "alive" | "danger" | "elimination" | "immune" | "shielded";
+
+  // twist-engine v3 compatibility virtual flag
+  eliminated?: boolean;
 }
 
 interface ArenaSettings {
@@ -33,6 +42,7 @@ interface ArenaSettings {
 
 interface ArenaState {
   players: ArenaPlayer[];
+
   round: number;
   type: RoundType;
   status: ArenaStatus;
@@ -42,11 +52,12 @@ interface ArenaState {
   graceEnd: number;
 
   settings: ArenaSettings;
+
   lastSortedAt: number;
 }
 
 /* ============================================================================
-   MEMORY STATE
+   MEMORY
 ============================================================================ */
 
 let arena: ArenaState = {
@@ -70,21 +81,19 @@ let arena: ArenaState = {
 };
 
 /* ============================================================================
-   BASIC GETTERS (server.ts gebruikt deze)
+   BASIC GETTERS FOR server.ts
 ============================================================================ */
 
-// Volledige arena snapshot
 export function getArena(): ArenaState {
   return arena;
 }
 
-// Alleen settings (server stuurt dit naar admin-frontend)
 export function getArenaSettings(): ArenaSettings {
   return arena.settings;
 }
 
 /* ============================================================================
-   SCORE CALCULATION
+   SCORE FETCHER
 ============================================================================ */
 
 async function getPlayerScore(tiktokId: string): Promise<number> {
@@ -93,10 +102,9 @@ async function getPlayerScore(tiktokId: string): Promise<number> {
 
   const q = await pool.query(
     `
-      SELECT COALESCE(SUM(diamonds), 0) AS score
+      SELECT COALESCE(SUM(diamonds),0) AS score
       FROM gifts
-      WHERE receiver_id = $1
-        AND game_id = $2
+      WHERE receiver_id=$1 AND game_id=$2
     `,
     [BigInt(tiktokId), gid]
   );
@@ -105,16 +113,15 @@ async function getPlayerScore(tiktokId: string): Promise<number> {
 }
 
 /* ============================================================================
-   SORTING + POSITION STATUSES
+   SORTING & STATUS ASSIGNMENT
 ============================================================================ */
 
 async function recomputePositions() {
-  // scores vers uit DB per speler
+  // refresh scores
   for (const p of arena.players) {
     p.score = await getPlayerScore(p.id);
   }
 
-  // sorteer op score DESC
   arena.players.sort((a, b) => b.score - a.score);
 
   const total = arena.players.length;
@@ -122,22 +129,35 @@ async function recomputePositions() {
   for (let i = 0; i < total; i++) {
     const p = arena.players[i];
 
-    // immune blijft immune
-    if (p.positionStatus === "immune") continue;
+    if (p.boosters.includes("immune")) {
+      p.positionStatus = "immune";
+      continue;
+    }
 
-    // laatste 3 = elimination
-    if (i >= total - 3) p.positionStatus = "elimination";
-    // daarboven (max 2 plekken) = danger
-    else if (i >= total - 5) p.positionStatus = "danger";
-    // rest = alive
-    else p.positionStatus = "alive";
+    // lowest 3 = elimination
+    if (i >= total - 3) {
+      p.positionStatus = "elimination";
+      p.eliminated = true;
+    }
+
+    // next 2 = danger
+    else if (i >= total - 5) {
+      p.positionStatus = "danger";
+      p.eliminated = false;
+    }
+
+    // others = alive
+    else {
+      p.positionStatus = "alive";
+      p.eliminated = false;
+    }
   }
 
   arena.lastSortedAt = Date.now();
 }
 
 /* ============================================================================
-   EMIT ARENA
+   EMIT ARENA SNAPSHOT
 ============================================================================ */
 
 export async function emitArena() {
@@ -149,8 +169,8 @@ export async function emitArena() {
     type: arena.type,
     status: arena.status,
 
-    timeLeft: 0,
     isRunning: arena.status === "active",
+    timeLeft: 0,
 
     roundStartTime: arena.roundStartTime,
     roundCutoff: arena.roundCutoff,
@@ -172,7 +192,7 @@ export async function startRound(type: RoundType) {
   arena.round += 1;
   arena.status = "active";
 
-  const duration =
+  const dur =
     type === "finale"
       ? arena.settings.roundDurationFinal
       : arena.settings.roundDurationPre;
@@ -180,26 +200,22 @@ export async function startRound(type: RoundType) {
   const now = Date.now();
 
   arena.roundStartTime = now;
-  arena.roundCutoff = now + duration * 1000;
+  arena.roundCutoff = now + dur * 1000;
   arena.graceEnd = arena.roundCutoff + arena.settings.graceSeconds * 1000;
 
-  emitLog({
-    type: "arena",
-    message: `Ronde gestart (${type}) – ${duration}s`,
-  });
+  emitLog({ type: "arena", message: `Ronde gestart (${type})` });
 
   await emitArena();
 
   io.emit("round:start", {
     round: arena.round,
     type,
-    duration,
+    duration: dur,
   });
 }
 
 export async function endRound() {
   if (arena.status === "active") {
-    // → GRACE
     arena.status = "grace";
     await emitArena();
 
@@ -214,7 +230,6 @@ export async function endRound() {
   }
 
   if (arena.status === "grace") {
-    // → ENDED
     arena.status = "ended";
 
     await recomputePositions();
@@ -225,8 +240,8 @@ export async function endRound() {
 
     const top3 = arena.players.slice(0, 3).map((p) => ({
       id: p.id,
-      display_name: p.display_name,
       username: p.username,
+      display_name: p.display_name,
       diamonds: p.score,
     }));
 
@@ -247,12 +262,12 @@ export async function endRound() {
 }
 
 /* ============================================================================
-   ARENA MGMT (voor server.ts & admin)
+   ARENA MANAGEMENT (Compatibel met server.ts & admin frontend)
 ============================================================================ */
 
 /**
- * Oude API naam die server.ts verwacht:
- *  arenaJoin(tiktok_id, display_name, username)
+ * arenaJoin(tiktok_id, display_name, username)
+ * Wordt gebruikt door server.ts → ADD TO ARENA
  */
 export async function arenaJoin(
   tiktok_id: string,
@@ -261,17 +276,15 @@ export async function arenaJoin(
 ) {
   const id = String(tiktok_id);
 
-  if (arena.players.some((p) => p.id === id)) {
-    // al in arena, niks doen
-    return;
-  }
+  if (arena.players.some((p) => p.id === id)) return;
 
-  // init score = 0, recomputePositions haalt echte score op uit DB
   arena.players.push({
     id,
     username: username.replace(/^@+/, "").toLowerCase(),
     display_name,
     score: 0,
+    boosters: [],            // twist-engine expects this
+    eliminated: false,       // twist-engine expects this
     positionStatus: "alive",
   });
 
@@ -279,16 +292,16 @@ export async function arenaJoin(
 }
 
 /**
- * Oude API naam die server.ts verwacht:
- *  arenaLeave(tiktok_id)
+ * arenaLeave(tiktok_id)
+ * Wordt gebruikt door server.ts → ELIMINATE
  */
 export async function arenaLeave(tiktok_id: string) {
   const id = String(tiktok_id);
+
   const idx = arena.players.findIndex((p) => p.id === id);
   if (idx === -1) return;
 
   const p = arena.players[idx];
-
   arena.players.splice(idx, 1);
 
   emitLog({
@@ -300,8 +313,7 @@ export async function arenaLeave(tiktok_id: string) {
 }
 
 /**
- * Oude API naam: arenaClear()
- * Gebruikt bij startGame / hardResetGame
+ * arenaClear() — gebruikt door startGame(), hardResetGame(), resetArena()
  */
 export async function arenaClear() {
   arena.players = [];
@@ -315,13 +327,13 @@ export async function arenaClear() {
 
   arena.lastSortedAt = Date.now();
 
-  emitLog({ type: "system", message: "Arena leeg" });
+  emitLog({ type: "system", message: "Arena volledig geleegd" });
 
   await emitArena();
 }
 
 /**
- * Nieuwe directe admin-API via username (optioneel te blijven gebruiken)
+ * addToArena(username) — moderne admin call
  */
 export async function addToArena(username: string, resolveUser: Function) {
   const clean = username.replace(/^@+/, "").toLowerCase();
@@ -337,6 +349,8 @@ export async function addToArena(username: string, resolveUser: Function) {
     username: user.username,
     display_name: user.display_name,
     score: 0,
+    boosters: [],
+    eliminated: false,
     positionStatus: "alive",
   });
 
@@ -349,19 +363,19 @@ export async function addToArena(username: string, resolveUser: Function) {
 }
 
 /**
- * Elimineer speler op basis van username (gebruikt door twists & admin)
+ * eliminate(username) — gebruikt door twists & admin panel
  */
 export async function eliminate(username: string) {
   const clean = username.replace(/^@+/, "").toLowerCase();
 
-  const index = arena.players.findIndex(
+  const idx = arena.players.findIndex(
     (p) => p.username.toLowerCase() === clean
   );
-  if (index === -1) throw new Error("Gebruiker zit niet in arena");
 
-  const p = arena.players[index];
+  if (idx === -1) throw new Error("Gebruiker zit niet in arena");
 
-  arena.players.splice(index, 1);
+  const p = arena.players[idx];
+  arena.players.splice(idx, 1);
 
   emitLog({
     type: "elim",
@@ -372,7 +386,7 @@ export async function eliminate(username: string) {
 }
 
 /**
- * Queue → arena (wordt door server aangeroepen)
+ * addFromQueue(user) — queue → arena (server.ts)
  */
 export async function addFromQueue(user: any) {
   arena.players.push({
@@ -380,6 +394,8 @@ export async function addFromQueue(user: any) {
     username: user.username,
     display_name: user.display_name,
     score: 0,
+    boosters: [],
+    eliminated: false,
     positionStatus: "alive",
   });
 
@@ -387,7 +403,7 @@ export async function addFromQueue(user: any) {
 }
 
 /* ============================================================================
-   RESET / SETTINGS / FORCE SORT
+   SETTINGS / RESET
 ============================================================================ */
 
 export async function resetArena() {
@@ -406,11 +422,15 @@ export async function updateArenaSettings(
 
   emitLog({
     type: "system",
-    message: `Settings gewijzigd: ${JSON.stringify(newSettings)}`,
+    message: `Settings aangepast: ${JSON.stringify(newSettings)}`,
   });
 
   await emitArena();
 }
+
+/* ============================================================================
+   FORCE SORT
+============================================================================ */
 
 export async function forceSort() {
   await recomputePositions();
@@ -478,21 +498,33 @@ setInterval(async () => {
 }, 1000);
 
 /* ============================================================================
-   DEFAULT EXPORT (optioneel gebruikt)
+   🟩 FINAL EXPORT — EXACT WAT server.ts VERWACHT
 ============================================================================ */
+
 export default {
+  // Basic getters
   getArena,
   getArenaSettings,
+
+  // Emit helpers
   emitArena,
+
+  // Rounds
   startRound,
   endRound,
+
+  // Arena mgmt (legacy + modern)
   arenaJoin,
   arenaLeave,
   arenaClear,
   addToArena,
   eliminate,
   addFromQueue,
+
+  // Settings / reset
   updateArenaSettings,
   resetArena,
+
+  // Utility
   forceSort,
 };
