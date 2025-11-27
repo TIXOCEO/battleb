@@ -1,9 +1,9 @@
 /* ============================================================================
-   adminTypes.ts — BattleBox v13.2 (GIFTS-DRIVEN EDITION, FIXED)
-   ✔ Volledig gesynchroniseerd met backend
-   ✔ Alle inbound events correct toegevoegd (hosts, hostsActiveChanged)
-   ✔ Promote/demote verwijderd
-   ✔ Geen build errors meer
+   adminTypes.ts — BattleBox v15
+   ✔ Gesynchroniseerd met server.ts v7 & game-engine v15
+   ✔ Round-based scoring compatible
+   ✔ Correcte arena structuur
+   ✔ Correcte leaderboards & stats
 ============================================================================ */
 
 /* ================================
@@ -22,8 +22,9 @@ export interface ArenaPlayer {
   display_name: string;
   username: string;
   score: number;
+
   boosters: string[];
-  status: "alive" | "eliminated";
+  status: "alive" | "eliminated"; // legacy, UI uses positionStatus
   positionStatus: ArenaPlayerStatus;
 
   is_vip?: boolean;
@@ -34,7 +35,7 @@ export interface ArenaPlayer {
 }
 
 /* ================================
-   ARENA STATE
+   ARENA STATE (FULL v15)
 ================================ */
 export interface ArenaState {
   players: ArenaPlayer[];
@@ -43,13 +44,19 @@ export interface ArenaState {
   type: "quarter" | "finale";
 
   status: "idle" | "active" | "grace" | "ended";
+
+  /** UI convenience */
   timeLeft: number;
+
+  /** shortcut: status === "active" */
   isRunning: boolean;
 
+  /** Real timestamps (ms) */
   roundStartTime: number;
   roundCutoff: number;
   graceEnd: number;
 
+  /** TOTAL settings structure */
   settings: {
     roundDurationPre: number;
     roundDurationFinal: number;
@@ -57,6 +64,10 @@ export interface ArenaState {
     forceEliminations: boolean;
   };
 
+  /** Finale baseline indicator */
+  firstFinalRound: number | null;
+
+  /** Used for UI resorting logic */
   lastSortedAt: number;
 }
 
@@ -150,7 +161,7 @@ export interface ArenaSettings {
 }
 
 /* ================================
-   LEADERBOARDS (GIFTS-DRIVEN)
+   LEADERBOARDS — GIFTS DRIVEN
 ================================ */
 export interface PlayerLeaderboardEntry {
   tiktok_id: string;
@@ -167,7 +178,7 @@ export interface GifterLeaderboardEntry {
 }
 
 /* ============================================================================
-   INITIAL SNAPSHOT
+   INITIAL SNAPSHOT — EXACT copy of server.ts
 ============================================================================ */
 export interface InitialSnapshot {
   arena: ArenaState;
@@ -187,9 +198,9 @@ export interface InitialSnapshot {
 
   stats:
     | {
-        total_players?: number;
-        total_player_diamonds?: number;
-        total_host_diamonds?: number;
+        totalPlayers: number;
+        totalPlayerDiamonds: number;
+        totalHostDiamonds: number;
       }
     | null;
 
@@ -199,15 +210,11 @@ export interface InitialSnapshot {
 
 /* ============================================================================
    SOCKET INBOUND (BACKEND → FRONTEND)
-   MUST MATCH server.ts EXACTLY
 ============================================================================ */
 export interface AdminSocketInbound {
   updateArena: (arena: ArenaState) => void;
 
-  updateQueue: (data: {
-    open: boolean;
-    entries: QueueEntry[];
-  }) => void;
+  updateQueue: (q: { open: boolean; entries: QueueEntry[] }) => void;
 
   log: (log: LogEntry) => void;
   initialLogs: (logs: LogEntry[]) => void;
@@ -226,29 +233,20 @@ export interface AdminSocketInbound {
 
   hostDiamonds: (data: { username: string; total: number }) => void;
 
-  /** SETTINGS (nodig) */
   settings: (settings: ArenaSettings) => void;
 
-  /** HOSTS (ontbrak → build error) */
   hosts: (rows: HostProfile[]) => void;
 
-  /** HOSTS ACTIVE CHANGE (backend stuurt dit ook) */
-  hostsActiveChanged: (payload: {
-    username: string;
-    tiktok_id: string;
-  }) => void;
+  hostsActiveChanged: (payload: { username: string; tiktok_id: string }) => void;
 
-  /** Ronde events */
+  /** Round events */
   "round:start": (payload: {
     round: number;
     type: "quarter" | "finale";
     duration: number;
   }) => void;
 
-  "round:grace": (payload: {
-    round: number;
-    grace: number;
-  }) => void;
+  "round:grace": (payload: { round: number; grace: number }) => void;
 
   "round:end": (payload: {
     round: number;
@@ -269,10 +267,7 @@ export interface AdminSocketInbound {
 export interface AdminSocketOutbound {
   ping: () => void;
 
-  getInitialSnapshot: (
-    payload: {},
-    ack: (snap: InitialSnapshot) => void
-  ) => void;
+  getInitialSnapshot: (payload: {}, ack: (snap: InitialSnapshot) => void) => void;
 
   getHosts: (
     payload: {},
@@ -291,20 +286,6 @@ export interface AdminSocketOutbound {
 
   setActiveHost: (
     payload: { id: number },
-    ack: (res: AdminAckResponse) => void
-  ) => void;
-
-  getSettings: (
-    payload: {},
-    ack: (res: {
-      success: boolean;
-      settings: ArenaSettings;
-      gameActive: boolean;
-    }) => void
-  ) => void;
-
-  updateSettings: (
-    payload: ArenaSettings,
     ack: (res: AdminAckResponse) => void
   ) => void;
 
@@ -341,10 +322,7 @@ export interface AdminSocketOutbound {
     ack: (res: AdminAckResponse) => void
   ) => void;
 
-  endRound: (
-    payload: {},
-    ack: (res: AdminAckResponse) => void
-  ) => void;
+  endRound: (payload: {}, ack: (res: AdminAckResponse) => void) => void;
 
   giveTwist: (
     payload: { username: string; twist: string },
