@@ -1,6 +1,6 @@
 // ============================================================================
-// frontend/lib/socketClient.ts — BattleBox v13.0 (STORELESS VERSION)
-// Realtime backend connector — volledig in sync met backend/adminTypes
+// frontend/lib/socketClient.ts — BattleBox v15 (SYNCED EDITION)
+// Realtime backend connector — volledig in sync met backend v7 & adminTypes v15
 // ============================================================================
 
 import { io, Socket } from "socket.io-client";
@@ -26,7 +26,7 @@ const ADMIN_TOKEN =
   process.env.NEXT_PUBLIC_ADMIN_TOKEN || "supergeheim123";
 
 // ============================================================================
-// SINGLETON
+// SOCKET SINGLETON
 // ============================================================================
 declare global {
   // eslint-disable-next-line no-var
@@ -34,7 +34,7 @@ declare global {
 }
 
 // ============================================================================
-// MAIN SOCKET
+// MAIN SOCKET INSTANCE
 // ============================================================================
 export function getAdminSocket(): Socket<
   AdminSocketInbound,
@@ -56,13 +56,15 @@ export function getAdminSocket(): Socket<
   // CONNECT
   // ==========================================================================
   socket.on("connect", () => {
-    console.log("✔ Verbonden met backend");
+    console.log("✔ Verbonden met BattleBox-backend");
 
     socket.emit("ping");
 
-    socket.emit("getInitialSnapshot", {}, (snap: InitialSnapshot) => {});
+    // Initial snapshot
+    socket.emit("getInitialSnapshot", {}, (_snap: InitialSnapshot) => {});
+
+    // Hosts lijst
     socket.emit("getHosts", {}, () => {});
-    socket.emit("getSettings", {}, () => {});
   });
 
   // ==========================================================================
@@ -86,27 +88,32 @@ export function getAdminSocket(): Socket<
   }, 10000);
 
   // ==========================================================================
-  // INBOUND EVENTS
+  // INBOUND EVENTS (Backend → Frontend)
   // ==========================================================================
   socket.on("updateArena", (_arena: ArenaState) => {});
   socket.on("updateQueue", (_q: { open: boolean; entries: QueueEntry[] }) => {});
+
   socket.on("log", (_log: LogEntry) => {});
   socket.on("initialLogs", (_rows: LogEntry[]) => {});
+
   socket.on("leaderboardPlayers", (_rows: PlayerLeaderboardEntry[]) => {});
   socket.on("leaderboardGifters", (_rows: GifterLeaderboardEntry[]) => {});
-  socket.on("streamStats", (_stats: any) => {});
-  socket.on("gameSession", (_s) => {});
-  socket.on("hosts", (_rows: HostProfile[]) => {});
-  socket.on("hostsActiveChanged", (_p) => {});
-  socket.on("settings", (_settings: ArenaSettings) => {});
 
-  socket.on("round:start", (_d: any) => {});
-  socket.on("round:grace", (_d: any) => {});
-  socket.on("round:end", () => {});
+  socket.on("streamStats", (_stats) => {});
+  socket.on("gameSession", (_session) => {});
+
+  socket.on("hosts", (_hosts: HostProfile[]) => {});
+  socket.on("hostsActiveChanged", (_payload) => {});
+
+  socket.on("settings", (_s: ArenaSettings) => {});
+
+  socket.on("round:start", (_data) => {});
+  socket.on("round:grace", (_data) => {});
+  socket.on("round:end", (_data) => {});
 
   socket.on("hostDiamonds", (_d: { username: string; total: number }) => {});
 
-  // ❌ VERWIJDERD: socket.on("pong")
+  // No pong event — intentionally removed
 
   globalThis.__adminSocket = socket;
   return socket;
