@@ -1,10 +1,10 @@
 /* ============================================================================
-   5-game-engine.ts — BattleBox Arena Engine v14.0 FINAL
-   ✔ Compatibel met server.ts v6.x
-   ✔ Compatible met twist-engine v3.x (boosters & state mapping)
-   ✔ Gifts-driven scores
-   ✔ Full queue support
-   ✔ No disable buttons bug
+   5-game-engine.ts — BattleBox Arena Engine v14.3
+   ✔ Danger tijdens ronde (pos 6–8)
+   ✔ Eliminations alleen NA de ronde
+   ✔ Idle → alles alive
+   ✔ Immune blijft immune
+   ✔ Fix: nieuwe spelers nooit meteen elimination
 ============================================================================ */
 
 import pool from "../db";
@@ -23,13 +23,8 @@ export interface ArenaPlayer {
   display_name: string;
   score: number;
 
-  // engine v14 uses boosters[] + positionStatus = twist compatible
   boosters: string[];
-
-  // UI-driven state
   positionStatus: "alive" | "danger" | "elimination" | "immune" | "shielded";
-
-  // twist-engine v3 compatibility virtual flag
   eliminated?: boolean;
 }
 
@@ -42,7 +37,6 @@ interface ArenaSettings {
 
 interface ArenaState {
   players: ArenaPlayer[];
-
   round: number;
   type: RoundType;
   status: ArenaStatus;
@@ -81,7 +75,7 @@ let arena: ArenaState = {
 };
 
 /* ============================================================================
-   BASIC GETTERS FOR server.ts
+   GETTERS
 ============================================================================ */
 
 export function getArena(): ArenaState {
@@ -113,51 +107,79 @@ async function getPlayerScore(tiktokId: string): Promise<number> {
 }
 
 /* ============================================================================
-   SORTING & STATUS ASSIGNMENT
+   POSITION COMPUTATION — jouw regels!
 ============================================================================ */
 
 async function recomputePositions() {
-  // refresh scores
+  const status = arena.status;
+
+  // Update all scores first
   for (const p of arena.players) {
     p.score = await getPlayerScore(p.id);
   }
 
+  // Sort high → low score
   arena.players.sort((a, b) => b.score - a.score);
 
   const total = arena.players.length;
 
+  // ----------------------------------------------------------------------------
+  // IDLE MODE — geen danger, geen elimination
+  // ----------------------------------------------------------------------------
+  if (status === "idle") {
+    for (const p of arena.players) {
+      p.positionStatus = p.boosters.includes("immune") ? "immune" : "alive";
+      p.eliminated = false;
+    }
+    arena.lastSortedAt = Date.now();
+    return;
+  }
+
+  // ----------------------------------------------------------------------------
+  // ACTIVE + GRACE — gevaarzones, maar GEEN eliminations!
+  // pos 1–5 alive
+  // pos 6–8 danger
+  // pos >8 alive
+  // onder 6 spelers: alles alive
+  // ----------------------------------------------------------------------------
   for (let i = 0; i < total; i++) {
     const p = arena.players[i];
 
+    // Immune = overschrijft alles
     if (p.boosters.includes("immune")) {
       p.positionStatus = "immune";
+      p.eliminated = false;
       continue;
     }
 
-    // lowest 3 = elimination
-    if (i >= total - 3) {
-      p.positionStatus = "elimination";
-      p.eliminated = true;
-    }
-
-    // next 2 = danger
-    else if (i >= total - 5) {
-      p.positionStatus = "danger";
-      p.eliminated = false;
-    }
-
-    // others = alive
-    else {
+    if (total < 6) {
       p.positionStatus = "alive";
       p.eliminated = false;
+      continue;
     }
+
+    if (i <= 4) {
+      p.positionStatus = "alive";
+      p.eliminated = false;
+      continue;
+    }
+
+    if (i >= 5 && i <= 7) {
+      p.positionStatus = "danger";
+      p.eliminated = false;
+      continue;
+    }
+
+    // Everyone above pos 8 = safe
+    p.positionStatus = "alive";
+    p.eliminated = false;
   }
 
   arena.lastSortedAt = Date.now();
 }
 
 /* ============================================================================
-   EMIT ARENA SNAPSHOT
+   EMIT SNAPSHOT
 ============================================================================ */
 
 export async function emitArena() {
@@ -192,12 +214,11 @@ export async function startRound(type: RoundType) {
   arena.round += 1;
   arena.status = "active";
 
+  const now = Date.now();
   const dur =
     type === "finale"
       ? arena.settings.roundDurationFinal
       : arena.settings.roundDurationPre;
-
-  const now = Date.now();
 
   arena.roundStartTime = now;
   arena.roundCutoff = now + dur * 1000;
@@ -215,9 +236,11 @@ export async function startRound(type: RoundType) {
 }
 
 export async function endRound() {
+  // -----------------------
+  // ACTIVE → GRACE
+  // -----------------------
   if (arena.status === "active") {
     arena.status = "grace";
-    await emitArena();
 
     emitLog({ type: "arena", message: "Grace gestart" });
 
@@ -226,17 +249,30 @@ export async function endRound() {
       grace: arena.settings.graceSeconds,
     });
 
+    await emitArena();
     return;
   }
 
+  // -----------------------
+  // GRACE → ENDED
+  // -----------------------
   if (arena.status === "grace") {
     arena.status = "ended";
 
     await recomputePositions();
 
+    // Bepaal ECHTE eliminaties: pos 6–8 (index 5–7)
     const doomed = arena.players
-      .filter((p) => p.positionStatus === "elimination")
+      .filter((_p, i) => i >= 5 && i <= 7)
       .map((p) => p.username);
+
+    // Markeer deze nu als elimination
+    arena.players.forEach((p, i) => {
+      if (i >= 5 && i <= 7) {
+        p.positionStatus = "elimination";
+        p.eliminated = true;
+      }
+    });
 
     const top3 = arena.players.slice(0, 3).map((p) => ({
       id: p.id,
@@ -262,13 +298,9 @@ export async function endRound() {
 }
 
 /* ============================================================================
-   ARENA MANAGEMENT (Compatibel met server.ts & admin frontend)
+   ARENA MANAGEMENT
 ============================================================================ */
 
-/**
- * arenaJoin(tiktok_id, display_name, username)
- * Wordt gebruikt door server.ts → ADD TO ARENA
- */
 export async function arenaJoin(
   tiktok_id: string,
   display_name: string,
@@ -283,18 +315,14 @@ export async function arenaJoin(
     username: username.replace(/^@+/, "").toLowerCase(),
     display_name,
     score: 0,
-    boosters: [],            // twist-engine expects this
-    eliminated: false,       // twist-engine expects this
+    boosters: [],
+    eliminated: false,
     positionStatus: "alive",
   });
 
   await emitArena();
 }
 
-/**
- * arenaLeave(tiktok_id)
- * Wordt gebruikt door server.ts → ELIMINATE
- */
 export async function arenaLeave(tiktok_id: string) {
   const id = String(tiktok_id);
 
@@ -304,17 +332,11 @@ export async function arenaLeave(tiktok_id: string) {
   const p = arena.players[idx];
   arena.players.splice(idx, 1);
 
-  emitLog({
-    type: "elim",
-    message: `${p.display_name} uit arena verwijderd`,
-  });
+  emitLog({ type: "elim", message: `${p.display_name} uit arena verwijderd` });
 
   await emitArena();
 }
 
-/**
- * arenaClear() — gebruikt door startGame(), hardResetGame(), resetArena()
- */
 export async function arenaClear() {
   arena.players = [];
   arena.round = 0;
@@ -332,9 +354,6 @@ export async function arenaClear() {
   await emitArena();
 }
 
-/**
- * addToArena(username) — moderne admin call
- */
 export async function addToArena(username: string, resolveUser: Function) {
   const clean = username.replace(/^@+/, "").toLowerCase();
 
@@ -354,40 +373,25 @@ export async function addToArena(username: string, resolveUser: Function) {
     positionStatus: "alive",
   });
 
-  emitLog({
-    type: "arena",
-    message: `${user.display_name} toegevoegd aan arena`,
-  });
+  emitLog({ type: "arena", message: `${user.display_name} toegevoegd aan arena` });
 
   await emitArena();
 }
 
-/**
- * eliminate(username) — gebruikt door twists & admin panel
- */
 export async function eliminate(username: string) {
   const clean = username.replace(/^@+/, "").toLowerCase();
 
-  const idx = arena.players.findIndex(
-    (p) => p.username.toLowerCase() === clean
-  );
-
+  const idx = arena.players.findIndex((p) => p.username.toLowerCase() === clean);
   if (idx === -1) throw new Error("Gebruiker zit niet in arena");
 
   const p = arena.players[idx];
   arena.players.splice(idx, 1);
 
-  emitLog({
-    type: "elim",
-    message: `${p.display_name} geëlimineerd`,
-  });
+  emitLog({ type: "elim", message: `${p.display_name} geëlimineerd` });
 
   await emitArena();
 }
 
-/**
- * addFromQueue(user) — queue → arena (server.ts)
- */
 export async function addFromQueue(user: any) {
   arena.players.push({
     id: String(user.tiktok_id),
@@ -403,7 +407,7 @@ export async function addFromQueue(user: any) {
 }
 
 /* ============================================================================
-   SETTINGS / RESET
+   SETTINGS
 ============================================================================ */
 
 export async function resetArena() {
@@ -413,10 +417,7 @@ export async function resetArena() {
 export async function updateArenaSettings(
   newSettings: Partial<ArenaState["settings"]>
 ) {
-  arena.settings = {
-    ...arena.settings,
-    ...newSettings,
-  };
+  arena.settings = { ...arena.settings, ...newSettings };
 
   io.emit("settings", arena.settings);
 
@@ -429,7 +430,7 @@ export async function updateArenaSettings(
 }
 
 /* ============================================================================
-   FORCE SORT
+   MANUAL SORT
 ============================================================================ */
 
 export async function forceSort() {
@@ -438,7 +439,7 @@ export async function forceSort() {
 }
 
 /* ============================================================================
-   TIMER LOOP — CORE ROUND LOGIC TICKS
+   TIMER LOOP — automated round transitions
 ============================================================================ */
 
 setInterval(async () => {
@@ -446,7 +447,6 @@ setInterval(async () => {
 
   const now = Date.now();
 
-  // ACTIVE → GRACE
   if (arena.status === "active" && now >= arena.roundCutoff) {
     arena.status = "grace";
 
@@ -464,67 +464,29 @@ setInterval(async () => {
     return;
   }
 
-  // GRACE → ENDED
   if (arena.status === "grace" && now >= arena.graceEnd) {
-    arena.status = "ended";
-
-    await recomputePositions();
-
-    const doomed = arena.players
-      .filter((p) => p.positionStatus === "elimination")
-      .map((p) => p.username);
-
-    const top3 = arena.players.slice(0, 3).map((p) => ({
-      id: p.id,
-      display_name: p.display_name,
-      username: p.username,
-      diamonds: p.score,
-    }));
-
-    io.emit("round:end", {
-      round: arena.round,
-      type: arena.type,
-      pendingEliminations: doomed,
-      top3,
-    });
-
-    emitLog({
-      type: "arena",
-      message: `⛔ Ronde beëindigd — eliminaties nodig (${doomed.length})`,
-    });
-
-    await emitArena();
+    await endRound();
+    return;
   }
 }, 1000);
 
 /* ============================================================================
-   🟩 FINAL EXPORT — EXACT WAT server.ts VERWACHT
+   EXPORT
 ============================================================================ */
 
 export default {
-  // Basic getters
   getArena,
   getArenaSettings,
-
-  // Emit helpers
   emitArena,
-
-  // Rounds
   startRound,
   endRound,
-
-  // Arena mgmt (legacy + modern)
   arenaJoin,
   arenaLeave,
   arenaClear,
   addToArena,
   eliminate,
   addFromQueue,
-
-  // Settings / reset
   updateArenaSettings,
   resetArena,
-
-  // Utility
   forceSort,
 };
