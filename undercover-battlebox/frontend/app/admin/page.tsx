@@ -54,7 +54,7 @@ export default function AdminDashboardPage() {
 
   const [hostDiamonds, setHostDiamonds] = useState(0);
 
-  /* INPUTS */
+  /* USER INPUTS */
   const [username, setUsername] = useState("");
   const [status, setStatus] = useState<string | null>(null);
 
@@ -76,31 +76,7 @@ export default function AdminDashboardPage() {
   const autoRef = useRef<HTMLDivElement | null>(null);
 
   /* ============================================
-     CONFIRM DELETE MODAL STATE
-  ============================================ */
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
-
-  function requestEliminate(username: string) {
-    setConfirmTarget(username);
-    setConfirmOpen(true);
-  }
-
-  function confirmDelete() {
-    if (confirmTarget) {
-      emitAdminWithUser("eliminate", confirmTarget);
-    }
-    setConfirmOpen(false);
-    setConfirmTarget(null);
-  }
-
-  function cancelDelete() {
-    setConfirmOpen(false);
-    setConfirmTarget(null);
-  }
-
-  /* ============================================
-     CLICK OUTSIDE FIX FOR AUTOCOMPLETE
+     CLICK OUTSIDE FOR AUTOCOMPLETE
   ============================================ */
   useEffect(() => {
     function handler(e: any) {
@@ -114,42 +90,51 @@ export default function AdminDashboardPage() {
   }, []);
 
   /* ============================================
-     SOCKET SETUP — v15
+     SOCKET SETUP — FIXED (no return)
   ============================================ */
   useEffect(() => {
     const socket = getAdminSocket();
 
+    // Arena and queue
     socket.on("updateArena", (data) => setArena(data));
-
     socket.on("updateQueue", (d) => {
       setQueue(d.entries ?? []);
       setQueueOpen(d.open ?? true);
     });
 
-    socket.on("log", (l) => setLogs((prev) => [l, ...prev].slice(0, 200)));
+    // Logs
+    socket.on("log", (l) => setLogs((p) => [l, ...p].slice(0, 200)));
     socket.on("initialLogs", (d) => setLogs(d.slice(0, 200)));
 
+    // Stats / Session
     socket.on("streamStats", (s) => setStreamStats(s));
     socket.on("gameSession", (s) => setGameSession(s));
 
+    // Leaderboards
     socket.on("leaderboardPlayers", (rows) => setPlayerLeaderboard(rows));
     socket.on("leaderboardGifters", (rows) => setGifterLeaderboard(rows));
 
+    // Host diamonds
     socket.on("hostDiamonds", (d) => setHostDiamonds(d.total));
 
+    // Round events
     socket.on("round:start", (d) =>
       setStatus(`▶️ Ronde gestart (${d.type}) – ${d.duration}s`)
     );
     socket.on("round:grace", (d) =>
       setStatus(`⏳ Grace periode (${d.grace}s)`)
     );
-    socket.on("round:end", () => setStatus("⛔ Ronde beëindigd – eliminatie"));
+    socket.on("round:end", () =>
+      setStatus("⛔ Ronde beëindigd – eliminatiefase")
+    );
 
     socket.on("connect_error", () =>
       setStatus("❌ Socket verbinding weggevallen")
     );
 
-    return () => socket.removeAllListeners();
+    return () => {
+      socket.removeAllListeners();
+    };
   }, []);
 
   /* ============================================
@@ -162,12 +147,10 @@ export default function AdminDashboardPage() {
       if (!snap) return;
 
       if (snap.arena) setArena(snap.arena);
-
       if (snap.queue) {
         setQueue(snap.queue.entries ?? []);
         setQueueOpen(snap.queue.open ?? true);
       }
-
       if (snap.logs) setLogs(snap.logs.slice(0, 200));
       if (snap.stats) setStreamStats(snap.stats);
       if (snap.gameSession) setGameSession(snap.gameSession);
@@ -207,14 +190,21 @@ export default function AdminDashboardPage() {
     const socket = getAdminSocket();
     const formatted = uname.startsWith("@") ? uname : `@${uname}`;
 
+    if (
+      event === "eliminate" &&
+      !confirm(`Weet je zeker dat je ${formatted} wilt verwijderen?`)
+    ) {
+      return;
+    }
+
     setStatus(`Bezig met ${event}...`);
     socket.emit(event, { username: formatted }, (res: AdminAckResponse) => {
       setStatus(res?.success ? "✅ Uitgevoerd" : `❌ ${res?.message}`);
     });
   };
 
-  /* ============================================
-     AUTOFILL SEARCH (DEBOUNCED)
+/* ============================================
+     AUTOCOMPLETE SEARCH
   ============================================ */
   useEffect(() => {
     const q = typing.trim().replace(/^@+/, "");
@@ -237,9 +227,6 @@ export default function AdminDashboardPage() {
     return () => clearTimeout(handle);
   }, [typing]);
 
-  /* ============================================
-     AUTOFILL APPLY
-  ============================================ */
   function applyAutoFill(user: SearchUser) {
     if (!user) return;
 
@@ -277,14 +264,6 @@ export default function AdminDashboardPage() {
   const canStopRound = arenaStatus === "active";
   const canGraceEnd = arenaStatus === "grace";
 
-  const needsElimination =
-    (arena?.settings?.forceEliminations ?? true) &&
-    arenaStatus === "ended" &&
-    hasDoomed;
-
-  /* ============================================
-     TIMER + PROGRESS BAR
-  ============================================ */
   const roundProgress = useMemo(() => {
     if (!arena) return 0;
     const now = Date.now();
@@ -311,7 +290,7 @@ export default function AdminDashboardPage() {
     return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   };
 
-const colorForPosition = (p: any) => {
+  const colorForPosition = (p: any) => {
     if (!arena || arena.status === "idle")
       return "bg-gray-50 border-gray-200";
 
@@ -328,38 +307,10 @@ const colorForPosition = (p: any) => {
   };
 
   /* ============================================
-     UI START
+     UI
   ============================================ */
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
-      {/* CONFIRM POPUP */}
-      {confirmOpen && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl p-6 w-80 text-center">
-            <h3 className="font-bold mb-3 text-lg">Bevestigen</h3>
-            <p className="text-sm mb-4">
-              Weet je zeker dat je{" "}
-              <strong>{confirmTarget}</strong> wilt verwijderen?
-            </p>
-
-            <div className="flex justify-center gap-3">
-              <button
-                onClick={cancelDelete}
-                className="px-4 py-2 bg-gray-200 rounded-lg text-sm"
-              >
-                Annuleer
-              </button>
-
-              <button
-                onClick={confirmDelete}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm"
-              >
-                Verwijder
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* HEADER */}
       <header className="mb-6 relative">
@@ -371,8 +322,7 @@ const colorForPosition = (p: any) => {
                 Undercover BattleBox – Admin
               </div>
               <div className="text-xs text-gray-500">
-                Verbonden als{" "}
-                <span className="font-semibold text-green-600">Admin</span>
+                Verbonden als <span className="font-semibold text-green-600">Admin</span>
               </div>
             </div>
           </div>
@@ -384,7 +334,7 @@ const colorForPosition = (p: any) => {
           </div>
         </div>
 
-        {/* TIMER BAR */}
+        {/* TIMER */}
         {arena && arena.status !== "idle" && (
           <div className="w-full bg-gray-300 rounded-full h-4 shadow-inner relative overflow-hidden">
             <div
@@ -396,21 +346,14 @@ const colorForPosition = (p: any) => {
               `}
               style={{ width: `${roundProgress}%` }}
             />
+
             <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold">
               {arena.status === "active" &&
-                formatTime(
-                  Math.max(
-                    0,
-                    Math.floor((arena.roundCutoff - Date.now()) / 1000)
-                  )
-                )}
+                formatTime(Math.max(0, Math.floor((arena.roundCutoff - Date.now()) / 1000)))}
+
               {arena.status === "grace" &&
-                formatTime(
-                  Math.max(
-                    0,
-                    Math.floor((arena.graceEnd - Date.now()) / 1000)
-                  )
-                )}
+                formatTime(Math.max(0, Math.floor((arena.graceEnd - Date.now()) / 1000)))}
+
               {arena.status === "ended" && "00:00"}
             </div>
           </div>
@@ -418,150 +361,132 @@ const colorForPosition = (p: any) => {
       </header>
 
       {/* ============================================================
-          SPELBESTURING (HERSTELD!)
+          SPELBESTURING — HERSTELD
       ============================================================ */}
-      <section className="bg-white rounded-2xl shadow p-4 mb-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="flex flex-col gap-3">
-          <div className="text-sm font-semibold">Spelbesturing</div>
+      <section className="bg-white rounded-2xl shadow p-4 mb-6">
 
-          <div className="flex gap-2 flex-wrap">
-            <button
-              onClick={() => emitAdmin("startGame")}
-              disabled={gameSession.active}
-              className={`px-3 py-1.5 rounded-full text-xs ${
-                gameSession.active
-                  ? "bg-gray-400 text-white cursor-not-allowed"
-                  : "bg-green-600 text-white"
-              }`}
-            >
-              Start spel
-            </button>
+        <h2 className="text-sm font-semibold mb-3">Spelbesturing</h2>
 
-            <button
-              onClick={() => emitAdmin("stopGame")}
-              disabled={!gameSession.active}
-              className={`px-3 py-1.5 rounded-full text-xs ${
-                !gameSession.active
-                  ? "bg-gray-400 text-white cursor-not-allowed"
-                  : "bg-yellow-600 text-white"
-              }`}
-            >
-              Stop spel
-            </button>
-          </div>
+        <div className="flex flex-wrap gap-2">
 
-          <div>
-            <div className="text-xs text-gray-600 mb-1">Ronde acties</div>
-            <div className="flex gap-2 flex-wrap">
-              <button
-                onClick={() => emitAdmin("startRound", { type: "quarter" })}
-                disabled={!canStartRound}
-                className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full text-xs disabled:bg-gray-400"
-              >
-                Start voorronde
-              </button>
+          <button
+            onClick={() =>
+              emitAdmin("startRound", { type: "quarter" })
+            }
+            disabled={!canStartRound}
+            className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full text-xs disabled:bg-gray-400"
+          >
+            Start voorronde
+          </button>
 
-              <button
-                onClick={() => emitAdmin("startRound", { type: "finale" })}
-                disabled={!canStartRound}
-                className="px-3 py-1.5 bg-black text-white rounded-full text-xs disabled:bg-gray-400"
-              >
-                Start finale
-              </button>
+          <button
+            onClick={() => emitAdmin("startRound", { type: "semi" })}
+            disabled={!canStartRound}
+            className="px-3 py-1.5 bg-orange-500 text-white rounded-full text-xs disabled:bg-gray-400"
+          >
+            Start halve finale
+          </button>
 
-              <button
-                onClick={() => emitAdmin("endRound")}
-                disabled={!canStopRound && !canGraceEnd}
-                className="px-3 py-1.5 bg-red-600 text-white rounded-full text-xs disabled:bg-gray-400"
-              >
-                Stop ronde
-              </button>
-            </div>
+          <button
+            onClick={() => emitAdmin("startRound", { type: "finale" })}
+            disabled={!canStartRound}
+            className="px-3 py-1.5 bg-purple-600 text-white rounded-full text-xs disabled:bg-gray-400"
+          >
+            Start finale
+          </button>
 
-            {needsElimination && (
-              <p className="mt-2 text-xs text-red-600">
-                ⚠ Eerst alle eliminaties uitvoeren!
-              </p>
-            )}
-          </div>
+          <button
+            onClick={() => emitAdmin("endRound")}
+            disabled={!canStopRound}
+            className="px-3 py-1.5 bg-gray-800 text-white rounded-full text-xs disabled:bg-gray-400"
+          >
+            Stop ronde
+          </button>
+
+          <button
+            onClick={() => emitAdmin("endGrace")}
+            disabled={!canGraceEnd}
+            className="px-3 py-1.5 bg-yellow-600 text-white rounded-full text-xs disabled:bg-gray-400"
+          >
+            Grace → Eliminaties
+          </button>
         </div>
+      </section>
 
-        {/* ============================================================
-            SPELERSACTIES
-        ============================================================ */}
-        <div className="lg:col-span-2 flex flex-col gap-3">
-          <div className="text-sm font-semibold">Speleracties</div>
+      {/* ============================================================
+          SPELERSACTIES
+      ============================================================ */}
+      <section className="bg-white rounded-2xl shadow p-4 mb-6">
 
-          <div className="flex flex-col md:flex-row gap-3 md:items-end relative">
-            {/* USERNAME INPUT */}
-            <div className="flex-1">
-              <label className="text-xs text-gray-600 font-semibold mb-1 block">
-                @username (zoek)
-              </label>
+        <h2 className="text-sm font-semibold mb-3">Speleracties</h2>
 
-              <div className="relative" ref={autoRef}>
-                <input
-                  type="text"
-                  value={username}
-                  onFocus={() => {
-                    setActiveAutoField("main");
-                    setTyping(username);
-                    setShowResults(true);
-                  }}
-                  onChange={(e) => {
-                    setUsername(e.target.value);
-                    setActiveAutoField("main");
-                    setTyping(e.target.value);
-                    setShowResults(true);
-                  }}
-                  placeholder="@zoeken"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                />
+        <div className="flex flex-col md:flex-row gap-3 md:items-end relative">
 
-                {/* AUTOCOMPLETE MAIN */}
-                {showResults &&
-                  searchResults.length > 0 &&
-                  activeAutoField === "main" && (
-                    <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
-                      {searchResults.map((u) => (
-                        <div
-                          key={u.tiktok_id}
-                          onClick={() => applyAutoFill(u)}
-                          className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
-                        >
-                          <span className="font-semibold">
-                            {u.display_name}
-                          </span>{" "}
-                          <span className="text-gray-500">@{u.username}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-              </div>
+          <div className="flex-1">
+            <label className="text-xs text-gray-600 font-semibold mb-1 block">
+              @username (zoek)
+            </label>
+
+            <div className="relative" ref={autoRef}>
+              <input
+                type="text"
+                value={username}
+                onFocus={() => {
+                  setActiveAutoField("main");
+                  setTyping(username);
+                  setShowResults(true);
+                }}
+                onChange={(e) => {
+                  setUsername(e.target.value);
+                  setActiveAutoField("main");
+                  setTyping(e.target.value);
+                  setShowResults(true);
+                }}
+                placeholder="@zoeken"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              />
+
+              {/* AUTOCOMPLETE */}
+              {showResults &&
+                searchResults.length > 0 &&
+                activeAutoField === "main" && (
+                  <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
+                    {searchResults.map((u) => (
+                      <div
+                        key={u.tiktok_id}
+                        onClick={() => applyAutoFill(u)}
+                        className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+                      >
+                        <span className="font-semibold">{u.display_name}</span>{" "}
+                        <span className="text-gray-500">@{u.username}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
             </div>
+          </div>
 
-            <div className="flex gap-2 text-xs">
-              <button
-                onClick={() => emitAdminWithUser("addToArena", username)}
-                className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full"
-              >
-                → Arena
-              </button>
+          <div className="flex gap-2 text-xs">
+            <button
+              onClick={() => emitAdminWithUser("addToArena", username)}
+              className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full"
+            >
+              → Arena
+            </button>
 
-              <button
-                onClick={() => emitAdminWithUser("addToQueue", username)}
-                className="px-3 py-1.5 bg-gray-800 text-white rounded-full"
-              >
-                → Queue
-              </button>
+            <button
+              onClick={() => emitAdminWithUser("addToQueue", username)}
+              className="px-3 py-1.5 bg-gray-800 text-white rounded-full"
+            >
+              → Queue
+            </button>
 
-              <button
-                onClick={() => requestEliminate(username)}
-                className="px-3 py-1.5 bg-red-600 text-white rounded-full"
-              >
-                Elimineer
-              </button>
-            </div>
+            <button
+              onClick={() => emitAdminWithUser("eliminate", username)}
+              className="px-3 py-1.5 bg-red-600 text-white rounded-full"
+            >
+              Elimineer
+            </button>
           </div>
         </div>
       </section>
@@ -570,14 +495,17 @@ const colorForPosition = (p: any) => {
           ARENA + QUEUE
       ============================================================ */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4 relative">
-        {/* HOST DIAMONDS BADGE */}
+
+        {/* Host Diamonds */}
         <div className="absolute md:left-1/2 md:-translate-x-1/2 md:translate-y-[-10px] right-2 top-[-6px] md:right-auto md:top-[-10px] z-20">
           <div className="bg-[#ff4d4f] text-white text-xs font-semibold px-3 py-1 rounded-full shadow-lg">
             Host: {fmt(hostDiamonds)} 💎
           </div>
         </div>
 
-        {/* ARENA */}
+        {/* =====================
+            ARENA
+        ===================== */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Arena</h2>
           <p className="text-sm text-gray-500 mb-4">
@@ -591,13 +519,14 @@ const colorForPosition = (p: any) => {
               players.map((p, idx) => (
                 <div
                   key={p.id}
-                  className={`relative rounded-lg p-3 border text-sm shadow ${colorForPosition(
-                    p
-                  )}`}
+                  className={`relative rounded-lg p-3 border text-sm shadow ${colorForPosition(p)}`}
                 >
-                  {/* REMOVE BUTTON */}
+
+                  {/* delete top right */}
                   <button
-                    onClick={() => requestEliminate(p.username)}
+                    onClick={() =>
+                      emitAdminWithUser("eliminate", p.username)
+                    }
                     className="absolute top-1 right-1 text-[10px] bg-red-600 text-white px-1.5 py-0.5 rounded shadow"
                   >
                     ✕
@@ -605,7 +534,7 @@ const colorForPosition = (p: any) => {
 
                   <div className="flex justify-between items-center">
                     <span className="font-bold">#{idx + 1}</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-300 text-gray-800">
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-300 text-gray-700">
                       {p.positionStatus}
                     </span>
                   </div>
@@ -620,7 +549,9 @@ const colorForPosition = (p: any) => {
 
                   {p.positionStatus === "elimination" && (
                     <button
-                      onClick={() => requestEliminate(p.username)}
+                      onClick={() =>
+                        emitAdminWithUser("eliminate", p.username)
+                      }
                       className="mt-2 px-2 py-1 text-[11px] rounded-full border border-red-300 text-red-700 bg-red-50"
                     >
                       Verwijder speler
@@ -641,9 +572,9 @@ const colorForPosition = (p: any) => {
           </div>
         </div>
 
-        {/* ===============================
+        {/* =====================
             QUEUE
-        =============================== */}
+        ===================== */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Wachtrij</h2>
           <p className="text-sm text-gray-500 mb-3">
@@ -677,12 +608,12 @@ const colorForPosition = (p: any) => {
                       </span>
                     )}
                     {q.is_fan && !q.is_vip && (
-                      <span className="px-2 py-0.5 text-[10px] rounded-full bg-blue-100 text-blue-700 border border-blue-300">
+                      <span className="px-2 py-0.5 text-[10px] rounded-full bg-blue-100 text-blue-700 border-blue-300">
                         Fan
                       </span>
                     )}
                     {q.priorityDelta > 0 && (
-                      <span className="px-2 py-0.5 text-[10px] rounded-full bg-purple-100 text-purple-700 border border-purple-300">
+                      <span className="px-2 py-0.5 text-[10px] rounded-full bg-purple-100 text-purple-700 border-purple-300">
                         Boost +{q.priorityDelta}
                       </span>
                     )}
@@ -695,14 +626,18 @@ const colorForPosition = (p: any) => {
 
                 <div className="flex gap-1 mt-2 sm:mt-0 justify-end">
                   <button
-                    onClick={() => emitAdminWithUser("addToArena", q.username)}
+                    onClick={() =>
+                      emitAdminWithUser("addToArena", q.username)
+                    }
                     className="px-2 py-1 rounded-full border border-[#ff4d4f] text-[#ff4d4f]"
                   >
                     → Arena
                   </button>
 
                   <button
-                    onClick={() => requestRemoveFromQueue(q.username)}
+                    onClick={() =>
+                      emitAdminWithUser("removeFromQueue", q.username)
+                    }
                     className="px-2 py-1 rounded-full border border-red-300 text-red-700 bg-red-50"
                   >
                     ✕
@@ -711,9 +646,7 @@ const colorForPosition = (p: any) => {
               </div>
             ))
           ) : (
-            <div className="text-sm text-gray-500 italic">
-              Wachtrij is leeg.
-            </div>
+            <div className="text-sm text-gray-500 italic">Wachtrij is leeg.</div>
           )}
         </div>
       </section>
@@ -723,6 +656,8 @@ const colorForPosition = (p: any) => {
       ============================================================ */}
       <section className="mt-4">
         <div className="bg-white rounded-2xl shadow p-0 overflow-hidden">
+          
+          {/* Tabs */}
           <div className="w-full flex justify-end p-3 border-b border-gray-200 bg-gray-50">
             <div className="flex gap-2">
               <button
@@ -760,6 +695,7 @@ const colorForPosition = (p: any) => {
           {/* PLAYER LB */}
           {activeLbTab === "players" && (
             <div className="p-4 max-h-96 overflow-y-auto text-sm">
+
               <h2 className="text-xl font-semibold mb-2">Player Leaderboard</h2>
               <p className="text-xs text-gray-500 mb-3">
                 Diamanten ontvangen in deze stream (total_score)
@@ -794,14 +730,11 @@ const colorForPosition = (p: any) => {
                         (acc, p) => acc + (p.total_score || 0),
                         0
                       )
-                    )}{" "}
-                    💎
+                    )} 💎
                   </div>
                 </>
               ) : (
-                <div className="text-sm text-gray-500 italic">
-                  Geen spelers gevonden.
-                </div>
+                <div className="text-sm text-gray-500 italic">Geen spelers gevonden.</div>
               )}
             </div>
           )}
@@ -809,9 +742,10 @@ const colorForPosition = (p: any) => {
           {/* GIFTER LB */}
           {activeLbTab === "gifters" && (
             <div className="p-4 max-h-96 overflow-y-auto text-sm">
+
               <h2 className="text-xl font-semibold mb-2">Gifter Leaderboard</h2>
               <p className="text-xs text-gray-500 mb-3">
-                Diamanten verstuurd (huidige stream)
+                Diamanten verstuurd in deze stream
               </p>
 
               {gifterLeaderboard.length ? (
@@ -843,14 +777,11 @@ const colorForPosition = (p: any) => {
                         (acc, g) => acc + (g.total_diamonds || 0),
                         0
                       )
-                    )}{" "}
-                    💎
+                    )} 💎
                   </div>
                 </>
               ) : (
-                <div className="text-sm text-gray-500 italic">
-                  Geen gifters gevonden.
-                </div>
+                <div className="text-sm text-gray-500 italic">Geen gifters gevonden.</div>
               )}
             </div>
           )}
@@ -864,6 +795,7 @@ const colorForPosition = (p: any) => {
         <h2 className="text-xl font-semibold mb-4">Twists</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
           {/* GIVE */}
           <div className="p-4 border rounded-xl bg-gray-50 shadow-sm relative">
             <h3 className="font-semibold mb-3">Twist geven aan speler</h3>
@@ -887,7 +819,7 @@ const colorForPosition = (p: any) => {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
-            {/* AUTOCOMPLETE GIVE */}
+            {/* autocomplete */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "give" && (
@@ -898,9 +830,7 @@ const colorForPosition = (p: any) => {
                       onClick={() => applyAutoFill(u)}
                       className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
                     >
-                      <span className="font-semibold">
-                        {u.display_name}
-                      </span>{" "}
+                      <span className="font-semibold">{u.display_name}</span>{" "}
                       <span className="text-gray-500">@{u.username}</span>
                     </div>
                   ))}
@@ -958,7 +888,7 @@ const colorForPosition = (p: any) => {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
-            {/* AUTOCOMPLETE USE */}
+            {/* autocomplete */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "use" && (
@@ -969,9 +899,7 @@ const colorForPosition = (p: any) => {
                       onClick={() => applyAutoFill(u)}
                       className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
                     >
-                      <span className="font-semibold">
-                        {u.display_name}
-                      </span>{" "}
+                      <span className="font-semibold">{u.display_name}</span>{" "}
                       <span className="text-gray-500">@{u.username}</span>
                     </div>
                   ))}
@@ -993,9 +921,7 @@ const colorForPosition = (p: any) => {
               <option value="diamondpistol">Diamond Pistol</option>
             </select>
 
-            <label className="text-xs font-semibold">
-              Target speler (optioneel)
-            </label>
+            <label className="text-xs font-semibold">Target (optioneel)</label>
             <input
               type="text"
               value={twistTargetUse}
@@ -1014,7 +940,7 @@ const colorForPosition = (p: any) => {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-3"
             />
 
-            {/* AUTOCOMPLETE TARGET */}
+            {/* autocomplete */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "target" && (
@@ -1025,9 +951,7 @@ const colorForPosition = (p: any) => {
                       onClick={() => applyAutoFill(u)}
                       className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
                     >
-                      <span className="font-semibold">
-                        {u.display_name}
-                      </span>{" "}
+                      <span className="font-semibold">{u.display_name}</span>{" "}
                       <span className="text-gray-500">@{u.username}</span>
                     </div>
                   ))}
@@ -1092,6 +1016,34 @@ const colorForPosition = (p: any) => {
       <footer className="mt-4 text-xs text-gray-400 text-center">
         BattleBox Engine v3.3 – Danny Stable
       </footer>
+
+      {/* ============================================================
+          CONFIRM POPUP (global)
+      ============================================================ */}
+      {confirmData && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-80">
+            <h3 className="text-lg font-semibold mb-3">Bevestigen</h3>
+            <p className="text-sm mb-4">{confirmData.message}</p>
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={cancelConfirm}
+                className="px-3 py-1.5 text-sm rounded-full bg-gray-200"
+              >
+                Annuleer
+              </button>
+
+              <button
+                onClick={confirmData.onConfirm}
+                className="px-3 py-1.5 text-sm rounded-full bg-red-600 text-white"
+              >
+                Verwijderen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
-                        }
+                          }
