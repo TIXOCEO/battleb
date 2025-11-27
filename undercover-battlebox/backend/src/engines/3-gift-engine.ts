@@ -1,10 +1,9 @@
 /* ============================================================================
-   3-gift-engine.ts — BATTLEBOX v15.1 FIXED
-   ✔ Gift-engine volledig hersteld
-   ✔ Correcte receiver-detectie (host/speler)
-   ✔ Correcte diamond + streak logica
-   ✔ Compatibel met server.ts v7
-   ✔ Volledige 21-kolommen gifts insert
+   3-gift-engine.ts — BATTLEBOX v15.2 REALTIME EDITION
+   ✔ Realtime arena diamond update
+   ✔ Realtime host badge update
+   ✔ Live sorting op diamonds
+   ✔ Geen gedrag of logica verder veranderd
 ============================================================================ */
 
 import pool from "../db";
@@ -26,9 +25,37 @@ import {
 } from "../server";
 
 import { addBP } from "./4-points-engine";
-import { getArena } from "./5-game-engine";
+import { getArena, emitArena } from "./5-game-engine";
 import { addTwistByGift } from "./8-twist-engine";
 import { TWIST_MAP, TwistType } from "./twist-definitions";
+
+/* ============================================================================
+   NEW REALTIME DIAMOND UPDATE FUNCTION
+   (Wordt NA elke gift uitgevoerd)
+============================================================================ */
+function applyDiamondsToArena(receiverId: string | null, diamonds: number, isHost: boolean) {
+  const arena = getArena();
+  if (!arena) return;
+
+  // Host badge diamonds toevoegen
+  if (isHost) {
+    arena.host_diamonds = (arena.host_diamonds || 0) + diamonds;
+  }
+
+  // Player diamonds updaten
+  if (!isHost && receiverId) {
+    const p = arena.players.find((pl) => pl.id === String(receiverId));
+    if (p) {
+      p.diamonds += diamonds;
+    }
+  }
+
+  // SORTEREN OP DIAMONDS (zoals afgesproken)
+  arena.players.sort((a, b) => b.diamonds - a.diamonds);
+
+  // DIRECT DOORSTUREN NAAR FRONTEND
+  emitArena();
+}
 
 /* ============================================================================
    ACTIVE GAME ID
@@ -89,7 +116,7 @@ function formatDisplay(u: any) {
 }
 
 /* ============================================================================
-   EXTRACT SENDER (v14.2 — 100% betrouwbare versie)
+   EXTRACT SENDER
 ============================================================================ */
 function extractSender(evt: any) {
   const raw =
@@ -132,7 +159,7 @@ function extractSender(evt: any) {
 }
 
 /* ============================================================================
-   DIAMOND CALC — originele streak/Type1 fix uit v14.2
+   DIAMOND CALC
 ============================================================================ */
 function calcDiamonds(evt: any): number {
   const base = Number(evt.diamondCount || evt.diamond || 0);
@@ -142,14 +169,13 @@ function calcDiamonds(evt: any): number {
   const final = !!evt.repeatEnd;
   const type = Number(evt.giftType || 0);
 
-  // TikTok combo type=1 → alleen betalen op final packet
   if (type === 1) return final ? base * repeat : 0;
 
   return base;
 }
 
 /* ============================================================================
-   RECEIVER RESOLUTION — 100% uit v14.2 (volledig werkend)
+   RECEIVER RESOLUTION
 ============================================================================ */
 async function resolveReceiver(evt: any) {
   const host = getActiveHost();
@@ -172,7 +198,6 @@ async function resolveReceiver(evt: any) {
 
   const un = unique ? norm(unique) : null;
 
-  // Sender == direct receiver → self → fallback to host
   if (evt.userId && directId && String(evt.userId) === String(directId)) {
     if (HOST_ID) {
       const h = await getOrUpdateUser(String(HOST_ID), null, null);
@@ -185,7 +210,6 @@ async function resolveReceiver(evt: any) {
     }
   }
 
-  // Direct receiver exists → player or host
   if (directId) {
     const u = await getOrUpdateUser(String(directId), null, null);
     const isHost = HOST_ID && String(directId) === String(HOST_ID);
@@ -197,7 +221,6 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  // Unique-ID match with host
   if (un && HOST_USERNAME && un === HOST_USERNAME && HOST_ID) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     return {
@@ -208,7 +231,6 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  // Fallback to host if known
   if (HOST_ID) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     return {
@@ -219,8 +241,7 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  // Truly unknown
-  return { id: null, username: "", display_name: "UNKNOWN", role: "speler" };
+  return { id: null, username : "", display_name: "UNKNOWN", role: "speler" };
 }
 
 /* ============================================================================
@@ -235,7 +256,7 @@ function isHeartMeGift(evt: any): boolean {
 }
 
 /* ============================================================================
-   MAIN PROCESSOR — GIFT LOGIC v15.1 (volledig stabiel)
+   MAIN PROCESSOR — GIFT LOGIC v15.2 REALTIME
 ============================================================================ */
 async function processGift(evt: any, source: string) {
   try {
@@ -295,7 +316,7 @@ async function processGift(evt: any, source: string) {
 
     /* FAN / HEART ME */
     if (isHostReceiver && isHeartMeGift(evt)) {
-      const expires = new Date(now() + 24 * 3600 * 1000);
+      const expires = new Date(Date.now() + 24 * 3600 * 1000);
 
       await pool.query(
         `UPDATE users SET is_fan=TRUE, fan_expires_at=$1
@@ -365,42 +386,52 @@ async function processGift(evt: any, source: string) {
       `,
       [
         /* giver */
-        BigInt(sender.tiktok_id),  // $1
-        sender.username,           // $2
-        sender.display_name,       // $3
+        BigInt(sender.tiktok_id),      // $1
+        sender.username,               // $2
+        sender.display_name,           // $3
 
         /* gift details */
-        evt.giftName || "unknown", // $4
-        diamonds,                  // $5
-        diamonds * 0.2,            // $6
+        evt.giftName || "unknown",     // $4
+        diamonds,                      // $5
+        diamonds * 0.2,                // $6
 
         /* receiver */
         receiver.id ? BigInt(String(receiver.id)) : null, // $7
-        receiver.username,         // $8
-        receiver.display_name,     // $9
-        receiver.role,             // $10
+        receiver.username,             // $8
+        receiver.display_name,         // $9
+        receiver.role,                 // $10
 
         /* game info */
-        gameId,                    // $11
-        isHostReceiver,            // $12
-        !isHostReceiver && inRound,// $13
-        arena_id,                  // $14
-        inRound,                   // $15
+        gameId,                        // $11
+        isHostReceiver,                // $12
+        !isHostReceiver && inRound,    // $13
+        arena_id,                      // $14
+        inRound,                       // $15
 
         /* added columns */
-        sender.display_name,       // $16
-        sender.username,           // $17
-        arena.round ?? 0,          // $18
-        source                     // $19
+        sender.display_name,           // $16
+        sender.username,               // $17
+        arena.round ?? 0,              // $18
+        source                         // $19
       ]
     );
 
-    /* BROADCASTS */
+    /* =========================================================================
+       REALTIME UPDATE ARENA (NIEUWE PATCH)
+       ⚡ directe diamonds in memory
+       ⚡ host badge meebewegen
+       ⚡ live sorting op diamonds
+       ⚡ onmiddellijk emitArena()
+    ========================================================================= */
+    applyDiamondsToArena(receiver.id, diamonds, isHostReceiver);
+
+    /* BROADCASTS (LB & stats) */
     await broadcastStats();
     await broadcastPlayerLeaderboard();
     await broadcastGifterLeaderboard();
     await broadcastHostDiamonds();
 
+    /* LOGGING */
     emitLog({
       type: "gift",
       message: `${senderFmt} → ${receiverFmt}: ${evt.giftName} (+${diamonds}💎)`
@@ -412,8 +443,7 @@ async function processGift(evt: any, source: string) {
 }
 
 /* ============================================================================
-   INIT GIFT ENGINE — TikTok Event Binding
-   Volledig compatibel met server.ts v7 + battlebox game-engine v15
+   INIT GIFT ENGINE
 ============================================================================ */
 export function initGiftEngine(conn: any) {
   if (!conn || typeof conn.on !== "function") {
@@ -421,14 +451,8 @@ export function initGiftEngine(conn: any) {
     return;
   }
 
-  console.log("🎁 GiftEngine v15.1 FIXED LOADED (100% stable)");
+  console.log("🎁 GiftEngine v15.2 REALTIME LOADED");
 
-  /* ----------------------------------------------
-     OFFICIËLE TIKTOK EVENT SOURCES
-     Deze structuur is exact zoals jouw v14.2 engine.
-  ---------------------------------------------- */
-
-  // 1. Normale gift packet
   conn.on("gift", (d: any) => {
     try {
       processGift(d, "gift");
@@ -437,7 +461,6 @@ export function initGiftEngine(conn: any) {
     }
   });
 
-  // 2. roomMessage (bevat vaak hidden gifts)
   conn.on("roomMessage", (d: any) => {
     try {
       if (d?.giftId || d?.diamondCount) {
@@ -448,7 +471,6 @@ export function initGiftEngine(conn: any) {
     }
   });
 
-  // 3. member (soms gift data)
   conn.on("member", (d: any) => {
     try {
       if (d?.giftId || d?.diamondCount) {
@@ -459,7 +481,6 @@ export function initGiftEngine(conn: any) {
     }
   });
 
-  // 4. chat → gift hidden in _data
   conn.on("chat", (d: any) => {
     try {
       if (d?._data?.giftId || d?._data?.diamondCount) {
@@ -470,7 +491,6 @@ export function initGiftEngine(conn: any) {
     }
   });
 
-  // 5. giftMessage (sommige connectors gebruiken dit)
   conn.on("giftMessage", (d: any) => {
     try {
       if (d?.giftId || d?.diamondCount) {
@@ -481,7 +501,6 @@ export function initGiftEngine(conn: any) {
     }
   });
 
-  // 6. social events (zeldzaam gift-data)
   conn.on("social", (d: any) => {
     try {
       if (d?.giftId || d?.diamondCount) {
