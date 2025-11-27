@@ -1,11 +1,10 @@
 /* ============================================================================
-   5-game-engine.ts — BattleBox Arena Engine v15.1
-   ✔ Correct round_id scoring (alleen is_round_gift=TRUE)
-   ✔ Correct finale baseline
-   ✔ Danger 6–8 alleen tijdens ronde
-   ✔ Eliminaties na grace
-   ✔ DB settings (arena_settings table)
-   ✔ Compatibel met gift-engine v14.2 & server v7.3
+   5-game-engine.ts — BattleBox Arena Engine v15.2
+   ✔ Finaleronde: ALTIJD bottom-1 danger & eliminatie
+   ✔ Sorteert altijd op totale score (quarter + finale baselines)
+   ✔ Finale werkt door tot 1 winnaar
+   ✔ Quarter danger = 6–8
+   ✔ DB-round scoring: is_round_gift=TRUE ONLY
 ============================================================================ */
 
 import pool from "../db";
@@ -22,17 +21,16 @@ export interface ArenaPlayer {
   id: string;                     // TikTok ID
   username: string;
   display_name: string;
-  score: number;                  // DB-based score
-
+  score: number;                  // total computed score
   boosters: string[];
   positionStatus: "alive" | "danger" | "elimination" | "immune" | "shielded";
   eliminated?: boolean;
 }
 
 export interface ArenaSettings {
-  roundDurationPre: number;       // seconds
-  roundDurationFinal: number;     // seconds
-  graceSeconds: number;           // seconds
+  roundDurationPre: number;
+  roundDurationFinal: number;
+  graceSeconds: number;
   forceEliminations: boolean;
 }
 
@@ -49,12 +47,12 @@ export interface ArenaState {
 
   settings: ArenaSettings;
 
-  firstFinalRound: number | null; // determines baseline for finals
+  firstFinalRound: number | null;
   lastSortedAt: number;
 }
 
 /* ============================================================================
-   MEMORY (initial state)
+   MEMORY
 ============================================================================ */
 
 let arena: ArenaState = {
@@ -68,8 +66,8 @@ let arena: ArenaState = {
   graceEnd: 0,
 
   settings: {
-    roundDurationPre: 300,       // overwritten by DB
-    roundDurationFinal: 180,     // overwritten by DB
+    roundDurationPre: 300,
+    roundDurationFinal: 180,
     graceSeconds: 10,
     forceEliminations: true,
   },
@@ -79,7 +77,7 @@ let arena: ArenaState = {
 };
 
 /* ============================================================================
-   LOAD SETTINGS FROM DATABASE
+   LOAD SETTINGS
 ============================================================================ */
 
 export async function loadArenaSettingsFromDB() {
@@ -91,7 +89,7 @@ export async function loadArenaSettingsFromDB() {
   `);
 
   if (!r.rows.length) {
-    console.log("⚠ Geen arena_settings gevonden — defaults blijven actief.");
+    console.log("⚠ Geen arena_settings gevonden, defaults gebruikt.");
     return;
   }
 
@@ -101,12 +99,8 @@ export async function loadArenaSettingsFromDB() {
   arena.settings.roundDurationFinal = Number(row.round_final_seconds);
   arena.settings.graceSeconds = Number(row.grace_seconds);
 
-  console.log("✔ Arena settings geladen uit DB:", arena.settings);
+  console.log("✔ Arena settings geladen:", arena.settings);
 }
-
-/* ============================================================================
-   GETTERS
-============================================================================ */
 
 export function getArena(): ArenaState {
   return arena;
@@ -117,10 +111,9 @@ export function getArenaSettings(): ArenaSettings {
 }
 
 /* ============================================================================
-   SCORE SYSTEM — PURE DB, ROUND-BASED + is_round_gift=TRUE
+   SCORE SYSTEM — ALWAYS TOTAL SCORE
 ============================================================================ */
 
-// Score voor één ronde (alleen echte ronde-gifts)
 async function getRoundScore(tiktokId: string, round: number): Promise<number> {
   const gid = (io as any)?.currentGameId;
   if (!gid || !round) return 0;
@@ -140,7 +133,6 @@ async function getRoundScore(tiktokId: string, round: number): Promise<number> {
   return Number(q.rows[0]?.score || 0);
 }
 
-// Score voor FINALE (baseline + finale, alleen ronde-gifts)
 async function getFinalScore(tiktokId: string): Promise<number> {
   const gid = (io as any)?.currentGameId;
   if (!gid) return 0;
@@ -148,7 +140,6 @@ async function getFinalScore(tiktokId: string): Promise<number> {
 
   const first = arena.firstFinalRound;
 
-  // A) Baseline = alle voorrondes (met is_round_gift=TRUE)
   const baselineQ = await pool.query(
     `
       SELECT COALESCE(SUM(diamonds),0) AS score
@@ -161,7 +152,6 @@ async function getFinalScore(tiktokId: string): Promise<number> {
     [BigInt(tiktokId), gid, first]
   );
 
-  // B) Finale rondes (≥ firstFinalRound, ook alleen ronde-gifts)
   const finaleQ = await pool.query(
     `
       SELECT COALESCE(SUM(diamonds),0) AS score
@@ -180,84 +170,81 @@ async function getFinalScore(tiktokId: string): Promise<number> {
   );
 }
 
-// Automatische score router
 async function computePlayerScore(player: ArenaPlayer): Promise<number> {
-  if (arena.type === "finale") {
-    return await getFinalScore(player.id);
-  }
+  if (arena.type === "finale") return await getFinalScore(player.id);
 
-  // Quarter / normal rounds
   return await getRoundScore(player.id, arena.round);
 }
 
 /* ============================================================================
-   POSITION COMPUTATION — Danger 6–8 ONLY
+   RECOMPUTE POSITIONS — v15.2
+   ✔ Sorteert ALTIJD op totale score (quarter + finale)
+   ✔ Quarter danger = 6–8
+   ✔ Finale danger = laatste speler (index = n-1)
 ============================================================================ */
 
 async function recomputePositions() {
-  const status = arena.status;
-
-  // Update score voor elke speler
+  // Update scores
   for (const p of arena.players) {
     p.score = await computePlayerScore(p);
   }
 
-  // Sorteren
+  // Sorteren desc
   arena.players.sort((a, b) => b.score - a.score);
-
   const total = arena.players.length;
 
-  /* -------------------------------------------------------------
-     IDLE — iedereen veilig
-  ------------------------------------------------------------- */
-  if (status === "idle") {
+  if (arena.status === "idle") {
+    // idle mode → geen danger
     for (const p of arena.players) {
+      p.positionStatus = p.boosters.includes("immune")
+        ? "immune"
+        : "alive";
+      p.eliminated = false;
+    }
+    arena.lastSortedAt = Date.now();
+    return;
+  }
+
+  /* -------------------------------
+     QUARTER LOGICA
+  --------------------------------*/
+  if (arena.type === "quarter") {
+    for (let i = 0; i < total; i++) {
+      const p = arena.players[i];
+
       if (p.boosters.includes("immune")) {
         p.positionStatus = "immune";
-      } else {
-        p.positionStatus = "alive";
+        continue;
       }
-      p.eliminated = false;
+
+      if (total < 6) {
+        p.positionStatus = "alive";
+        continue;
+      }
+
+      if (i <= 4) p.positionStatus = "alive";
+      else if (i >= 5 && i <= 7) p.positionStatus = "danger";
+      else p.positionStatus = "alive";
     }
 
     arena.lastSortedAt = Date.now();
     return;
   }
 
-  /* -------------------------------------------------------------
-     ACTIVE / GRACE — danger posities 6–8
-  ------------------------------------------------------------- */
+  /* -------------------------------
+     FINALE LOGICA — v15.2
+     ✔ altijd bottom-1 danger
+  --------------------------------*/
   for (let i = 0; i < total; i++) {
     const p = arena.players[i];
 
-    // immune override
     if (p.boosters.includes("immune")) {
       p.positionStatus = "immune";
-      p.eliminated = false;
       continue;
     }
 
-    // minder dan 6 spelers → geen danger
-    if (total < 6) {
-      p.positionStatus = "alive";
-      p.eliminated = false;
-      continue;
-    }
-
-    if (i <= 4) {
-      p.positionStatus = "alive";
-      p.eliminated = false;
-      continue;
-    }
-
-    if (i >= 5 && i <= 7) {
-      p.positionStatus = "danger";
-      p.eliminated = false;
-      continue;
-    }
-
-    p.positionStatus = "alive";
-    p.eliminated = false;
+    if (i === total - 1) p.positionStatus = "danger";
+    else p.positionStatus = "alive";
   }
 
   arena.lastSortedAt = Date.now();
@@ -298,7 +285,7 @@ export async function startRound(type: RoundType) {
   // Nieuwe ronde +1
   arena.round += 1;
 
-  // Finale-detectie (Variant 1: admin triggered)
+  // Finale-detectie
   arena.type = type;
 
   if (type === "finale" && arena.firstFinalRound === null) {
@@ -306,16 +293,15 @@ export async function startRound(type: RoundType) {
 
     emitLog({
       type: "arena",
-      message: `Finale gestart op ronde #${arena.round}`,
+      message: `⚡ Finale gestart op ronde #${arena.round}`,
     });
   }
 
-  // Active mode
+  // Active
   arena.status = "active";
-
   const now = Date.now();
 
-  const duration = 
+  const duration =
     type === "finale"
       ? arena.settings.roundDurationFinal
       : arena.settings.roundDurationPre;
@@ -339,17 +325,21 @@ export async function startRound(type: RoundType) {
 }
 
 /* ============================================================================
-   END ROUND — 2 fase eliminatie
+   END ROUND — v15.2
+   ✔ ACTIVE → GRACE
+   ✔ GRACE → eliminaties volgens quarter of finale regels
 ============================================================================ */
 
 export async function endRound() {
-  // FASe 1: ACTIVE → GRACE
+  /* -------------------------
+     FASE 1: ACTIVE → GRACE
+  --------------------------*/
   if (arena.status === "active") {
     arena.status = "grace";
 
     emitLog({
       type: "arena",
-      message: `Grace periode gestart (${arena.settings.graceSeconds}s)`,
+      message: `⏳ Grace periode gestart (${arena.settings.graceSeconds}s)`,
     });
 
     io.emit("round:grace", {
@@ -361,20 +351,76 @@ export async function endRound() {
     return;
   }
 
-  // FASe 2: GRACE → ENDED
+  /* -------------------------
+     FASE 2: GRACE → ENDED
+  --------------------------*/
   if (arena.status === "grace") {
     arena.status = "ended";
 
-    // Nog 1 keer correcte sort
     await recomputePositions();
-
     const total = arena.players.length;
 
-    // Te weinig spelers → niemand elimineren
-    if (total < 6) {
+    /* ============================
+         SPECIALE FINALE LOGICA
+       ============================ */
+    if (arena.type === "finale") {
+      if (total <= 1) {
+        // Winnaar bekend
+        emitLog({
+          type: "arena",
+          message: `🏆 Finale gewonnen door ${arena.players[0]?.display_name || "?"}`,
+        });
+
+        io.emit("round:end", {
+          round: arena.round,
+          type: arena.type,
+          pendingEliminations: [],
+          top3: arena.players.slice(0, 3),
+          winner: arena.players[0] || null,
+        });
+
+        await emitArena();
+        return;
+      }
+
+      // De laatste speler (lowest score) wordt geëlimineerd
+      const doomed = [arena.players[total - 1]];
+
+      doomed[0].positionStatus = "elimination";
+      doomed[0].eliminated = true;
+
       emitLog({
         type: "arena",
-        message: `Ronde geëindigd — minder dan 6 spelers (${total}), geen eliminaties.`,
+        message: `🔥 Finale-eliminatie: ${doomed[0].display_name}`,
+      });
+
+      const top3 = arena.players.slice(0, 3).map((p) => ({
+        id: p.id,
+        username: p.username,
+        display_name: p.display_name,
+        diamonds: p.score,
+      }));
+
+      io.emit("round:end", {
+        round: arena.round,
+        type: arena.type,
+        pendingEliminations: doomed.map((p) => p.username),
+        top3,
+      });
+
+      await emitArena();
+      return;
+    }
+
+    /* ============================
+         QUARTER LOGICA (normaal)
+       ============================ */
+
+    if (total < 6) {
+      // Geen eliminaties
+      emitLog({
+        type: "arena",
+        message: `Ronde geëindigd — minder dan 6 spelers, geen eliminaties.`,
       });
 
       io.emit("round:end", {
@@ -388,13 +434,12 @@ export async function endRound() {
       return;
     }
 
-    // Eliminatie: posities 6–8 → indexes 5–7
+    // Quarter eliminaties 6–8 → indexes 5–7
     const doomed = arena.players
-      .map((p, index) => ({ p, index }))
-      .filter((entry) => entry.index >= 5 && entry.index <= 7)
-      .map((entry) => entry.p);
+      .map((p, i) => ({ p, i }))
+      .filter((x) => x.i >= 5 && x.i <= 7)
+      .map((x) => x.p);
 
-    // Markeer ze
     for (const p of doomed) {
       p.positionStatus = "elimination";
       p.eliminated = true;
@@ -421,7 +466,7 @@ export async function endRound() {
 
     await emitArena();
   }
-}
+  }
 
 /* ============================================================================
    ARENA MANAGEMENT — JOIN / LEAVE
@@ -495,7 +540,7 @@ export async function addToArena(username: string, resolveUser: Function) {
 }
 
 /* ============================================================================
-   ELIMINATE
+   ELIMINATE (MANUAL)
 ============================================================================ */
 
 export async function eliminate(username: string) {
@@ -513,7 +558,7 @@ export async function eliminate(username: string) {
 }
 
 /* ============================================================================
-   QUEUE → ARENA
+   QUEUE → ARENA (auto join)
 ============================================================================ */
 
 export async function addFromQueue(user: any) {
@@ -531,7 +576,7 @@ export async function addFromQueue(user: any) {
 }
 
 /* ============================================================================
-   ARENA CLEAR (Complete reset)
+   ARENA CLEAR (total reset)
 ============================================================================ */
 
 export async function arenaClear() {
@@ -558,7 +603,7 @@ export async function forceSort() {
 }
 
 /* ============================================================================
-   SETTINGS
+   UPDATE SETTINGS
 ============================================================================ */
 
 export async function updateArenaSettings(
@@ -577,7 +622,7 @@ export async function updateArenaSettings(
 }
 
 /* ============================================================================
-   TIMER LOOP — ACTIVE → GRACE → ENDED
+   TIMER LOOP — AUTO PROGRESSION
 ============================================================================ */
 
 setInterval(async () => {
