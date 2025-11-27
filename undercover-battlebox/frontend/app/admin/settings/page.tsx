@@ -2,7 +2,11 @@
 
 import React, { useEffect, useState, useRef } from "react";
 import { getAdminSocket } from "@/lib/socketClient";
-import type { AdminAckResponse, ArenaSettings, HostProfile } from "@/lib/adminTypes";
+import type {
+  AdminAckResponse,
+  ArenaSettings,
+  HostProfile,
+} from "@/lib/adminTypes";
 
 // Sanitizers
 function sanitizeHostUsername(input: string): string {
@@ -21,17 +25,17 @@ function sanitizeHostId(input: string): string {
 }
 
 export default function SettingsPage() {
-  // Host profiles
+  // Hosts
   const [hostProfiles, setHostProfiles] = useState<HostProfile[]>([]);
   const [activeHost, setActiveHost] = useState<HostProfile | null>(null);
 
-  // New host form
+  // New host fields
   const [newHostUser, setNewHostUser] = useState("");
   const [newHostId, setNewHostId] = useState("");
   const manualHostIdEdit = useRef(false);
   const tiktokIdInputRef = useRef<HTMLInputElement | null>(null);
 
-  // General state
+  // Arena settings
   const [settings, setSettings] = useState<ArenaSettings>({
     roundDurationPre: 180,
     roundDurationFinal: 300,
@@ -44,33 +48,46 @@ export default function SettingsPage() {
   const [gameActive, setGameActive] = useState(false);
 
   // ---------------------------------------------------------------------
-  // INIT SOCKET — FIXED (NO PREFIX)
+  // INIT SOCKET — FIXED (uses getInitialSnapshot)
   // ---------------------------------------------------------------------
   useEffect(() => {
     const socket = getAdminSocket();
 
-    socket.emit("getSettings", {}, (res: any) => {
-      if (!res?.success) {
-        setStatus(`❌ ${res?.message || "Kon instellingen niet laden"}`);
+    // Load snapshot
+    socket.emit("getInitialSnapshot", {}, (snap: any) => {
+      if (!snap) {
+        setStatus("❌ Kon snapshot niet laden");
         return;
       }
 
-      if (res.settings) setSettings(res.settings);
-      setGameActive(!!res.gameActive);
+      if (snap.settings) setSettings(snap.settings);
+      if (snap.gameSession) setGameActive(!!snap.gameSession.active);
+      if (snap.hostDiamonds) {
+        // OK but not shown here
+      }
+      if (snap.hosts) {
+        setHostProfiles(snap.hosts);
+        const active = snap.hosts.find((h: any) => h.active) || null;
+        setActiveHost(active);
+      }
+
       setConnected(true);
     });
 
+    // Quiet fallback load hosts
     socket.emit("getHosts", {}, (res: any) => {
       if (res?.success) {
-        setHostProfiles(res.hosts || []);
-        const active = res.hosts?.find((h: any) => h.active) || null;
+        setHostProfiles(res.hosts);
+        const active = res.hosts.find((h: any) => h.active) || null;
         setActiveHost(active);
       }
     });
 
+    // Connection state
     socket.on("connect", () => setConnected(true));
     socket.on("disconnect", () => setConnected(false));
 
+    // Live host list updates
     socket.on("hosts", (hosts: HostProfile[]) => {
       setHostProfiles(hosts);
       const active = hosts.find((h) => h.active) || null;
@@ -87,11 +104,12 @@ export default function SettingsPage() {
       });
     });
 
-    socket.on("gameSession", (s: any) => setGameActive(!!s?.active));
+    socket.on("gameSession", (s: any) => setGameActive(!!s.active));
 
-    socket.on("settings", (s: ArenaSettings) =>
-      setSettings((prev) => ({ ...prev, ...s }))
-    );
+    // When backend updates settings (timers only)
+    socket.on("settings", (s: ArenaSettings) => {
+      setSettings((prev) => ({ ...prev, ...s }));
+    });
 
     return () => {
       socket.off("connect");
@@ -111,7 +129,6 @@ export default function SettingsPage() {
     if (manualHostIdEdit.current) return;
 
     let cancelled = false;
-
     const timer = setTimeout(async () => {
       try {
         setNewHostId("...");
@@ -137,7 +154,7 @@ export default function SettingsPage() {
   }, [newHostUser]);
 
   // ---------------------------------------------------------------------
-  // CREATE HOST PROFILE (NO PREFIX)
+  // CREATE HOST PROFILE
   // ---------------------------------------------------------------------
   const createHostProfile = () => {
     const cleanUser = sanitizeHostUsername(newHostUser);
@@ -149,7 +166,6 @@ export default function SettingsPage() {
     }
 
     const socket = getAdminSocket();
-
     socket.emit(
       "createHost",
       {
@@ -180,7 +196,7 @@ export default function SettingsPage() {
   };
 
   // ---------------------------------------------------------------------
-  // ACTIVATE HOST (NO PREFIX)
+  // ACTIVATE HOST PROFILE
   // ---------------------------------------------------------------------
   const activateProfile = (id: number) => {
     if (gameActive) {
@@ -190,14 +206,12 @@ export default function SettingsPage() {
 
     const socket = getAdminSocket();
     socket.emit("setActiveHost", { id }, (res: any) => {
-      setStatus(
-        res.success ? "✔ Actieve host ingesteld" : `❌ ${res.message}`
-      );
+      setStatus(res.success ? "✔ Actieve host ingesteld" : `❌ ${res.message}`);
     });
   };
 
   // ---------------------------------------------------------------------
-  // DELETE HOST (NO PREFIX)
+  // DELETE HOST PROFILE
   // ---------------------------------------------------------------------
   const deleteProfile = (id: number) => {
     const socket = getAdminSocket();
@@ -207,19 +221,19 @@ export default function SettingsPage() {
   };
 
   // ---------------------------------------------------------------------
-  // SAVE TIMER SETTINGS (NO PREFIX)
+  // SAVE TIMER SETTINGS
+  // backend action = updateRoundSettings
   // ---------------------------------------------------------------------
   const updateTimers = () => {
     const socket = getAdminSocket();
     socket.emit(
-      "updateSettings",
+      "updateRoundSettings",
       {
-        roundDurationPre: settings.roundDurationPre,
-        roundDurationFinal: settings.roundDurationFinal,
-        graceSeconds: settings.graceSeconds,
-        forceEliminations: settings.forceEliminations,
+        pre: settings.roundDurationPre,
+        final: settings.roundDurationFinal,
+        grace: settings.graceSeconds,
       },
-      (res: any) => {
+      (res: AdminAckResponse) => {
         setStatus(
           res.success
             ? "✔ Timer-instellingen opgeslagen"
@@ -269,8 +283,7 @@ export default function SettingsPage() {
               value={activeHost?.id ?? ""}
               onChange={(e) => {
                 const id = Number(e.target.value);
-                if (!id) return;
-                activateProfile(id);
+                if (id) activateProfile(id);
               }}
             >
               <option value="">
@@ -432,25 +445,17 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <label className="mt-4 flex items-center gap-2 text-xs text-gray-600">
-          <input
-            type="checkbox"
-            checked={settings.forceEliminations}
-            onChange={(e) =>
-              setSettings({
-                ...settings,
-                forceEliminations: e.target.checked,
-              })
-            }
-          />
-          Forceer eliminaties vereist
+        {/* forceEliminations cannot be updated (backend has no handler) */}
+        <label className="mt-4 flex items-center gap-2 text-xs text-gray-600 opacity-50 cursor-not-allowed">
+          <input type="checkbox" checked={settings.forceEliminations} disabled />
+          Forceer eliminaties vereist (locked — server managed)
         </label>
 
         <button
           onClick={updateTimers}
           className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-full text-sm"
         >
-          Instellingen opslaan
+          Timer-instellingen opslaan
         </button>
       </section>
     </div>
