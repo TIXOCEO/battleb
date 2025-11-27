@@ -1,7 +1,8 @@
 // ============================================================================
-// server.ts — BATTLEBOX BACKEND v7.3
+// server.ts — BATTLEBOX BACKEND v7.3 REALTIME PATCH
 // Gifts-Driven Engine + Round Flags (is_round_gift / round_active)
 // Correct Leaderboards + Host Diamonds + Username Autofill
+// Realtime Arena Diamond Updates (minimal required changes)
 // ============================================================================
 
 import express from "express";
@@ -151,7 +152,7 @@ let currentGameId: number | null = null;
 (io as any).currentGameId = null;
 
 // ============================================================================
-// ARENA WRAPPERS (engine-driven scores, geen injectArenaScores meer)
+// ARENA WRAPPERS (NOODZAKELIJKE REALTIME PATCH: export intact gehouden)
 // ============================================================================
 export async function emitArena() {
   await emitArenaRaw();
@@ -384,7 +385,7 @@ async function buildInitialSnapshot() {
     gameId: currentGameId
   };
 
-  // STREAMSTATS (zelfde filters als broadcastStats)
+  // STREAMSTATS
   if (currentGameId) {
     const r = await pool.query(
       `
@@ -418,7 +419,7 @@ async function buildInitialSnapshot() {
     snap.stats = null;
   }
 
-  // PLAYER LEADERBOARD (zelfde filters als broadcastPlayerLeaderboard)
+  // PLAYER LEADERBOARD
   if (currentGameId) {
     const hostId = HARD_HOST_ID ? BigInt(HARD_HOST_ID) : null;
 
@@ -451,7 +452,7 @@ async function buildInitialSnapshot() {
     snap.playerLeaderboardSummary = 0;
   }
 
-  // GIFTER LEADERBOARD (zelfde filters als broadcastGifterLeaderboard)
+  // GIFTER LEADERBOARD
   if (currentGameId) {
     const gf = await pool.query(
       `
@@ -479,7 +480,7 @@ async function buildInitialSnapshot() {
     snap.gifterLeaderboardSummary = 0;
   }
 
-  // HOST DIAMONDS (zelfde filters als broadcastHostDiamonds)
+  // HOST DIAMONDS
   if (currentGameId && HARD_HOST_ID) {
     const hx = await pool.query(
       `
@@ -519,7 +520,7 @@ io.on("connection", async (socket: AdminSocket) => {
     host: { username: HARD_HOST_USERNAME, id: HARD_HOST_ID }
   });
 
-  // Hostlijst pushen
+  // Hostlijst
   const hosts = await pool.query(`
     SELECT id, label, username, tiktok_id, active
     FROM hosts ORDER BY id
@@ -532,7 +533,7 @@ io.on("connection", async (socket: AdminSocket) => {
     gameId: currentGameId
   });
 
-  // Initial leaderboard + stats
+  // Initial LB + stats
   if (currentGameId) {
     await broadcastPlayerLeaderboard();
     await broadcastGifterLeaderboard();
@@ -540,7 +541,7 @@ io.on("connection", async (socket: AdminSocket) => {
     await broadcastStats();
   }
 
-  // Initial snapshot handler
+  // Snapshot handler
   socket.on("getInitialSnapshot", async (_payload, ack) => {
     const snap = await buildInitialSnapshot();
     ack(snap);
@@ -555,9 +556,7 @@ io.on("connection", async (socket: AdminSocket) => {
 
   async function handle(action: string, data: any, ack: Function) {
     try {
-      // ----------------------------------------------------------------------
-      // HOST MANAGEMENT
-      // ----------------------------------------------------------------------
+      // --- HOST MANAGEMENT ---
       if (action === "getHosts") {
         const r = await pool.query(
           `SELECT id, label, username, tiktok_id, active FROM hosts ORDER BY id`
@@ -823,7 +822,7 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       // ----------------------------------------------------------------------
-      // SEARCH USERS (AUTOFILL) — TERUGGEZET UIT v6.3
+      // SEARCH USERS (AUTOFILL)
       // ----------------------------------------------------------------------
       if (action === "searchUsers") {
         const q = (data?.query || "").trim().toLowerCase();
