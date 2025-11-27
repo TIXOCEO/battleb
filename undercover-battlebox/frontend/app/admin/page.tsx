@@ -402,14 +402,6 @@ export default function AdminDashboardPage() {
           >
             Stop ronde
           </button>
-
-          <button
-            onClick={() => emitAdmin("endGrace")}
-            disabled={!canGraceEnd}
-            className="px-3 py-1.5 bg-yellow-600 text-white rounded-full text-xs disabled:bg-gray-400"
-          >
-            Grace → Eliminaties
-          </button>
         </div>
       </section>
 
