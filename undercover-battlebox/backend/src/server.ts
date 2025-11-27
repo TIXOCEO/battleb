@@ -1,7 +1,8 @@
 // ============================================================================
-// server.ts — BATTLEBOX BACKEND v7
-// Compatible with Game Engine v15 (round-based scoring)
-// Clean arena handling • No score injection • Stable host management
+// server.ts — BATTLEBOX BACKEND v7.1
+// Fully compatible with Game Engine v15 (round-based scoring)
+// 100% correct round filtering (round_id > 0)
+// No idle scoring, no baseline corruption
 // ============================================================================
 
 import express from "express";
@@ -151,7 +152,7 @@ let currentGameId: number | null = null;
 (io as any).currentGameId = null;
 
 // ============================================================================
-// ARENA WRAPPERS (ENGINE-CLEAN, no score injection)
+// ARENA WRAPPERS
 // ============================================================================
 export async function emitArena() {
   await emitArenaRaw();
@@ -162,7 +163,12 @@ export function getArena() {
 }
 
 // ============================================================================
-// LEADERBOARDS — 100% GIFTS-DRIVEN (NO ROUND SCORE INJECTION)
+// ROUND-SAFE LEADERBOARDS
+// (ROUND_ID > 0 only — fully correct scoring)
+// ============================================================================
+
+// ============================================================================
+// PLAYER LB — only gifts during round
 // ============================================================================
 export async function broadcastPlayerLeaderboard() {
   if (!currentGameId) {
@@ -179,7 +185,7 @@ export async function broadcastPlayerLeaderboard() {
       receiver_id AS tiktok_id,
       receiver_username AS username,
       receiver_display_name AS display_name,
-      SUM(diamonds) AS total_score
+      SUM(CASE WHEN round_id > 0 THEN diamonds ELSE 0 END) AS total_score
     FROM gifts
     WHERE game_id=$1
       AND COALESCE(receiver_role,'speler')='speler'
@@ -202,7 +208,7 @@ export async function broadcastPlayerLeaderboard() {
 }
 
 // ============================================================================
-// GIFTER LEADERBOARD
+// GIFTER LB — only gifts during round
 // ============================================================================
 export async function broadcastGifterLeaderboard() {
   if (!currentGameId) {
@@ -213,11 +219,11 @@ export async function broadcastGifterLeaderboard() {
 
   const r = await pool.query(
     `
-    SELECT 
+    SELECT
       giver_id AS user_id,
       giver_username AS username,
       giver_display_name AS display_name,
-      SUM(diamonds) AS total_diamonds
+      SUM(CASE WHEN round_id > 0 THEN diamonds ELSE 0 END) AS total_diamonds
     FROM gifts
     WHERE game_id=$1
     GROUP BY giver_id, giver_username, giver_display_name
@@ -237,7 +243,7 @@ export async function broadcastGifterLeaderboard() {
 }
 
 // ============================================================================
-// HOST DIAMONDS
+// HOST DIAMONDS — only in round
 // ============================================================================
 export async function broadcastHostDiamonds() {
   if (!currentGameId || !HARD_HOST_ID) {
@@ -249,7 +255,9 @@ export async function broadcastHostDiamonds() {
     `
     SELECT COALESCE(SUM(diamonds),0) AS total
     FROM gifts
-    WHERE game_id=$1 AND is_host_gift=TRUE
+    WHERE game_id=$1
+      AND is_host_gift=TRUE
+      AND round_id > 0
     `,
     [currentGameId]
   );
@@ -261,7 +269,7 @@ export async function broadcastHostDiamonds() {
 }
 
 // ============================================================================
-// STREAM STATS — GIFTS-DRIVEN
+// STREAM STATS — round-filtered
 // ============================================================================
 export async function broadcastStats() {
   if (!currentGameId) {
@@ -276,7 +284,8 @@ export async function broadcastStats() {
     `
     SELECT
       COUNT(DISTINCT receiver_id) AS total_players,
-      COALESCE(SUM(diamonds),0) AS total_player_diamonds
+      COALESCE(SUM(CASE WHEN round_id > 0 THEN diamonds ELSE 0 END),0)
+        AS total_player_diamonds
     FROM gifts 
     WHERE game_id=$1 
       AND COALESCE(receiver_role,'speler')='speler'
@@ -286,7 +295,7 @@ export async function broadcastStats() {
 
   const h = await pool.query(
     `
-    SELECT COALESCE(SUM(diamonds),0) AS total
+    SELECT COALESCE(SUM(CASE WHEN round_id > 0 THEN diamonds ELSE 0 END),0) AS total
     FROM gifts
     WHERE game_id=$1 AND is_host_gift=TRUE
     `,
@@ -341,11 +350,11 @@ export async function restartTikTokConnection() {
     host: { username: HARD_HOST_USERNAME, id: HARD_HOST_ID }
   });
 
-  // Engines activeren
+  // Engines starten
   initGiftEngine(conn);
   initChatEngine(conn);
 
-  // LB + stats na reconnect
+  // Leaderboards + stats direct updaten
   if (currentGameId) {
     await broadcastPlayerLeaderboard();
     await broadcastGifterLeaderboard();
@@ -355,12 +364,12 @@ export async function restartTikTokConnection() {
 }
 
 // ============================================================================
-// SNAPSHOT — used for admin dashboard
+// SNAPSHOT — volledig round-filtered
 // ============================================================================
 async function buildInitialSnapshot() {
   const snap: any = {};
 
-  // Arena snapshot (engine computed)
+  // Arena
   snap.arena = getArena();
 
   // Queue
@@ -378,12 +387,14 @@ async function buildInitialSnapshot() {
     gameId: currentGameId
   };
 
-  // STREAM STATS
+  // STREAM STATS (ROUND FILTERED)
   if (currentGameId) {
     const r = await pool.query(
       `
-      SELECT COUNT(DISTINCT receiver_id) AS total_players,
-             COALESCE(SUM(diamonds),0) AS total_player_diamonds
+      SELECT 
+        COUNT(DISTINCT receiver_id) AS total_players,
+        COALESCE(SUM(CASE WHEN round_id > 0 THEN diamonds ELSE 0 END),0)
+          AS total_player_diamonds
       FROM gifts
       WHERE game_id=$1
         AND COALESCE(receiver_role,'speler')='speler'
@@ -393,7 +404,7 @@ async function buildInitialSnapshot() {
 
     const h = await pool.query(
       `
-      SELECT COALESCE(SUM(diamonds),0) AS total
+      SELECT COALESCE(SUM(CASE WHEN round_id > 0 THEN diamonds ELSE 0 END),0) AS total
       FROM gifts
       WHERE game_id=$1 AND is_host_gift=TRUE
       `,
@@ -409,18 +420,20 @@ async function buildInitialSnapshot() {
     snap.stats = null;
   }
 
-  // LEADERBOARDS
+  // PLAYER LEADERBOARD (ROUND FILTER)
   if (currentGameId) {
     const hostId = HARD_HOST_ID ? BigInt(HARD_HOST_ID) : null;
 
     const lb = await pool.query(
       `
-      SELECT receiver_id AS tiktok_id,
-             receiver_username AS username,
-             receiver_display_name AS display_name,
-             SUM(diamonds) AS total_score
+      SELECT 
+        receiver_id AS tiktok_id,
+        receiver_username AS username,
+        receiver_display_name AS display_name,
+        SUM(CASE WHEN round_id > 0 THEN diamonds ELSE 0 END) AS total_score
       FROM gifts
       WHERE game_id=$1
+        AND receiver_id IS NOT NULL
         AND COALESCE(receiver_role,'speler')='speler'
         AND ( $2::bigint IS NULL OR receiver_id <> $2 )
       GROUP BY receiver_id, receiver_username, receiver_display_name
@@ -440,14 +453,15 @@ async function buildInitialSnapshot() {
     snap.playerLeaderboardSummary = 0;
   }
 
-  // Gifter LB
+  // GIFTER LB (ROUND FILTER)
   if (currentGameId) {
     const gf = await pool.query(
       `
-      SELECT giver_id AS user_id,
-             giver_username AS username,
-             giver_display_name AS display_name,
-             SUM(diamonds) AS total_diamonds
+      SELECT 
+        giver_id AS user_id,
+        giver_username AS username,
+        giver_display_name AS display_name,
+        SUM(CASE WHEN round_id > 0 THEN diamonds ELSE 0 END) AS total_diamonds
       FROM gifts
       WHERE game_id=$1
       GROUP BY giver_id, giver_username, giver_display_name
@@ -467,11 +481,11 @@ async function buildInitialSnapshot() {
     snap.gifterLeaderboardSummary = 0;
   }
 
-  // Host diamonds
+  // HOST DIAMONDS (ROUND FILTER)
   if (currentGameId && HARD_HOST_ID) {
     const hx = await pool.query(
       `
-      SELECT COALESCE(SUM(diamonds),0) AS total
+      SELECT COALESCE(SUM(CASE WHEN round_id > 0 THEN diamonds ELSE 0 END),0) AS total
       FROM gifts
       WHERE game_id=$1 AND is_host_gift=TRUE
       `,
@@ -505,7 +519,7 @@ io.on("connection", async (socket: AdminSocket) => {
     host: { username: HARD_HOST_USERNAME, id: HARD_HOST_ID }
   });
 
-  // Hostlijst pushen
+  // Hostlijst
   const hosts = await pool.query(`
     SELECT id, label, username, tiktok_id, active
     FROM hosts ORDER BY id
@@ -518,7 +532,7 @@ io.on("connection", async (socket: AdminSocket) => {
     gameId: currentGameId
   });
 
-  // Initial leaderboard + stats
+  // Initial LB + stats
   if (currentGameId) {
     await broadcastPlayerLeaderboard();
     await broadcastGifterLeaderboard();
@@ -526,7 +540,7 @@ io.on("connection", async (socket: AdminSocket) => {
     await broadcastStats();
   }
 
-  // Initial snapshot handler
+  // Full snapshot (round filtered)
   socket.on("getInitialSnapshot", async (_payload, ack) => {
     const snap = await buildInitialSnapshot();
     ack(snap);
@@ -686,7 +700,7 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       // ----------------------------------------------------------------------
-      // ROUND: START / END
+      // ROUNDS
       // ----------------------------------------------------------------------
       if (action === "startRound") {
         const type = data?.type === "finale" ? "finale" : "quarter";
@@ -716,9 +730,7 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // ----------------------------------------------------------------------
-      // NEW: ROUND SETTINGS UPDATE
-      // ----------------------------------------------------------------------
+      // UPDATE ROUND SETTINGS
       if (action === "updateRoundSettings") {
         const pre = Number(data?.pre);
         const fin = Number(data?.final);
@@ -743,7 +755,7 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       // ----------------------------------------------------------------------
-      // ARENA: ADD / REMOVE
+      // ARENA MGMT
       // ----------------------------------------------------------------------
       if (action === "addToArena") {
         const clean = (data?.username || "").trim().replace(/^@+/, "").toLowerCase();
@@ -806,7 +818,7 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       // ----------------------------------------------------------------------
-      // QUEUE MANAGEMENT
+      // QUEUE MGMT
       // ----------------------------------------------------------------------
       if (action === "addToQueue") {
         const clean = (data?.username || "").trim().replace(/^@+/, "").toLowerCase();
@@ -867,7 +879,7 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // Priority boosts
+      // PRIORITY BOOSTS
       if (action === "promoteUser") {
         const clean = (data?.username || "").trim().replace(/^@+/, "").toLowerCase();
 
@@ -980,18 +992,17 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       // ----------------------------------------------------------------------
-      // UNKNOWN COMMAND
+      // UNKNOWN
       // ----------------------------------------------------------------------
       return ack({ success: false, message: "Onbekend admin commando" });
+
     } catch (err: any) {
       console.error("Admin error:", err);
       return ack({ success: false, message: err?.message || "Serverfout" });
     }
   }
 
-  // ===========================================================================
-  // UNIVERSAL DISPATCH WRAPPER
-  // ===========================================================================
+  // Universal event dispatcher
   socket.onAny((event, payload, ack) => {
     if (typeof ack !== "function") ack = () => {};
     handle(event, payload, ack);
