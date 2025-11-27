@@ -1,15 +1,11 @@
 /* ============================================================================
-   5-game-engine.ts — BattleBox Arena Engine v15 (Final)
-   Variant 1 — Admin starts finale manually
-   -------------------------------------------
-   ✔ Correct round_id scoring (pure DB)
-   ✔ Correct finale baseline (round_id < firstFinalRound)
-   ✔ Danger 6–8 only during round
-   ✔ Eliminations only after grace
-   ✔ Idle = safe for all
+   5-game-engine.ts — BattleBox Arena Engine v15.1
+   ✔ Correct round_id scoring (alleen is_round_gift=TRUE)
+   ✔ Correct finale baseline
+   ✔ Danger 6–8 alleen tijdens ronde
+   ✔ Eliminaties na grace
    ✔ DB settings (arena_settings table)
-   ✔ No total-score bugs
-   ✔ Fully compatible with gift-engine v15
+   ✔ Compatibel met gift-engine v14.2 & server v7.3
 ============================================================================ */
 
 import pool from "../db";
@@ -83,12 +79,10 @@ let arena: ArenaState = {
 };
 
 /* ============================================================================
-   LOAD SETTINGS FROM DATABASE  (Correct version)
+   LOAD SETTINGS FROM DATABASE
 ============================================================================ */
 
 export async function loadArenaSettingsFromDB() {
-  // CORRECT schema:
-  // arena_settings(round_pre_seconds, round_final_seconds, grace_seconds)
   const r = await pool.query(`
     SELECT round_pre_seconds, round_final_seconds, grace_seconds
     FROM arena_settings
@@ -123,10 +117,10 @@ export function getArenaSettings(): ArenaSettings {
 }
 
 /* ============================================================================
-   SCORE SYSTEM — PURE DB, ROUND-BASED
+   SCORE SYSTEM — PURE DB, ROUND-BASED + is_round_gift=TRUE
 ============================================================================ */
 
-// Score voor één ronde
+// Score voor één ronde (alleen echte ronde-gifts)
 async function getRoundScore(tiktokId: string, round: number): Promise<number> {
   const gid = (io as any)?.currentGameId;
   if (!gid || !round) return 0;
@@ -138,6 +132,7 @@ async function getRoundScore(tiktokId: string, round: number): Promise<number> {
       WHERE receiver_id=$1
         AND game_id=$2
         AND round_id=$3
+        AND is_round_gift=TRUE
     `,
     [BigInt(tiktokId), gid, round]
   );
@@ -145,7 +140,7 @@ async function getRoundScore(tiktokId: string, round: number): Promise<number> {
   return Number(q.rows[0]?.score || 0);
 }
 
-// Score voor FINALE
+// Score voor FINALE (baseline + finale, alleen ronde-gifts)
 async function getFinalScore(tiktokId: string): Promise<number> {
   const gid = (io as any)?.currentGameId;
   if (!gid) return 0;
@@ -153,7 +148,7 @@ async function getFinalScore(tiktokId: string): Promise<number> {
 
   const first = arena.firstFinalRound;
 
-  // A) Baseline = alle voorrondes
+  // A) Baseline = alle voorrondes (met is_round_gift=TRUE)
   const baselineQ = await pool.query(
     `
       SELECT COALESCE(SUM(diamonds),0) AS score
@@ -161,11 +156,12 @@ async function getFinalScore(tiktokId: string): Promise<number> {
       WHERE receiver_id=$1
         AND game_id=$2
         AND round_id < $3
+        AND is_round_gift=TRUE
     `,
     [BigInt(tiktokId), gid, first]
   );
 
-  // B) Finale rondes (≥ firstFinalRound)
+  // B) Finale rondes (≥ firstFinalRound, ook alleen ronde-gifts)
   const finaleQ = await pool.query(
     `
       SELECT COALESCE(SUM(diamonds),0) AS score
@@ -173,6 +169,7 @@ async function getFinalScore(tiktokId: string): Promise<number> {
       WHERE receiver_id=$1
         AND game_id=$2
         AND round_id >= $3
+        AND is_round_gift=TRUE
     `,
     [BigInt(tiktokId), gid, first]
   );
@@ -346,9 +343,7 @@ export async function startRound(type: RoundType) {
 ============================================================================ */
 
 export async function endRound() {
-  /* -------------------------------------------------------------
-     FASe 1: ACTIVE → GRACE
-  ------------------------------------------------------------- */
+  // FASe 1: ACTIVE → GRACE
   if (arena.status === "active") {
     arena.status = "grace";
 
@@ -366,9 +361,7 @@ export async function endRound() {
     return;
   }
 
-  /* -------------------------------------------------------------
-     FASe 2: GRACE → ENDED
-  ------------------------------------------------------------- */
+  // FASe 2: GRACE → ENDED
   if (arena.status === "grace") {
     arena.status = "ended";
 
@@ -395,9 +388,7 @@ export async function endRound() {
       return;
     }
 
-    /* -------------------------------------------------------------
-       Eliminatie: posities 6–8 → indexes 5–7
-    ------------------------------------------------------------- */
+    // Eliminatie: posities 6–8 → indexes 5–7
     const doomed = arena.players
       .map((p, index) => ({ p, index }))
       .filter((entry) => entry.index >= 5 && entry.index <= 7)
@@ -473,7 +464,7 @@ export async function arenaLeave(tiktok_id: string) {
 }
 
 /* ============================================================================
-   ADD BY USER LOOKUP  (Admin add)
+   ADD BY USER LOOKUP
 ============================================================================ */
 
 export async function addToArena(username: string, resolveUser: Function) {
@@ -558,7 +549,7 @@ export async function arenaClear() {
 }
 
 /* ============================================================================
-   FORCE SORT (manual trigger from server)
+   FORCE SORT
 ============================================================================ */
 
 export async function forceSort() {
@@ -567,7 +558,7 @@ export async function forceSort() {
 }
 
 /* ============================================================================
-   SETTINGS (already correct)
+   SETTINGS
 ============================================================================ */
 
 export async function updateArenaSettings(
@@ -586,8 +577,7 @@ export async function updateArenaSettings(
 }
 
 /* ============================================================================
-   TIMER LOOP — automatic phase transitions
-   ACTIVE → GRACE → ENDED
+   TIMER LOOP — ACTIVE → GRACE → ENDED
 ============================================================================ */
 
 setInterval(async () => {
