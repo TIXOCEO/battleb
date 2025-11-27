@@ -1,6 +1,6 @@
 /* ============================================================================
-   3-gift-engine.ts — v14.2
-   GIFTS-ONLY ENGINE — FIXED FOR 21-COLUMN GIFTS TABLE
+   3-gift-engine.ts — v14.4 FINAL
+   GIFTS ENGINE — 21 COLUMNS — ROUND-STRICT + HOST ALWAYS
 ============================================================================ */
 
 import pool from "../db";
@@ -18,17 +18,16 @@ import {
   getActiveHost,
   broadcastPlayerLeaderboard,
   broadcastGifterLeaderboard,
-  broadcastHostDiamonds,
+  broadcastHostDiamonds
 } from "../server";
 
 import { addBP } from "./4-points-engine";
 import { getArena, emitArena } from "./5-game-engine";
-
 import { TWIST_MAP, TwistType } from "./twist-definitions";
 import { addTwistByGift } from "./8-twist-engine";
 
 /* ============================================================================
-   HELPER: Get active game id
+   GAME HELPERS
 ============================================================================ */
 
 function getActiveGameId(): number | null {
@@ -41,10 +40,9 @@ async function isGameActive(): Promise<boolean> {
   if (!gid) return false;
 
   const r = await pool.query(
-    `SELECT id FROM games WHERE id=$1 AND status='running' LIMIT 1`,
+    `SELECT id FROM games WHERE id=$1 AND status='running'`,
     [gid]
   );
-
   return r.rows.length > 0;
 }
 
@@ -84,8 +82,7 @@ function now() {
 }
 
 function formatDisplay(u: any) {
-  if (!u) return "Onbekend";
-  return u.display_name;
+  return u?.display_name || "Onbekend";
 }
 
 /* ============================================================================
@@ -99,8 +96,6 @@ function extractSender(evt: any) {
     evt.fromUser ||
     evt.msgUser ||
     evt.userIdentity ||
-    evt.toUser ||
-    evt.receiver ||
     evt._data ||
     evt;
 
@@ -109,8 +104,6 @@ function extractSender(evt: any) {
       raw?.userId ||
       raw?.uid ||
       raw?.id ||
-      raw?.receiverId ||
-      raw?.senderId ||
       evt.userId ||
       evt.senderUserId ||
       null,
@@ -128,7 +121,7 @@ function extractSender(evt: any) {
       raw?.displayName ||
       raw?.nickName ||
       evt.nickname ||
-      null,
+      null
   };
 }
 
@@ -155,7 +148,7 @@ function calcDiamonds(evt: any): number {
 async function resolveReceiver(evt: any) {
   const host = getActiveHost();
   const HOST_ID = host?.id ? String(host.id) : null;
-  const HOST_USERNAME = host?.username ? norm(host.username) : "";
+  const HOST_USER = host?.username ? norm(host.username) : "";
 
   const directId =
     evt.receiverUserId ||
@@ -167,24 +160,24 @@ async function resolveReceiver(evt: any) {
   const unique =
     evt.receiver?.uniqueId ||
     evt.receiver?.unique_id ||
-    evt.toUser?.uniqueId ||
-    evt.toUser?.unique_id ||
     null;
 
   const un = unique ? norm(unique) : null;
 
+  // Self-gift => ALWAYS host
   if (evt.userId && directId && String(evt.userId) === String(directId)) {
     if (HOST_ID) {
-      const h = await getOrUpdateUser(String(HOST_ID), null, null);
+      const h = await getOrUpdateUser(HOST_ID, null, null);
       return {
         id: HOST_ID,
         username: h.username,
         display_name: h.display_name,
-        role: "host"
+        role: "host",
       };
     }
   }
 
+  // Direct receiver found?
   if (directId) {
     const u = await getOrUpdateUser(String(directId), null, null);
     const isHost = HOST_ID && String(directId) === String(HOST_ID);
@@ -192,27 +185,29 @@ async function resolveReceiver(evt: any) {
       id: u.tiktok_id,
       username: u.username,
       display_name: u.display_name,
-      role: isHost ? "host" : "speler"
+      role: isHost ? "host" : "speler",
     };
   }
 
-  if (un && HOST_USERNAME && un === HOST_USERNAME && HOST_ID) {
+  // Name match with host
+  if (un && HOST_USER && un === HOST_USER && HOST_ID) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     return {
       id: HOST_ID,
       username: h.username,
       display_name: h.display_name,
-      role: "host"
+      role: "host",
     };
   }
 
+  // Fallback receiver = host
   if (HOST_ID) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     return {
       id: HOST_ID,
       username: h.username,
       display_name: h.display_name,
-      role: "host"
+      role: "host",
     };
   }
 
@@ -223,30 +218,25 @@ async function resolveReceiver(evt: any) {
    HEART ME
 ============================================================================ */
 
-const HEART_ME_GIFT_IDS = new Set([7934]);
+const HEART_ME_IDS = new Set([7934]);
 
-function isHeartMeGift(evt: any): boolean {
-  const name = (evt.giftName || "").toLowerCase().trim();
-  if (name === "heart me") return true;
-  return HEART_ME_GIFT_IDS.has(Number(evt.giftId));
+function isHeartMeGift(evt: any) {
+  const name = (evt.giftName || "").toLowerCase();
+  return name === "heart me" || HEART_ME_IDS.has(Number(evt.giftId));
 }
 
 /* ============================================================================
-   MAIN PROCESSOR — GIFTS-ONLY
+   MAIN PROCESSOR
 ============================================================================ */
 
 async function processGift(evt: any, source: string) {
   try {
-    /* ----------------------------------------
-       DEDUPE
-    ---------------------------------------- */
+    /* DEDUPE */
     const key = makeDedupeKey(evt, source);
     if (dedupe.has(key)) return;
     dedupe.add(key);
 
-    /* ----------------------------------------
-       IDENTITY SYNC
-    ---------------------------------------- */
+    /* Identity sync */
     await upsertIdentityFromLooseEvent(evt);
 
     const S = extractSender(evt);
@@ -257,23 +247,22 @@ async function processGift(evt: any, source: string) {
     const diamonds = calcDiamonds(evt);
     if (diamonds <= 0) return;
 
-    /* ----------------------------------------
-       CHECK GAME ACTIVE ONLY
-    ---------------------------------------- */
-    const gameId = getActiveGameId();
+    /* Game active? */
+    const gid = getActiveGameId();
     const active = await isGameActive();
-
-    if (!gameId || !active) {
-      emitLog({
-        type: "gift",
-        message: `${sender.display_name} → UNKNOWN: ${evt.giftName} (+${diamonds}💎)`
-      });
-      return;
+    if (!gid || !active) {
+      // Host gifts still count even in idle
+      const receiver = await resolveReceiver(evt);
+      if (receiver.role !== "host") {
+        emitLog({
+          type: "gift",
+          message: `${sender.display_name} → IDLE: ${evt.giftName} (+${diamonds}💎)`
+        });
+        return;
+      }
     }
 
-    /* ----------------------------------------
-       RESOLVE RECEIVER
-    ---------------------------------------- */
+    /* Resolve receiver */
     const receiver = await resolveReceiver(evt);
     const isHostReceiver = receiver.role === "host";
 
@@ -281,20 +270,13 @@ async function processGift(evt: any, source: string) {
       ? await getUserByTikTokId(String(receiver.id))
       : null;
 
+    const arena = getArena();
+    const inRound = arena.status === "active" || arena.status === "grace";
+
     const senderFmt = formatDisplay(sender);
     const receiverFmt = receiverUser ? receiverUser.display_name : "UNKNOWN";
 
-    /* ----------------------------------------
-       ARENA CONTEXT
-    ---------------------------------------- */
-    const arena = getArena();
-    const inRound =
-      arena.status === "active" || arena.status === "grace";
-    const arena_id = arena.round ?? null;
-
-    /* ----------------------------------------
-       BP ADD
-    ---------------------------------------- */
+    /* BP */
     await addBP(
       BigInt(sender.tiktok_id),
       diamonds * 0.2,
@@ -302,15 +284,11 @@ async function processGift(evt: any, source: string) {
       sender.display_name
     );
 
-    /* ----------------------------------------
-       FAN / HEART ME
-    ---------------------------------------- */
+    /* FAN / HEART ME */
     if (isHostReceiver && isHeartMeGift(evt)) {
       const expires = new Date(now() + 24 * 3600 * 1000);
-
       await pool.query(
-        `UPDATE users SET is_fan=TRUE, fan_expires_at=$1
-         WHERE tiktok_id=$2`,
+        `UPDATE users SET is_fan=TRUE, fan_expires_at=$1 WHERE tiktok_id=$2`,
         [expires, BigInt(sender.tiktok_id)]
       );
 
@@ -320,9 +298,7 @@ async function processGift(evt: any, source: string) {
       });
     }
 
-    /* ----------------------------------------
-       TWISTS
-    ---------------------------------------- */
+    /* TWISTS */
     const giftId = Number(evt.giftId);
     const twistType: TwistType | null =
       (Object.keys(TWIST_MAP) as TwistType[]).find(
@@ -338,36 +314,23 @@ async function processGift(evt: any, source: string) {
     }
 
     /* =========================================================================
-       DATABASE INSERT — FULL 21-COLUMN GIFTS TABLE
-       Exact structuur die JIJ nodig hebt
+       INSERT — STRICT FLAG RULES
+       - is_round_gift = TRUE alleen als:
+           ontvanger speler AND inRound === true
+       - is_host_gift = TRUE als ontvanger host (altijd)
+       - round_active = inRound (altijd TRUE voor ronde gifts)
     ========================================================================= */
+    const is_round_gift = !isHostReceiver && inRound;
+    const is_host_gift = isHostReceiver ? true : false;
+
     await pool.query(
       `
       INSERT INTO gifts (
-        giver_id,
-        giver_username,
-        giver_display_name,
-
-        gift_name,
-        diamonds,
-        bp,
-        created_at,
-
-        receiver_id,
-        receiver_username,
-        receiver_display_name,
-        receiver_role,
-
-        game_id,
-        is_host_gift,
-        is_round_gift,
-        arena_id,
-        round_active,
-
-        sender_display_name,
-        sender_username,
-        round_id,
-        source_event
+        giver_id, giver_username, giver_display_name,
+        gift_name, diamonds, bp, created_at,
+        receiver_id, receiver_username, receiver_display_name, receiver_role,
+        game_id, is_host_gift, is_round_gift, arena_id, round_active,
+        sender_display_name, sender_username, round_id, source_event
       )
       VALUES (
         $1,$2,$3,
@@ -378,40 +341,35 @@ async function processGift(evt: any, source: string) {
       )
       `,
       [
-        /* giver */
-        BigInt(sender.tiktok_id),  // $1
-        sender.username,           // $2
-        sender.display_name,       // $3
+        BigInt(sender.tiktok_id),
+        sender.username,
+        sender.display_name,
 
-        /* gift details */
-        evt.giftName || "unknown", // $4
-        diamonds,                  // $5
-        diamonds * 0.2,            // $6
+        evt.giftName || "unknown",
+        diamonds,
+        diamonds * 0.2,
 
-        /* receiver */
-        receiver.id ? BigInt(String(receiver.id)) : null, // $7
-        receiver.username,         // $8
-        receiver.display_name,     // $9
-        receiver.role,             // $10
+        receiver.id ? BigInt(receiver.id) : null,
+        receiver.username,
+        receiver.display_name,
+        receiver.role,
 
-        /* game info */
-        gameId,                    // $11
-        isHostReceiver,            // $12
-        !isHostReceiver && inRound,// $13
-        arena_id,                  // $14
-        inRound,                   // $15
+        gid,
+        is_host_gift,
+        is_round_gift,
+        arena.round ?? null,
+        inRound,
 
-        /* added columns */
-        sender.display_name,       // $16
-        sender.username,           // $17
-        arena.round ?? 0,          // $18
-        source                     // $19
+        sender.display_name,
+        sender.username,
+        arena.round ?? 0,
+        source
       ]
     );
 
     /* =========================================================================
-       BROADCAST FIXES — This is the correct version
-    =============================================================== */ 
+       BROADCAST
+    ========================================================================= */
     await broadcastStats();
     await broadcastPlayerLeaderboard();
     await broadcastGifterLeaderboard();
@@ -429,7 +387,7 @@ async function processGift(evt: any, source: string) {
 }
 
 /* ============================================================================
-   INIT GIFT ENGINE — TikTok Event Binding
+   INIT
 ============================================================================ */
 
 export function initGiftEngine(conn: any) {
@@ -438,9 +396,7 @@ export function initGiftEngine(conn: any) {
     return;
   }
 
-  console.log(
-    "🎁 GiftEngine v14.2 LOADED (gifts-only scoring • arena inject • leaderboard sync • 21-col DB)"
-  );
+  console.log("🎁 GiftEngine v14.4 LOADED");
 
   conn.on("gift", (d: any) => processGift(d, "gift"));
   conn.on("roomMessage", (d: any) => {
