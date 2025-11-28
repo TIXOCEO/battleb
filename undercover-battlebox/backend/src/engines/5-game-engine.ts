@@ -191,17 +191,35 @@ async function recomputePositions() {
 
   arena.players.sort((a, b) => b.score - a.score);
 
-  if (status === "ended") {
+if (status === "ended") {
+
+  // 🔥 FIX: als er minder dan 6 spelers zijn, dan GEEN elimination behouden.
+  if (arena.players.length < 6) {
     for (const p of arena.players) {
-      if (p.eliminated) {
-        p.positionStatus = "elimination";
-      } else if (p.boosters.includes("immune")) {
-        p.positionStatus = "immune";
-      }
+      p.positionStatus = p.boosters.includes("immune")
+        ? "immune"
+        : "alive";
+      p.eliminated = false; // reset eliminated flag
     }
+
     arena.lastSortedAt = Date.now();
     return;
   }
+
+  // 🔥 NORMALE LOGICA voor 6 of meer spelers
+  for (const p of arena.players) {
+    if (p.eliminated) {
+      p.positionStatus = "elimination";
+    } else if (p.boosters.includes("immune")) {
+      p.positionStatus = "immune";
+    } else {
+      p.positionStatus = "alive";
+    }
+  }
+
+  arena.lastSortedAt = Date.now();
+  return;
+}
 
   if (arena.type === "quarter") {
     if (total < 6) {
