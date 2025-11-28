@@ -1,7 +1,7 @@
 // ============================================================================
-// src/queue.ts — QUEUE ENGINE v16.1 CLEAN BUILD
+// src/queue.ts — QUEUE ENGINE v16.2 CLEAN BUILD
 // Position-based queue system (VIP/FAN aware)
-// Compatibel met server.ts v15+ en alle admin dashboard acties
+// Compatibel met server.ts v16+ en admin dashboard acties
 // ============================================================================
 
 import pool from "./db";
@@ -64,7 +64,6 @@ export async function getQueue() {
     const isFan = !!fanActive;
     const boost = Number(row.boost_spots) || 0;
 
-    // UI reason label
     let reason = "";
     if (isVip) reason += "[VIP] ";
     if (isFan) reason += "[FAN] ";
@@ -126,10 +125,8 @@ export async function addToQueue(
   const userTid = BigInt(tiktok_id);
   const cleanUsername = username.replace(/^@+/, "").toLowerCase();
 
-  // oude entry weg
   await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [userTid]);
 
-  // user info
   const ur = await pool.query(
     `
     SELECT 
@@ -145,9 +142,7 @@ export async function addToQueue(
     [userTid]
   );
 
-  if (!ur.rows.length) {
-    throw new Error("Gebruiker niet gevonden in database (users).");
-  }
+  if (!ur.rows.length) throw new Error("Gebruiker niet gevonden.");
 
   const user = ur.rows[0];
   const now = Date.now();
@@ -160,11 +155,8 @@ export async function addToQueue(
   const isFan = !!fanActive;
   const isVip = !!user.is_vip;
 
-  if (!isFan) {
-    throw new Error("Gebruiker is geen actieve FAN (kan niet joinen).");
-  }
+  if (!isFan) throw new Error("Gebruiker is geen FAN (kan niet joinen).");
 
-  // nieuwe positie onderaan
   const qr = await pool.query(
     `SELECT COALESCE(MAX(position),0) AS maxpos FROM queue`
   );
@@ -182,7 +174,6 @@ export async function addToQueue(
   const newId = ir.rows[0].id;
   let newPos = ir.rows[0].position;
 
-  // VIP-boost (5 posities), maar FIFO veilig
   if (isVip) {
     const targetPos = Math.max(1, newPos - 5);
 
@@ -229,7 +220,7 @@ export async function addToQueue(
 }
 
 /**
- * removeFromQueue — admin verwijdert speler uit queue
+ * removeFromQueue — admin
  */
 export async function removeFromQueue(tiktok_id: string): Promise<void> {
   const userTid = BigInt(tiktok_id);
@@ -238,7 +229,6 @@ export async function removeFromQueue(tiktok_id: string): Promise<void> {
     `SELECT id, position FROM queue WHERE user_tiktok_id=$1`,
     [userTid]
   );
-
   if (!r.rows.length) return;
 
   const entry = r.rows[0];
@@ -260,7 +250,7 @@ export async function removeFromQueue(tiktok_id: string): Promise<void> {
 }
 
 /**
- * leaveQueue — !leave uit chat
+ * leaveQueue — !leave
  */
 export async function leaveQueue(tiktok_id: string): Promise<number> {
   const userTid = BigInt(tiktok_id);
@@ -269,7 +259,6 @@ export async function leaveQueue(tiktok_id: string): Promise<number> {
     `SELECT id, position, boost_spots FROM queue WHERE user_tiktok_id=$1`,
     [userTid]
   );
-
   if (!r.rows.length) return 0;
 
   const entry = r.rows[0];
@@ -330,7 +319,6 @@ export async function promoteQueue(tiktok_id: string): Promise<void> {
 
   const aboveId = prev.rows[0].id;
 
-  // swap
   await swapPositions(id, aboveId);
 }
 
@@ -362,7 +350,6 @@ export async function demoteQueue(tiktok_id: string): Promise<void> {
 
   const belowId = nxt.rows[0].id;
 
-  // swap
   await swapPositions(id, belowId);
 }
 
@@ -396,9 +383,30 @@ export async function addToArenaFromQueue(tiktok_id: string): Promise<void> {
 }
 
 // ============================================================================
-// EXPORT DEFAULT
+// EXTRA HELPERS — promote/demote via username
 // ============================================================================
 
+export async function promoteQueueByUsername(username: string) {
+  const r = await pool.query(
+    `SELECT tiktok_id FROM users WHERE LOWER(username)=LOWER($1) LIMIT 1`,
+    [username]
+  );
+  if (!r.rows.length) return;
+  return promoteQueue(String(r.rows[0].tiktok_id));
+}
+
+export async function demoteQueueByUsername(username: string) {
+  const r = await pool.query(
+    `SELECT tiktok_id FROM users WHERE LOWER(username)=LOWER($1) LIMIT 1`,
+    [username]
+  );
+  if (!r.rows.length) return;
+  return demoteQueue(String(r.rows[0].tiktok_id));
+}
+
+// ============================================================================
+// EXPORT DEFAULT
+// ============================================================================
 export default {
   getQueue,
   pushQueueUpdate,
@@ -409,4 +417,6 @@ export default {
   demoteQueue,
   addToArenaFromQueue,
   normalizePositions,
+  promoteQueueByUsername,
+  demoteQueueByUsername,
 };
