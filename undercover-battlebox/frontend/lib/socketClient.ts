@@ -1,6 +1,8 @@
 // ============================================================================
-// frontend/lib/socketClient.ts — BattleBox v15.1 (SYNCED EDITION)
-// Realtime backend connector — volledig in sync met backend v7 & adminTypes v15.1
+// frontend/lib/socketClient.ts — BattleBox v16 (SYNCED EDITION)
+// ✔ Realtime backend connector — volledig in sync met backend v16 & adminTypes v16
+// ✔ Nieuwe outbound commands toegevoegd (promoteUser, demoteUser, giveVip, removeVip)
+// ✔ Volledig backward compatible — rest van code NIET aangepast
 // ============================================================================
 
 import { io, Socket } from "socket.io-client";
@@ -43,7 +45,7 @@ export function getAdminSocket(): Socket<
     throw new Error("getAdminSocket moet client-side worden gebruikt.");
   }
 
-  // Gebruik singleton indien aanwezig
+  // Singleton
   if (globalThis.__adminSocket) return globalThis.__adminSocket;
 
   // ==========================================================================
@@ -117,8 +119,25 @@ export function getAdminSocket(): Socket<
   socket.on("hostDiamonds", (_d: { username: string; total: number }) => {});
 
   // ==========================================================================
-  // EINDE — Geen outbound implementatie nodig, alleen type support
+  // OUTBOUND — Alleen type support, geen implementatie nodig
   // ==========================================================================
+  //
+  // De nieuwe admin actions zijn:
+  //
+  //  ✔ promoteUser
+  //  ✔ demoteUser
+  //  ✔ giveVip
+  //  ✔ removeVip
+  //  ✔ addToQueue
+  //  ✔ removeFromQueue
+  //  ✔ addToArena (queue → arena)
+  //
+  // Ze zijn beschikbaar via:
+  //    const socket = getAdminSocket();
+  //    socket.emit("promoteUser", { username }, ack => ...)
+  //
+  // Geen extra code nodig — types zijn reeds gekoppeld.
+  //
 
   globalThis.__adminSocket = socket;
   return socket;
