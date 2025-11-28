@@ -1,10 +1,11 @@
 /* ============================================================================
-   adminTypes.ts — BattleBox v15 (patched for realtime diamonds)
+   adminTypes.ts — BattleBox v15.1
    ✔ Gesynchroniseerd met server.ts v7 & game-engine v15
    ✔ Round-based scoring compatible
    ✔ Correcte arena structuur
-   ✔ Realtime arena diamonds (NEW)
-   ✔ Realtime host diamonds (NEW)
+   ✔ Realtime arena diamonds
+   ✔ Realtime host diamonds
+   ✔ Permanent remove event toegevoegd (removeFromArenaPermanent)
 ============================================================================ */
 
 /* ================================
@@ -23,23 +24,15 @@ export interface ArenaPlayer {
   display_name: string;
   username: string;
 
-  /** 
-   * v15 legacy field (UI static scoring)
-   * blijft bestaan zodat frontend niet breekt
-   */
+  /** v15 legacy field — blijft bestaan */
   score: number;
 
-  /**
-   * ✔ NIEUW — Realtime diamonds field
-   * Wordt live geüpdatet door 3-gift-engine.ts v15.2
-   */
+  /** Realtime diamonds uit gift-engine */
   diamonds: number;
 
   boosters: string[];
 
-  /**
-   * legacy, niet gebruikt voor sorting — positionStatus bepaalt dit
-   */
+  /** Legacy, niet gebruikt voor sorting */
   status: "alive" | "eliminated";
 
   positionStatus: ArenaPlayerStatus;
@@ -62,18 +55,13 @@ export interface ArenaState {
 
   status: "idle" | "active" | "grace" | "ended";
 
-  /** UI convenience */
   timeLeft: number;
-
-  /** shortcut: status === "active" */
   isRunning: boolean;
 
-  /** timestamps */
   roundStartTime: number;
   roundCutoff: number;
   graceEnd: number;
 
-  /** settings */
   settings: {
     roundDurationPre: number;
     roundDurationFinal: number;
@@ -81,16 +69,10 @@ export interface ArenaState {
     forceEliminations: boolean;
   };
 
-  /** baseline indicator */
   firstFinalRound: number | null;
 
-  /** UI internal sorting timestamp */
   lastSortedAt: number;
 
-  /**
-   * ✔ NIEUW — realtime host diamonds
-   * Updatet live via gift-engine
-   */
   host_diamonds?: number;
 }
 
@@ -259,7 +241,6 @@ export interface AdminSocketInbound {
   settings: (settings: ArenaSettings) => void;
 
   hosts: (rows: HostProfile[]) => void;
-
   hostsActiveChanged: (payload: { username: string; tiktok_id: string }) => void;
 
   "round:start": (payload: {
@@ -289,7 +270,10 @@ export interface AdminSocketInbound {
 export interface AdminSocketOutbound {
   ping: () => void;
 
-  getInitialSnapshot: (payload: {}, ack: (snap: InitialSnapshot) => void) => void;
+  getInitialSnapshot: (
+    payload: {},
+    ack: (snap: InitialSnapshot) => void
+  ) => void;
 
   getHosts: (
     payload: {},
@@ -332,6 +316,15 @@ export interface AdminSocketOutbound {
   ) => void;
 
   eliminate: (
+    payload: { username: string },
+    ack: (res: AdminAckResponse) => void
+  ) => void;
+
+  /** 
+   * ✔ NIEUW — definitief verwijderen uit arena
+   * gebruikt door permanente verwijderknop
+   */
+  removeFromArenaPermanent: (
     payload: { username: string },
     ack: (res: AdminAckResponse) => void
   ) => void;
