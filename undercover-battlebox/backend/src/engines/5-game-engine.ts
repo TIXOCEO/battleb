@@ -8,6 +8,7 @@
    ✔ Eliminated spelers blijven elimination in ENDED
    ✔ New players IDLE: krijgen geen vorige ronde gifts
    ✔ Admin remove-knop: enabled bij ENDED of IDLE
+   ✔ PATCHED: arenaLeave(force) voor permanente verwijdering
 ============================================================================ */
 
 import pool from "../db";
@@ -101,13 +102,12 @@ export function getArenaSettings() {
 }
 
 /* ============================================================================
-   SCORE SYSTEM — FIXED
+   SCORE SYSTEM
 ============================================================================ */
 
 async function getRoundScore(tiktokId: string, round: number) {
   const gid = (io as any)?.currentGameId;
 
-  // New players should never inherit old round gifts
   if (!gid || round !== arena.round) return 0;
 
   const q = await pool.query(
@@ -174,33 +174,23 @@ async function recomputePositions() {
   const status = arena.status;
   const total = arena.players.length;
 
-  /* --------------------------------------
-     IDLE → scores always 0
-  ---------------------------------------*/
   if (status === "idle") {
     for (const p of arena.players) {
       p.score = 0;
       p.positionStatus = p.boosters.includes("immune")
         ? "immune"
         : "alive";
-      // eliminated flag blijft staan, host kan opruimen
     }
     arena.lastSortedAt = Date.now();
     return;
   }
 
-  /* --------------------------------------
-     Load real scores
-  ---------------------------------------*/
   for (const p of arena.players) {
     p.score = await computePlayerScore(p);
   }
 
   arena.players.sort((a, b) => b.score - a.score);
 
-  /* --------------------------------------
-     ENDED — DO NOT OVERRIDE ELIMINATION
-  ---------------------------------------*/
   if (status === "ended") {
     for (const p of arena.players) {
       if (p.eliminated) {
@@ -213,9 +203,6 @@ async function recomputePositions() {
     return;
   }
 
-  /* --------------------------------------
-     QUARTER danger
-  ---------------------------------------*/
   if (arena.type === "quarter") {
     if (total < 6) {
       for (const p of arena.players) {
@@ -244,9 +231,6 @@ async function recomputePositions() {
     return;
   }
 
-  /* --------------------------------------
-     FINALE danger — bottom-1
-  ---------------------------------------*/
   for (let i = 0; i < total; i++) {
     const p = arena.players[i];
 
@@ -255,14 +239,14 @@ async function recomputePositions() {
       continue;
     }
 
-    p.positionStatus = (i === total - 1) ? "danger" : "alive";
+    p.positionStatus = i === total - 1 ? "danger" : "alive";
   }
 
   arena.lastSortedAt = Date.now();
 }
 
 /* ============================================================================
-   EMIT SNAPSHOT — removeAllowed toegevoegd
+   EMIT SNAPSHOT
 ============================================================================ */
 
 export async function emitArena() {
@@ -284,25 +268,20 @@ export async function emitArena() {
     firstFinalRound: arena.firstFinalRound,
     lastSortedAt: arena.lastSortedAt,
 
-    // 🎯 Nieuw: frontend mag weggooiknoppen tonen in IDLE & ENDED
     removeAllowed: arena.status === "idle" || arena.status === "ended",
   });
 }
 
 /* ============================================================================
-   START ROUND — v15.4
-   ✔ Nieuwe ronde: iedereen ALIVE (eliminated blijft TRUE)
-   ✔ Geen oude scores meenemen
+   START / END ROUND
 ============================================================================ */
 
 export async function startRound(type: RoundType) {
   if (!arena.players.length) throw new Error("Geen spelers in arena!");
 
-  // Nieuwe ronde
   arena.round += 1;
   arena.type = type;
 
-  // Markeer eerste finale-ronde
   if (type === "finale" && arena.firstFinalRound === null) {
     arena.firstFinalRound = arena.round;
 
@@ -312,14 +291,12 @@ export async function startRound(type: RoundType) {
     });
   }
 
-  // Iedereen weer ALIVE, maar eliminated blijft TRUE (host moet dan verwijderen)
   for (const p of arena.players) {
     p.positionStatus = "alive";
   }
 
   arena.status = "active";
 
-  // Timers
   const now = Date.now();
   const duration =
     type === "finale"
@@ -344,19 +321,8 @@ export async function startRound(type: RoundType) {
   });
 }
 
-/* ============================================================================
-   END ROUND — v15.4
-   ✔ ACTIVE → GRACE
-   ✔ GRACE → END
-   ✔ Finales: altijd bottom-1 eliminatie
-   ✔ Eliminated spelers blijven elimination-status behouden
-============================================================================ */
-
 export async function endRound() {
 
-  /* -------------------------
-     PHASE 1: ACTIVE → GRACE
-  --------------------------*/
   if (arena.status === "active") {
     arena.status = "grace";
 
@@ -374,20 +340,13 @@ export async function endRound() {
     return;
   }
 
-  /* -------------------------
-     PHASE 2: GRACE → ENDED
-  --------------------------*/
   if (arena.status === "grace") {
     arena.status = "ended";
 
-    await recomputePositions(); // gebruikt nu elimination-correctie
+    await recomputePositions();
     const total = arena.players.length;
 
-    /* ======================================================
-         FINALE – bottom-1 eliminatie
-       ====================================================== */
     if (arena.type === "finale") {
-
       if (total <= 1) {
         emitLog({
           type: "arena",
@@ -425,10 +384,6 @@ export async function endRound() {
       await emitArena();
       return;
     }
-
-    /* ======================================================
-         NORMAL (QUARTER) ELIMINATIES
-       ====================================================== */
 
     if (total < 6) {
       io.emit("round:end", {
@@ -470,8 +425,6 @@ export async function endRound() {
 
 /* ============================================================================
    ARENA MANAGEMENT — JOIN / LEAVE
-   ✔ Nieuwe speler krijgt ALTIJD score 0 (nooit oude ronde-score)
-   ✔ eliminated = false bij join
 ============================================================================ */
 
 export async function arenaJoin(
@@ -481,10 +434,8 @@ export async function arenaJoin(
 ) {
   const id = String(tiktok_id);
 
-  // Reeds in arena → skip
   if (arena.players.some((p) => p.id === id)) return;
 
-  // Nieuwe speler heeft NOOIT oude scores
   arena.players.push({
     id,
     username: username.replace(/^@+/, "").toLowerCase(),
@@ -499,29 +450,47 @@ export async function arenaJoin(
 }
 
 /* ============================================================================
-   ARENA LEAVE — remove button
+   PATCHED: ARENA LEAVE — force = permanent delete
 ============================================================================ */
 
-export async function arenaLeave(tiktok_id: string) {
-  const id = String(tiktok_id);
+export async function arenaLeave(
+  usernameOrId: string,
+  force: boolean = false
+) {
+  const clean = String(usernameOrId).replace(/^@+/, "").toLowerCase();
 
-  const idx = arena.players.findIndex((p) => p.id === id);
+  const idx = arena.players.findIndex(
+    (p) =>
+      p.id === clean ||
+      p.username.toLowerCase() === clean
+  );
+
   if (idx === -1) return;
 
   const p = arena.players[idx];
-  arena.players.splice(idx, 1);
 
-  emitLog({
-    type: "elim",
-    message: `${p.display_name} uit arena verwijderd door host`,
-  });
+  if (force) {
+    arena.players.splice(idx, 1);
+
+    emitLog({
+      type: "elim",
+      message: `${p.display_name} permanent verwijderd uit arena`,
+    });
+  } else {
+    p.positionStatus = "elimination";
+    p.eliminated = true;
+
+    emitLog({
+      type: "elim",
+      message: `${p.display_name} gemarkeerd als eliminated`,
+    });
+  }
 
   await emitArena();
 }
 
 /* ============================================================================
-   ADD BY USER LOOKUP — admin manual add
-   ✔ Nieuwe speler wordt behandeld als 100% nieuw
+   OTHER ENTRYPOINTS: unchanged
 ============================================================================ */
 
 export async function addToArena(username: string, resolveUser: Function) {
@@ -551,10 +520,6 @@ export async function addToArena(username: string, resolveUser: Function) {
   await emitArena();
 }
 
-/* ============================================================================
-   ELIMINATE (ADMIN) — direct verwijderen
-============================================================================ */
-
 export async function eliminate(username: string) {
   const clean = username.replace(/^@+/, "").toLowerCase();
 
@@ -574,12 +539,6 @@ export async function eliminate(username: string) {
   await emitArena();
 }
 
-/* ============================================================================
-   QUEUE → ARENA (AUTO JOIN)
-   ✔ Nooit oude score
-   ✔ Altijd verse speler
-============================================================================ */
-
 export async function addFromQueue(user: any) {
   arena.players.push({
     id: String(user.tiktok_id),
@@ -595,7 +554,7 @@ export async function addFromQueue(user: any) {
 }
 
 /* ============================================================================
-   ARENA CLEAR — FULL RESET
+   CLEAR, SORT, SETTINGS
 ============================================================================ */
 
 export async function arenaClear() {
@@ -612,18 +571,10 @@ export async function arenaClear() {
   await emitArena();
 }
 
-/* ============================================================================
-   FORCE SORT — admin dépannage
-============================================================================ */
-
 export async function forceSort() {
   await recomputePositions();
   await emitArena();
 }
-
-/* ============================================================================
-   UPDATE SETTINGS — persistent
-============================================================================ */
 
 export async function updateArenaSettings(
   newSettings: Partial<ArenaSettings>
@@ -641,7 +592,7 @@ export async function updateArenaSettings(
 }
 
 /* ============================================================================
-   TIMER LOOP — ACTIVE → GRACE → END
+   TIMER LOOP
 ============================================================================ */
 
 setInterval(async () => {
@@ -649,7 +600,6 @@ setInterval(async () => {
 
   const now = Date.now();
 
-  // ACTIVE → GRACE
   if (arena.status === "active" && now >= arena.roundCutoff) {
     arena.status = "grace";
 
@@ -667,7 +617,6 @@ setInterval(async () => {
     return;
   }
 
-  // GRACE → ENDED → eliminaties
   if (arena.status === "grace" && now >= arena.graceEnd) {
     await endRound();
     return;
