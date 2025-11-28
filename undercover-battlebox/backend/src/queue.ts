@@ -1,5 +1,5 @@
 // ============================================================================
-// src/queue.ts — QUEUE ENGINE v16
+// src/queue.ts — QUEUE ENGINE v16.1 CLEAN BUILD
 // Position-based queue system (VIP/FAN aware)
 // Compatibel met server.ts v15+ en alle admin dashboard acties
 // ============================================================================
@@ -7,15 +7,12 @@
 import pool from "./db";
 import { io } from "./server";
 
-//
 // ============================================================================
 // HELPERS
 // ============================================================================
-//
 
 /**
  * Herschrijft ALLE posities naar een nette sequentie 1..N.
- * Dit zorgt voor perfecte consistentie na elke wijziging.
  */
 export async function normalizePositions() {
   await pool.query(`
@@ -32,8 +29,7 @@ export async function normalizePositions() {
 }
 
 /**
- * Haal de volledige queue op in vaste volgorde.
- * SORT = position ASC, NIET meer priority-based.
+ * Haal de volledige queue op
  */
 export async function getQueue() {
   const result = await pool.query(
@@ -68,7 +64,7 @@ export async function getQueue() {
     const isFan = !!fanActive;
     const boost = Number(row.boost_spots) || 0;
 
-    // reason label voor UI, blijft bestaan
+    // UI reason label
     let reason = "";
     if (isVip) reason += "[VIP] ";
     if (isFan) reason += "[FAN] ";
@@ -89,7 +85,7 @@ export async function getQueue() {
 }
 
 /**
- * Emit de actuele queue naar alle admins
+ * Emit queue naar alle admins
  */
 export async function pushQueueUpdate() {
   await normalizePositions();
@@ -98,21 +94,11 @@ export async function pushQueueUpdate() {
 }
 
 // ============================================================================
-// src/queue.ts — QUEUE ENGINE v16 (DEEL 2)
-// Kernfuncties: addToQueue, removeFromQueue, leaveQueue, swapPositions
+// KERNFUNCTIES
 // ============================================================================
 
-import pool from "./db";
-import { io } from "./server";
-
-import { normalizePositions, getQueue, pushQueueUpdate } from "./queue"; // same file, circular-safe in Node
-
-// =====================================================================================
-// UTILS
-// =====================================================================================
-
-/** 
- * Wisselt twee posities in de queue om (voor promote/demote).
+/**
+ * Wisselt twee posities
  */
 async function swapPositions(idA: number, idB: number) {
   await pool.query(
@@ -130,30 +116,20 @@ async function swapPositions(idA: number, idB: number) {
   await pushQueueUpdate();
 }
 
-
-// =====================================================================================
-// addToQueue() — volledig vernieuwd voor v16
-// =====================================================================================
-//
-// - FAN-check wordt in chat-engine uitgevoerd (maar queue-engine dubbelcheckt FAN-status)
-// - VIP krijgt ALTIJD een boost van 5 plekken
-// - VIP FIFO: VIP-push nooit voor eerdere VIP’s
-// - Nieuwe speler komt ALTIJD onderaan → daarna repositioning
-// - Daarna: queue herschikken + update emitten
-// =====================================================================================
-
-export async function addToQueue(tiktok_id: string, username: string): Promise<void> {
+/**
+ * addToQueue — FAN verplicht, VIP krijgt boost (FIFO safe)
+ */
+export async function addToQueue(
+  tiktok_id: string,
+  username: string
+): Promise<void> {
   const userTid = BigInt(tiktok_id);
   const cleanUsername = username.replace(/^@+/, "").toLowerCase();
 
-  //
-  // Stap 1 — verwijder oude entry als die bestaat
-  //
+  // oude entry weg
   await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [userTid]);
 
-  //
-  // Stap 2 — haal FAN/VIP status op
-  //
+  // user info
   const ur = await pool.query(
     `
     SELECT 
@@ -170,7 +146,7 @@ export async function addToQueue(tiktok_id: string, username: string): Promise<v
   );
 
   if (!ur.rows.length) {
-    throw new Error("Gebruiker niet gevonden in database (users-tabel).");
+    throw new Error("Gebruiker niet gevonden in database (users).");
   }
 
   const user = ur.rows[0];
@@ -184,17 +160,14 @@ export async function addToQueue(tiktok_id: string, username: string): Promise<v
   const isFan = !!fanActive;
   const isVip = !!user.is_vip;
 
-  //
-  // Stap 3 — FAN-check
-  //
   if (!isFan) {
     throw new Error("Gebruiker is geen actieve FAN (kan niet joinen).");
   }
 
-  //
-  // Stap 4 — nieuwe entry onderaan plaatsen
-  //
-  const qr = await pool.query(`SELECT COALESCE(MAX(position),0) AS maxpos FROM queue`);
+  // nieuwe positie onderaan
+  const qr = await pool.query(
+    `SELECT COALESCE(MAX(position),0) AS maxpos FROM queue`
+  );
   const startPos = Number(qr.rows[0].maxpos) + 1;
 
   const ir = await pool.query(
@@ -209,13 +182,10 @@ export async function addToQueue(tiktok_id: string, username: string): Promise<v
   const newId = ir.rows[0].id;
   let newPos = ir.rows[0].position;
 
-  //
-  // Stap 5 — VIP (automatische 5-plaats boost)
-  //
+  // VIP-boost (5 posities), maar FIFO veilig
   if (isVip) {
     const targetPos = Math.max(1, newPos - 5);
 
-    // Maar… VIP FIFO: niet voor eerdere VIP’s duwen
     const earlierVIPs = await pool.query(
       `
         SELECT id, position 
@@ -238,7 +208,6 @@ export async function addToQueue(tiktok_id: string, username: string): Promise<v
     const finalTarget = Math.max(targetPos, protectedVIPend + 1);
 
     if (finalTarget < newPos) {
-      // schuif alle spelers tussen finalTarget..newPos één plek naar beneden
       await pool.query(
         `
           UPDATE queue
@@ -248,7 +217,6 @@ export async function addToQueue(tiktok_id: string, username: string): Promise<v
         [finalTarget, newPos]
       );
 
-      // zet nieuwe speler op finalTarget
       await pool.query(
         `UPDATE queue SET position=$1 WHERE id=$2`,
         [finalTarget, newId]
@@ -256,23 +224,13 @@ export async function addToQueue(tiktok_id: string, username: string): Promise<v
     }
   }
 
-  //
-  // Stap 6 — finalize
-  //
   await normalizePositions();
   await pushQueueUpdate();
 }
 
-
-
-// =====================================================================================
-// removeFromQueue() — admin & intern
-// =====================================================================================
-//
-// - Verwijdert speler uit queue
-// - Schuift alle spelers onder die positie één plek omhoog
-// =====================================================================================
-
+/**
+ * removeFromQueue — admin verwijdert speler uit queue
+ */
 export async function removeFromQueue(tiktok_id: string): Promise<void> {
   const userTid = BigInt(tiktok_id);
 
@@ -286,10 +244,8 @@ export async function removeFromQueue(tiktok_id: string): Promise<void> {
   const entry = r.rows[0];
   const pos = Number(entry.position);
 
-  // verwijder
   await pool.query(`DELETE FROM queue WHERE id=$1`, [entry.id]);
 
-  // schuif alles onder deze positie omhoog
   await pool.query(
     `
       UPDATE queue
@@ -303,17 +259,9 @@ export async function removeFromQueue(tiktok_id: string): Promise<void> {
   await pushQueueUpdate();
 }
 
-
-
-// =====================================================================================
-// leaveQueue() — voor !leave via chat-engine
-// =====================================================================================
-//
-// - berekent refund
-// - verwijdert entry
-// - resequence
-// =====================================================================================
-
+/**
+ * leaveQueue — !leave uit chat
+ */
 export async function leaveQueue(tiktok_id: string): Promise<number> {
   const userTid = BigInt(tiktok_id);
 
@@ -330,7 +278,6 @@ export async function leaveQueue(tiktok_id: string): Promise<number> {
 
   const refund = Math.floor(boost * 200 * 0.5);
 
-  // Refund naar BP
   await pool.query(
     `
       UPDATE users 
@@ -341,10 +288,8 @@ export async function leaveQueue(tiktok_id: string): Promise<number> {
     [refund, userTid]
   );
 
-  // delete row
   await pool.query(`DELETE FROM queue WHERE id=$1`, [entry.id]);
 
-  // schuif posities
   await pool.query(
     `
       UPDATE queue
@@ -360,30 +305,9 @@ export async function leaveQueue(tiktok_id: string): Promise<number> {
   return refund;
 }
 
-// ============================================================================
-// src/queue.ts — QUEUE ENGINE v16 (DEEL 3)
-// Promote/Demote + AddToArenaFromQueue
-// ============================================================================
-
-import pool from "./db";
-import { io } from "./server";
-
-import {
-  normalizePositions,
-  getQueue,
-  pushQueueUpdate,
-} from "./queue"; // dezelfde file, node kan dit, safe
-
-
-// =====================================================================================
-// promoteQueue() — speler één plek OMHOOG
-// =====================================================================================
-//
-// - Works exactly as requested for admin UI
-// - Cannot go above position 1
-// - Swaps positions met speler erboven
-// =====================================================================================
-
+/**
+ * promoteQueue — speler één plek omhoog
+ */
 export async function promoteQueue(tiktok_id: string): Promise<void> {
   const tid = BigInt(tiktok_id);
 
@@ -396,9 +320,8 @@ export async function promoteQueue(tiktok_id: string): Promise<void> {
   const { id, position } = r.rows[0];
   const pos = Number(position);
 
-  if (pos <= 1) return; // kan niet hoger
+  if (pos <= 1) return;
 
-  // speler boven deze
   const prev = await pool.query(
     `SELECT id FROM queue WHERE position=$1`,
     [pos - 1]
@@ -407,34 +330,13 @@ export async function promoteQueue(tiktok_id: string): Promise<void> {
 
   const aboveId = prev.rows[0].id;
 
-  // swap de posities
-  await pool.query(
-    `
-      UPDATE queue
-      SET position = CASE 
-        WHEN id = $1 THEN $3
-        WHEN id = $2 THEN $4
-      END
-      WHERE id IN ($1, $2)
-    `,
-    [id, aboveId, pos - 1, pos]
-  );
-
-  await normalizePositions();
-  await pushQueueUpdate();
+  // swap
+  await swapPositions(id, aboveId);
 }
 
-
-
-// =====================================================================================
-// demoteQueue() — speler één plek OMLAAG
-// =====================================================================================
-//
-// - Works exactly as requested for admin UI
-// - Cannot go below max position
-// - Swaps met speler onder hem
-// =====================================================================================
-
+/**
+ * demoteQueue — speler één plek omlaag
+ */
 export async function demoteQueue(tiktok_id: string): Promise<void> {
   const tid = BigInt(tiktok_id);
 
@@ -450,9 +352,8 @@ export async function demoteQueue(tiktok_id: string): Promise<void> {
   const maxR = await pool.query(`SELECT MAX(position) AS maxpos FROM queue`);
   const maxPos = Number(maxR.rows[0].maxpos);
 
-  if (pos >= maxPos) return; // kan niet lager
+  if (pos >= maxPos) return;
 
-  // speler onder deze
   const nxt = await pool.query(
     `SELECT id FROM queue WHERE position=$1`,
     [pos + 1]
@@ -462,34 +363,12 @@ export async function demoteQueue(tiktok_id: string): Promise<void> {
   const belowId = nxt.rows[0].id;
 
   // swap
-  await pool.query(
-    `
-      UPDATE queue
-      SET position = CASE 
-        WHEN id = $1 THEN $3
-        WHEN id = $2 THEN $4
-      END
-      WHERE id IN ($1, $2)
-    `,
-    [id, belowId, pos + 1, pos]
-  );
-
-  await normalizePositions();
-  await pushQueueUpdate();
+  await swapPositions(id, belowId);
 }
 
-
-
-// =====================================================================================
-// addToArenaFromQueue() — interne helper
-// =====================================================================================
-//
-// - Verwijdert speler uit queue
-// - Resequence posities
-// - Server.ts roept daarna arenaJoin() aan
-// - Admin dashboard knop "→ Arena" gebruikt deze flow
-// =====================================================================================
-
+/**
+ * addToArenaFromQueue — interne helper
+ */
 export async function addToArenaFromQueue(tiktok_id: string): Promise<void> {
   const tid = BigInt(tiktok_id);
 
@@ -501,10 +380,8 @@ export async function addToArenaFromQueue(tiktok_id: string): Promise<void> {
 
   const pos = Number(r.rows[0].position);
 
-  // delete
   await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [tid]);
 
-  // schuif rest omhoog
   await pool.query(
     `
       UPDATE queue
@@ -516,15 +393,11 @@ export async function addToArenaFromQueue(tiktok_id: string): Promise<void> {
 
   await normalizePositions();
   await pushQueueUpdate();
-
-  // vanaf hier doet server.ts → arenaJoin()
 }
 
-
-
-// =====================================================================================
-// EXPORTS
-// =====================================================================================
+// ============================================================================
+// EXPORT DEFAULT
+// ============================================================================
 
 export default {
   getQueue,
@@ -535,4 +408,5 @@ export default {
   promoteQueue,
   demoteQueue,
   addToArenaFromQueue,
+  normalizePositions,
 };
