@@ -34,6 +34,8 @@ import {
 
 import {
   getQueue,
+  addToQueue,
+  removeFromQueue,
   promoteQueue,
   demoteQueue,
   normalizePositions,
