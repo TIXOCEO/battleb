@@ -385,17 +385,25 @@ export async function endRound() {
       return;
     }
 
-    if (total < 6) {
-      io.emit("round:end", {
-        round: arena.round,
-        type: arena.type,
-        pendingEliminations: [],
-        top3: arena.players.slice(0, 3),
-      });
+if (total < 6) {
 
-      await emitArena();
-      return;
-    }
+  // 🔥 FIX: niemand mag in elimination terechtkomen
+  for (const p of arena.players) {
+    p.positionStatus = "alive";
+    p.eliminated = false;
+  }
+
+  io.emit("round:end", {
+    round: arena.round,
+    type: arena.type,
+    pendingEliminations: [],
+    top3: arena.players.slice(0, 3),
+  });
+
+  await emitArena();
+  return;
+}
+
 
     const doomed = arena.players
       .map((p, i) => ({ p, i }))
