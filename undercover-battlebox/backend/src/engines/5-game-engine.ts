@@ -1,5 +1,14 @@
 /* ============================================================================
-   5-game-engine.ts — BattleBox Arena Engine v15.4 FIXED
+   5-game-engine.ts — BattleBox Arena Engine v15.4
+   ✔ Finaleronde: bottom-1 danger + eliminatie
+   ✔ Sorteert altijd op totale score
+   ✔ Quarter danger = posities 6–8
+   ✔ Finale werkt tot winnaar
+   ✔ IDLE toont GEEN scores
+   ✔ Eliminated spelers blijven elimination in ENDED
+   ✔ New players IDLE: krijgen geen vorige ronde gifts
+   ✔ Admin remove-knop: enabled bij ENDED of IDLE
+   ✔ PATCHED: arenaLeave(force) voor permanente verwijdering
 ============================================================================ */
 
 import pool from "../db";
@@ -93,21 +102,22 @@ export function getArenaSettings() {
 }
 
 /* ============================================================================
-   SCORE HELPERS
+   SCORE SYSTEM
 ============================================================================ */
 
 async function getRoundScore(tiktokId: string, round: number) {
   const gid = (io as any)?.currentGameId;
+
   if (!gid || round !== arena.round) return 0;
 
   const q = await pool.query(
     `
-    SELECT COALESCE(SUM(diamonds),0) AS score
-    FROM gifts
-    WHERE receiver_id=$1
-      AND game_id=$2
-      AND round_id=$3
-      AND is_round_gift=TRUE
+      SELECT COALESCE(SUM(diamonds),0) AS score
+      FROM gifts
+      WHERE receiver_id=$1
+        AND game_id=$2
+        AND round_id=$3
+        AND is_round_gift=TRUE
     `,
     [BigInt(tiktokId), gid, round]
   );
@@ -124,24 +134,24 @@ async function getFinalScore(tiktokId: string) {
 
   const base = await pool.query(
     `
-    SELECT COALESCE(SUM(diamonds),0) AS score
-    FROM gifts
-    WHERE game_id=$2
-      AND receiver_id=$1
-      AND round_id < $3
-      AND is_round_gift=TRUE
+      SELECT COALESCE(SUM(diamonds),0) AS score
+      FROM gifts
+      WHERE game_id=$2
+        AND receiver_id=$1
+        AND round_id < $3
+        AND is_round_gift=TRUE
     `,
     [BigInt(tiktokId), gid, first]
   );
 
   const finale = await pool.query(
     `
-    SELECT COALESCE(SUM(diamonds),0) AS score
-    FROM gifts
-    WHERE game_id=$2
-      AND receiver_id=$1
-      AND round_id >= $3
-      AND is_round_gift=TRUE
+      SELECT COALESCE(SUM(diamonds),0) AS score
+      FROM gifts
+      WHERE game_id=$2
+        AND receiver_id=$1
+        AND round_id >= $3
+        AND is_round_gift=TRUE
     `,
     [BigInt(tiktokId), gid, first]
   );
@@ -153,22 +163,23 @@ async function computePlayerScore(p: ArenaPlayer) {
   if (arena.status === "idle") return 0;
 
   if (arena.type === "finale") return await getFinalScore(p.id);
-
   return await getRoundScore(p.id, arena.round);
 }
 
 /* ============================================================================
-   RECOMPUTE POSITIONS
+   RECOMPUTE POSITIONS — FIXED
 ============================================================================ */
 
 async function recomputePositions() {
   const status = arena.status;
+  const total = arena.players.length;
 
   if (status === "idle") {
     for (const p of arena.players) {
       p.score = 0;
-      p.positionStatus = p.boosters.includes("immune") ? "immune" : "alive";
-      p.eliminated = false;
+      p.positionStatus = p.boosters.includes("immune")
+        ? "immune"
+        : "alive";
     }
     arena.lastSortedAt = Date.now();
     return;
@@ -179,37 +190,26 @@ async function recomputePositions() {
   }
 
   arena.players.sort((a, b) => b.score - a.score);
-  const total = arena.players.length;
 
-  /* ENDED */
   if (status === "ended") {
+    for (const p of arena.players) {
+      if (p.eliminated) {
+        p.positionStatus = "elimination";
+      } else if (p.boosters.includes("immune")) {
+        p.positionStatus = "immune";
+      }
+    }
+    arena.lastSortedAt = Date.now();
+    return;
+  }
+
+  if (arena.type === "quarter") {
     if (total < 6) {
       for (const p of arena.players) {
         p.positionStatus = p.boosters.includes("immune")
           ? "immune"
           : "alive";
-        p.eliminated = false;
       }
-      arena.lastSortedAt = Date.now();
-      return;
-    }
-
-    for (const p of arena.players) {
-      if (p.eliminated) p.positionStatus = "elimination";
-      else if (p.boosters.includes("immune")) p.positionStatus = "immune";
-      else p.positionStatus = "alive";
-    }
-
-    arena.lastSortedAt = Date.now();
-    return;
-  }
-
-  /* QUARTER */
-  if (arena.type === "quarter") {
-    if (total < 6) {
-      for (const p of arena.players)
-        p.positionStatus = p.boosters.includes("immune") ? "immune" : "alive";
-
       arena.lastSortedAt = Date.now();
       return;
     }
@@ -231,7 +231,6 @@ async function recomputePositions() {
     return;
   }
 
-  /* FINALE */
   for (let i = 0; i < total; i++) {
     const p = arena.players[i];
 
@@ -247,7 +246,7 @@ async function recomputePositions() {
 }
 
 /* ============================================================================
-   EMIT ARENA SNAPSHOT
+   EMIT SNAPSHOT
 ============================================================================ */
 
 export async function emitArena() {
@@ -274,7 +273,7 @@ export async function emitArena() {
 }
 
 /* ============================================================================
-   START ROUND
+   START / END ROUND
 ============================================================================ */
 
 export async function startRound(type: RoundType) {
@@ -322,12 +321,8 @@ export async function startRound(type: RoundType) {
   });
 }
 
-/* ============================================================================
-   END ROUND
-============================================================================ */
-
 export async function endRound() {
-  /* ACTIVE → GRACE */
+
   if (arena.status === "active") {
     arena.status = "grace";
 
@@ -345,14 +340,12 @@ export async function endRound() {
     return;
   }
 
-  /* GRACE → ENDED */
   if (arena.status === "grace") {
     arena.status = "ended";
 
     await recomputePositions();
     const total = arena.players.length;
 
-    /* FINALE LOGICA */
     if (arena.type === "finale") {
       if (total <= 1) {
         emitLog({
@@ -362,7 +355,7 @@ export async function endRound() {
 
         io.emit("round:end", {
           round: arena.round,
-          type: "finale",
+          type: arena.type,
           pendingEliminations: [],
           winner: arena.players[0] || null,
           top3: arena.players.slice(0, 3),
@@ -392,13 +385,7 @@ export async function endRound() {
       return;
     }
 
-    /* QUARTER LOGICA */
     if (total < 6) {
-      for (const p of arena.players) {
-        p.positionStatus = "alive";
-        p.eliminated = false;
-      }
-
       io.emit("round:end", {
         round: arena.round,
         type: arena.type,
@@ -437,7 +424,7 @@ export async function endRound() {
 }
 
 /* ============================================================================
-   ARENA JOIN / LEAVE
+   ARENA MANAGEMENT — JOIN / LEAVE
 ============================================================================ */
 
 export async function arenaJoin(
@@ -451,7 +438,7 @@ export async function arenaJoin(
 
   arena.players.push({
     id,
-    username: username.toLowerCase().replace(/^@+/, ""),
+    username: username.replace(/^@+/, "").toLowerCase(),
     display_name,
     score: 0,
     boosters: [],
@@ -463,14 +450,19 @@ export async function arenaJoin(
 }
 
 /* ============================================================================
-   PATCHED: PERMANENT REMOVE
+   PATCHED: ARENA LEAVE — force = permanent delete
 ============================================================================ */
 
-export async function arenaLeave(usernameOrId: string, force = false) {
+export async function arenaLeave(
+  usernameOrId: string,
+  force: boolean = false
+) {
   const clean = String(usernameOrId).replace(/^@+/, "").toLowerCase();
 
   const idx = arena.players.findIndex(
-    (p) => p.id === clean || p.username.toLowerCase() === clean
+    (p) =>
+      p.id === clean ||
+      p.username.toLowerCase() === clean
   );
 
   if (idx === -1) return;
@@ -498,7 +490,7 @@ export async function arenaLeave(usernameOrId: string, force = false) {
 }
 
 /* ============================================================================
-   ADMIN HELPERS
+   OTHER ENTRYPOINTS: unchanged
 ============================================================================ */
 
 export async function addToArena(username: string, resolveUser: Function) {
@@ -562,7 +554,7 @@ export async function addFromQueue(user: any) {
 }
 
 /* ============================================================================
-   ARENA CLEAR
+   CLEAR, SORT, SETTINGS
 ============================================================================ */
 
 export async function arenaClear() {
@@ -579,18 +571,10 @@ export async function arenaClear() {
   await emitArena();
 }
 
-/* ============================================================================
-   FORCE SORT
-============================================================================ */
-
 export async function forceSort() {
   await recomputePositions();
   await emitArena();
 }
-
-/* ============================================================================
-   UPDATE SETTINGS
-============================================================================ */
 
 export async function updateArenaSettings(
   newSettings: Partial<ArenaSettings>
