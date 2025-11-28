@@ -1,9 +1,10 @@
 // ============================================================================
-// server.ts — BATTLEBOX BACKEND v16 FINAL (Queue/VIP/FAN Upgrade Build)
-// Gifts Engine + Round Flags + Realtime Queue v15 Sync
+// server.ts — BATTLEBOX BACKEND v16.2 FINAL (Queue/VIP/FAN Upgrade Build)
+// Gifts Engine + Round Flags + Realtime Queue v16 Sync
 // Correct Leaderboards + Host Diamonds + Username Autofill
 // Idle gifts: NIET tellen voor spelers, WEL tellen voor host
 // Queue logic compleet gesynchroniseerd met chat-engine & queue.ts
+// + Added: promoteQueueByUsername / demoteQueueByUsername
 // ============================================================================
 
 import express from "express";
@@ -31,7 +32,14 @@ import {
   updateArenaSettings
 } from "./engines/5-game-engine";
 
-import { getQueue } from "./queue";
+import {
+  getQueue,
+  promoteQueue,
+  demoteQueue,
+  normalizePositions,
+  pushQueueUpdate
+} from "./queue";
+
 import { giveTwistAdmin, useTwistAdmin } from "./engines/9-admin-twist-engine";
 
 // ============================================================================
@@ -244,7 +252,9 @@ export async function broadcastGifterLeaderboard() {
   io.emit("leaderboardGiftersSummary", sum);
 }
 
+// ============================================================================
 // HOST DIAMONDS
+// ============================================================================
 export async function broadcastHostDiamonds() {
   if (!currentGameId || !HARD_HOST_ID) {
     io.emit("hostDiamonds", { username: "", total: 0 });
@@ -312,6 +322,7 @@ export async function broadcastStats() {
 // ============================================================================
 // TIKTOK CONNECT FLOW
 // ============================================================================
+
 let tiktokConn: any = null;
 
 async function fullyDisconnect() {
@@ -359,6 +370,33 @@ export async function restartTikTokConnection() {
     await broadcastHostDiamonds();
     await broadcastStats();
   }
+}
+
+// ============================================================================
+// PROMOTE/DEMOTE HELPERS — **GEFIXT**
+// ============================================================================
+async function promoteQueueByUsername(username: string) {
+  const r = await pool.query(
+    `SELECT tiktok_id FROM users WHERE LOWER(username)=LOWER($1) LIMIT 1`,
+    [username]
+  );
+  if (!r.rows.length) return;
+
+  await promoteQueue(String(r.rows[0].tiktok_id));
+  await normalizePositions();
+  await pushQueueUpdate();
+}
+
+async function demoteQueueByUsername(username: string) {
+  const r = await pool.query(
+    `SELECT tiktok_id FROM users WHERE LOWER(username)=LOWER($1) LIMIT 1`,
+    [username]
+  );
+  if (!r.rows.length) return;
+
+  await demoteQueue(String(r.rows[0].tiktok_id));
+  await normalizePositions();
+  await pushQueueUpdate();
 }
 
 // ============================================================================
@@ -558,7 +596,8 @@ io.on("connection", async (socket: AdminSocket) => {
       // ======================================================================
       // HOST MANAGEMENT
       // ======================================================================
-      if (action === "getHosts") {
+
+    if (action === "getHosts") {
         const r = await pool.query(
           `SELECT id, label, username, tiktok_id, active FROM hosts ORDER BY id`
         );
@@ -720,7 +759,7 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       // ======================================================================
-      // ROUND: START / END
+      // ROUND ACTIONS
       // ======================================================================
       if (action === "startRound") {
         const type = data?.type === "finale" ? "finale" : "quarter";
@@ -754,36 +793,7 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       // ======================================================================
-      // ROUND SETTINGS UPDATE
-      // ======================================================================
-      if (action === "updateRoundSettings") {
-        const pre = Number(data?.pre);
-        const fin = Number(data?.final);
-        const grace = Number(data?.grace);
-
-        await pool.query(
-          `
-          UPDATE arena_settings
-            SET round_pre_seconds=$1,
-                round_final_seconds=$2,
-                grace_seconds=$3
-          WHERE id=1
-        `,
-          [pre, fin, grace]
-        );
-
-        await loadArenaSettingsFromDB();
-        await updateArenaSettings({
-          roundDurationPre: pre,
-          roundDurationFinal: fin,
-          graceSeconds: grace
-        });
-
-        return ack({ success: true });
-      }
-
-      // ======================================================================
-      // ARENA MGMT
+      // ARENA MANAGEMENT
       // ======================================================================
       if (action === "addToArena") {
         const clean = (data?.username || "")
@@ -808,7 +818,6 @@ io.on("connection", async (socket: AdminSocket) => {
             message: "Host kan niet in arena staan"
           });
 
-        // NIEUW: verwijderen uit queue indien aanwezig
         await pool.query(
           `DELETE FROM queue WHERE user_tiktok_id=$1`,
           [r.rows[0].tiktok_id]
@@ -916,7 +925,7 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       // ======================================================================
-      // QUEUE MGMT (NEW PRIORITY SYSTEM)
+      // QUEUE MANAGEMENT (UPGRADED)
       // ======================================================================
       if (action === "addToQueue") {
         const clean = (data?.username || "")
@@ -943,15 +952,18 @@ io.on("connection", async (socket: AdminSocket) => {
             message: "Host kan niet in queue staan"
           });
 
-        await pool.query(
-          `
-          INSERT INTO queue (user_tiktok_id, boost_spots, joined_at)
-          VALUES ($1,0,NOW())
-          ON CONFLICT (user_tiktok_id) DO UPDATE
-          SET joined_at = EXCLUDED.joined_at
-          `,
-          [u.rows[0].tiktok_id]
-        );
+        // Nieuw systeem: volledig via queue-engine → addToQueue()
+        try {
+          await addToQueue(
+            String(u.rows[0].tiktok_id),
+            u.rows[0].username
+          );
+        } catch (e: any) {
+          return ack({
+            success: false,
+            message: e?.message || "Kon niet joinen"
+          });
+        }
 
         emitLog({
           type: "queue",
@@ -982,9 +994,7 @@ io.on("connection", async (socket: AdminSocket) => {
         if (!u.rows.length)
           return ack({ success: false, message: "User nietgevonden" });
 
-        await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [
-          u.rows[0].tiktok_id
-        ]);
+        await removeFromQueue(String(u.rows[0].tiktok_id));
 
         emitLog({
           type: "queue",
@@ -999,11 +1009,9 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // PRIORITY BUTTONS – UPGRADED
-      // ----------------------------------------------------
-      // BOOST_SPOTS blijft bestaan voor een andere functie
-      // Maar promote/demote verschuiven nu ECHT de positie
-      // ----------------------------------------------------
+      // ============================================================
+      // PRIORITEIT — PROMOTE / DEMOTE (ECHT SCHUIVEN)
+      // ============================================================
       if (action === "promoteUser") {
         const clean = (data?.username || "")
           .trim()
@@ -1011,6 +1019,16 @@ io.on("connection", async (socket: AdminSocket) => {
           .toLowerCase();
 
         await promoteQueueByUsername(clean);
+
+        emitLog({
+          type: "queue",
+          message: `Promote: @${clean}`
+        });
+
+        io.emit("updateQueue", {
+          open: true,
+          entries: await getQueue()
+        });
 
         return ack({ success: true });
       }
@@ -1023,11 +1041,21 @@ io.on("connection", async (socket: AdminSocket) => {
 
         await demoteQueueByUsername(clean);
 
+        emitLog({
+          type: "queue",
+          message: `Demote: @${clean}`
+        });
+
+        io.emit("updateQueue", {
+          open: true,
+          entries: await getQueue()
+        });
+
         return ack({ success: true });
       }
 
       // ======================================================================
-      // VIP / FAN MGMT
+      // VIP SETTINGS
       // ======================================================================
       if (action === "giveVip") {
         const clean = (data?.username || "")
@@ -1114,7 +1142,7 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       // ======================================================================
-      // UNKNOWN
+      // UNKNOWN COMMAND
       // ======================================================================
       return ack({
         success: false,
