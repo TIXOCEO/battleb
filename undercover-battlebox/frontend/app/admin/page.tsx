@@ -180,7 +180,7 @@ export default function AdminDashboardPage() {
   }, []);
 
   /* ============================================
-     EMITTER HELPERS
+     EMITTER HELPERS (FIXED)
   ============================================ */
   const emitAdmin = (
     event: keyof AdminSocketOutbound,
@@ -196,6 +196,7 @@ export default function AdminDashboardPage() {
     });
   };
 
+  /** OLD helper, used only for arena-delete buttons */
   const emitAdminWithUser = (
     event: keyof AdminSocketOutbound,
     userTarget?: string
@@ -254,7 +255,7 @@ export default function AdminDashboardPage() {
     setActiveAutoField(null);
   }
 
-  /* ============================================
+/* ============================================
      HELPERS
   ============================================ */
   const fmt = (n: number | string | undefined | null) =>
@@ -311,7 +312,7 @@ export default function AdminDashboardPage() {
     }
   };
 
-/* ============================================
+  /* ============================================
      UI
   ============================================ */
   return (
@@ -437,7 +438,7 @@ export default function AdminDashboardPage() {
       </section>
 
       {/* ============================================================
-          SPELERSACTIES (MET VIP-KNOPPEN TOEGEVOEGD)
+          SPELERSACTIES (AANGEPAST)
       ============================================================ */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
         <h2 className="text-sm font-semibold mb-3">Speleracties</h2>
@@ -487,43 +488,34 @@ export default function AdminDashboardPage() {
             </div>
           </div>
 
-          {/*  
-             ======================================================
-               SPELERSACTIE-BUTTONS + VIP-KNOPPEN
-             ======================================================
-          */}
+          {/* ACTION BUTTONS */}
           <div className="flex gap-2 text-xs flex-wrap">
             <button
-              onClick={() => emitAdminWithUser("addToArena", username)}
+              onClick={() => emitAdmin("addToArena", { username })}
               className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full"
             >
               → Arena
             </button>
 
+            {/* FIXED — Queue knop werkt nu */}
             <button
-              onClick={() => emitAdminWithUser("addToQueue", username)}
+              onClick={() => emitAdmin("addToQueue", { username })}
               className="px-3 py-1.5 bg-gray-800 text-white rounded-full"
             >
               → Queue
             </button>
 
-            <button
-              onClick={() => emitAdminWithUser("eliminate", username)}
-              className="px-3 py-1.5 bg-red-600 text-white rounded-full"
-            >
-              Elimineer
-            </button>
+            {/* Elimineer knop verwijderd zoals gevraagd */}
 
-            {/* VIP KNOPPEN */}
             <button
-              onClick={() => emitAdminWithUser("giveVip", username)}
+              onClick={() => emitAdmin("giveVip", { username })}
               className="px-3 py-1.5 bg-yellow-400 text-black rounded-full border border-yellow-600"
             >
               Geef VIP
             </button>
 
             <button
-              onClick={() => emitAdminWithUser("removeVip", username)}
+              onClick={() => emitAdmin("removeVip", { username })}
               className="px-3 py-1.5 bg-yellow-200 text-yellow-800 rounded-full border border-yellow-500"
             >
               Verwijder VIP
@@ -720,38 +712,41 @@ export default function AdminDashboardPage() {
 
                 {/* BUTTONS RIGHT */}
                 <div className="flex flex-col sm:flex-row gap-1 mt-2 sm:mt-0 justify-end sm:items-center">
-
-                  {/* NEW — PROMOTE / DEMOTE */}
+                  {/* Promote / Demote */}
                   <div className="flex gap-1 mr-1">
                     <button
-                      onClick={() => emitAdmin("promoteUser", { username: q.username })}
+                      onClick={() =>
+                        emitAdmin("promoteUser", { username: q.username })
+                      }
                       className="px-2 py-1 text-[11px] rounded-full bg-green-100 text-green-700 border border-green-300"
                     >
                       ↑ Promote
                     </button>
 
                     <button
-                      onClick={() => emitAdmin("demoteUser", { username: q.username })}
+                      onClick={() =>
+                        emitAdmin("demoteUser", { username: q.username })
+                      }
                       className="px-2 py-1 text-[11px] rounded-full bg-orange-100 text-orange-700 border border-orange-300"
                     >
                       ↓ Demote
                     </button>
                   </div>
 
-                  {/* → Arena */}
                   <button
                     onClick={() =>
-                      emitAdminWithUser("addToArena", q.username)
+                      emitAdmin("addToArena", { username: q.username })
                     }
                     className="px-2 py-1 rounded-full border border-[#ff4d4f] text-[#ff4d4f]"
                   >
                     → Arena
                   </button>
 
-                  {/* Delete */}
                   <button
                     onClick={() =>
-                      emitAdminWithUser("removeFromQueue", q.username)
+                      emitAdmin("removeFromQueue", {
+                        username: q.username,
+                      })
                     }
                     className="px-2 py-1 rounded-full border border-red-300 text-red-700 bg-red-50"
                   >
@@ -1171,4 +1166,4 @@ export default function AdminDashboardPage() {
       )}
     </main>
   );
-      }
+              }
