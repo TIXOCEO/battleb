@@ -539,10 +539,10 @@ export default function AdminDashboardPage() {
                         onConfirm: () => {
                           const socket = getAdminSocket();
                           setStatus(
-                            `Bezig met removeFromArena voor ${formatted}...`
+                            `Bezig met removeFromArenaPermanent voor ${formatted}...`
                           );
                           socket.emit(
-                            "removeFromArena",
+                            "removeFromArenaPermanent",
                             { username: formatted },
                             (res: AdminAckResponse) => {
                               setStatus(
@@ -577,7 +577,7 @@ export default function AdminDashboardPage() {
                   </div>
 
                   {/* Alleen bij elimination tonen we nog een extra "Verwijder speler" knop,
-                      die OOK echt removeFromArena doet, niet opnieuw eliminate */}
+                      die OOK echt removeFromArenaPermanent doet, niet opnieuw eliminate */}
                   {p.positionStatus === "elimination" && (
                     <button
                       onClick={() => {
@@ -591,10 +591,10 @@ export default function AdminDashboardPage() {
                           onConfirm: () => {
                             const socket = getAdminSocket();
                             setStatus(
-                              `Bezig met removeFromArena voor ${formatted}...`
+                              `Bezig met removeFromArenaPermanent voor ${formatted}...`
                             );
                             socket.emit(
-                              "removeFromArena",
+                              "removeFromArenaPermanent",
                               { username: formatted },
                               (res: AdminAckResponse) => {
                                 setStatus(
