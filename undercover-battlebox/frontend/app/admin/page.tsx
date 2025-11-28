@@ -258,7 +258,10 @@ export default function AdminDashboardPage() {
   const players = useMemo(() => arena?.players ?? [], [arena]);
   const arenaStatus = arena?.status ?? "idle";
 
-  const hasDoomed = players.some((p) => p.positionStatus === "elimination");
+  const hasDoomed =
+  arenaStatus === "ended" &&
+  players.length > 5 &&
+  players.some((p) => p.positionStatus === "elimination");
 
   const canStartRound =
     !!arena &&
