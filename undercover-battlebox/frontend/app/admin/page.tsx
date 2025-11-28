@@ -87,7 +87,7 @@ export default function AdminDashboardPage() {
   const cancelConfirm = () => setConfirmData(null);
 
   /* ============================================
-     CLICK OUTSIDE FOR AUTOCOMPLETE
+     CLICK OUTSIDE AUTOCOMPLETE
   ============================================ */
   useEffect(() => {
     function handler(e: any) {
@@ -101,34 +101,28 @@ export default function AdminDashboardPage() {
   }, []);
 
   /* ============================================
-     SOCKET SETUP — FIXED
+     SOCKET SETUP
   ============================================ */
   useEffect(() => {
     const socket = getAdminSocket();
 
-    // Arena and queue
     socket.on("updateArena", (data) => setArena(data));
     socket.on("updateQueue", (d) => {
       setQueue(d.entries ?? []);
       setQueueOpen(d.open ?? true);
     });
 
-    // Logs
     socket.on("log", (l) => setLogs((p) => [l, ...p].slice(0, 200)));
     socket.on("initialLogs", (d) => setLogs(d.slice(0, 200)));
 
-    // Stats / Session
     socket.on("streamStats", (s) => setStreamStats(s));
     socket.on("gameSession", (s) => setGameSession(s));
 
-    // Leaderboards
     socket.on("leaderboardPlayers", (rows) => setPlayerLeaderboard(rows));
     socket.on("leaderboardGifters", (rows) => setGifterLeaderboard(rows));
 
-    // Host diamonds
     socket.on("hostDiamonds", (d) => setHostDiamonds(d.total));
 
-    // Round events
     socket.on("round:start", (d) =>
       setStatus(`▶️ Ronde gestart (${d.type}) – ${d.duration}s`)
     );
@@ -172,6 +166,18 @@ export default function AdminDashboardPage() {
       if (snap.gifterLeaderboard)
         setGifterLeaderboard(snap.gifterLeaderboard);
     });
+  }, []);
+
+  /* ============================================
+     RONDE TIMER REALTIME UPDATE (NIEUW)
+  ============================================ */
+  useEffect(() => {
+    const t = setInterval(() => {
+      // Forceer re-render → roundProgress & countdown blijven live lopen
+      setArena((a) => (a ? { ...a } : a));
+    }, 1000);
+
+    return () => clearInterval(t);
   }, []);
 
   /* ============================================
@@ -258,15 +264,9 @@ export default function AdminDashboardPage() {
   const players = useMemo(() => arena?.players ?? [], [arena]);
   const arenaStatus = arena?.status ?? "idle";
 
-  const hasDoomed =
-  arenaStatus === "ended" &&
-  players.length > 5 &&
-  players.some((p) => p.positionStatus === "elimination");
-
+  /* ===== FIX 2: hasDoomed verwijderd ===== */
   const canStartRound =
-    !!arena &&
-    (arenaStatus === "idle" || arenaStatus === "ended") &&
-    !hasDoomed;
+    !!arena && (arenaStatus === "idle" || arenaStatus === "ended");
 
   const canStopRound = arenaStatus === "active";
   const canGraceEnd = arenaStatus === "grace";
@@ -378,76 +378,73 @@ export default function AdminDashboardPage() {
       </header>
 
       {/* ============================================================
-          SPELBESTURING — HERSTELD
+          SPELBESTURING — FIXES ACTIEF
       ============================================================ */}
-
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
+        <h2 className="text-sm font-semibold mb-3">Spelbesturing</h2>
 
-  <h2 className="text-sm font-semibold mb-3">Spelbesturing</h2>
+        {/* START/STOP SPEL */}
+        <div className="flex flex-wrap gap-2 mb-4">
+          <button
+            onClick={() => emitAdmin("startGame")}
+            disabled={gameSession.active}
+            className={`px-3 py-1.5 rounded-full text-xs ${
+              gameSession.active
+                ? "bg-gray-400 text-white cursor-not-allowed"
+                : "bg-green-600 text-white"
+            }`}
+          >
+            Start spel
+          </button>
 
-  {/* START/STOP SPEL – HERSTELD */}
-  <div className="flex flex-wrap gap-2 mb-4">
-    <button
-      onClick={() => emitAdmin("startGame")}
-      disabled={gameSession.active}
-      className={`px-3 py-1.5 rounded-full text-xs ${
-        gameSession.active
-          ? "bg-gray-400 text-white cursor-not-allowed"
-          : "bg-green-600 text-white"
-      }`}
-    >
-      Start spel
-    </button>
+          <button
+            onClick={() => emitAdmin("stopGame")}
+            disabled={!gameSession.active}
+            className={`px-3 py-1.5 rounded-full text-xs ${
+              !gameSession.active
+                ? "bg-gray-400 text-white cursor-not-allowed"
+                : "bg-yellow-500 text-white"
+            }`}
+          >
+            Stop spel
+          </button>
+        </div>
 
-    <button
-      onClick={() => emitAdmin("stopGame")}
-      disabled={!gameSession.active}
-      className={`px-3 py-1.5 rounded-full text-xs ${
-        !gameSession.active
-          ? "bg-gray-400 text-white cursor-not-allowed"
-          : "bg-yellow-500 text-white"
-      }`}
-    >
-      Stop spel
-    </button>
-  </div>
+        {/* RONDE KNOPPEN – eliminate blokje is verwijderd */}
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => emitAdmin("startRound", { type: "quarter" })}
+            disabled={!canStartRound}
+            className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full text-xs disabled:bg-gray-400"
+          >
+            Start voorronde
+          </button>
 
-  {/* RONDE KNOPPEN */}
-  <div className="flex flex-wrap gap-2">
-    <button
-      onClick={() => emitAdmin("startRound", { type: "quarter" })}
-      disabled={!canStartRound}
-      className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full text-xs disabled:bg-gray-400"
-    >
-      Start voorronde
-    </button>
+          <button
+            onClick={() => emitAdmin("startRound", { type: "semi" })}
+            disabled={!canStartRound}
+            className="px-3 py-1.5 bg-orange-500 text-white rounded-full text-xs disabled:bg-gray-400"
+          >
+            Start halve finale
+          </button>
 
-    <button
-      onClick={() => emitAdmin("startRound", { type: "semi" })}
-      disabled={!canStartRound}
-      className="px-3 py-1.5 bg-orange-500 text-white rounded-full text-xs disabled:bg-gray-400"
-    >
-      Start halve finale
-    </button>
+          <button
+            onClick={() => emitAdmin("startRound", { type: "finale" })}
+            disabled={!canStartRound}
+            className="px-3 py-1.5 bg-purple-600 text-white rounded-full text-xs disabled:bg-gray-400"
+          >
+            Start finale
+          </button>
 
-    <button
-      onClick={() => emitAdmin("startRound", { type: "finale" })}
-      disabled={!canStartRound}
-      className="px-3 py-1.5 bg-purple-600 text-white rounded-full text-xs disabled:bg-gray-400"
-    >
-      Start finale
-    </button>
-
-    <button
-      onClick={() => emitAdmin("endRound")}
-      disabled={!canStopRound}
-      className="px-3 py-1.5 bg-gray-800 text-white rounded-full text-xs disabled:bg-gray-400"
-    >
-      Stop ronde
-    </button>
-  </div>
-</section>
-      
+          <button
+            onClick={() => emitAdmin("endRound")}
+            disabled={!canStopRound}
+            className="px-3 py-1.5 bg-gray-800 text-white rounded-full text-xs disabled:bg-gray-400"
+          >
+            Stop ronde
+          </button>
+        </div>
+      </section>
 
       {/* ============================================================
           SPELERSACTIES
@@ -608,8 +605,7 @@ export default function AdminDashboardPage() {
                     Score: {fmt(p.score)} 💎
                   </div>
 
-                  {/* Alleen bij elimination tonen we nog een extra "Verwijder speler" knop,
-                      die OOK echt removeFromArenaPermanent doet, niet opnieuw eliminate */}
+                  {/* EXTRA KNOP BIJ ELIMINATION */}
                   {p.positionStatus === "elimination" && (
                     <button
                       onClick={() => {
@@ -617,7 +613,6 @@ export default function AdminDashboardPage() {
                         const formatted = raw.startsWith("@")
                           ? raw
                           : `@${raw}`;
-
                         openConfirm({
                           message: `Speler ${formatted} staat op elimination. Permanent uit de arena verwijderen?`,
                           onConfirm: () => {
@@ -632,9 +627,7 @@ export default function AdminDashboardPage() {
                                 setStatus(
                                   res?.success
                                     ? "✅ Uitgevoerd"
-                                    : `❌ ${
-                                        res?.message ?? "Geen antwoord"
-                                      }`
+                                    : `❌ ${res?.message ?? "Geen antwoord"}`
                                 );
                                 setConfirmData(null);
                               }
@@ -915,7 +908,7 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
-            {/* AUTOCOMPLETE GIVE */}
+            {/* AUTOCOMPLETE */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "give" && (
@@ -1116,7 +1109,7 @@ export default function AdminDashboardPage() {
       </footer>
 
       {/* ============================================================
-          CONFIRM POPUP (global)
+          CONFIRM POPUP
       ============================================================ */}
       {confirmData && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
@@ -1146,4 +1139,4 @@ export default function AdminDashboardPage() {
       )}
     </main>
   );
-                  }
+}
