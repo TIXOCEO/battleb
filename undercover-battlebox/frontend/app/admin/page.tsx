@@ -499,7 +499,7 @@ export default function AdminDashboardPage() {
 
             {/* FIXED — Queue knop werkt nu */}
             <button
-              onClick={() => emitAdmin("addToQueue", { username })}
+              onClick={() => emitAdminWithUser("addToQueue", q.username)}
               className="px-3 py-1.5 bg-gray-800 text-white rounded-full"
             >
               → Queue
