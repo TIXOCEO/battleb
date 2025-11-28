@@ -167,7 +167,6 @@ export function getArena() {
 // ============================================================================
 // LEADERBOARDS — FIXED RULES
 // ============================================================================
-
 export async function broadcastPlayerLeaderboard() {
   if (!currentGameId) {
     io.emit("leaderboardPlayers", []);
@@ -316,7 +315,6 @@ export async function broadcastStats() {
 // ============================================================================
 // TIKTOK CONNECT FLOW
 // ============================================================================
-
 let tiktokConn: any = null;
 
 async function fullyDisconnect() {
@@ -437,14 +435,13 @@ async function buildInitialSnapshot() {
       [currentGameId, hostId]
     );
 
-    // 🔥 FIX
+    // 🔥 FIX: cast numeric to number
     pl.rows = pl.rows.map(r => ({
       ...r,
       total_score: Number(r.total_score || 0)
     }));
 
     snap.playerLeaderboard = pl.rows;
-
     snap.playerLeaderboardSummary = pl.rows.reduce(
       (acc, r) => acc + r.total_score,
       0
@@ -472,14 +469,12 @@ async function buildInitialSnapshot() {
       [currentGameId]
     );
 
-    // 🔥 FIX
     gf.rows = gf.rows.map(r => ({
       ...r,
       total_diamonds: Number(r.total_diamonds || 0)
     }));
 
     snap.gifterLeaderboard = gf.rows;
-
     snap.gifterLeaderboardSummary = gf.rows.reduce(
       (a, b) => a + b.total_diamonds,
       0
@@ -680,7 +675,7 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      if (action === "stopGame") {
+    if (action === "stopGame") {
         if (!currentGameId) return ack({ success: true });
 
         await pool.query(
@@ -750,10 +745,13 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
+      // ======================================================================
+      // 🔥 PATCH: DIRECT STOP FORCE MODE
+      // ======================================================================
       if (action === "endRound") {
-        await endRound();
-        await emitArena();
+        await endRound(true); // ← *** ENIGE PATCH IN HET HELE BESTAND ***
 
+        await emitArena();
         await broadcastPlayerLeaderboard();
         await broadcastGifterLeaderboard();
         await broadcastHostDiamonds();
@@ -866,7 +864,7 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       // ======================================================================
-      // 🔥 FIX: PERMANENTE REMOVE — echte force remove
+      // 🔥 PERMANENTE REMOVE (force = true)
       // ======================================================================
       if (action === "removeFromArenaPermanent") {
         const clean = (data?.username || "")
@@ -884,7 +882,6 @@ io.on("connection", async (socket: AdminSocket) => {
         if (!r.rows.length)
           return ack({ success: false, message: "User niet gevonden" });
 
-        // 🔥 BELANGRIJKSTE FIX → FORCE true:
         await arenaLeave(String(r.rows[0].tiktok_id), true);
 
         emitLog({
