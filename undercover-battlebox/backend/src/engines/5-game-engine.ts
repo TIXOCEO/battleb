@@ -1,15 +1,14 @@
 /* ============================================================================
-   5-game-engine.ts — BattleBox Arena Engine v15.4 (Patched)
+   5-game-engine.ts — BattleBox Arena Engine v15.5
    ✔ Finaleronde: bottom-1 danger + eliminatie
    ✔ Sorteert altijd op totale score
-   ✔ Quarter danger = posities 6–8
+   ✔ Quarter danger = dynamisch: iedereen met score >= score positie 6
    ✔ Finale werkt tot winnaar
    ✔ IDLE toont GEEN scores
    ✔ Eliminated spelers blijven elimination in ENDED
    ✔ New players IDLE: krijgen geen vorige ronde gifts
    ✔ Admin remove-knop: enabled bij ENDED of IDLE
    ✔ PATCHED: arenaLeave(force) voor permanente verwijdering
-   ✔ PATCHED: io.roundActive sync voor gift-engine
 ============================================================================ */
 
 import pool from "../db";
@@ -50,10 +49,6 @@ export interface ArenaState {
   firstFinalRound: number | null;
   lastSortedAt: number;
 }
-
-/* ============================================================================
-   DEFAULT ARENA
-============================================================================ */
 
 let arena: ArenaState = {
   players: [],
@@ -161,10 +156,7 @@ async function getFinalScore(tiktokId: string) {
     [BigInt(tiktokId), gid, first]
   );
 
-  return (
-    Number(base.rows[0]?.score || 0) +
-    Number(finale.rows[0]?.score || 0)
-  );
+  return Number(base.rows[0].score) + Number(finale.rows[0].score);
 }
 
 async function computePlayerScore(p: ArenaPlayer) {
@@ -175,14 +167,14 @@ async function computePlayerScore(p: ArenaPlayer) {
 }
 
 /* ============================================================================
-   RECOMPUTE POSITIONS — FIXED
+   RECOMPUTE POSITIONS — PATCHED (quarter tie logic)
 ============================================================================ */
 
 async function recomputePositions() {
   const status = arena.status;
   const total = arena.players.length;
 
-  // IDLE: alles resetten
+  // IDLE: scores 0 en alive
   if (status === "idle") {
     for (const p of arena.players) {
       p.score = 0;
@@ -194,7 +186,7 @@ async function recomputePositions() {
     return;
   }
 
-  // Score berekenen
+  // Scores berekenen
   for (const p of arena.players) {
     p.score = await computePlayerScore(p);
   }
@@ -202,25 +194,25 @@ async function recomputePositions() {
   // Sorteren
   arena.players.sort((a, b) => b.score - a.score);
 
-  // ENDED — eliminated spelers blijven elimination
+  // ENDED: eliminated blijven elimination
   if (status === "ended") {
     for (const p of arena.players) {
       if (p.eliminated) {
         p.positionStatus = "elimination";
-        continue;
-      }
-
-      if (p.boosters.includes("immune")) {
+      } else if (p.boosters.includes("immune")) {
         p.positionStatus = "immune";
-        continue;
       }
     }
     arena.lastSortedAt = Date.now();
     return;
   }
 
-  // QUARTER LOGICA (top 1–5 safe, 6–8 danger)
+/* ------------------------------
+   QUARTER LOGICA (DYNAMISCHE DANGER)
+--------------------------------- */
+
   if (arena.type === "quarter") {
+    // Minder dan 6 spelers → geen danger
     if (total < 6) {
       for (const p of arena.players) {
         p.positionStatus = p.boosters.includes("immune")
@@ -230,6 +222,9 @@ async function recomputePositions() {
       arena.lastSortedAt = Date.now();
       return;
     }
+
+    // 🔥 DYNAMISCHE THRESHOLD
+    const threshold = arena.players[5].score;
 
     for (let i = 0; i < total; i++) {
       const p = arena.players[i];
@@ -244,17 +239,27 @@ async function recomputePositions() {
         continue;
       }
 
-      if (i <= 4) p.positionStatus = "alive";
-      else if (i >= 5 && i <= 7) p.positionStatus = "danger";
-      else p.positionStatus = "alive";
+      // 🔥 NIEUWE REGEL:
+      // Iedereen met score >= threshold = danger
+      if (p.score >= threshold) {
+        p.positionStatus = "danger";
+      } else {
+        p.positionStatus = "alive";
+      }
     }
 
     arena.lastSortedAt = Date.now();
     return;
   }
 
-  // FINALE: alleen bottom-1 is danger
-  for (let i = 0; i < total; i++) {
+  /* ------------------------------
+     FINALE LOGICA
+  --------------------------------- */
+
+  // Finale: bottom-1 = danger
+  const totalFinal = arena.players.length;
+
+  for (let i = 0; i < totalFinal; i++) {
     const p = arena.players[i];
 
     if (p.eliminated) {
@@ -267,7 +272,8 @@ async function recomputePositions() {
       continue;
     }
 
-    p.positionStatus = i === total - 1 ? "danger" : "alive";
+    // bottom-1 = danger
+    p.positionStatus = i === totalFinal - 1 ? "danger" : "alive";
   }
 
   arena.lastSortedAt = Date.now();
@@ -310,7 +316,6 @@ export async function startRound(type: RoundType) {
   arena.round += 1;
   arena.type = type;
 
-  // Finale start flag
   if (type === "finale" && arena.firstFinalRound === null) {
     arena.firstFinalRound = arena.round;
 
@@ -320,7 +325,7 @@ export async function startRound(type: RoundType) {
     });
   }
 
-  // Reset status
+  // Reset statuses
   for (const p of arena.players) {
     p.positionStatus = "alive";
     p.eliminated = false;
@@ -328,7 +333,7 @@ export async function startRound(type: RoundType) {
 
   arena.status = "active";
 
-  // PATCH: Gift-engine roundActive sync
+  // PATCH: Gift-engine roundActive ON
   (io as any).roundActive = true;
   (io as any).currentRound = arena.round;
 
@@ -379,13 +384,16 @@ export async function endRound() {
   if (arena.status === "grace") {
     arena.status = "ended";
 
-    // PATCH: Gift-engine roundActive sync OFF
+    // PATCH: Gift-engine roundActive OFF
     (io as any).roundActive = false;
 
     await recomputePositions();
     const total = arena.players.length;
 
-    // ======== FINALE LOGICA ========
+    /* ===============================
+       FINALE END LOGIC
+    ================================ */
+
     if (arena.type === "finale") {
       if (total <= 1) {
         emitLog({
@@ -425,7 +433,10 @@ export async function endRound() {
       return;
     }
 
-    // ======== QUARTER LOGICA ========
+    /* ===============================
+       QUARTER END LOGIC (with dynamic danger)
+    ================================ */
+
     if (total < 6) {
       io.emit("round:end", {
         round: arena.round,
@@ -438,10 +449,8 @@ export async function endRound() {
       return;
     }
 
-    const doomed = arena.players
-      .map((p, i) => ({ p, i }))
-      .filter((x) => x.i >= 5 && x.i <= 7)
-      .map((x) => x.p);
+    // Dynamische eliminaties: iedereen die danger had wordt geëlimineerd
+    const doomed = arena.players.filter((p) => p.positionStatus === "danger");
 
     for (const p of doomed) {
       p.positionStatus = "elimination";
@@ -464,6 +473,7 @@ export async function endRound() {
   }
 }
 
+
 /* ============================================================================
    ARENA MANAGEMENT — JOIN / LEAVE
 ============================================================================ */
@@ -475,7 +485,6 @@ export async function arenaJoin(
 ) {
   const id = String(tiktok_id);
 
-  // Geen dubbele spelers
   if (arena.players.some((p) => p.id === id)) return;
 
   arena.players.push({
@@ -500,21 +509,18 @@ export async function arenaLeave(
   force: boolean = false
 ) {
   const clean = String(usernameOrId).replace(/^@+/, "");
-
-  // FIX: Correcte ID + username normalisatie
   const cleanLower = clean.toLowerCase();
 
   const idx = arena.players.findIndex(
-    (p) =>
-      p.id === clean || p.username.toLowerCase() === cleanLower
+    (p) => p.id === clean || p.username.toLowerCase() === cleanLower
   );
 
   if (idx === -1) return;
 
   const p = arena.players[idx];
 
-  // FORCE = speler permanent verwijderen
   if (force) {
+    // Permanente verwijdering
     arena.players.splice(idx, 1);
 
     emitLog({
@@ -526,7 +532,7 @@ export async function arenaLeave(
     return;
   }
 
-  // Normal eliminate (blijft zichtbaar in ENDED)
+  // Soft elimination
   p.positionStatus = "elimination";
   p.eliminated = true;
 
@@ -594,7 +600,7 @@ export async function addFromQueue(user: any) {
     username: user.username.toLowerCase(),
     display_name: user.display_name,
     score: 0,
-    boosters: [],           // FIX: altijd clean starten
+    boosters: [],
     eliminated: false,
     positionStatus: "alive",
   });
