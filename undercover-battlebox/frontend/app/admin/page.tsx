@@ -377,45 +377,74 @@ export default function AdminDashboardPage() {
       {/* ============================================================
           SPELBESTURING — HERSTELD
       ============================================================ */}
+
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
-        <h2 className="text-sm font-semibold mb-3">Spelbesturing</h2>
 
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() =>
-              emitAdmin("startRound", { type: "quarter" })
-            }
-            disabled={!canStartRound}
-            className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full text-xs disabled:bg-gray-400"
-          >
-            Start voorronde
-          </button>
+  <h2 className="text-sm font-semibold mb-3">Spelbesturing</h2>
 
-          <button
-            onClick={() => emitAdmin("startRound", { type: "semi" })}
-            disabled={!canStartRound}
-            className="px-3 py-1.5 bg-orange-500 text-white rounded-full text-xs disabled:bg-gray-400"
-          >
-            Start halve finale
-          </button>
+  {/* START/STOP SPEL – HERSTELD */}
+  <div className="flex flex-wrap gap-2 mb-4">
+    <button
+      onClick={() => emitAdmin("startGame")}
+      disabled={gameSession.active}
+      className={`px-3 py-1.5 rounded-full text-xs ${
+        gameSession.active
+          ? "bg-gray-400 text-white cursor-not-allowed"
+          : "bg-green-600 text-white"
+      }`}
+    >
+      Start spel
+    </button>
 
-          <button
-            onClick={() => emitAdmin("startRound", { type: "finale" })}
-            disabled={!canStartRound}
-            className="px-3 py-1.5 bg-purple-600 text-white rounded-full text-xs disabled:bg-gray-400"
-          >
-            Start finale
-          </button>
+    <button
+      onClick={() => emitAdmin("stopGame")}
+      disabled={!gameSession.active}
+      className={`px-3 py-1.5 rounded-full text-xs ${
+        !gameSession.active
+          ? "bg-gray-400 text-white cursor-not-allowed"
+          : "bg-yellow-500 text-white"
+      }`}
+    >
+      Stop spel
+    </button>
+  </div>
 
-          <button
-            onClick={() => emitAdmin("endRound")}
-            disabled={!canStopRound && !canGraceEnd}
-            className="px-3 py-1.5 bg-gray-800 text-white rounded-full text-xs disabled:bg-gray-400"
-          >
-            Stop ronde
-          </button>
-        </div>
-      </section>
+  {/* RONDE KNOPPEN */}
+  <div className="flex flex-wrap gap-2">
+    <button
+      onClick={() => emitAdmin("startRound", { type: "quarter" })}
+      disabled={!canStartRound}
+      className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full text-xs disabled:bg-gray-400"
+    >
+      Start voorronde
+    </button>
+
+    <button
+      onClick={() => emitAdmin("startRound", { type: "semi" })}
+      disabled={!canStartRound}
+      className="px-3 py-1.5 bg-orange-500 text-white rounded-full text-xs disabled:bg-gray-400"
+    >
+      Start halve finale
+    </button>
+
+    <button
+      onClick={() => emitAdmin("startRound", { type: "finale" })}
+      disabled={!canStartRound}
+      className="px-3 py-1.5 bg-purple-600 text-white rounded-full text-xs disabled:bg-gray-400"
+    >
+      Start finale
+    </button>
+
+    <button
+      onClick={() => emitAdmin("endRound")}
+      disabled={!canStopRound}
+      className="px-3 py-1.5 bg-gray-800 text-white rounded-full text-xs disabled:bg-gray-400"
+    >
+      Stop ronde
+    </button>
+  </div>
+</section>
+      
 
       {/* ============================================================
           SPELERSACTIES
