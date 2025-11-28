@@ -1,5 +1,5 @@
 /* ============================================================================
-   5-game-engine.ts — BattleBox Arena Engine v15.4
+   5-game-engine.ts — BattleBox Arena Engine v15.4 (Patched)
    ✔ Finaleronde: bottom-1 danger + eliminatie
    ✔ Sorteert altijd op totale score
    ✔ Quarter danger = posities 6–8
@@ -9,6 +9,7 @@
    ✔ New players IDLE: krijgen geen vorige ronde gifts
    ✔ Admin remove-knop: enabled bij ENDED of IDLE
    ✔ PATCHED: arenaLeave(force) voor permanente verwijdering
+   ✔ PATCHED: io.roundActive sync voor gift-engine
 ============================================================================ */
 
 import pool from "../db";
@@ -49,6 +50,10 @@ export interface ArenaState {
   firstFinalRound: number | null;
   lastSortedAt: number;
 }
+
+/* ============================================================================
+   DEFAULT ARENA
+============================================================================ */
 
 let arena: ArenaState = {
   players: [],
@@ -156,7 +161,10 @@ async function getFinalScore(tiktokId: string) {
     [BigInt(tiktokId), gid, first]
   );
 
-  return Number(base.rows[0].score) + Number(finale.rows[0].score);
+  return (
+    Number(base.rows[0]?.score || 0) +
+    Number(finale.rows[0]?.score || 0)
+  );
 }
 
 async function computePlayerScore(p: ArenaPlayer) {
@@ -174,6 +182,7 @@ async function recomputePositions() {
   const status = arena.status;
   const total = arena.players.length;
 
+  // IDLE: alles resetten
   if (status === "idle") {
     for (const p of arena.players) {
       p.score = 0;
@@ -185,24 +194,32 @@ async function recomputePositions() {
     return;
   }
 
+  // Score berekenen
   for (const p of arena.players) {
     p.score = await computePlayerScore(p);
   }
 
+  // Sorteren
   arena.players.sort((a, b) => b.score - a.score);
 
+  // ENDED — eliminated spelers blijven elimination
   if (status === "ended") {
     for (const p of arena.players) {
       if (p.eliminated) {
         p.positionStatus = "elimination";
-      } else if (p.boosters.includes("immune")) {
+        continue;
+      }
+
+      if (p.boosters.includes("immune")) {
         p.positionStatus = "immune";
+        continue;
       }
     }
     arena.lastSortedAt = Date.now();
     return;
   }
 
+  // QUARTER LOGICA (top 1–5 safe, 6–8 danger)
   if (arena.type === "quarter") {
     if (total < 6) {
       for (const p of arena.players) {
@@ -216,6 +233,11 @@ async function recomputePositions() {
 
     for (let i = 0; i < total; i++) {
       const p = arena.players[i];
+
+      if (p.eliminated) {
+        p.positionStatus = "elimination";
+        continue;
+      }
 
       if (p.boosters.includes("immune")) {
         p.positionStatus = "immune";
@@ -231,8 +253,14 @@ async function recomputePositions() {
     return;
   }
 
+  // FINALE: alleen bottom-1 is danger
   for (let i = 0; i < total; i++) {
     const p = arena.players[i];
+
+    if (p.eliminated) {
+      p.positionStatus = "elimination";
+      continue;
+    }
 
     if (p.boosters.includes("immune")) {
       p.positionStatus = "immune";
@@ -246,7 +274,7 @@ async function recomputePositions() {
 }
 
 /* ============================================================================
-   EMIT SNAPSHOT
+   EMIT SNAPSHOT — Admin Dashboard Compatible
 ============================================================================ */
 
 export async function emitArena() {
@@ -273,7 +301,7 @@ export async function emitArena() {
 }
 
 /* ============================================================================
-   START / END ROUND
+   START / END ROUND — patched for gift-engine sync
 ============================================================================ */
 
 export async function startRound(type: RoundType) {
@@ -282,6 +310,7 @@ export async function startRound(type: RoundType) {
   arena.round += 1;
   arena.type = type;
 
+  // Finale start flag
   if (type === "finale" && arena.firstFinalRound === null) {
     arena.firstFinalRound = arena.round;
 
@@ -291,11 +320,17 @@ export async function startRound(type: RoundType) {
     });
   }
 
+  // Reset status
   for (const p of arena.players) {
     p.positionStatus = "alive";
+    p.eliminated = false;
   }
 
   arena.status = "active";
+
+  // PATCH: Gift-engine roundActive sync
+  (io as any).roundActive = true;
+  (io as any).currentRound = arena.round;
 
   const now = Date.now();
   const duration =
@@ -322,7 +357,7 @@ export async function startRound(type: RoundType) {
 }
 
 export async function endRound() {
-
+  // ACTIVE → GRACE
   if (arena.status === "active") {
     arena.status = "grace";
 
@@ -340,12 +375,17 @@ export async function endRound() {
     return;
   }
 
+  // GRACE → ENDED
   if (arena.status === "grace") {
     arena.status = "ended";
+
+    // PATCH: Gift-engine roundActive sync OFF
+    (io as any).roundActive = false;
 
     await recomputePositions();
     const total = arena.players.length;
 
+    // ======== FINALE LOGICA ========
     if (arena.type === "finale") {
       if (total <= 1) {
         emitLog({
@@ -385,6 +425,7 @@ export async function endRound() {
       return;
     }
 
+    // ======== QUARTER LOGICA ========
     if (total < 6) {
       io.emit("round:end", {
         round: arena.round,
@@ -434,6 +475,7 @@ export async function arenaJoin(
 ) {
   const id = String(tiktok_id);
 
+  // Geen dubbele spelers
   if (arena.players.some((p) => p.id === id)) return;
 
   arena.players.push({
@@ -457,18 +499,21 @@ export async function arenaLeave(
   usernameOrId: string,
   force: boolean = false
 ) {
-  const clean = String(usernameOrId).replace(/^@+/, "").toLowerCase();
+  const clean = String(usernameOrId).replace(/^@+/, "");
+
+  // FIX: Correcte ID + username normalisatie
+  const cleanLower = clean.toLowerCase();
 
   const idx = arena.players.findIndex(
     (p) =>
-      p.id === clean ||
-      p.username.toLowerCase() === clean
+      p.id === clean || p.username.toLowerCase() === cleanLower
   );
 
   if (idx === -1) return;
 
   const p = arena.players[idx];
 
+  // FORCE = speler permanent verwijderen
   if (force) {
     arena.players.splice(idx, 1);
 
@@ -476,21 +521,25 @@ export async function arenaLeave(
       type: "elim",
       message: `${p.display_name} permanent verwijderd uit arena`,
     });
-  } else {
-    p.positionStatus = "elimination";
-    p.eliminated = true;
 
-    emitLog({
-      type: "elim",
-      message: `${p.display_name} gemarkeerd als eliminated`,
-    });
+    await emitArena();
+    return;
   }
+
+  // Normal eliminate (blijft zichtbaar in ENDED)
+  p.positionStatus = "elimination";
+  p.eliminated = true;
+
+  emitLog({
+    type: "elim",
+    message: `${p.display_name} gemarkeerd als eliminated`,
+  });
 
   await emitArena();
 }
 
 /* ============================================================================
-   OTHER ENTRYPOINTS: unchanged
+   OTHER ENTRYPOINTS — unchanged
 ============================================================================ */
 
 export async function addToArena(username: string, resolveUser: Function) {
@@ -545,7 +594,7 @@ export async function addFromQueue(user: any) {
     username: user.username.toLowerCase(),
     display_name: user.display_name,
     score: 0,
-    boosters: [],
+    boosters: [],           // FIX: altijd clean starten
     eliminated: false,
     positionStatus: "alive",
   });
@@ -600,6 +649,7 @@ setInterval(async () => {
 
   const now = Date.now();
 
+  // ACTIVE → GRACE
   if (arena.status === "active" && now >= arena.roundCutoff) {
     arena.status = "grace";
 
@@ -617,6 +667,7 @@ setInterval(async () => {
     return;
   }
 
+  // GRACE → ENDED
   if (arena.status === "grace" && now >= arena.graceEnd) {
     await endRound();
     return;
