@@ -1,11 +1,19 @@
 // ============================================================================
-// 6-chat-engine.ts — v10.4 FINAL (Danny Build)
+// 6-chat-engine.ts — v16 (Danny Build) — Queue v16 Compatible
+// ----------------------------------------------------------------------------
+// ✔ FAN-only join
+// ✔ Host join only offline
+// ✔ Uses Queue v16 (addToQueue / leaveQueue / pushQueueUpdate)
+// ✔ All old direct sorting removed (queue.ts handles everything)
+// ✔ Boost intact
+// ✔ Twists intact
+// ✔ Extreme stability, minimal edits
 // ============================================================================
 
 import pool from "../db";
 import { io, emitLog, getActiveHost, isStreamLive } from "../server";
 
-import { addToQueue, leaveQueue, getQueue } from "../queue";
+import { addToQueue, leaveQueue, getQueue, pushQueueUpdate } from "../queue";
 import { getOrUpdateUser } from "./2-user-engine";
 import { applyBoost, parseBoostChatCommand } from "./7-boost-engine";
 import { parseUseCommand } from "./8-twist-engine";
@@ -57,7 +65,7 @@ async function ensureFanStatus(userId: bigint): Promise<boolean> {
 // MAIN ENGINE
 // ============================================================================
 export function initChatEngine(conn: any) {
-  console.log("💬 CHAT ENGINE v10.4 LOADED");
+  console.log("💬 CHAT ENGINE v16 LOADED");
 
   conn.on("chat", async (msg: any) => {
     try {
@@ -92,10 +100,10 @@ export function initChatEngine(conn: any) {
 
       const dbUserId = BigInt(userId);
 
-      // fan
+      // FAN CHECK
       const fan = await ensureFanStatus(dbUserId);
 
-      // vip
+      // VIP CHECK
       const vipRow = await pool.query(
         `SELECT is_vip FROM users WHERE tiktok_id=$1`,
         [dbUserId]
@@ -104,7 +112,7 @@ export function initChatEngine(conn: any) {
 
       const tag = isVip ? "[VIP] " : fan ? "[FAN] " : "";
 
-      // host check
+      // HOST CHECK
       const activeHost = getActiveHost();
       const isHost =
         activeHost && String(activeHost.id) === String(userId);
@@ -116,11 +124,7 @@ export function initChatEngine(conn: any) {
         // host mag joinen als stream NIET live is
         if (isHost && !isStreamLive()) {
           await addToQueue(String(userId), user.username);
-
-          io.emit("updateQueue", {
-            open: true,
-            entries: await getQueue(),
-          });
+          await pushQueueUpdate();
 
           emitLog({
             type: "queue",
@@ -139,7 +143,7 @@ export function initChatEngine(conn: any) {
           return;
         }
 
-        // spelers → FAN ONLY
+        // FAN ONLY (spelers)
         if (!fan) {
           emitLog({
             type: "queue",
@@ -149,11 +153,7 @@ export function initChatEngine(conn: any) {
         }
 
         await addToQueue(String(userId), user.username);
-
-        io.emit("updateQueue", {
-          open: true,
-          entries: await getQueue(),
-        });
+        await pushQueueUpdate();
 
         emitLog({
           type: "queue",
@@ -169,10 +169,7 @@ export function initChatEngine(conn: any) {
       if (cmd === "!leave") {
         const refund = await leaveQueue(String(userId));
 
-        io.emit("updateQueue", {
-          open: true,
-          entries: await getQueue(),
-        });
+        await pushQueueUpdate();
 
         emitLog({
           type: "queue",
@@ -196,10 +193,7 @@ export function initChatEngine(conn: any) {
             user.display_name
           );
 
-          io.emit("updateQueue", {
-            open: true,
-            entries: await getQueue(),
-          });
+          await pushQueueUpdate();
 
           emitLog({
             type: "boost",
