@@ -827,7 +827,7 @@ io.on("connection", async (socket: AdminSocket) => {
         if (String(r.rows[0].tiktok_id) === HARD_HOST_ID)
           return ack({ success: false, message: "Host kan niet geëlimineerd worden" });
 
-        await arenaLeave(String(r.rows[0].tiktok_id));
+        await arenaLeave(String(r.rows[0].tiktok_id), true);
 
         await emitArena();
         emitLog({
