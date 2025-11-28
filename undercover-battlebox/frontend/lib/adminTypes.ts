@@ -1,11 +1,12 @@
 /* ============================================================================
-   adminTypes.ts — BattleBox v15.1
-   ✔ Gesynchroniseerd met server.ts v7 & game-engine v15
-   ✔ Round-based scoring compatible
-   ✔ Correcte arena structuur
-   ✔ Realtime arena diamonds
-   ✔ Realtime host diamonds
-   ✔ Permanent remove event toegevoegd (removeFromArenaPermanent)
+   adminTypes.ts — BattleBox v16
+   ✔ Gesynchroniseerd met server.ts v16 & queue.ts v16
+   ✔ Queue-entry volledig consistent (VIP/FAN/Boost/Reason/Position)
+   ✔ Nieuwe admin actions toegevoegd:
+     - promoteUser
+     - demoteUser
+     - giveVip / removeVip (realtime queue refresh)
+   ✔ Overige logica volledig ongewijzigd gelaten
 ============================================================================ */
 
 /* ================================
@@ -45,7 +46,7 @@ export interface ArenaPlayer {
 }
 
 /* ================================
-   ARENA STATE (FULL v15)
+   ARENA STATE
 ================================ */
 export interface ArenaState {
   players: ArenaPlayer[];
@@ -77,15 +78,19 @@ export interface ArenaState {
 }
 
 /* ================================
-   QUEUE ENTRY
+   QUEUE ENTRY — UPDATED v16
 ================================ */
 export interface QueueEntry {
   position: number;
   tiktok_id: string;
+
   display_name: string;
   username: string;
 
+  /** Boost component voor positie (VIP/FAN/Boost) */
   priorityDelta: number;
+
+  /** Waarom gebruiker deze prio heeft ( "[VIP] [FAN] +Boost 2" ) */
   reason: string;
 
   is_vip: boolean;
@@ -129,7 +134,7 @@ export interface AdminAckResponse {
 }
 
 /* ================================
-   SEARCH USER RESULT
+   SEARCH RESULT
 ================================ */
 export interface SearchUser {
   tiktok_id: string;
@@ -166,7 +171,7 @@ export interface ArenaSettings {
 }
 
 /* ================================
-   LEADERBOARDS — GIFTS DRIVEN
+   LEADERBOARDS
 ================================ */
 export interface PlayerLeaderboardEntry {
   tiktok_id: string;
@@ -265,7 +270,7 @@ export interface AdminSocketInbound {
 }
 
 /* ================================
-   SOCKET OUTBOUND
+   SOCKET OUTBOUND — UPDATED v16
 ================================ */
 export interface AdminSocketOutbound {
   ping: () => void;
@@ -310,6 +315,7 @@ export interface AdminSocketOutbound {
     ack: (res: AdminAckResponse) => void
   ) => void;
 
+  /** 🎯 NIEUW: push uit queue + direct naar arena */
   addToArena: (
     payload: { username: string },
     ack: (res: AdminAckResponse) => void
@@ -320,11 +326,29 @@ export interface AdminSocketOutbound {
     ack: (res: AdminAckResponse) => void
   ) => void;
 
-  /** 
-   * ✔ NIEUW — definitief verwijderen uit arena
-   * gebruikt door permanente verwijderknop
-   */
   removeFromArenaPermanent: (
+    payload: { username: string },
+    ack: (res: AdminAckResponse) => void
+  ) => void;
+
+  /** 🎯 NIEUW — Admin knoppen voor queue positie */
+  promoteUser: (
+    payload: { username: string },
+    ack: (res: AdminAckResponse) => void
+  ) => void;
+
+  demoteUser: (
+    payload: { username: string },
+    ack: (res: AdminAckResponse) => void
+  ) => void;
+
+  /** 🎯 NIEUW — VIP Controls */
+  giveVip: (
+    payload: { username: string },
+    ack: (res: AdminAckResponse) => void
+  ) => void;
+
+  removeVip: (
     payload: { username: string },
     ack: (res: AdminAckResponse) => void
   ) => void;
