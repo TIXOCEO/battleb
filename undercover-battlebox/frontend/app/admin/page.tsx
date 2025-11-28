@@ -169,11 +169,10 @@ export default function AdminDashboardPage() {
   }, []);
 
   /* ============================================
-     RONDE TIMER REALTIME UPDATE (NIEUW)
+     RONDE TIMER REALTIME UPDATE
   ============================================ */
   useEffect(() => {
     const t = setInterval(() => {
-      // Forceer re-render → roundProgress & countdown blijven live lopen
       setArena((a) => (a ? { ...a } : a));
     }, 1000);
 
@@ -264,7 +263,6 @@ export default function AdminDashboardPage() {
   const players = useMemo(() => arena?.players ?? [], [arena]);
   const arenaStatus = arena?.status ?? "idle";
 
-  /* ===== FIX 2: hasDoomed verwijderd ===== */
   const canStartRound =
     !!arena && (arenaStatus === "idle" || arenaStatus === "ended");
 
@@ -313,7 +311,7 @@ export default function AdminDashboardPage() {
     }
   };
 
-  /* ============================================
+/* ============================================
      UI
   ============================================ */
   return (
@@ -378,7 +376,7 @@ export default function AdminDashboardPage() {
       </header>
 
       {/* ============================================================
-          SPELBESTURING — FIXES ACTIEF
+          SPELBESTURING
       ============================================================ */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
         <h2 className="text-sm font-semibold mb-3">Spelbesturing</h2>
@@ -410,7 +408,7 @@ export default function AdminDashboardPage() {
           </button>
         </div>
 
-        {/* RONDE KNOPPEN – alleen voorronde + finale (engine: quarter | finale) */}
+        {/* RONDE-KNOPPEN */}
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => emitAdmin("startRound", { type: "quarter" })}
@@ -439,7 +437,7 @@ export default function AdminDashboardPage() {
       </section>
 
       {/* ============================================================
-          SPELERSACTIES
+          SPELERSACTIES (MET VIP-KNOPPEN TOEGEVOEGD)
       ============================================================ */}
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
         <h2 className="text-sm font-semibold mb-3">Speleracties</h2>
@@ -469,7 +467,7 @@ export default function AdminDashboardPage() {
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
               />
 
-              {/* AUTOCOMPLETE MAIN */}
+              {/* AUTOCOMPLETE */}
               {showResults &&
                 searchResults.length > 0 &&
                 activeAutoField === "main" && (
@@ -480,9 +478,7 @@ export default function AdminDashboardPage() {
                         onClick={() => applyAutoFill(u)}
                         className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
                       >
-                        <span className="font-semibold">
-                          {u.display_name}
-                        </span>{" "}
+                        <span className="font-semibold">{u.display_name}</span>{" "}
                         <span className="text-gray-500">@{u.username}</span>
                       </div>
                     ))}
@@ -491,7 +487,12 @@ export default function AdminDashboardPage() {
             </div>
           </div>
 
-          <div className="flex gap-2 text-xs">
+          {/*  
+             ======================================================
+               SPELERSACTIE-BUTTONS + VIP-KNOPPEN
+             ======================================================
+          */}
+          <div className="flex gap-2 text-xs flex-wrap">
             <button
               onClick={() => emitAdminWithUser("addToArena", username)}
               className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full"
@@ -511,6 +512,21 @@ export default function AdminDashboardPage() {
               className="px-3 py-1.5 bg-red-600 text-white rounded-full"
             >
               Elimineer
+            </button>
+
+            {/* VIP KNOPPEN */}
+            <button
+              onClick={() => emitAdminWithUser("giveVip", username)}
+              className="px-3 py-1.5 bg-yellow-400 text-black rounded-full border border-yellow-600"
+            >
+              Geef VIP
+            </button>
+
+            <button
+              onClick={() => emitAdminWithUser("removeVip", username)}
+              className="px-3 py-1.5 bg-yellow-200 text-yellow-800 rounded-full border border-yellow-500"
+            >
+              Verwijder VIP
             </button>
           </div>
         </div>
@@ -547,7 +563,7 @@ export default function AdminDashboardPage() {
                     p
                   )}`}
                 >
-                  {/* PERMANENT DELETE TOP-RIGHT */}
+                  {/* PERMANENT DELETE */}
                   <button
                     onClick={() => {
                       const raw = p.username || "";
@@ -597,7 +613,6 @@ export default function AdminDashboardPage() {
                     Score: {fmt(p.score)} 💎
                   </div>
 
-                  {/* EXTRA KNOP BIJ ELIMINATION */}
                   {p.positionStatus === "elimination" && (
                     <button
                       onClick={() => {
@@ -676,17 +691,20 @@ export default function AdminDashboardPage() {
                     {q.display_name} (@{q.username})
                   </div>
 
+                  {/* BADGES */}
                   <div className="flex flex-wrap gap-1 mt-1">
                     {q.is_vip && (
                       <span className="px-2 py-0.5 text-[10px] rounded-full bg-yellow-200 text-yellow-900 border border-yellow-400">
                         VIP
                       </span>
                     )}
+
                     {q.is_fan && !q.is_vip && (
                       <span className="px-2 py-0.5 text-[10px] rounded-full bg-blue-100 text-blue-700 border-blue-300">
                         Fan
                       </span>
                     )}
+
                     {q.priorityDelta > 0 && (
                       <span className="px-2 py-0.5 text-[10px] rounded-full bg-purple-100 text-purple-700 border-purple-300">
                         Boost +{q.priorityDelta}
@@ -694,12 +712,33 @@ export default function AdminDashboardPage() {
                     )}
                   </div>
 
+                  {/* POSITION INFO */}
                   <div className="mt-1 text-xs text-gray-500">
                     #{q.position} • {q.reason}
                   </div>
                 </div>
 
-                <div className="flex gap-1 mt-2 sm:mt-0 justify-end">
+                {/* BUTTONS RIGHT */}
+                <div className="flex flex-col sm:flex-row gap-1 mt-2 sm:mt-0 justify-end sm:items-center">
+
+                  {/* NEW — PROMOTE / DEMOTE */}
+                  <div className="flex gap-1 mr-1">
+                    <button
+                      onClick={() => emitAdmin("promoteUser", { username: q.username })}
+                      className="px-2 py-1 text-[11px] rounded-full bg-green-100 text-green-700 border border-green-300"
+                    >
+                      ↑ Promote
+                    </button>
+
+                    <button
+                      onClick={() => emitAdmin("demoteUser", { username: q.username })}
+                      className="px-2 py-1 text-[11px] rounded-full bg-orange-100 text-orange-700 border border-orange-300"
+                    >
+                      ↓ Demote
+                    </button>
+                  </div>
+
+                  {/* → Arena */}
                   <button
                     onClick={() =>
                       emitAdminWithUser("addToArena", q.username)
@@ -709,6 +748,7 @@ export default function AdminDashboardPage() {
                     → Arena
                   </button>
 
+                  {/* Delete */}
                   <button
                     onClick={() =>
                       emitAdminWithUser("removeFromQueue", q.username)
@@ -721,7 +761,9 @@ export default function AdminDashboardPage() {
               </div>
             ))
           ) : (
-            <div className="text-sm text-gray-500 italic">Wachtrij is leeg.</div>
+            <div className="text-sm text-gray-500 italic">
+              Wachtrij is leeg.
+            </div>
           )}
         </div>
       </section>
@@ -877,7 +919,7 @@ export default function AdminDashboardPage() {
         <h2 className="text-xl font-semibold mb-4">Twists</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* GIVE */}
+          {/* GIVE TWIST */}
           <div className="p-4 border rounded-xl bg-gray-50 shadow-sm relative">
             <h3 className="font-semibold mb-3">Twist geven aan speler</h3>
 
@@ -946,7 +988,7 @@ export default function AdminDashboardPage() {
             </button>
           </div>
 
-          {/* USE */}
+          {/* USE TWIST */}
           <div className="p-4 border rounded-xl bg-gray-50 shadow-sm relative">
             <h3 className="font-semibold mb-3">Twist gebruiken (admin)</h3>
 
@@ -969,7 +1011,7 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
-            {/* AUTOCOMPLETE USE */}
+            {/* AUTOCOMPLETE */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "use" && (
@@ -1002,9 +1044,7 @@ export default function AdminDashboardPage() {
               <option value="diamondpistol">Diamond Pistol</option>
             </select>
 
-            <label className="text-xs font-semibold">
-              Target (optioneel)
-            </label>
+            <label className="text-xs font-semibold">Target (optioneel)</label>
             <input
               type="text"
               value={twistTargetUse}
@@ -1131,4 +1171,4 @@ export default function AdminDashboardPage() {
       )}
     </main>
   );
-                  }
+      }
