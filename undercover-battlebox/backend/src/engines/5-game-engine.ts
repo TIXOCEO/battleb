@@ -1,13 +1,10 @@
 /* ============================================================================
-   5-game-engine.ts — BattleBox Arena Engine v15.5
-   ✔ Finaleronde: bottom-1 danger + eliminatie
+   5-game-engine.ts — BattleBox Arena Engine v15.6
+   ✔ Quarter danger = score <= positie 6 (juiste tie-logica)
+   ✔ Finale: alle spelers met laagste score elimineren (tie-correct)
    ✔ Sorteert altijd op totale score
-   ✔ Quarter danger = dynamisch: iedereen met score >= score positie 6
-   ✔ Finale werkt tot winnaar
    ✔ IDLE toont GEEN scores
    ✔ Eliminated spelers blijven elimination in ENDED
-   ✔ New players IDLE: krijgen geen vorige ronde gifts
-   ✔ Admin remove-knop: enabled bij ENDED of IDLE
    ✔ PATCHED: arenaLeave(force) voor permanente verwijdering
 ============================================================================ */
 
@@ -167,14 +164,14 @@ async function computePlayerScore(p: ArenaPlayer) {
 }
 
 /* ============================================================================
-   RECOMPUTE POSITIONS — PATCHED (quarter tie logic)
+   RECOMPUTE POSITIONS — QUARTER & FINALE PATCHED
 ============================================================================ */
 
 async function recomputePositions() {
   const status = arena.status;
   const total = arena.players.length;
 
-  // IDLE: scores 0 en alive
+  // IDLE: scores terug naar 0 + alive/immune
   if (status === "idle") {
     for (const p of arena.players) {
       p.score = 0;
@@ -191,10 +188,10 @@ async function recomputePositions() {
     p.score = await computePlayerScore(p);
   }
 
-  // Sorteren
+  // Sorteren op score DESC
   arena.players.sort((a, b) => b.score - a.score);
 
-  // ENDED: eliminated blijven elimination
+  // ENDED fase → alleen eliminated blijven elimination
   if (status === "ended") {
     for (const p of arena.players) {
       if (p.eliminated) {
@@ -207,13 +204,13 @@ async function recomputePositions() {
     return;
   }
 
-/* ------------------------------
-   QUARTER LOGICA (DYNAMISCHE DANGER)
---------------------------------- */
+  /* ============================================================================
+     QUARTER LOGICA — DANGER = score <= threshold (positie 6)
+  ============================================================================ */
 
   if (arena.type === "quarter") {
-    // Minder dan 6 spelers → geen danger
     if (total < 6) {
+      // Geen danger bij te weinig spelers
       for (const p of arena.players) {
         p.positionStatus = p.boosters.includes("immune")
           ? "immune"
@@ -223,7 +220,7 @@ async function recomputePositions() {
       return;
     }
 
-    // 🔥 DYNAMISCHE THRESHOLD
+    // 🔥 threshold = score op positie 6 (index 5)
     const threshold = arena.players[5].score;
 
     for (let i = 0; i < total; i++) {
@@ -239,9 +236,9 @@ async function recomputePositions() {
         continue;
       }
 
-      // 🔥 NIEUWE REGEL:
-      // Iedereen met score >= threshold = danger
-      if (p.score >= threshold) {
+      // 🔥 CORRECTE REGEL:
+      // Danger wanneer score <= threshold
+      if (p.score <= threshold) {
         p.positionStatus = "danger";
       } else {
         p.positionStatus = "alive";
@@ -252,11 +249,10 @@ async function recomputePositions() {
     return;
   }
 
-  /* ------------------------------
-     FINALE LOGICA
-  --------------------------------- */
+  /* ============================================================================
+     FINALE LOGICA — ACTIVE fase (bottom-1 danger)
+  ============================================================================ */
 
-  // Finale: bottom-1 = danger
   const totalFinal = arena.players.length;
 
   for (let i = 0; i < totalFinal; i++) {
@@ -272,7 +268,7 @@ async function recomputePositions() {
       continue;
     }
 
-    // bottom-1 = danger
+    // Tijdens active ≠ elimineren → alleen bottom-1 danger
     p.positionStatus = i === totalFinal - 1 ? "danger" : "alive";
   }
 
@@ -280,7 +276,7 @@ async function recomputePositions() {
 }
 
 /* ============================================================================
-   EMIT SNAPSHOT — Admin Dashboard Compatible
+   EMIT SNAPSHOT
 ============================================================================ */
 
 export async function emitArena() {
@@ -307,7 +303,7 @@ export async function emitArena() {
 }
 
 /* ============================================================================
-   START / END ROUND — patched for gift-engine sync
+   START / END ROUND
 ============================================================================ */
 
 export async function startRound(type: RoundType) {
@@ -325,7 +321,7 @@ export async function startRound(type: RoundType) {
     });
   }
 
-  // Reset statuses
+  // Reset eliminatie status
   for (const p of arena.players) {
     p.positionStatus = "alive";
     p.eliminated = false;
@@ -333,7 +329,7 @@ export async function startRound(type: RoundType) {
 
   arena.status = "active";
 
-  // PATCH: Gift-engine roundActive ON
+  // PATCH gift-engine hook
   (io as any).roundActive = true;
   (io as any).currentRound = arena.round;
 
@@ -359,7 +355,7 @@ export async function startRound(type: RoundType) {
     type,
     duration,
   });
-}
+     }
 
 export async function endRound() {
   // ACTIVE → GRACE
@@ -384,16 +380,15 @@ export async function endRound() {
   if (arena.status === "grace") {
     arena.status = "ended";
 
-    // PATCH: Gift-engine roundActive OFF
+    // PATCH: Gift-engine stop
     (io as any).roundActive = false;
 
     await recomputePositions();
     const total = arena.players.length;
 
-    /* ===============================
-       FINALE END LOGIC
-    ================================ */
-
+    /* ============================================================================
+       FINALE END LOGIC — CORRECT TIE ELIMINATION
+    ============================================================================ */
     if (arena.type === "finale") {
       if (total <= 1) {
         emitLog({
@@ -413,19 +408,26 @@ export async function endRound() {
         return;
       }
 
-      const doomed = arena.players[total - 1];
-      doomed.positionStatus = "elimination";
-      doomed.eliminated = true;
+      // 🔥 LAAGSTE SCORE OPSPOREN (correcte tie-elimination)
+      const lowestScore = arena.players[total - 1].score;
+      const doomed = arena.players.filter((p) => p.score === lowestScore);
+
+      for (const p of doomed) {
+        p.positionStatus = "elimination";
+        p.eliminated = true;
+      }
 
       emitLog({
         type: "arena",
-        message: `🔥 Finale eliminatie: ${doomed.display_name}`,
+        message: `🔥 Finale eliminatie(s): ${doomed
+          .map((x) => x.display_name)
+          .join(", ")}`,
       });
 
       io.emit("round:end", {
         round: arena.round,
         type: "finale",
-        pendingEliminations: [doomed.username],
+        pendingEliminations: doomed.map((x) => x.username),
         top3: arena.players.slice(0, 3),
       });
 
@@ -433,9 +435,9 @@ export async function endRound() {
       return;
     }
 
-    /* ===============================
-       QUARTER END LOGIC (with dynamic danger)
-    ================================ */
+    /* ============================================================================
+       QUARTER END LOGIC — eliminatie van alle danger spelers
+    ============================================================================ */
 
     if (total < 6) {
       io.emit("round:end", {
@@ -449,7 +451,6 @@ export async function endRound() {
       return;
     }
 
-    // Dynamische eliminaties: iedereen die danger had wordt geëlimineerd
     const doomed = arena.players.filter((p) => p.positionStatus === "danger");
 
     for (const p of doomed) {
@@ -472,7 +473,6 @@ export async function endRound() {
     await emitArena();
   }
 }
-
 
 /* ============================================================================
    ARENA MANAGEMENT — JOIN / LEAVE
@@ -500,14 +500,7 @@ export async function arenaJoin(
   await emitArena();
 }
 
-/* ============================================================================
-   PATCHED: ARENA LEAVE — force = permanent delete
-============================================================================ */
-
-export async function arenaLeave(
-  usernameOrId: string,
-  force: boolean = false
-) {
+export async function arenaLeave(usernameOrId: string, force: boolean = false) {
   const clean = String(usernameOrId).replace(/^@+/, "");
   const cleanLower = clean.toLowerCase();
 
@@ -532,7 +525,7 @@ export async function arenaLeave(
     return;
   }
 
-  // Soft elimination
+  // Soft eliminate
   p.positionStatus = "elimination";
   p.eliminated = true;
 
@@ -655,7 +648,6 @@ setInterval(async () => {
 
   const now = Date.now();
 
-  // ACTIVE → GRACE
   if (arena.status === "active" && now >= arena.roundCutoff) {
     arena.status = "grace";
 
@@ -673,7 +665,6 @@ setInterval(async () => {
     return;
   }
 
-  // GRACE → ENDED
   if (arena.status === "grace" && now >= arena.graceEnd) {
     await endRound();
     return;
