@@ -410,7 +410,7 @@ export default function AdminDashboardPage() {
           </button>
         </div>
 
-        {/* RONDE KNOPPEN – eliminate blokje is verwijderd */}
+        {/* RONDE KNOPPEN – alleen voorronde + finale (engine: quarter | finale) */}
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => emitAdmin("startRound", { type: "quarter" })}
@@ -418,14 +418,6 @@ export default function AdminDashboardPage() {
             className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full text-xs disabled:bg-gray-400"
           >
             Start voorronde
-          </button>
-
-          <button
-            onClick={() => emitAdmin("startRound", { type: "semi" })}
-            disabled={!canStartRound}
-            className="px-3 py-1.5 bg-orange-500 text-white rounded-full text-xs disabled:bg-gray-400"
-          >
-            Start halve finale
           </button>
 
           <button
@@ -1139,4 +1131,4 @@ export default function AdminDashboardPage() {
       )}
     </main>
   );
-}
+                  }
