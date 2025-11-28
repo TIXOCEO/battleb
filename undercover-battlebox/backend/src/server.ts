@@ -669,9 +669,9 @@ io.on("connection", async (socket: AdminSocket) => {
         await broadcastStats();
 
         return ack({ success: true });
-}
+      }
 
-    if (action === "stopGame") {
+      if (action === "stopGame") {
         if (!currentGameId) return ack({ success: true });
 
         await pool.query(
@@ -917,7 +917,7 @@ io.on("connection", async (socket: AdminSocket) => {
 
       // ======================================================================
       // QUEUE MGMT (NEW PRIORITY SYSTEM)
-// ======================================================================
+      // ======================================================================
       if (action === "addToQueue") {
         const clean = (data?.username || "")
           .trim()
@@ -980,7 +980,7 @@ io.on("connection", async (socket: AdminSocket) => {
         );
 
         if (!u.rows.length)
-          return ack({ success: false, message: "User niet gevonden" });
+          return ack({ success: false, message: "User nietgevonden" });
 
         await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [
           u.rows[0].tiktok_id
@@ -999,25 +999,19 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // PRIORITY BUTTONS
+      // PRIORITY BUTTONS – UPGRADED
+      // ----------------------------------------------------
+      // BOOST_SPOTS blijft bestaan voor een andere functie
+      // Maar promote/demote verschuiven nu ECHT de positie
+      // ----------------------------------------------------
       if (action === "promoteUser") {
         const clean = (data?.username || "")
           .trim()
           .replace(/^@+/, "")
           .toLowerCase();
 
-        await pool.query(
-          `
-          UPDATE queue
-          SET boost_spots = boost_spots + 1
-          WHERE user_tiktok_id = (
-            SELECT tiktok_id FROM users WHERE LOWER(username)=LOWER($1) LIMIT 1
-          )
-          `,
-          [clean]
-        );
+        await promoteQueueByUsername(clean);
 
-        io.emit("updateQueue", { open: true, entries: await getQueue() });
         return ack({ success: true });
       }
 
@@ -1027,18 +1021,8 @@ io.on("connection", async (socket: AdminSocket) => {
           .replace(/^@+/, "")
           .toLowerCase();
 
-        await pool.query(
-          `
-          UPDATE queue
-          SET boost_spots = GREATEST(boost_spots - 1,0)
-          WHERE user_tiktok_id = (
-            SELECT tiktok_id FROM users WHERE LOWER(username)=LOWER($1) LIMIT 1
-          )
-          `,
-          [clean]
-        );
+        await demoteQueueByUsername(clean);
 
-        io.emit("updateQueue", { open: true, entries: await getQueue() });
         return ack({ success: true });
       }
 
@@ -1094,7 +1078,7 @@ io.on("connection", async (socket: AdminSocket) => {
         );
 
         if (!r.rows.length)
-          return ack({ success: false, message: "User niet gevonden" });
+          return ack({ success: false, message: "User nietgevonden" });
 
         await pool.query(
           `
