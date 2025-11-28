@@ -1,10 +1,9 @@
 // ============================================================================
-// server.ts — BATTLEBOX BACKEND v7.3 REALTIME PATCH (CORRECTED FINAL)
-// Gifts-Driven Engine + Round Flags (is_round_gift / round_active)
+// server.ts — BATTLEBOX BACKEND v16 FINAL (Queue/VIP/FAN Upgrade Build)
+// Gifts Engine + Round Flags + Realtime Queue v15 Sync
 // Correct Leaderboards + Host Diamonds + Username Autofill
-// Realtime Arena Diamond Updates
-// Idle gifts → NIET tellen (speler), WEL tellen (host)
-// Gifter leaderboard volgt beide regels correct
+// Idle gifts: NIET tellen voor spelers, WEL tellen voor host
+// Queue logic compleet gesynchroniseerd met chat-engine & queue.ts
 // ============================================================================
 
 import express from "express";
@@ -196,7 +195,6 @@ export async function broadcastPlayerLeaderboard() {
     [currentGameId, hostId]
   );
 
-  // 🔥 FIX: cast naar number
   q.rows = q.rows.map(r => ({
     ...r,
     total_score: Number(r.total_score || 0)
@@ -235,7 +233,6 @@ export async function broadcastGifterLeaderboard() {
     [currentGameId]
   );
 
-  // 🔥 FIX: cast naar number
   r.rows = r.rows.map(x => ({
     ...x,
     total_diamonds: Number(x.total_diamonds || 0)
@@ -435,7 +432,6 @@ async function buildInitialSnapshot() {
       [currentGameId, hostId]
     );
 
-    // 🔥 FIX: cast numeric to number
     pl.rows = pl.rows.map(r => ({
       ...r,
       total_score: Number(r.total_score || 0)
@@ -673,7 +669,7 @@ io.on("connection", async (socket: AdminSocket) => {
         await broadcastStats();
 
         return ack({ success: true });
-      }
+}
 
     if (action === "stopGame") {
         if (!currentGameId) return ack({ success: true });
@@ -745,11 +741,8 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // ======================================================================
-      // 🔥 PATCH: DIRECT STOP FORCE MODE
-      // ======================================================================
       if (action === "endRound") {
-        await endRound(true); // ← *** ENIGE PATCH IN HET HELE BESTAND ***
+        await endRound(true);
 
         await emitArena();
         await broadcastPlayerLeaderboard();
@@ -815,6 +808,12 @@ io.on("connection", async (socket: AdminSocket) => {
             message: "Host kan niet in arena staan"
           });
 
+        // NIEUW: verwijderen uit queue indien aanwezig
+        await pool.query(
+          `DELETE FROM queue WHERE user_tiktok_id=$1`,
+          [r.rows[0].tiktok_id]
+        );
+
         await arenaJoin(
           String(r.rows[0].tiktok_id),
           r.rows[0].display_name,
@@ -822,6 +821,8 @@ io.on("connection", async (socket: AdminSocket) => {
         );
 
         await emitArena();
+        io.emit("updateQueue", { open: true, entries: await getQueue() });
+
         emitLog({
           type: "arena",
           message: `${r.rows[0].display_name} toegevoegd aan arena`
@@ -863,9 +864,6 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // ======================================================================
-      // 🔥 PERMANENTE REMOVE (force = true)
-      // ======================================================================
       if (action === "removeFromArenaPermanent") {
         const clean = (data?.username || "")
           .trim()
@@ -918,8 +916,8 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       // ======================================================================
-      // QUEUE MGMT
-      // ======================================================================
+      // QUEUE MGMT (NEW PRIORITY SYSTEM)
+// ======================================================================
       if (action === "addToQueue") {
         const clean = (data?.username || "")
           .trim()
@@ -940,13 +938,17 @@ io.on("connection", async (socket: AdminSocket) => {
           });
 
         if (String(u.rows[0].tiktok_id) === HARD_HOST_ID)
-          return ack({ success: false, message: "Host kan niet in queue staan" });
+          return ack({
+            success: false,
+            message: "Host kan niet in queue staan"
+          });
 
         await pool.query(
           `
           INSERT INTO queue (user_tiktok_id, boost_spots, joined_at)
           VALUES ($1,0,NOW())
-          ON CONFLICT (user_tiktok_id) DO NOTHING
+          ON CONFLICT (user_tiktok_id) DO UPDATE
+          SET joined_at = EXCLUDED.joined_at
           `,
           [u.rows[0].tiktok_id]
         );
@@ -997,7 +999,7 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // Priority boosts
+      // PRIORITY BUTTONS
       if (action === "promoteUser") {
         const clean = (data?.username || "")
           .trim()
@@ -1015,7 +1017,7 @@ io.on("connection", async (socket: AdminSocket) => {
           [clean]
         );
 
-        io.emit("updateQueue", { entries: await getQueue(), open: true });
+        io.emit("updateQueue", { open: true, entries: await getQueue() });
         return ack({ success: true });
       }
 
@@ -1036,12 +1038,12 @@ io.on("connection", async (socket: AdminSocket) => {
           [clean]
         );
 
-        io.emit("updateQueue", { entries: await getQueue(), open: true });
+        io.emit("updateQueue", { open: true, entries: await getQueue() });
         return ack({ success: true });
       }
 
       // ======================================================================
-      // VIP / FAN
+      // VIP / FAN MGMT
       // ======================================================================
       if (action === "giveVip") {
         const clean = (data?.username || "")
@@ -1073,6 +1075,8 @@ io.on("connection", async (socket: AdminSocket) => {
           type: "vip",
           message: `${r.rows[0].display_name} kreeg VIP`
         });
+
+        io.emit("updateQueue", { open: true, entries: await getQueue() });
         return ack({ success: true });
       }
 
@@ -1107,6 +1111,7 @@ io.on("connection", async (socket: AdminSocket) => {
           message: `${r.rows[0].display_name} VIP verwijderd`
         });
 
+        io.emit("updateQueue", { open: true, entries: await getQueue() });
         return ack({ success: true });
       }
 
@@ -1125,12 +1130,13 @@ io.on("connection", async (socket: AdminSocket) => {
       }
 
       // ======================================================================
-      // UNKNOWN COMMAND
+      // UNKNOWN
       // ======================================================================
       return ack({
         success: false,
         message: "Onbekend admin commando"
       });
+
     } catch (err: any) {
       console.error("Admin error:", err);
       return ack({
@@ -1140,7 +1146,6 @@ io.on("connection", async (socket: AdminSocket) => {
     }
   }
 
-  // DISPATCH WRAPPER
   socket.onAny((event, payload, ack) => {
     if (typeof ack !== "function") ack = () => {};
     handle(event, payload, ack);
