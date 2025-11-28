@@ -1,6 +1,6 @@
 // ============================================================================
-// frontend/lib/socketClient.ts — BattleBox v15 (SYNCED EDITION)
-// Realtime backend connector — volledig in sync met backend v7 & adminTypes v15
+// frontend/lib/socketClient.ts — BattleBox v15.1 (SYNCED EDITION)
+// Realtime backend connector — volledig in sync met backend v7 & adminTypes v15.1
 // ============================================================================
 
 import { io, Socket } from "socket.io-client";
@@ -14,7 +14,6 @@ import type {
   ArenaSettings,
   InitialSnapshot,
   HostProfile,
-
   AdminSocketInbound,
   AdminSocketOutbound,
 } from "./adminTypes";
@@ -44,8 +43,12 @@ export function getAdminSocket(): Socket<
     throw new Error("getAdminSocket moet client-side worden gebruikt.");
   }
 
+  // Gebruik singleton indien aanwezig
   if (globalThis.__adminSocket) return globalThis.__adminSocket;
 
+  // ==========================================================================
+  // INIT SOCKET
+  // ==========================================================================
   const socket = io(BACKEND_URL, {
     transports: ["websocket", "polling"],
     path: "/socket.io",
@@ -60,10 +63,10 @@ export function getAdminSocket(): Socket<
 
     socket.emit("ping");
 
-    // Initial snapshot
+    // Initial snapshot ophalen
     socket.emit("getInitialSnapshot", {}, (_snap: InitialSnapshot) => {});
 
-    // Hosts lijst
+    // Hosts ophalen
     socket.emit("getHosts", {}, () => {});
   });
 
@@ -113,7 +116,9 @@ export function getAdminSocket(): Socket<
 
   socket.on("hostDiamonds", (_d: { username: string; total: number }) => {});
 
-  // No pong event — intentionally removed
+  // ==========================================================================
+  // EINDE — Geen outbound implementatie nodig, alleen type support
+  // ==========================================================================
 
   globalThis.__adminSocket = socket;
   return socket;
