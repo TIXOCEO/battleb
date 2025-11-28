@@ -1,6 +1,11 @@
 /* ============================================================================
-   3-gift-engine.ts — v14.4 FINAL
-   GIFTS ENGINE — 21 COLUMNS — ROUND-STRICT + HOST ALWAYS
+   3-gift-engine.ts — v14.5 SYNC PATCH
+   ✔ Gesynchroniseerd met game-engine v15.5
+   ✔ roundActive + currentRound via io.*
+   ✔ Idle gifts: host telt, speler niet
+   ✔ Ronde gifts alleen bij roundActive=true
+   ✔ Strict host fallback rules behouden
+   ✔ Niets anders gewijzigd
 ============================================================================ */
 
 import pool from "../db";
@@ -164,7 +169,7 @@ async function resolveReceiver(evt: any) {
 
   const un = unique ? norm(unique) : null;
 
-  // Self-gift => ALWAYS host
+  // Self-gift → host
   if (evt.userId && directId && String(evt.userId) === String(directId)) {
     if (HOST_ID) {
       const h = await getOrUpdateUser(HOST_ID, null, null);
@@ -177,7 +182,7 @@ async function resolveReceiver(evt: any) {
     }
   }
 
-  // Direct receiver found?
+  // Direct match
   if (directId) {
     const u = await getOrUpdateUser(String(directId), null, null);
     const isHost = HOST_ID && String(directId) === String(HOST_ID);
@@ -189,7 +194,7 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  // Name match with host
+  // Name match host
   if (un && HOST_USER && un === HOST_USER && HOST_ID) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     return {
@@ -200,7 +205,7 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  // Fallback receiver = host
+  // Fallback → host
   if (HOST_ID) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     return {
@@ -226,7 +231,7 @@ function isHeartMeGift(evt: any) {
 }
 
 /* ============================================================================
-   MAIN PROCESSOR
+   MAIN PROCESSOR — PATCHED FOR ROUND SYNC
 ============================================================================ */
 
 async function processGift(evt: any, source: string) {
@@ -247,34 +252,34 @@ async function processGift(evt: any, source: string) {
     const diamonds = calcDiamonds(evt);
     if (diamonds <= 0) return;
 
-    /* Game active? */
+    /* Game state */
     const gid = getActiveGameId();
     const active = await isGameActive();
-    if (!gid || !active) {
-      // Host gifts still count even in idle
-      const receiver = await resolveReceiver(evt);
-      if (receiver.role !== "host") {
-        emitLog({
-          type: "gift",
-          message: `${sender.display_name} → IDLE: ${evt.giftName} (+${diamonds}💎)`
-        });
-        return;
-      }
-    }
+
+    /* 🔥 PATCH: synchroon met arena v15.5 */
+    const roundActive = (io as any).roundActive === true;
+    const currentRound = (io as any).currentRound || 0;
 
     /* Resolve receiver */
     const receiver = await resolveReceiver(evt);
     const isHostReceiver = receiver.role === "host";
 
-    const receiverUser = receiver.id
-      ? await getUserByTikTokId(String(receiver.id))
-      : null;
-
+    /* Arena snapshot */
     const arena = getArena();
-    const inRound = arena.status === "active" || arena.status === "grace";
 
     const senderFmt = formatDisplay(sender);
-    const receiverFmt = receiverUser ? receiverUser.display_name : "UNKNOWN";
+    const receiverFmt = receiver.display_name;
+
+    /* IDLE gifts → Host telt, speler NIET */
+    if (!gid || !active || !roundActive) {
+      if (!isHostReceiver) {
+        emitLog({
+          type: "gift",
+          message: `${senderFmt} → IDLE: ${evt.giftName} (+${diamonds}💎)`
+        });
+        return;
+      }
+    }
 
     /* BP */
     await addBP(
@@ -284,7 +289,7 @@ async function processGift(evt: any, source: string) {
       sender.display_name
     );
 
-    /* FAN / HEART ME */
+    /* FAN via Heart Me */
     if (isHostReceiver && isHeartMeGift(evt)) {
       const expires = new Date(now() + 24 * 3600 * 1000);
       await pool.query(
@@ -294,7 +299,7 @@ async function processGift(evt: any, source: string) {
 
       emitLog({
         type: "fan",
-        message: `${sender.display_name} is nu FAN ❤️ (24u)`
+        message: `${senderFmt} is nu FAN ❤️ (24u)`
       });
     }
 
@@ -314,14 +319,14 @@ async function processGift(evt: any, source: string) {
     }
 
     /* =========================================================================
-       INSERT — STRICT FLAG RULES
-       - is_round_gift = TRUE alleen als:
-           ontvanger speler AND inRound === true
-       - is_host_gift = TRUE als ontvanger host (altijd)
-       - round_active = inRound (altijd TRUE voor ronde gifts)
+       INSERT — STRICT ROUND SYNC PATCH
+       - Host gifts ALWAYS count
+       - Player gifts ONLY count in active round
+       - round_id ALWAYS = currentRound
     ========================================================================= */
-    const is_round_gift = !isHostReceiver && inRound;
-    const is_host_gift = isHostReceiver ? true : false;
+
+    const is_round_gift = !isHostReceiver && roundActive;
+    const is_host_gift = isHostReceiver;
 
     await pool.query(
       `
@@ -358,16 +363,16 @@ async function processGift(evt: any, source: string) {
         is_host_gift,
         is_round_gift,
         arena.round ?? null,
-        inRound,
+        roundActive,
 
         sender.display_name,
         sender.username,
-        arena.round ?? 0,
+        currentRound,
         source
       ]
     );
 
-    /* =========================================================================
+   /* =========================================================================
        BROADCAST
     ========================================================================= */
     await broadcastStats();
@@ -396,7 +401,7 @@ export function initGiftEngine(conn: any) {
     return;
   }
 
-  console.log("🎁 GiftEngine v14.4 LOADED");
+  console.log("🎁 GiftEngine v14.5 SYNC PATCH LOADED");
 
   conn.on("gift", (d: any) => processGift(d, "gift"));
   conn.on("roomMessage", (d: any) => {
