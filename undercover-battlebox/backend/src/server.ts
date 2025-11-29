@@ -41,7 +41,8 @@ import {
   promoteQueue,
   demoteQueue,
   normalizePositions,
-  pushQueueUpdate
+  pushQueueUpdate,
+  addToQueueAdminOverride
 } from "./queue";
 
 import { giveTwistAdmin, useTwistAdmin } from "./engines/9-admin-twist-engine";
@@ -890,7 +891,7 @@ io.on("connection", async (socket: AdminSocket) => {
           return ack({ success: false, message: "Host kan niet in queue staan" });
 
         try {
-          await addToQueue(String(u.rows[0].tiktok_id), u.rows[0].username);
+          await addToQueueAdminOverride(String(u.rows[0].tiktok_id), u.rows[0].username);
         } catch (e: any) {
           return ack({ success: false, message: e?.message || "Kon niet joinen" });
         }
