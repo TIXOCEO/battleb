@@ -1,9 +1,11 @@
 /* ============================================================================
-   3-gift-engine.ts — v14.6 TWIST-INVENTORY PATCH
-   ✔ Houdt alle bestaande logic intact
-   ✔ Twist gifts → uitsluitend twist-inventory (Optie 1)
-   ✔ addTwistByGift() blijft enige twist-handling in gift-engine
-   ✔ Geen directe gameplay-effecten
+   3-gift-engine.ts — v14.5 SYNC PATCH
+   ✔ Gesynchroniseerd met game-engine v15.5
+   ✔ roundActive + currentRound via io.*
+   ✔ Idle gifts: host telt, speler niet
+   ✔ Ronde gifts alleen bij roundActive=true
+   ✔ Strict host fallback rules behouden
+   ✔ Niets anders gewijzigd
 ============================================================================ */
 
 import pool from "../db";
@@ -26,11 +28,7 @@ import {
 
 import { addBP } from "./4-points-engine";
 import { getArena, emitArena } from "./5-game-engine";
-
-// 📌 TWIST DEFINITIONS
 import { TWIST_MAP, TwistType } from "./twist-definitions";
-
-// 📌 INVENTORY HANDLER (Optie 1)
 import { addTwistByGift } from "./8-twist-engine";
 
 /* ============================================================================
@@ -196,7 +194,7 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  // Name match → host fallback
+  // Name match host
   if (un && HOST_USER && un === HOST_USER && HOST_ID) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     return {
@@ -207,7 +205,7 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  // Hard fallback → host
+  // Fallback → host
   if (HOST_ID) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     return {
@@ -233,7 +231,7 @@ function isHeartMeGift(evt: any) {
 }
 
 /* ============================================================================
-   MAIN PROCESSOR — PATCHED FOR ROUND SYNC + TWISTS
+   MAIN PROCESSOR — PATCHED FOR ROUND SYNC
 ============================================================================ */
 
 async function processGift(evt: any, source: string) {
@@ -258,7 +256,7 @@ async function processGift(evt: any, source: string) {
     const gid = getActiveGameId();
     const active = await isGameActive();
 
-    /* 🔥 PATCH: synchroon met arena v15.7 */
+    /* 🔥 PATCH: synchroon met arena v15.5 */
     const roundActive = (io as any).roundActive === true;
     const currentRound = (io as any).currentRound || 0;
 
@@ -305,13 +303,7 @@ async function processGift(evt: any, source: string) {
       });
     }
 
-    /* =========================================================================
-       TWISTS — OPTIE 1: ALLEEN INVENTORY
-       - Herkent twist gifts via TWIST_MAP
-       - Schrijft uitsluitend naar twist_inventory via addTwistByGift
-       - GEEN directe arena/gameplay effecten vanuit gift-engine
-    ========================================================================= */
-
+    /* TWISTS */
     const giftId = Number(evt.giftId);
     const twistType: TwistType | null =
       (Object.keys(TWIST_MAP) as TwistType[]).find(
@@ -320,7 +312,6 @@ async function processGift(evt: any, source: string) {
 
     if (twistType) {
       await addTwistByGift(String(sender.tiktok_id), twistType);
-
       emitLog({
         type: "twist",
         message: `${senderFmt} ontving twist: ${TWIST_MAP[twistType].giftName}`
@@ -336,10 +327,6 @@ async function processGift(evt: any, source: string) {
 
     const is_round_gift = !isHostReceiver && roundActive;
     const is_host_gift = isHostReceiver;
-
-   /* =========================================================================
-       INSERT → gifts
-    ========================================================================= */
 
     await pool.query(
       `
@@ -385,8 +372,8 @@ async function processGift(evt: any, source: string) {
       ]
     );
 
-    /* =========================================================================
-       BROADCASTS
+   /* =========================================================================
+       BROADCAST
     ========================================================================= */
     await broadcastStats();
     await broadcastPlayerLeaderboard();
@@ -414,7 +401,7 @@ export function initGiftEngine(conn: any) {
     return;
   }
 
-  console.log("🎁 GiftEngine v14.6 LOADED (Twist Inventory Enabled)");
+  console.log("🎁 GiftEngine v14.5 SYNC PATCH LOADED");
 
   conn.on("gift", (d: any) => processGift(d, "gift"));
   conn.on("roomMessage", (d: any) => {
@@ -434,10 +421,6 @@ export function initGiftEngine(conn: any) {
     if (d?.giftId || d?.diamondCount) processGift(d, "social");
   });
 }
-
-/* ============================================================================
-   EXPORT
-============================================================================ */
 
 export default {
   initGiftEngine,
