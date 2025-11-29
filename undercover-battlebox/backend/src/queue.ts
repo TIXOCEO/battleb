@@ -1,5 +1,5 @@
 // ============================================================================
-// src/queue.ts — QUEUE ENGINE v16.2 CLEAN BUILD
+// src/queue.ts — QUEUE ENGINE v16.3 (Admin Override Edition)
 // Position-based queue system (VIP/FAN aware)
 // Compatibel met server.ts v16+ en admin dashboard acties
 // ============================================================================
@@ -116,7 +116,8 @@ async function swapPositions(idA: number, idB: number) {
 }
 
 /**
- * addToQueue — FAN verplicht, VIP krijgt boost (FIFO safe)
+ * addToQueue — FAN verplicht (CHAT ONLY)
+ * VIP krijgt boost (FIFO safe)
  */
 export async function addToQueue(
   tiktok_id: string,
@@ -155,6 +156,7 @@ export async function addToQueue(
   const isFan = !!fanActive;
   const isVip = !!user.is_vip;
 
+  // ❗ CHAT → FAN verplicht
   if (!isFan) throw new Error("Gebruiker is geen FAN (kan niet joinen).");
 
   const qr = await pool.query(
@@ -183,6 +185,100 @@ export async function addToQueue(
         FROM queue q 
         JOIN users u ON u.tiktok_id = q.user_tiktok_id
         WHERE u.is_vip = true
+          AND q.position < $1
+        ORDER BY q.position ASC
+      `,
+      [newPos]
+    );
+
+    let protectedVIPend = 0;
+    if (earlierVIPs.rows.length) {
+      protectedVIPend = Math.max(
+        ...earlierVIPs.rows.map((v: any) => Number(v.position))
+      );
+    }
+
+    const finalTarget = Math.max(targetPos, protectedVIPend + 1);
+
+    if (finalTarget < newPos) {
+      await pool.query(
+        `
+          UPDATE queue
+          SET position = position + 1
+          WHERE position >= $1 AND position < $2
+        `,
+        [finalTarget, newPos]
+      );
+
+      await pool.query(
+        `UPDATE queue SET position=$1 WHERE id=$2`,
+        [finalTarget, newId]
+      );
+    }
+  }
+
+  await normalizePositions();
+  await pushQueueUpdate();
+}
+
+/**
+ * ⭐ ADMIN OVERRIDE — GEEN FAN CHECK
+ * addToQueueAdminOverride — gebruikt door server.ts admin action
+ */
+export async function addToQueueAdminOverride(
+  tiktok_id: string,
+  username: string
+): Promise<void> {
+  const userTid = BigInt(tiktok_id);
+
+  // Verwijder bestaande entry
+  await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [userTid]);
+
+  const ur = await pool.query(
+    `
+    SELECT 
+      display_name,
+      username,
+      is_vip,
+      vip_expires_at
+    FROM users 
+    WHERE tiktok_id=$1
+    `,
+    [userTid]
+  );
+
+  if (!ur.rows.length) throw new Error("Gebruiker niet gevonden.");
+
+  const user = ur.rows[0];
+  const isVip = !!user.is_vip;
+
+  const qr = await pool.query(
+    `SELECT COALESCE(MAX(position),0) AS maxpos FROM queue`
+  );
+  const startPos = Number(qr.rows[0].maxpos) + 1;
+
+  const ir = await pool.query(
+    `
+      INSERT INTO queue (user_tiktok_id, boost_spots, joined_at, position)
+      VALUES ($1, 0, NOW(), $2)
+      RETURNING id, position
+    `,
+    [userTid, startPos]
+  );
+
+  const newId = ir.rows[0].id;
+  let newPos = ir.rows[0].position;
+
+  // VIP-behandeling blijft actief
+  if (isVip) {
+    const targetPos = Math.max(1, newPos - 5);
+
+    const earlierVIPs = await pool.query(
+      `
+        SELECT id, position 
+        FROM queue q 
+        JOIN users u ON u.tiktok_id = q.user_tiktok_id
+        WHERE u.is_vip = TRUE
           AND q.position < $1
         ORDER BY q.position ASC
       `,
@@ -411,6 +507,7 @@ export default {
   getQueue,
   pushQueueUpdate,
   addToQueue,
+  addToQueueAdminOverride,    // ⭐ belangrijk
   removeFromQueue,
   leaveQueue,
   promoteQueue,
