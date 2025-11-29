@@ -1,12 +1,17 @@
 // ============================================================================
-// twist-definitions.ts — v2.0 (Danny Stable Build)
+// twist-definitions.ts — v3.3 (Danny + GPT Final Build)
 // ============================================================================
 //
-// ✔ COMPLETE SET (Galaxy, MoneyGun, Bomb, Shield, Immune, DiamondPistol, Heal)
-// ✔ Alle giftId’s zoals opgegeven
-// ✔ Aliases voor chat (!use heal @user)
-// ✔ isOffensive / targeted / requiresTarget 100% correct
-// ✔ Klaar voor twist-engine v3.0
+// FINAL RULES:
+// - Galaxy toggles ranking
+// - MoneyGun: targeted → end-round eliminate (immune blocks, heal removes)
+// - Bomb: random → end-round eliminate (immune blocks, heal removes)
+// - Immune: protects vs MG/Bomb/normal elim, NOT vs DP
+// - Heal: removes MG/Bomb eliminate status only
+// - DiamondPistol: target is auto-immune, everyone else = eliminate status,
+//   bypasses immune & heal, only once per round
+//
+// Shield is removed entirely.
 //
 // ============================================================================
 
@@ -14,7 +19,6 @@ export type TwistType =
   | "galaxy"
   | "moneygun"
   | "bomb"
-  | "shield"
   | "immune"
   | "heal"
   | "diamondpistol";
@@ -36,92 +40,77 @@ export interface TwistDefinition {
 }
 
 // ============================================================================
-// TWIST MAP — COMPLETE, FINAL, READY
+// TWIST MAP — FINAL DEFINITIONS
 // ============================================================================
-
 export const TWIST_MAP: Record<TwistType, TwistDefinition> = {
-  // ------------------------------------------------------------------------
+
   galaxy: {
     giftId: 11046,
     giftName: "Galaxy",
     diamonds: 1000,
     aliases: ["galaxy", "gxy"],
-    description: "Keert de volledige ranking om.",
+    description:
+      "Keert de ranking om. Nogmaals gebruiken zet de ranking weer terug (toggle).",
     requiresTarget: false,
     targeted: false,
     isOffensive: false,
   },
 
-  // ------------------------------------------------------------------------
   moneygun: {
     giftId: 7168,
     giftName: "Money Gun",
     diamonds: 500,
     aliases: ["moneygun", "gun"],
     description:
-      "Elimineert 1 speler aan het einde van de ronde.",
-    requiresTarget: false,
-    targeted: false,
+      "Markeert een gekozen speler voor eliminatie aan het einde van de ronde. Immune blokkeert, Heal verwijdert deze markering.",
+    requiresTarget: true,
+    targeted: true,
     isOffensive: true,
   },
 
-  // ------------------------------------------------------------------------
   bomb: {
     giftId: 16101,
     giftName: "Space Dog (Bomb)",
     diamonds: 2500,
     aliases: ["bomb", "boom"],
     description:
-      "Bombardeert een willekeurige speler (immune spelers worden overgeslagen).",
+      "Bombardeert een willekeurige speler (immune wordt overgeslagen) en markeert voor eliminatie aan het einde van de ronde. Heal kan deze markering verwijderen.",
     requiresTarget: false,
     targeted: false,
     isOffensive: true,
   },
 
-  // ------------------------------------------------------------------------
-  shield: {
-    giftId: 9921,
-    giftName: "Shield",
-    diamonds: 500,
-    aliases: ["shield", "protect"],
-    description: "Beschermt tegen 1 aanval (MoneyGun/Bomb).",
-    requiresTarget: false,
-    targeted: false,
-    isOffensive: false,
-  },
-
-  // ------------------------------------------------------------------------
   immune: {
     giftId: 14658,
     giftName: "Blooming Heart (Immune)",
     diamonds: 1599,
-    aliases: ["immune", "immunity"],
-    description: "Maakt een speler volledig immuun voor eliminaties.",
+    aliases: ["immune", "immunity", "save"],
+    description:
+      "Geeft immuniteit tegen MoneyGun, Bomb en normale eliminaties. Werkt niet tegen DiamondPistol.",
     requiresTarget: true,
     targeted: true,
     isOffensive: false,
   },
 
-  // ------------------------------------------------------------------------
   heal: {
     giftId: 14210,
     giftName: "Galaxy Globe (Heal)",
     diamonds: 1500,
     aliases: ["heal", "medic", "restore"],
     description:
-      "Verwijdert eliminatie-status van MoneyGun/Bomb en maakt speler weer alive.",
+      "Verwijdert eliminatie-status veroorzaakt door MoneyGun of Bomb. Werkt niet tegen DiamondPistol.",
     requiresTarget: true,
     targeted: true,
     isOffensive: false,
   },
 
-  // ------------------------------------------------------------------------
   diamondpistol: {
     giftId: 14768,
     giftName: "Diamond Gun",
     diamonds: 5000,
     aliases: ["pistol", "dp", "diamondgun"],
-    description: "Laat slechts één gekozen speler overleven.",
+    description:
+      "Ultra agressieve twist: de gekozen target overleeft en wordt automatisch immune; alle andere spelers krijgen eliminate-status. Immune en Heal werken niet. Slechts één keer per ronde.",
     requiresTarget: true,
     targeted: true,
     isOffensive: true,
@@ -129,7 +118,7 @@ export const TWIST_MAP: Record<TwistType, TwistDefinition> = {
 };
 
 // ============================================================================
-// Helper — Vind twist op basis van alias
+// Helper — vind twist op basis van alias
 // ============================================================================
 export function resolveTwistAlias(input: string): TwistType | null {
   const lower = input.toLowerCase();
