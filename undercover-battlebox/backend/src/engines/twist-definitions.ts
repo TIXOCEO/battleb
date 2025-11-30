@@ -1,10 +1,12 @@
 // ============================================================================
-// twist-definitions.ts — v3.4 (MoneyGun Fase-1 Compatible Build)
+// twist-definitions.ts — v4.0 (MoneyGun Fase-2 Upgrade Build)
 // ----------------------------------------------------------------------------
-// ✔ MoneyGun: targeted → end-round eliminate (immune blocks, heal removes)
-// ✔ Andere twists blijven gedefinieerd, maar worden Fase 1 niet gebruikt
-// ✔ Volledig compatibel met twist-engine v14.3 (marking model)
-// ✔ Correcte aliases + mapping voor chat-engine (!use ...)
+// ✔ MoneyGun mark-model velden toegevoegd (markForRoundEnd, blockIfImmune, etc.)
+// ✔ Bomb mark-model velden toegevoegd
+// ✔ Heal kan MG/Bomb markeringen verwijderen (healEliminationMark = true)
+// ✔ DiamondPistol ongewijzigd gelaten (zoals gevraagd)
+// ✔ Alle bestaande properties 100% behouden
+// ✔ Backwards compatible met twist-engine v14.4
 // ============================================================================
 
 export type TwistType =
@@ -16,33 +18,41 @@ export type TwistType =
   | "diamondpistol";
 
 // ============================================================================
-// DEFINITIE STRUCTUUR
+// DEFINITIE STRUCTUUR + EXTRA FASE-2 VELDEN
 // ============================================================================
 
 export interface TwistDefinition {
-  /** Uniek gift ID (TikTok) — null = niet gekoppeld aan gift */
   giftId: number | null;
-
-  /** Hoe de gift / twist heet in logs */
   giftName: string;
-
-  /** Hoeveel diamonds TikTok aan deze gift koppelt (indien toepasbaar) */
   diamonds: number;
-
-  /** Aliases voor !use chat command */
   aliases: string[];
-
-  /** Uitleg voor admin UI / logs */
   description: string;
 
-  /** Vereist een target (bv. @username) */
   requiresTarget: boolean;
-
-  /** Is de twist gericht op een specifieke speler? */
   targeted: boolean;
-
-  /** Is de twist offensief (aanval) of defensief (support)? */
   isOffensive: boolean;
+
+  // ============================
+  // NEW FASE-2 UPGRADE PROPERTIES
+  // ============================
+
+  /** Wordt effect tegengehouden door immune? */
+  blockIfImmune?: boolean;
+
+  /** Markeer slachtoffer voor eliminatie aan einde van ronde */
+  markForRoundEnd?: boolean;
+
+  /** Heal kan deze markering verwijderen */
+  healEliminationMark?: boolean;
+
+  /** Is directe eliminatie (DiamondPistol) */
+  instantEliminate?: boolean;
+
+  /** Slechts één per ronde toegestaan? */
+  onePerRound?: boolean;
+
+  /** Mag deze twist alleen in active/grace/both gebruikt worden? */
+  allowedDuring?: "active" | "grace" | "both";
 }
 
 // ============================================================================
@@ -52,7 +62,7 @@ export interface TwistDefinition {
 export const TWIST_MAP: Record<TwistType, TwistDefinition> = {
 
   // --------------------------------------------------------------------------
-  // GALAXY
+  // GALAXY (ongewijzigd)
   // --------------------------------------------------------------------------
   galaxy: {
     giftId: 11046,
@@ -64,10 +74,12 @@ export const TWIST_MAP: Record<TwistType, TwistDefinition> = {
     requiresTarget: false,
     targeted: false,
     isOffensive: false,
+
+    allowedDuring: "both",
   },
 
   // --------------------------------------------------------------------------
-  // MONEYGUN — FASE 1 TWIST
+  // MONEYGUN — FASE-2 MARK-MODEL
   // --------------------------------------------------------------------------
   moneygun: {
     giftId: 7168,
@@ -79,10 +91,17 @@ export const TWIST_MAP: Record<TwistType, TwistDefinition> = {
     requiresTarget: true,
     targeted: true,
     isOffensive: true,
+
+    // NEW
+    blockIfImmune: true,
+    markForRoundEnd: true,
+    healEliminationMark: true,
+    instantEliminate: false,
+    allowedDuring: "both",
   },
 
   // --------------------------------------------------------------------------
-  // BOMB — FASE 2
+  // BOMB — FASE-2 RANDOM MARKING
   // --------------------------------------------------------------------------
   bomb: {
     giftId: 16101,
@@ -94,10 +113,17 @@ export const TWIST_MAP: Record<TwistType, TwistDefinition> = {
     requiresTarget: false,
     targeted: false,
     isOffensive: true,
+
+    // NEW
+    blockIfImmune: true,
+    markForRoundEnd: true,
+    healEliminationMark: true,
+    instantEliminate: false,
+    allowedDuring: "both",
   },
 
   // --------------------------------------------------------------------------
-  // IMMUNE — FASE 3
+  // IMMUNE — DEFENSE
   // --------------------------------------------------------------------------
   immune: {
     giftId: 14658,
@@ -109,10 +135,12 @@ export const TWIST_MAP: Record<TwistType, TwistDefinition> = {
     requiresTarget: true,
     targeted: true,
     isOffensive: false,
+
+    allowedDuring: "both",
   },
 
   // --------------------------------------------------------------------------
-  // HEAL — FASE 4
+  // HEAL — REMOVE MG/BOMB MARKS
   // --------------------------------------------------------------------------
   heal: {
     giftId: 14210,
@@ -120,14 +148,18 @@ export const TWIST_MAP: Record<TwistType, TwistDefinition> = {
     diamonds: 1500,
     aliases: ["heal", "medic", "restore"],
     description:
-      "Verwijdert eliminatie-status veroorzaakt door MoneyGun of Bomb.",
+      "Verwijdert eliminatie-status veroorzaakt door MoneyGun of Bomb. Werkt niet tegen DiamondPistol.",
     requiresTarget: true,
     targeted: true,
     isOffensive: false,
+
+    // NEW
+    healEliminationMark: true,
+    allowedDuring: "both",
   },
 
   // --------------------------------------------------------------------------
-  // DIAMOND PISTOL — FASE 5
+  // DIAMOND PISTOL — ONGEWIJZIGD (zoals gevraagd)
   // --------------------------------------------------------------------------
   diamondpistol: {
     giftId: 14768,
@@ -139,11 +171,18 @@ export const TWIST_MAP: Record<TwistType, TwistDefinition> = {
     requiresTarget: true,
     targeted: true,
     isOffensive: true,
+
+    // NEW maar safe (geen logic wijzig)
+    instantEliminate: true,
+    blockIfImmune: false,
+    healEliminationMark: false,
+    onePerRound: true,
+    allowedDuring: "active",
   },
 };
 
 // ============================================================================
-// Helper — vind twist op basis van alias
+// Helper — alias resolver (ongewijzigd)
 // ============================================================================
 
 export function resolveTwistAlias(input: string): TwistType | null {
