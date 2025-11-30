@@ -1,21 +1,21 @@
 // ============================================================================
-// 8-twist-engine.ts — Twist Engine v14.6 (MoneyGun/Bomb Safe Build)
+// 8-twist-engine.ts — Twist Engine v14.7 (MoneyGun/Bomb Safe + Delay Build)
 // ============================================================================
 //
-// ✔ Max 1 MoneyGun per target per ronde (via eliminated flag)
-// ✔ Bomb slaat immune en eerder gemarkeerde skip
-// ✔ Heal unmarks MG/Bomb (DiamondPistol unaffected)
+// ✔ Max 1 MoneyGun per target per ronde
+// ✔ Bomb → immune skip + already-marked skip
+// ✔ Bomb → 3s delay + countdown + veilig tegen overlap
+// ✔ Heal verwijdert alleen MG/Bomb markeringen
 // ✔ Immune blijft 1 ronde geldig (reset in game-engine)
-// ✔ Overlay-calls NIET verwijderd, geen build errors
-// ✔ Parser FIX behouden
-// ✔ Geen extra priority patches (zoals gevraagd)
+// ✔ Overlay-calls blijven staan (optioneel, veroorzaken geen errors)
+// ✔ Geen andere logica aangepast
 // ============================================================================
 
 import { io, emitLog } from "../server";
 import {
   getArena,
   emitArena,
-  eliminate // admin/manual only
+  eliminate
 } from "./5-game-engine";
 
 import {
@@ -34,6 +34,10 @@ import pool from "../db";
 // ============================================================================
 // HELPERS
 // ============================================================================
+
+async function sleep(ms: number) {
+  return new Promise(res => setTimeout(res, ms));
+}
 
 async function findUser(raw: string) {
   const clean = raw.replace("@", "").trim().toLowerCase();
@@ -131,7 +135,7 @@ async function applyGalaxy(sender: string) {
 }
 
 // ============================================================================
-// MONEYGUN — FASE 1 (dupe-block actief)
+// MONEYGUN
 // ============================================================================
 
 async function applyMoneyGun(sender: string, target: any) {
@@ -141,7 +145,6 @@ async function applyMoneyGun(sender: string, target: any) {
   const p = arena.players.find(x => x.id === target.id);
   if (!p) return;
 
-  // IMMUNE blocks MoneyGun
   if (isImmune(target.id)) {
     emitLog({
       type: "twist",
@@ -150,7 +153,6 @@ async function applyMoneyGun(sender: string, target: any) {
     return;
   }
 
-  // MAX 1 MARKER PER RONDE
   if (p.eliminated === true) {
     emitLog({
       type: "twist",
@@ -159,7 +161,6 @@ async function applyMoneyGun(sender: string, target: any) {
     return;
   }
 
-  // MARK
   markEliminated(target.id);
 
   emitOverlay("moneygun", {
@@ -169,20 +170,29 @@ async function applyMoneyGun(sender: string, target: any) {
 
   emitLog({
     type: "twist",
-    message: `${sender} MoneyGun → ${target.display_name} gemarkeerd voor eliminatie`
+    message: `${sender} MoneyGun → ${target.display_name} gemarkeerd`
   });
 
   await emitArena();
 }
 
 // ============================================================================
-// BOMB — NIET immune & NIET al-marked (dupe-block)
+// BOMB — met delay & countdown
 // ============================================================================
+
+let bombInProgress = false;
 
 async function applyBomb(sender: string) {
   const arena = getArena();
 
-  // Alleen spelers die niet immune EN niet al marked zijn
+  if (bombInProgress) {
+    emitLog({
+      type: "twist",
+      message: `${sender} Bomb → bezig, wacht tot huidige klaar is`
+    });
+    return;
+  }
+
   const poolTargets = arena.players.filter(
     (p) =>
       !p.boosters.includes("immune") &&
@@ -192,12 +202,44 @@ async function applyBomb(sender: string) {
   if (!poolTargets.length) {
     emitLog({
       type: "twist",
-      message: `${sender} Bomb → geen geldige targets (alles immune/marked)`
+      message: `${sender} Bomb → geen geldige targets (immune/marked)`
     });
     return;
   }
 
-  const chosen = poolTargets[Math.floor(Math.random() * poolTargets.length)];
+  // START BOMB SEQUENCE
+  bombInProgress = true;
+
+  emitOverlay("bomb_start", { by: sender });
+  emitLog({ type: "twist", message: `${sender} activeert BOMB…` });
+
+  // Countdown (optioneel overlay, logs altijd)
+  for (let i = 3; i >= 1; i--) {
+    emitLog({
+      type: "twist",
+      message: `💣 Bomb → ${i}…`
+    });
+    await sleep(1000);
+  }
+
+  // Na delay opnieuw arena ophalen (kan veranderd zijn)
+  const updatedArena = getArena();
+  const freshTargets = updatedArena.players.filter(
+    (p) =>
+      !p.boosters.includes("immune") &&
+      p.eliminated !== true
+  );
+
+  if (!freshTargets.length) {
+    emitLog({
+      type: "twist",
+      message: `${sender} Bomb → niemand meer geldig`
+    });
+    bombInProgress = false;
+    return;
+  }
+
+  const chosen = freshTargets[Math.floor(Math.random() * freshTargets.length)];
 
   markEliminated(chosen.id);
 
@@ -208,14 +250,16 @@ async function applyBomb(sender: string) {
 
   emitLog({
     type: "twist",
-    message: `${sender} BOMB → ${chosen.display_name} gemarkeerd voor eliminatie`
+    message: `${sender} BOMB → ${chosen.display_name} gemarkeerd`
   });
 
   await emitArena();
+
+  bombInProgress = false;
 }
 
 // ============================================================================
-// IMMUNE (blijft 1 ronde geldig → reset bij startRound in game-engine)
+// IMMUNE
 // ============================================================================
 
 async function applyImmuneTwist(sender: string, target: any) {
@@ -232,7 +276,7 @@ async function applyImmuneTwist(sender: string, target: any) {
 }
 
 // ============================================================================
-// HEAL — verwijdert MG/Bomb markeringen
+// HEAL
 // ============================================================================
 
 async function applyHeal(sender: string, target: any) {
@@ -266,7 +310,7 @@ async function applyHeal(sender: string, target: any) {
 }
 
 // ============================================================================
-// DIAMOND PISTOL (ongewijzigd)
+// DIAMOND PISTOL
 // ============================================================================
 
 async function applyDiamondPistol(sender: string, survivor: any) {
@@ -291,14 +335,14 @@ async function applyDiamondPistol(sender: string, survivor: any) {
 
   emitLog({
     type: "twist",
-    message: `${sender} DIAMOND PISTOL → ${survivor.display_name} overleeft!`
+    message: `${sender} DIAMOND PISTOL → ${survivor.display_name} overleeft`
   });
 
   await emitArena();
 }
 
 // ============================================================================
-// MAIN — USE TWIST (EXPORTED)
+// MAIN USE TWIST
 // ============================================================================
 
 export async function useTwist(
@@ -317,19 +361,15 @@ export async function useTwist(
     return;
   }
 
-  // Twist verbruiken
   const ok = await consumeTwistFromUser(senderId, twist);
   if (!ok) {
     emitLog({
       type: "twist",
-      message: `${senderName} probeerde ${
-        TWIST_MAP[twist].giftName
-      }, maar heeft geen twist`
+      message: `${senderName} probeerde ${TWIST_MAP[twist].giftName}, maar heeft geen twist`
     });
     return;
   }
 
-  // Target ophalen indien vereist
   let target = null;
   if (TWIST_MAP[twist].requiresTarget) {
     target = await findUser(rawTarget || "");
@@ -342,30 +382,24 @@ export async function useTwist(
     }
   }
 
-  // ROUTING
   switch (twist) {
     case "galaxy":
       return applyGalaxy(senderName);
-
     case "moneygun":
       return applyMoneyGun(senderName, target);
-
     case "bomb":
       return applyBomb(senderName);
-
     case "immune":
       return applyImmuneTwist(senderName, target);
-
     case "heal":
       return applyHeal(senderName, target);
-
     case "diamondpistol":
       return applyDiamondPistol(senderName, target);
   }
 }
 
 // ============================================================================
-// ADD TWIST (EXPORTED)
+// ADD TWIST
 // ============================================================================
 
 export async function addTwistByGift(userId: string, twist: TwistType) {
@@ -378,7 +412,7 @@ export async function addTwistByGift(userId: string, twist: TwistType) {
 }
 
 // ============================================================================
-// PARSER (!use ...) (EXPORTED)
+// PARSER
 // ============================================================================
 
 export async function parseUseCommand(
@@ -399,7 +433,7 @@ export async function parseUseCommand(
 }
 
 // ============================================================================
-// EXPORT DEFAULT
+// EXPORT
 // ============================================================================
 
 export default {
