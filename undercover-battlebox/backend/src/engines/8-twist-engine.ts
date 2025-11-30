@@ -283,7 +283,7 @@ async function applyDiamondPistol(sender: string, survivor: any) {
   });
 
   await emitArena();
-}
+    }
 
 // ============================================================================
 // MAIN — USE TWIST (EXPORTED)
@@ -329,7 +329,7 @@ export async function useTwist(
     }
   }
 
-switch (twist) {
+  switch (twist) {
     case "galaxy":
       return applyGalaxy(senderName);
     case "moneygun":
