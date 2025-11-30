@@ -1,16 +1,15 @@
 // ============================================================================
-// 8-twist-engine.ts — Twist Engine v14.4 (MoneyGun/Bomb Fase-1 Upgrade)
+// 8-twist-engine.ts — Twist Engine v14.5 (MG Blocked Dupes + Bomb Safe-Target)
 // ============================================================================
 //
 // ✔ Compatibel met Arena Engine v15+
 // ✔ MoneyGun markeert eliminate-status (end-round)
-// ✔ Bomb markeert eliminate-status (end-round)
-// ✔ Heal verwijdert alleen MG/Bomb eliminaties
-// ✔ Immune blijft booster die MG/Bomb blokkeert
-// ✔ DiamondPistol ongewijzigd (full power, geen ronde-limit toegevoegd)
-// ✔ parseUseCommand FIXED (belangrijk!)
-// ✔ Overige logica ongewijzigd gelaten
-//
+// ✔ MoneyGun kan NIET opnieuw dezelfde target raken (max 1 mark)
+// ✔ Bomb kiest NOOIT een target die al gemarkeerd = true
+// ✔ Bomb → als geen geldige targets → log + skip
+// ✔ Heal verwijdert MG/Bomb markeringen → daarna opnieuw hitbaar
+// ✔ DiamondPistol ongewijzigd
+// ✔ parser FIX blijft behouden
 // ============================================================================
 
 import { io, emitLog } from "../server";
@@ -22,8 +21,7 @@ import {
 
 import {
   giveTwistToUser,
-  consumeTwistFromUser,
-  listTwistsForUser
+  consumeTwistFromUser
 } from "./twist-inventory";
 
 import {
@@ -134,13 +132,17 @@ async function applyGalaxy(sender: string) {
 }
 
 // ============================================================================
-// MONEYGUN — FASE 1
-// Markeert target voor eliminatie aan end-round
+// MONEYGUN — FASE 1 (met dupe-block)
 // ============================================================================
 
 async function applyMoneyGun(sender: string, target: any) {
   if (!target) return;
 
+  const arena = getArena();
+  const p = arena.players.find(x => x.id === target.id);
+  if (!p) return;
+
+  // IMMUNE
   if (isImmune(target.id)) {
     emitLog({
       type: "twist",
@@ -149,8 +151,17 @@ async function applyMoneyGun(sender: string, target: any) {
     return;
   }
 
-  const success = markEliminated(target.id);
-  if (!success) return;
+  // MAX 1 MARK PER TARGET
+  if (p.eliminated === true) {
+    emitLog({
+      type: "twist",
+      message: `${sender} MoneyGun → ${target.display_name} is al gemarkeerd (Heal nodig)`
+    });
+    return;
+  }
+
+  // MARKEREN
+  markEliminated(target.id);
 
   emitOverlay("moneygun", {
     by: sender,
@@ -166,22 +177,25 @@ async function applyMoneyGun(sender: string, target: any) {
 }
 
 // ============================================================================
-// BOMB — FASE 1 UPGRADE
-// Random target → markeren voor end-round eliminatie
-// Immune wordt overgeslagen
+// BOMB — FASE 1 UPGRADE (NO DUPES)
 // ============================================================================
 
 async function applyBomb(sender: string) {
   const arena = getArena();
 
+  // Alleen spelers die:
+  // - NIET immune zijn
+  // - NIET al gemarkeerd zijn
   const poolTargets = arena.players.filter(
-    (p) => !p.boosters.includes("immune")
+    (p) =>
+      !p.boosters.includes("immune") &&
+      p.eliminated !== true
   );
 
   if (!poolTargets.length) {
     emitLog({
       type: "twist",
-      message: `${sender} Bomb → geen geldige targets`
+      message: `${sender} Bomb → geen geldige targets (alles al gemarkeerd)`
     });
     return;
   }
@@ -221,22 +235,20 @@ async function applyImmuneTwist(sender: string, target: any) {
 }
 
 // ============================================================================
-// HEAL — FASE 1 LOGICA
-// Verwijdert elimination-status van MG/Bomb
-// Werkt NIET tegen DiamondPistol
+// HEAL — verwijdert MG/Bomb markeringen
 // ============================================================================
 
 async function applyHeal(sender: string, target: any) {
   if (!target) return;
 
   const arena = getArena();
-  const p = arena.players.find((x) => x.id === target.id);
+  const p = arena.players.find(x => x.id === target.id);
   if (!p) return;
 
   if (!p.eliminated) {
     emitLog({
       type: "twist",
-      message: `${sender} HEAL → ${target.display_name} heeft geen MG/Bomb eliminatie-status`
+      message: `${sender} HEAL → ${target.display_name} heeft geen MG/Bomb markering`
     });
     return;
   }
@@ -257,7 +269,7 @@ async function applyHeal(sender: string, target: any) {
 }
 
 // ============================================================================
-// DIAMOND PISTOL (ongewijzigd, geen ronde-limit toegevoegd)
+// DIAMOND PISTOL (ongewijzigd — geen ronde-limit toegevoegd)
 // ============================================================================
 
 async function applyDiamondPistol(sender: string, survivor: any) {
@@ -320,7 +332,7 @@ export async function useTwist(
     return;
   }
 
-  // TARGET ophalen indien nodig
+  // Target ophalen indien nodig
   let target = null;
   if (TWIST_MAP[twist].requiresTarget) {
     target = await findUser(rawTarget || "");
@@ -333,7 +345,7 @@ export async function useTwist(
     }
   }
 
-  // ROUTING
+  // Routes
   switch (twist) {
     case "galaxy":
       return applyGalaxy(senderName);
