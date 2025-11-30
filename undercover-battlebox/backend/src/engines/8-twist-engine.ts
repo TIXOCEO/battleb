@@ -1,13 +1,15 @@
 // ============================================================================
-// 8-twist-engine.ts — Twist Engine v14.7 (MoneyGun/Bomb Safe + Delay Build)
+// 8-twist-engine.ts — Twist Engine v14.8 (MoneyGun/Bomb + Badges + Delay Build)
 // ============================================================================
 //
 // ✔ Max 1 MoneyGun per target per ronde
 // ✔ Bomb → immune skip + already-marked skip
-// ✔ Bomb → 3s delay + countdown + veilig tegen overlap
-// ✔ Heal verwijdert alleen MG/Bomb markeringen
+// ✔ Bomb → 3s delay + countdown
+// ✔ MoneyGun voegt badge toe: p.boosters.push("mg")
+// ✔ Bomb voegt badge toe: p.boosters.push("bomb")
+// ✔ Heal verwijdert alleen MG/Bomb badges + eliminated-flag
 // ✔ Immune blijft 1 ronde geldig (reset in game-engine)
-// ✔ Overlay-calls blijven staan (optioneel, veroorzaken geen errors)
+// ✔ Overlay-calls blijven staan (geen errors)
 // ✔ Geen andere logica aangepast
 // ============================================================================
 
@@ -135,7 +137,7 @@ async function applyGalaxy(sender: string) {
 }
 
 // ============================================================================
-// MONEYGUN
+// MONEYGUN (met badge)
 // ============================================================================
 
 async function applyMoneyGun(sender: string, target: any) {
@@ -161,6 +163,9 @@ async function applyMoneyGun(sender: string, target: any) {
     return;
   }
 
+  // Badge toevoegen
+  if (!p.boosters.includes("mg")) p.boosters.push("mg");
+
   markEliminated(target.id);
 
   emitOverlay("moneygun", {
@@ -177,7 +182,7 @@ async function applyMoneyGun(sender: string, target: any) {
 }
 
 // ============================================================================
-// BOMB — met delay & countdown
+// BOMB — delay + countdown + badge
 // ============================================================================
 
 let bombInProgress = false;
@@ -207,13 +212,11 @@ async function applyBomb(sender: string) {
     return;
   }
 
-  // START BOMB SEQUENCE
   bombInProgress = true;
 
   emitOverlay("bomb_start", { by: sender });
   emitLog({ type: "twist", message: `${sender} activeert BOMB…` });
 
-  // Countdown (optioneel overlay, logs altijd)
   for (let i = 3; i >= 1; i--) {
     emitLog({
       type: "twist",
@@ -222,7 +225,6 @@ async function applyBomb(sender: string) {
     await sleep(1000);
   }
 
-  // Na delay opnieuw arena ophalen (kan veranderd zijn)
   const updatedArena = getArena();
   const freshTargets = updatedArena.players.filter(
     (p) =>
@@ -240,6 +242,9 @@ async function applyBomb(sender: string) {
   }
 
   const chosen = freshTargets[Math.floor(Math.random() * freshTargets.length)];
+
+  // Badge toevoegen
+  if (!chosen.boosters.includes("bomb")) chosen.boosters.push("bomb");
 
   markEliminated(chosen.id);
 
@@ -276,7 +281,7 @@ async function applyImmuneTwist(sender: string, target: any) {
 }
 
 // ============================================================================
-// HEAL
+// HEAL — badge + eliminated mark verwijderen
 // ============================================================================
 
 async function applyHeal(sender: string, target: any) {
@@ -293,6 +298,9 @@ async function applyHeal(sender: string, target: any) {
     });
     return;
   }
+
+  // MG/Bomb badges verwijderen
+  p.boosters = p.boosters.filter(b => b !== "mg" && b !== "bomb");
 
   clearEliminationMark(target.id);
 
