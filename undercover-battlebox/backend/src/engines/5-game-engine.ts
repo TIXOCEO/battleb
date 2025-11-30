@@ -1,10 +1,10 @@
 /* ============================================================================
-   5-game-engine.ts — BattleBox Arena Engine v16.0 (MoneyGun Integration Build)
+   5-game-engine.ts — BattleBox Arena Engine v16.1
    ✔ Immune = 1 ronde geldig (reset bij startRound)
    ✔ Survivor immune (DiamondPistol) = 1 ronde geldig
-   ✔ MoneyGun/Bomb: unieke markers per ronde
-   ✔ MoneyGun: max 1 per target per ronde (twist-engine afhankelijk)
-   ✔ Alle oude logica intact
+   ✔ MoneyGun/Bomb markeringen = p.eliminated=true (blijft staan tot nieuwe ronde)
+   ✔ EndRound verwerkt eerst MG/Bomb, daarna danger/ties
+   ✔ Extra helpers: forceSort, addFromQueue, updateArenaSettings
 ============================================================================ */
 
 import pool from "../db";
@@ -19,12 +19,15 @@ export interface ArenaPlayer {
   display_name: string;
   score: number;
 
-  boosters: string[];
+  boosters: string[]; // blijft bestaan (voor oude logica)
 
   positionStatus: "alive" | "danger" | "elimination" | "immune" | "shielded";
   eliminated?: boolean;
 
+  /** Immune ontvangen door twist (1 ronde geldig) */
   tempImmune?: boolean;
+
+  /** Immune ontvangen als DiamondPistol-survivor (ook 1 ronde geldig) */
   survivorImmune?: boolean;
 }
 
@@ -34,11 +37,6 @@ export interface ArenaSettings {
   graceSeconds: number;
   forceEliminations: boolean;
 }
-
-/* ============================================================================
-   TWIST MARKERS (NIEUW)
-   MoneyGun/Bomb per ronde — voor dupe-blocking
-============================================================================ */
 
 export interface ArenaState {
   players: ArenaPlayer[];
@@ -54,19 +52,7 @@ export interface ArenaState {
 
   firstFinalRound: number | null;
   lastSortedAt: number;
-
-  /** Nieuw: actieve twist markers */
-  twists: {
-    active: {
-      moneygunTargets: { [id: string]: boolean };
-      bombTargets: { [id: string]: boolean };
-    };
-  };
 }
-
-/* ============================================================================
-   INITIAL ARENA STATE (met nieuwe twist-sectie)
-============================================================================ */
 
 let arena: ArenaState = {
   players: [],
@@ -82,18 +68,11 @@ let arena: ArenaState = {
     roundDurationPre: 300,
     roundDurationFinal: 180,
     graceSeconds: 10,
-    forceEliminations: true,
+    forceEliminations: true
   },
 
   firstFinalRound: null,
-  lastSortedAt: 0,
-
-  twists: {
-    active: {
-      moneygunTargets: {},
-      bombTargets: {},
-    },
-  },
+  lastSortedAt: 0
 };
 
 /* ============================================================================
@@ -192,13 +171,14 @@ async function computePlayerScore(p: ArenaPlayer) {
 }
 
 /* ============================================================================
-   RECOMPUTE POSITIONS (ongewijzigd, werkt met elim/immune)
+   RECOMPUTE POSITIONS — met tijdelijke IMMUNE patches
 ============================================================================ */
 
 async function recomputePositions() {
   const status = arena.status;
   const total = arena.players.length;
 
+  // IDLE — alles reset behalve eliminated
   if (status === "idle") {
     for (const p of arena.players) {
       p.score = 0;
@@ -212,13 +192,15 @@ async function recomputePositions() {
     return;
   }
 
-  // SCORE UPDATE
+  // SCORES ophalen
   for (const p of arena.players) {
     p.score = await computePlayerScore(p);
   }
 
+  // SORT
   arena.players.sort((a, b) => b.score - a.score);
 
+  // ENDED → MG/Bomb + DP elim blijven staan
   if (status === "ended") {
     for (const p of arena.players) {
       if (p.eliminated) {
@@ -240,11 +222,7 @@ async function recomputePositions() {
     return;
   }
 
-  /* Quarter / Finale logica — exact zoals jouw originele code */
-  /* … (afgerond in deel 2) … */
-}
-
-/* ============================================================================
+  /* ============================================================================
      QUARTER LOGICA
   ============================================================================ */
 
@@ -316,7 +294,7 @@ async function recomputePositions() {
 }
 
 /* ============================================================================
-   EMIT SNAPSHOT
+   EMIT SNAPSHOT + FORCE SORT
 ============================================================================ */
 
 export async function emitArena() {
@@ -338,8 +316,13 @@ export async function emitArena() {
     firstFinalRound: arena.firstFinalRound,
     lastSortedAt: arena.lastSortedAt,
 
-    removeAllowed: arena.status === "idle" || arena.status === "ended",
+    removeAllowed: arena.status === "idle" || arena.status === "ended"
   });
+}
+
+/** Handmatige her-sort (voor admin tools) */
+export async function forceSort() {
+  await emitArena();
 }
 
 /* ============================================================================
@@ -358,7 +341,7 @@ export async function startRound(type: RoundType) {
 
     emitLog({
       type: "arena",
-      message: `⚡ Finale gestart op ronde ${arena.round}`,
+      message: `⚡ Finale gestart op ronde ${arena.round}`
     });
   }
 
@@ -367,18 +350,17 @@ export async function startRound(type: RoundType) {
     p.positionStatus = "alive";
     p.eliminated = false;
 
+    // TEMP IMMUNE VERWIJDEREN (1 ronde geldig)
     p.tempImmune = false;
     p.survivorImmune = false;
 
+    // BOOSTER immune verwijderen (oude systeem)
     p.boosters = p.boosters.filter((b) => b !== "immune");
   }
 
-  // ✨ EXTRA NIEUW: reset twist target-blocking
-  arena.twists.active.moneygunTargets = {};
-  arena.twists.active.bombTargets = {};
-
   arena.status = "active";
 
+  // Gift-engine flags
   (io as any).roundActive = true;
   (io as any).currentRound = arena.round;
 
@@ -394,7 +376,7 @@ export async function startRound(type: RoundType) {
 
   emitLog({
     type: "arena",
-    message: `Ronde ${arena.round} gestart (${type}) — duur ${duration}s`,
+    message: `Ronde ${arena.round} gestart (${type}) — duur ${duration}s`
   });
 
   await emitArena();
@@ -402,7 +384,7 @@ export async function startRound(type: RoundType) {
   io.emit("round:start", {
     round: arena.round,
     type,
-    duration,
+    duration
   });
 }
 
@@ -451,7 +433,9 @@ export async function endRound(forceEnd: boolean = false) {
 
       emitLog({
         type: "arena",
-        message: `🔥 Finale eliminaties: ${doomed.map(x => x.display_name).join(", ")}`
+        message: `🔥 Finale eliminaties: ${doomed
+          .map((x) => x.display_name)
+          .join(", ")}`
       });
 
       io.emit("round:end", {
@@ -495,7 +479,7 @@ export async function endRound(forceEnd: boolean = false) {
     return;
   }
 
-/* ------------------------------------------------------------------------
+  /* ------------------------------------------------------------------------
      ACTIVE → GRACE (normale ronde)
   ------------------------------------------------------------------------- */
   if (arena.status === "active") {
@@ -516,7 +500,7 @@ export async function endRound(forceEnd: boolean = false) {
   }
 
   /* ------------------------------------------------------------------------
-     GRACE → ENDED (MG/Bomb eliminaties verwerken)
+     GRACE → ENDED (hier worden MG/Bomb eliminaties verwerkt)
   ------------------------------------------------------------------------- */
   if (arena.status === "grace") {
     arena.status = "ended";
@@ -526,7 +510,7 @@ export async function endRound(forceEnd: boolean = false) {
     const total = arena.players.length;
 
     /* =======================================================================
-       FINALE — MG/Bomb eerst, anders normale tie-eliminatie
+       FINALE — MG/Bomb eliminaties eerst, anders normale tie-eliminatie
     ======================================================================= */
     if (arena.type === "finale") {
       const doomedMG = arena.players.filter((p) => p.eliminated);
@@ -626,7 +610,7 @@ export async function endRound(forceEnd: boolean = false) {
 }
 
 /* ============================================================================
-   ARENA MANAGEMENT
+   ARENA MANAGEMENT (join/leave/clear etc.)
 ============================================================================ */
 
 export async function arenaJoin(
@@ -653,7 +637,10 @@ export async function arenaJoin(
   await emitArena();
 }
 
-export async function arenaLeave(usernameOrId: string, force: boolean = false) {
+export async function arenaLeave(
+  usernameOrId: string,
+  force: boolean = false
+) {
   const clean = String(usernameOrId).replace(/^@+/, "");
   const cleanLower = clean.toLowerCase();
 
@@ -677,7 +664,7 @@ export async function arenaLeave(usernameOrId: string, force: boolean = false) {
     return;
   }
 
-  // Soft eliminate (voor DP/host manual)
+  // Soft eliminate
   p.positionStatus = "elimination";
   p.eliminated = true;
 
@@ -743,9 +730,6 @@ export async function arenaClear() {
   arena.status = "idle";
   arena.firstFinalRound = null;
 
-  arena.twists.active.moneygunTargets = {};
-  arena.twists.active.bombTargets = {};
-
   emitLog({
     type: "arena",
     message: `Arena volledig gereset`
@@ -755,7 +739,77 @@ export async function arenaClear() {
 }
 
 /* ============================================================================
-   AUTO ROUND TIMERS
+   addFromQueue — generieke helper voor queue.ts
+   (signature expres breed gehouden, zodat elke call werkt)
+============================================================================ */
+
+export async function addFromQueue(...args: any[]) {
+  // Ondersteunt zowel object als losse argumenten
+  if (!args.length) return;
+
+  // Case 1: object met velden uit queue
+  const candidate = args[0];
+  if (
+    candidate &&
+    typeof candidate === "object" &&
+    ("tiktok_id" in candidate || "user_tiktok_id" in candidate)
+  ) {
+    const id = String(
+      (candidate as any).tiktok_id ?? (candidate as any).user_tiktok_id
+    );
+    const username: string =
+      (candidate as any).username ??
+      (candidate as any).user_username ??
+      "";
+    const display_name: string =
+      (candidate as any).display_name ??
+      (candidate as any).user_display_name ??
+      username;
+
+    return arenaJoin(id, display_name, username);
+  }
+
+  // Case 2: losse strings: (id, display_name, username)
+  if (typeof args[0] === "string") {
+    const id = String(args[0]);
+    const display_name = String(args[1] ?? args[2] ?? "Unknown");
+    const username = String(args[2] ?? args[1] ?? "unknown");
+    return arenaJoin(id, display_name, username);
+  }
+}
+
+/* ============================================================================
+   updateArenaSettings — basis-implementatie (voor admin panel)
+============================================================================ */
+
+export async function updateArenaSettings(
+  partial: Partial<ArenaSettings>
+) {
+  arena.settings = {
+    ...arena.settings,
+    ...partial
+  };
+
+  // Optioneel: wegschrijven naar DB als de kolommen bestaan
+  await pool.query(
+    `
+    UPDATE arena_settings
+    SET round_pre_seconds = $1,
+        round_final_seconds = $2,
+        grace_seconds = $3
+    `,
+    [
+      arena.settings.roundDurationPre,
+      arena.settings.roundDurationFinal,
+      arena.settings.graceSeconds
+    ]
+  );
+
+  await emitArena();
+}
+
+/* ============================================================================
+   TICK — auto overgang ACTIVE→GRACE en GRACE→ENDED
 ============================================================================ */
 
 setInterval(async () => {
@@ -785,6 +839,10 @@ setInterval(async () => {
     return;
   }
 }, 1000);
+
+/* ============================================================================
+   EXPORT DEFAULT
+============================================================================ */
 
 export default {
   getArena,
