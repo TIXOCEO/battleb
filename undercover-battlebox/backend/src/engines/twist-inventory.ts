@@ -1,12 +1,11 @@
 // ============================================================================
-// twist-inventory.ts — v1.5 (BattleBox MoneyGun Fase-1 Ready)
+// twist-inventory.ts — v2.0 (BattleBox MoneyGun Fase-2 Ready)
 // ----------------------------------------------------------------------------
-// ✔ 100% compatible met twist-engine v14.3
-// ✔ Eenvoudig, betrouwbaar, atomic
-// ✔ DB-vergrendeling (FOR UPDATE SKIP LOCKED) voor veilige realtime consume
-// ✔ Helper toegevoegd: countTwistForUser()
-// ✔ Helper toegevoegd: hasTwist()
-// ✔ Alles blijft uitbreidbaar zonder schema-wijzigingen
+// ✔ 100% compatible met twist-engine v14+
+// ✔ Veilig: atomic DELETE met SKIP LOCKED
+// ✔ Helpers toegevoegd voor Fase 2 (countTwistsForUser, hasTwist, listTargetsMarked)
+// ✔ GEEN max 1 per gebruiker — want MoneyGun = max 1 *per target*, NIET per user
+// ✔ Schema blijft gelijk (géén migraties nodig)
 // ============================================================================
 
 import pool from "../db";
@@ -27,7 +26,7 @@ export async function initTwistInventoryTable() {
 }
 
 // ============================================================================
-// GIVE TWIST → toevoegt 1 item in inventory
+// GIVE TWIST → voeg exact 1 item toe
 // ============================================================================
 export async function giveTwistToUser(
   userId: string,
@@ -72,7 +71,7 @@ export async function consumeTwistFromUser(
 }
 
 // ============================================================================
-// COUNT TWISTS FOR USER (helper voor admin UI / debug)
+// COUNT TWISTS FOR USER (telt aantal van een type)
 // ============================================================================
 export async function countTwistsForUser(
   userId: string,
@@ -91,7 +90,7 @@ export async function countTwistsForUser(
 }
 
 // ============================================================================
-// HAS TWIST (boolean check, sneller dan list)
+// HAS TWIST (boolean)
 // ============================================================================
 export async function hasTwist(
   userId: string,
@@ -111,7 +110,7 @@ export async function hasTwist(
 }
 
 // ============================================================================
-// LIST USER INVENTORY (volledige lijst)
+// LIST USER INVENTORY
 // ============================================================================
 export async function listTwistsForUser(
   userId: string
@@ -140,4 +139,21 @@ export async function clearTwistsForUser(userId: string) {
     `,
     [userId]
   );
+}
+
+// ============================================================================
+// (NEW) OPTIONAL — LIST ALL TWISTS OF CERTAIN TYPE (used by future logic)
+// ============================================================================
+export async function listAllUsersWithTwist(
+  twist: TwistType
+): Promise<{ user_id: string }[]> {
+  const res = await pool.query(
+    `
+    SELECT user_id
+    FROM twist_inventory
+    WHERE twist_type=$1
+    `,
+    [twist]
+  );
+  return res.rows;
 }
