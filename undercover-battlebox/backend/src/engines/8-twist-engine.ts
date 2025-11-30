@@ -1,21 +1,29 @@
 // ============================================================================
-// 8-twist-engine.ts — Twist Engine v14.3 (MoneyGun Fase-1 Upgrade)
+// 8-twist-engine.ts — Twist Engine v14.4 (MoneyGun/Bomb Fase-1 Upgrade)
+// ============================================================================
+//
 // ✔ Compatibel met Arena Engine v15+
-// ✔ MoneyGun markeert nu eliminate-status i.p.v. direct verwijderen
-// ✔ Eliminatie gebeurt correct bij endRound()
-// ✔ Overige twists ongewijzigd
+// ✔ MoneyGun markeert eliminate-status (end-round)
+// ✔ Bomb markeert eliminate-status (end-round)
+// ✔ Heal verwijdert alleen MG/Bomb eliminaties
+// ✔ Immune blijft booster die MG/Bomb blokkeert
+// ✔ DiamondPistol ongewijzigd (full power, geen ronde-limit toegevoegd)
+// ✔ parseUseCommand FIXED (belangrijk!)
+// ✔ Overige logica ongewijzigd gelaten
+//
 // ============================================================================
 
 import { io, emitLog } from "../server";
 import {
   getArena,
   emitArena,
-  eliminate // blijft bestaan voor admin/manual usage
+  eliminate // admin/manual only
 } from "./5-game-engine";
 
 import {
   giveTwistToUser,
-  consumeTwistFromUser
+  consumeTwistFromUser,
+  listTwistsForUser
 } from "./twist-inventory";
 
 import {
@@ -77,6 +85,26 @@ async function applyImmune(id: string) {
   await emitArena();
 }
 
+function markEliminated(id: string) {
+  const arena = getArena();
+  const p = arena.players.find(x => x.id === id);
+  if (!p) return false;
+
+  p.positionStatus = "elimination";
+  p.eliminated = true;
+  return true;
+}
+
+function clearEliminationMark(id: string) {
+  const arena = getArena();
+  const p = arena.players.find(x => x.id === id);
+  if (!p) return false;
+
+  p.positionStatus = "alive";
+  p.eliminated = false;
+  return true;
+}
+
 function emitOverlay(name: string, data: any) {
   io.emit(`twist:${name}`, data);
 }
@@ -106,14 +134,13 @@ async function applyGalaxy(sender: string) {
 }
 
 // ============================================================================
-// MONEYGUN — FASE 1 UPGRADE
-// Markeren voor eliminatie i.p.v. direct verwijderen
+// MONEYGUN — FASE 1
+// Markeert target voor eliminatie aan end-round
 // ============================================================================
 
 async function applyMoneyGun(sender: string, target: any) {
   if (!target) return;
 
-  // Immune check blijft werken, maar in fase 1 nog niet unlockable
   if (isImmune(target.id)) {
     emitLog({
       type: "twist",
@@ -122,16 +149,8 @@ async function applyMoneyGun(sender: string, target: any) {
     return;
   }
 
-  // ✔ NIEUW: GEEN eliminate(target.username) meer
-  // ✔ i.p.v. direct verwijderen → markeren voor endRound()
-
-  const arena = getArena();
-  const p = arena.players.find((x) => x.id === target.id);
-  if (!p) return;
-
-  // Markeren voor eliminatie aan einde van ronde
-  p.positionStatus = "elimination";
-  p.eliminated = true;
+  const success = markEliminated(target.id);
+  if (!success) return;
 
   emitOverlay("moneygun", {
     by: sender,
@@ -147,7 +166,9 @@ async function applyMoneyGun(sender: string, target: any) {
 }
 
 // ============================================================================
-// BOMB (ongewijzigd — blijft voor toekomstige fasen)
+// BOMB — FASE 1 UPGRADE
+// Random target → markeren voor end-round eliminatie
+// Immune wordt overgeslagen
 // ============================================================================
 
 async function applyBomb(sender: string) {
@@ -167,25 +188,23 @@ async function applyBomb(sender: string) {
 
   const chosen = poolTargets[Math.floor(Math.random() * poolTargets.length)];
 
-  // Bomb blijft direct elimineren (nóg niet aangepast naar fase-model)
-  await eliminate(chosen.username);
+  markEliminated(chosen.id);
 
   emitOverlay("bomb", {
     by: sender,
-    target: chosen.display_name,
-    pool: poolTargets.map((p) => p.display_name)
+    target: chosen.display_name
   });
 
   emitLog({
     type: "twist",
-    message: `${sender} BOMB → ${chosen.display_name}!`
+    message: `${sender} BOMB → ${chosen.display_name} gemarkeerd voor eliminatie`
   });
 
   await emitArena();
 }
 
 // ============================================================================
-// IMMUNE (ongewijzigd + standaard booster)
+// IMMUNE (ongewijzigd)
 // ============================================================================
 
 async function applyImmuneTwist(sender: string, target: any) {
@@ -202,43 +221,27 @@ async function applyImmuneTwist(sender: string, target: any) {
 }
 
 // ============================================================================
-// HEAL (ongewijzigd — speler terugbrengen in arena)
+// HEAL — FASE 1 LOGICA
+// Verwijdert elimination-status van MG/Bomb
+// Werkt NIET tegen DiamondPistol
 // ============================================================================
 
 async function applyHeal(sender: string, target: any) {
   if (!target) return;
 
   const arena = getArena();
+  const p = arena.players.find((x) => x.id === target.id);
+  if (!p) return;
 
-  // Reeds in arena?
-  if (arena.players.some((p) => p.id === target.id)) {
+  if (!p.eliminated) {
     emitLog({
       type: "twist",
-      message: `${sender} HEAL → ${target.display_name} zit al in arena`
+      message: `${sender} HEAL → ${target.display_name} heeft geen MG/Bomb eliminatie-status`
     });
     return;
   }
 
-  const q = await pool.query(
-    `
-      SELECT COALESCE(SUM(diamonds),0) AS score
-      FROM gifts
-      WHERE receiver_id=$1 AND game_id=$2
-    `,
-    [BigInt(target.id), (io as any).currentGameId]
-  );
-
-  const score = Number(q.rows[0]?.score || 0);
-
-  arena.players.push({
-    id: target.id,
-    username: target.username,
-    display_name: target.display_name,
-    score,
-    boosters: [],
-    eliminated: false,
-    positionStatus: "alive"
-  });
+  clearEliminationMark(target.id);
 
   emitOverlay("heal", {
     by: sender,
@@ -247,14 +250,14 @@ async function applyHeal(sender: string, target: any) {
 
   emitLog({
     type: "twist",
-    message: `${sender} HEAL → ${target.display_name} is terug!`
+    message: `${sender} HEAL → ${target.display_name} is hersteld`
   });
 
   await emitArena();
 }
 
 // ============================================================================
-// DIAMOND PISTOL (ongewijzigd - survivor blijft)
+// DIAMOND PISTOL (ongewijzigd, geen ronde-limit toegevoegd)
 // ============================================================================
 
 async function applyDiamondPistol(sender: string, survivor: any) {
@@ -283,7 +286,7 @@ async function applyDiamondPistol(sender: string, survivor: any) {
   });
 
   await emitArena();
-    }
+}
 
 // ============================================================================
 // MAIN — USE TWIST (EXPORTED)
@@ -305,7 +308,7 @@ export async function useTwist(
     return;
   }
 
-  // Zijn twist gebruiken
+  // Twist verbruiken
   const ok = await consumeTwistFromUser(senderId, twist);
   if (!ok) {
     emitLog({
@@ -317,6 +320,7 @@ export async function useTwist(
     return;
   }
 
+  // TARGET ophalen indien nodig
   let target = null;
   if (TWIST_MAP[twist].requiresTarget) {
     target = await findUser(rawTarget || "");
@@ -329,17 +333,23 @@ export async function useTwist(
     }
   }
 
+  // ROUTING
   switch (twist) {
     case "galaxy":
       return applyGalaxy(senderName);
+
     case "moneygun":
       return applyMoneyGun(senderName, target);
+
     case "bomb":
       return applyBomb(senderName);
+
     case "immune":
       return applyImmuneTwist(senderName, target);
+
     case "heal":
       return applyHeal(senderName, target);
+
     case "diamondpistol":
       return applyDiamondPistol(senderName, target);
   }
@@ -376,11 +386,11 @@ export async function parseUseCommand(
 
   const target = parts[2] ? parts[2].replace("@", "") : undefined;
 
-  await useTwist(senderId, senderName, msg);
+  await useTwist(senderId, senderName, twist, target);
 }
 
 // ============================================================================
-// EXPORT DEFAULT (OPTIONAL)
+// EXPORT DEFAULT
 // ============================================================================
 
 export default {
