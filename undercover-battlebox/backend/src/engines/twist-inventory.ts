@@ -106,7 +106,7 @@ export async function hasTwist(
     [userId, twist]
   );
 
-  return res.rowCount > 0;
+  return (res.rowCount ?? 0) > 0;
 }
 
 // ============================================================================
@@ -142,7 +142,7 @@ export async function clearTwistsForUser(userId: string) {
 }
 
 // ============================================================================
-// (NEW) OPTIONAL — LIST ALL TWISTS OF CERTAIN TYPE (used by future logic)
+// (NEW) OPTIONAL — LIST ALL USERS OF A TWIST TYPE
 // ============================================================================
 export async function listAllUsersWithTwist(
   twist: TwistType
