@@ -1,14 +1,19 @@
 // ============================================================================
-// twist-inventory.ts — v1.1 (Build-Safe)
-// ============================================================================
-// Bewaart welke twists elke gebruiker bezit.
+// twist-inventory.ts — v1.5 (BattleBox MoneyGun Fase-1 Ready)
+// ----------------------------------------------------------------------------
+// ✔ 100% compatible met twist-engine v14.3
+// ✔ Eenvoudig, betrouwbaar, atomic
+// ✔ DB-vergrendeling (FOR UPDATE SKIP LOCKED) voor veilige realtime consume
+// ✔ Helper toegevoegd: countTwistForUser()
+// ✔ Helper toegevoegd: hasTwist()
+// ✔ Alles blijft uitbreidbaar zonder schema-wijzigingen
 // ============================================================================
 
 import pool from "../db";
 import type { TwistType } from "./twist-definitions";
 
 // ============================================================================
-// INIT
+// INIT — TABLE STRUCTURE
 // ============================================================================
 export async function initTwistInventoryTable() {
   await pool.query(`
@@ -22,7 +27,7 @@ export async function initTwistInventoryTable() {
 }
 
 // ============================================================================
-// GIVE TWIST
+// GIVE TWIST → toevoegt 1 item in inventory
 // ============================================================================
 export async function giveTwistToUser(
   userId: string,
@@ -35,11 +40,12 @@ export async function giveTwistToUser(
     `,
     [userId, twist]
   );
+
   return true;
 }
 
 // ============================================================================
-// CONSUME TWIST (1 stuk)
+// CONSUME TWIST → verwijdert slechts 1 item (atomic + lock-safe)
 // ============================================================================
 export async function consumeTwistFromUser(
   userId: string,
@@ -49,10 +55,13 @@ export async function consumeTwistFromUser(
     `
     DELETE FROM twist_inventory
     WHERE id = (
-      SELECT id FROM twist_inventory
-      WHERE user_id = $1 AND twist_type = $2
+      SELECT id
+      FROM twist_inventory
+      WHERE user_id = $1
+        AND twist_type = $2
       ORDER BY id ASC
       LIMIT 1
+      FOR UPDATE SKIP LOCKED
     )
     RETURNING id
     `,
@@ -63,7 +72,46 @@ export async function consumeTwistFromUser(
 }
 
 // ============================================================================
-// LIST USER INVENTORY
+// COUNT TWISTS FOR USER (helper voor admin UI / debug)
+// ============================================================================
+export async function countTwistsForUser(
+  userId: string,
+  twist: TwistType
+): Promise<number> {
+  const res = await pool.query(
+    `
+    SELECT COUNT(*) AS total
+    FROM twist_inventory
+    WHERE user_id=$1 AND twist_type=$2
+    `,
+    [userId, twist]
+  );
+
+  return Number(res.rows[0]?.total || 0);
+}
+
+// ============================================================================
+// HAS TWIST (boolean check, sneller dan list)
+// ============================================================================
+export async function hasTwist(
+  userId: string,
+  twist: TwistType
+): Promise<boolean> {
+  const res = await pool.query(
+    `
+    SELECT id
+    FROM twist_inventory
+    WHERE user_id=$1 AND twist_type=$2
+    LIMIT 1
+    `,
+    [userId, twist]
+  );
+
+  return res.rowCount > 0;
+}
+
+// ============================================================================
+// LIST USER INVENTORY (volledige lijst)
 // ============================================================================
 export async function listTwistsForUser(
   userId: string
@@ -84,13 +132,11 @@ export async function listTwistsForUser(
 // ============================================================================
 // CLEAR ALL USER TWISTS
 // ============================================================================
-export async function clearTwistsForUser(
-  userId: string
-) {
+export async function clearTwistsForUser(userId: string) {
   await pool.query(
     `
     DELETE FROM twist_inventory
-    WHERE user_id = $1
+    WHERE user_id=$1
     `,
     [userId]
   );
