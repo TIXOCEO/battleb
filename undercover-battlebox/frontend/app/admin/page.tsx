@@ -253,7 +253,7 @@ export default function AdminDashboardPage() {
     setSearchResults([]);
     setShowResults(false);
     setActiveAutoField(null);
-  }
+    }
 
 /* ============================================
      HELPERS
@@ -302,7 +302,7 @@ export default function AdminDashboardPage() {
 
     switch (p.positionStatus) {
       case "immune":
-        return "bg-green-100 border-green-300";
+        return "bg-green-100 border-green-300"; // UPGRADE: immune = groen
       case "danger":
         return "bg-orange-100 border-orange-300";
       case "elimination":
@@ -505,8 +505,6 @@ export default function AdminDashboardPage() {
               → Queue
             </button>
 
-            {/* Elimineer knop verwijderd zoals gevraagd */}
-
             <button
               onClick={() => emitAdmin("giveVip", { username })}
               className="px-3 py-1.5 bg-yellow-400 text-black rounded-full border border-yellow-600"
@@ -704,7 +702,6 @@ export default function AdminDashboardPage() {
                     )}
                   </div>
 
-                  {/* POSITION INFO */}
                   <div className="mt-1 text-xs text-gray-500">
                     #{q.position} • {q.reason}
                   </div>
@@ -712,7 +709,6 @@ export default function AdminDashboardPage() {
 
                 {/* BUTTONS RIGHT */}
                 <div className="flex flex-col sm:flex-row gap-1 mt-2 sm:mt-0 justify-end sm:items-center">
-                  {/* Promote / Demote */}
                   <div className="flex gap-1 mr-1">
                     <button
                       onClick={() =>
@@ -1166,4 +1162,4 @@ export default function AdminDashboardPage() {
       )}
     </main>
   );
-              }
+                  }
