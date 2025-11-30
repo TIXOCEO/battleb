@@ -1,15 +1,14 @@
 // ============================================================================
-// 8-twist-engine.ts — Twist Engine v14.5 (MG Blocked Dupes + Bomb Safe-Target)
+// 8-twist-engine.ts — Twist Engine v14.6 (MoneyGun/Bomb Safe Build)
 // ============================================================================
 //
-// ✔ Compatibel met Arena Engine v15+
-// ✔ MoneyGun markeert eliminate-status (end-round)
-// ✔ MoneyGun kan NIET opnieuw dezelfde target raken (max 1 mark)
-// ✔ Bomb kiest NOOIT een target die al gemarkeerd = true
-// ✔ Bomb → als geen geldige targets → log + skip
-// ✔ Heal verwijdert MG/Bomb markeringen → daarna opnieuw hitbaar
-// ✔ DiamondPistol ongewijzigd
-// ✔ parser FIX blijft behouden
+// ✔ Max 1 MoneyGun per target per ronde (via eliminated flag)
+// ✔ Bomb slaat immune en eerder gemarkeerde skip
+// ✔ Heal unmarks MG/Bomb (DiamondPistol unaffected)
+// ✔ Immune blijft 1 ronde geldig (reset in game-engine)
+// ✔ Overlay-calls NIET verwijderd, geen build errors
+// ✔ Parser FIX behouden
+// ✔ Geen extra priority patches (zoals gevraagd)
 // ============================================================================
 
 import { io, emitLog } from "../server";
@@ -85,7 +84,7 @@ async function applyImmune(id: string) {
 
 function markEliminated(id: string) {
   const arena = getArena();
-  const p = arena.players.find(x => x.id === id);
+  const p = arena.players.find((x) => x.id === id);
   if (!p) return false;
 
   p.positionStatus = "elimination";
@@ -95,7 +94,7 @@ function markEliminated(id: string) {
 
 function clearEliminationMark(id: string) {
   const arena = getArena();
-  const p = arena.players.find(x => x.id === id);
+  const p = arena.players.find((x) => x.id === id);
   if (!p) return false;
 
   p.positionStatus = "alive";
@@ -132,7 +131,7 @@ async function applyGalaxy(sender: string) {
 }
 
 // ============================================================================
-// MONEYGUN — FASE 1 (met dupe-block)
+// MONEYGUN — FASE 1 (dupe-block actief)
 // ============================================================================
 
 async function applyMoneyGun(sender: string, target: any) {
@@ -142,7 +141,7 @@ async function applyMoneyGun(sender: string, target: any) {
   const p = arena.players.find(x => x.id === target.id);
   if (!p) return;
 
-  // IMMUNE
+  // IMMUNE blocks MoneyGun
   if (isImmune(target.id)) {
     emitLog({
       type: "twist",
@@ -151,7 +150,7 @@ async function applyMoneyGun(sender: string, target: any) {
     return;
   }
 
-  // MAX 1 MARK PER TARGET
+  // MAX 1 MARKER PER RONDE
   if (p.eliminated === true) {
     emitLog({
       type: "twist",
@@ -160,7 +159,7 @@ async function applyMoneyGun(sender: string, target: any) {
     return;
   }
 
-  // MARKEREN
+  // MARK
   markEliminated(target.id);
 
   emitOverlay("moneygun", {
@@ -177,15 +176,13 @@ async function applyMoneyGun(sender: string, target: any) {
 }
 
 // ============================================================================
-// BOMB — FASE 1 UPGRADE (NO DUPES)
+// BOMB — NIET immune & NIET al-marked (dupe-block)
 // ============================================================================
 
 async function applyBomb(sender: string) {
   const arena = getArena();
 
-  // Alleen spelers die:
-  // - NIET immune zijn
-  // - NIET al gemarkeerd zijn
+  // Alleen spelers die niet immune EN niet al marked zijn
   const poolTargets = arena.players.filter(
     (p) =>
       !p.boosters.includes("immune") &&
@@ -195,7 +192,7 @@ async function applyBomb(sender: string) {
   if (!poolTargets.length) {
     emitLog({
       type: "twist",
-      message: `${sender} Bomb → geen geldige targets (alles al gemarkeerd)`
+      message: `${sender} Bomb → geen geldige targets (alles immune/marked)`
     });
     return;
   }
@@ -218,7 +215,7 @@ async function applyBomb(sender: string) {
 }
 
 // ============================================================================
-// IMMUNE (ongewijzigd)
+// IMMUNE (blijft 1 ronde geldig → reset bij startRound in game-engine)
 // ============================================================================
 
 async function applyImmuneTwist(sender: string, target: any) {
@@ -269,7 +266,7 @@ async function applyHeal(sender: string, target: any) {
 }
 
 // ============================================================================
-// DIAMOND PISTOL (ongewijzigd — geen ronde-limit toegevoegd)
+// DIAMOND PISTOL (ongewijzigd)
 // ============================================================================
 
 async function applyDiamondPistol(sender: string, survivor: any) {
@@ -332,7 +329,7 @@ export async function useTwist(
     return;
   }
 
-  // Target ophalen indien nodig
+  // Target ophalen indien vereist
   let target = null;
   if (TWIST_MAP[twist].requiresTarget) {
     target = await findUser(rawTarget || "");
@@ -345,7 +342,7 @@ export async function useTwist(
     }
   }
 
-  // Routes
+  // ROUTING
   switch (twist) {
     case "galaxy":
       return applyGalaxy(senderName);
