@@ -1,11 +1,12 @@
 /* ============================================================================
-   5-game-engine.ts — BattleBox Arena Engine v16.1
+   5-game-engine.ts — BattleBox Arena Engine v16.2
    ✔ Immune = 1 ronde geldig (reset bij startRound)
    ✔ Survivor immune (DiamondPistol) = 1 ronde geldig
    ✔ MoneyGun/Bomb markeringen = p.eliminated=true (blijft staan tot nieuwe ronde)
    ✔ EndRound verwerkt eerst MG/Bomb, daarna danger/ties
    ✔ Extra helpers: forceSort, addFromQueue, updateArenaSettings
-   ✔ Nieuw: [MG] en [BOMB] badges automatisch reset bij startRound()
+   ✔ [MG] / [BOMB] badges reset bij startRound()
+   ✔ Noodzakelijke bugfixes (structurele {} sluiting)
 ============================================================================ */
 
 import pool from "../db";
@@ -20,15 +21,12 @@ export interface ArenaPlayer {
   display_name: string;
   score: number;
 
-  boosters: string[]; // blijft bestaan (voor oude logica)
+  boosters: string[];
 
   positionStatus: "alive" | "danger" | "elimination" | "immune" | "shielded";
   eliminated?: boolean;
 
-  /** Immune ontvangen door twist (1 ronde geldig) */
   tempImmune?: boolean;
-
-  /** Immune ontvangen als DiamondPistol-survivor (ook 1 ronde geldig) */
   survivorImmune?: boolean;
 }
 
@@ -172,7 +170,7 @@ async function computePlayerScore(p: ArenaPlayer) {
 }
 
 /* ============================================================================
-   RECOMPUTE POSITIONS — met tijdelijke IMMUNE patches
+   RECOMPUTE POSITIONS
 ============================================================================ */
 
 async function recomputePositions() {
@@ -192,6 +190,7 @@ async function recomputePositions() {
     return;
   }
 
+  // SCORES
   for (const p of arena.players) {
     p.score = await computePlayerScore(p);
   }
@@ -217,14 +216,7 @@ async function recomputePositions() {
     return;
   }
 
-  /* QUARTER LOGIC etc…  
-     >>> DEEL 2 gaat verder  
-  */
-   }
-
-/* ============================================================================
-     QUARTER LOGICA
-  ============================================================================ */
+  // ==== QUARTER LOGICA ====
 
   if (arena.type === "quarter") {
     if (total < 6) {
@@ -245,17 +237,14 @@ async function recomputePositions() {
         p.positionStatus = "elimination";
         continue;
       }
-
       if (p.tempImmune || p.survivorImmune) {
         p.positionStatus = "immune";
         continue;
       }
-
       if (p.boosters.includes("immune")) {
         p.positionStatus = "immune";
         continue;
       }
-
       p.positionStatus = p.score <= threshold ? "danger" : "alive";
     }
 
@@ -263,9 +252,7 @@ async function recomputePositions() {
     return;
   }
 
-  /* ============================================================================
-     FINALE
-  ============================================================================ */
+  // ==== FINALE ====
 
   const totalFinal = arena.players.length;
 
@@ -294,7 +281,7 @@ async function recomputePositions() {
 }
 
 /* ============================================================================
-   EMIT SNAPSHOT + FORCE SORT
+   EMIT SNAPSHOT
 ============================================================================ */
 
 export async function emitArena() {
@@ -320,13 +307,12 @@ export async function emitArena() {
   });
 }
 
-/** Handmatige her-sort (voor admin tools) */
 export async function forceSort() {
   await emitArena();
 }
 
 /* ============================================================================
-   START ROUND — reset immune + reset MG/Bomb markers + reset badges
+   START ROUND — reset immune + MG/Bomb markers + twist badges
 ============================================================================ */
 
 export async function startRound(type: RoundType) {
@@ -335,7 +321,6 @@ export async function startRound(type: RoundType) {
   arena.round += 1;
   arena.type = type;
 
-  // Finale start detectie
   if (type === "finale" && arena.firstFinalRound === null) {
     arena.firstFinalRound = arena.round;
 
@@ -345,27 +330,21 @@ export async function startRound(type: RoundType) {
     });
   }
 
-  // Reset MG/Bomb elimination markers, immune én twist-badges
   for (const p of arena.players) {
     p.positionStatus = "alive";
     p.eliminated = false;
 
-    // IMMUNE (temp) reset na elke ronde
     p.tempImmune = false;
     p.survivorImmune = false;
 
-    // Oude immune booster verwijderen
     p.boosters = p.boosters.filter((b) => b !== "immune");
 
-    // ✔ Nieuw: verwijder twist badges [MG] en [BOMB]
-    p.boosters = p.boosters.filter(
-      (b) => b !== "MG" && b !== "BOMB"
-    );
+    // ✔ CORRECT: reset MG/BOMB twist badges
+    p.boosters = p.boosters.filter((b) => b !== "mg" && b !== "bomb");
   }
 
   arena.status = "active";
 
-  // Gift-engine flags
   (io as any).roundActive = true;
   (io as any).currentRound = arena.round;
 
@@ -505,7 +484,7 @@ export async function endRound(forceEnd: boolean = false) {
   }
 
   /* ------------------------------------------------------------------------
-     GRACE → ENDED
+     GRACE → ENDED (MG/Bomb eerst)
   ------------------------------------------------------------------------- */
   if (arena.status === "grace") {
     arena.status = "ended";
@@ -539,7 +518,7 @@ export async function endRound(forceEnd: boolean = false) {
         return;
       }
 
-      // Geen MG/Bomb? Dan tie elimination
+      // Geen MG/BOMB → normale finale tie
       if (total <= 1) {
         emitLog({
           type: "arena",
@@ -548,7 +527,7 @@ export async function endRound(forceEnd: boolean = false) {
 
         io.emit("round:end", {
           round: arena.round,
-          type: arena.type,
+          type: "finale",
           pendingEliminations: [],
           winner: arena.players[0] || null,
           top3: arena.players.slice(0, 3)
@@ -666,6 +645,7 @@ export async function arenaLeave(usernameOrId: string, force: boolean = false) {
     return;
   }
 
+  // Soft eliminate
   p.positionStatus = "elimination";
   p.eliminated = true;
 
@@ -740,7 +720,7 @@ export async function arenaClear() {
 }
 
 /* ============================================================================
-   addFromQueue — generieke helper
+   addFromQueue
 ============================================================================ */
 
 export async function addFromQueue(...args: any[]) {
@@ -805,7 +785,7 @@ export async function updateArenaSettings(
 }
 
 /* ============================================================================
-   TICK — auto overgang ACTIVE→GRACE en GRACE→ENDED
+   TICK — auto ACTIVE→GRACE en GRACE→ENDED
 ============================================================================ */
 
 setInterval(async () => {
