@@ -1,12 +1,13 @@
 // ============================================================================
-// twist-definitions.ts — v4.1.1 (Bomb Command Update: bom/bomb/💣)
+// twist-definitions.ts — v4.2 (Bomb+Heal Compatibility Build)
 // ----------------------------------------------------------------------------
-// ✔ MoneyGun mark-model velden toegevoegd (markForRoundEnd, blockIfImmune, etc.)
-// ✔ Bomb mark-model velden toegevoegd
-// ✔ Heal kan MG/Bomb markeringen verwijderen
-// ✔ DiamondPistol ongewijzigd gelaten
-// ✔ Backwards compatible twist-engine v14+
-// ✔ Bomb aliases geüpdatet naar: ["bom", "bomb", "💣"]
+// ✔ MoneyGun mark-model velden (markForRoundEnd, blockIfImmune, etc.)
+// ✔ Bomb mark-model velden
+// ✔ Heal verwijdert MG/Bomb markeringen (healEliminationMark=true)
+// ✔ DiamondPistol ongewijzigd (zoals gevraagd)
+// ✔ Bomb aliases: ["bom", "bomb", "💣"]
+// ✔ 100% compatibel met twist-engine v14+
+// ✔ Geen extra logica toegevoegd buiten noodzakelijke patches
 // ============================================================================
 
 export type TwistType =
@@ -18,7 +19,7 @@ export type TwistType =
   | "diamondpistol";
 
 // ============================================================================
-// DEFINITIE STRUCTUUR (met Fase-2 extra properties)
+// DEFINITIE STRUCTUUR (Fase-2 eigenschappen)
 // ============================================================================
 
 export interface TwistDefinition {
@@ -32,11 +33,22 @@ export interface TwistDefinition {
   targeted: boolean;
   isOffensive: boolean;
 
+  /** Wordt effect tegengehouden door immune? */
   blockIfImmune?: boolean;
+
+  /** Markeer slachtoffer voor eliminatie aan einde van ronde */
   markForRoundEnd?: boolean;
+
+  /** Heal kan deze markering verwijderen */
   healEliminationMark?: boolean;
+
+  /** Directe eliminatie (DiamondPistol) */
   instantEliminate?: boolean;
+
+  /** Slechts één keer per ronde toegestaan? */
   onePerRound?: boolean;
+
+  /** Mag tijdens active/grace/beide? */
   allowedDuring?: "active" | "grace" | "both";
 }
 
@@ -63,7 +75,7 @@ export const TWIST_MAP: Record<TwistType, TwistDefinition> = {
   },
 
   // --------------------------------------------------------------------------
-  // MONEY GUN
+  // MONEYGUN
   // --------------------------------------------------------------------------
   moneygun: {
     giftId: 7168,
@@ -84,13 +96,13 @@ export const TWIST_MAP: Record<TwistType, TwistDefinition> = {
   },
 
   // --------------------------------------------------------------------------
-  // BOMB — UPDATED ALIASES
+  // BOMB — ALIASES GEÜPDATET
   // --------------------------------------------------------------------------
   bomb: {
     giftId: 16101,
     giftName: "Space Dog (Bomb)",
     diamonds: 2500,
-    aliases: ["bom", "bomb", "💣"], // <── UPDATE HIER
+    aliases: ["bom", "bomb", "💣"], // <── JOUW CHATCOMMANDOS
     description:
       "Bombardeert willekeurig een speler (immune wordt overgeslagen) en markeert voor eliminatie aan het einde van de ronde. Heal verwijdert deze markering.",
     requiresTarget: false,
@@ -105,7 +117,7 @@ export const TWIST_MAP: Record<TwistType, TwistDefinition> = {
   },
 
   // --------------------------------------------------------------------------
-  // IMMUNE
+  // IMMUNE — DEFENSE
   // --------------------------------------------------------------------------
   immune: {
     giftId: 14658,
@@ -122,7 +134,7 @@ export const TWIST_MAP: Record<TwistType, TwistDefinition> = {
   },
 
   // --------------------------------------------------------------------------
-  // HEAL
+  // HEAL — verwijdert MG/Bomb markeringen
   // --------------------------------------------------------------------------
   heal: {
     giftId: 14210,
@@ -140,7 +152,7 @@ export const TWIST_MAP: Record<TwistType, TwistDefinition> = {
   },
 
   // --------------------------------------------------------------------------
-  // DIAMOND PISTOL
+  // DIAMOND PISTOL — ONGEWIJZIGD
   // --------------------------------------------------------------------------
   diamondpistol: {
     giftId: 14768,
