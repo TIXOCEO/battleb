@@ -1,23 +1,22 @@
 // ============================================================================
-// 8-twist-engine.ts — Twist Engine v14.8 (MoneyGun/Bomb + Badges + Delay Build)
+// 8-twist-engine.ts — Twist Engine v15.0 (Galaxy Toggle + MoneyGun/Bomb/Heal)
 // ============================================================================
 //
-// ✔ Max 1 MoneyGun per target per ronde
-// ✔ Bomb → immune skip + already-marked skip
-// ✔ Bomb → 3s delay + countdown
-// ✔ MoneyGun voegt badge toe: p.boosters.push("mg")
-// ✔ Bomb voegt badge toe: p.boosters.push("bomb")
-// ✔ Heal verwijdert alleen MG/Bomb badges + eliminated-flag
-// ✔ Immune blijft 1 ronde geldig (reset in game-engine)
-// ✔ Overlay-calls blijven staan (geen errors)
-// ✔ Geen andere logica aangepast
+// ✔ Galaxy → reverseMode toggle (AAN/UIT)
+// ✔ Galaxy reset automatisch bij nieuwe ronde (via game-engine)
+// ✔ MoneyGun → badge + eliminated mark
+// ✔ Bomb → 3s delay + badge + skip immune
+// ✔ Heal → verwijdert MG/Bomb badges + eliminated mark
+// ✔ Immune blijft 1 ronde (reset in game-engine)
+// ✔ Geen onnodige wijzigingen
 // ============================================================================
 
 import { io, emitLog } from "../server";
 import {
   getArena,
   emitArena,
-  eliminate
+  eliminate,
+  toggleGalaxyMode   // <── nieuwe import, game-engine patch
 } from "./5-game-engine";
 
 import {
@@ -116,23 +115,25 @@ function emitOverlay(name: string, data: any) {
 // TWISTS
 // ============================================================================
 
-// GALAXY (ongewijzigd)
+// GALAXY — toggle reverseMode in game-engine
 async function applyGalaxy(sender: string) {
-  const arena = getArena();
+  // Toggle de reverseMode flag in de arena engine
+  const reversedNow = toggleGalaxyMode();
 
-  const sorted = [...arena.players].sort((a, b) =>
-    a.display_name.localeCompare(b.display_name)
-  );
-
-  arena.players.splice(0, arena.players.length, ...sorted);
-
-  emitOverlay("galaxy", { by: sender });
+  // Overlay event (kan je opvangen in overlay voor animatie)
+  emitOverlay("galaxy", {
+    by: sender,
+    reverse: reversedNow
+  });
 
   emitLog({
     type: "twist",
-    message: `${sender} gebruikte GALAXY!`
+    message: `${sender} gebruikte GALAXY → ranking nu ${
+      reversedNow ? "omgekeerd (laagste bovenaan)" : "normaal (hoogste bovenaan)"
+    }`
   });
 
+  // Recompute + broadcast nieuwe volgorde (op basis van reverseMode)
   await emitArena();
 }
 
@@ -315,7 +316,7 @@ async function applyHeal(sender: string, target: any) {
   });
 
   await emitArena();
-}
+    }
 
 // ============================================================================
 // DIAMOND PISTOL
@@ -393,14 +394,19 @@ export async function useTwist(
   switch (twist) {
     case "galaxy":
       return applyGalaxy(senderName);
+
     case "moneygun":
       return applyMoneyGun(senderName, target);
+
     case "bomb":
       return applyBomb(senderName);
+
     case "immune":
       return applyImmuneTwist(senderName, target);
+
     case "heal":
       return applyHeal(senderName, target);
+
     case "diamondpistol":
       return applyDiamondPistol(senderName, target);
   }
