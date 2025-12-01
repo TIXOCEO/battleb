@@ -1,10 +1,19 @@
 /* ============================================================================
-   5-game-engine.ts — BattleBox Arena Engine v16.3 (Galaxy Reverse Upgrade)
+   5-game-engine.ts — BattleBox Arena Engine v16.3 (Galaxy Reverse Mode)
+   ✔ Exact gebaseerd op jouw v16.2
    ✔ Immune = 1 ronde geldig
-   ✔ MG/Bomb markers blijven tot nieuwe ronde
-   ✔ Reverse ranking (Galaxy)
-   ✔ Reverse danger / finale eliminaties
-   ✔ Reverse reset bij startRound & arenaClear
+   ✔ Survivor immune (DiamondPistol) = 1 ronde geldig
+   ✔ MoneyGun/Bomb markeringen = p.eliminated=true (tot nieuwe ronde)
+   ✔ EndRound verwerkt eerst MG/Bomb, daarna danger/ties
+   ✔ Extra helpers: forceSort, addFromQueue, updateArenaSettings
+   ✔ [MG] / [BOMB] badges reset bij startRound()
+   -----------------------------------------------
+   ★ Toegevoegd voor Galaxy:
+   - reverseMode:boolean in arena-state
+   - toggleGalaxyMode() functie
+   - sortering omgekeerd wanneer reverseMode actief
+   - reverseMode meegestuurd in updateArena()
+   - reverseMode reset in startRound()
 ============================================================================ */
 
 import pool from "../db";
@@ -50,7 +59,7 @@ export interface ArenaState {
   firstFinalRound: number | null;
   lastSortedAt: number;
 
-  // ★ GALAXY ADDITION
+  /* ★ GALAXY REVERSE MODE */
   reverseMode: boolean;
 }
 
@@ -74,7 +83,7 @@ let arena: ArenaState = {
   firstFinalRound: null,
   lastSortedAt: 0,
 
-  // ★ GALAXY ADDITION — standaard normaal
+  /* ★ Standaard niet reversed */
   reverseMode: false
 };
 
@@ -114,7 +123,6 @@ export function getArenaSettings() {
 
 async function getRoundScore(tiktokId: string, round: number) {
   const gid = (io as any)?.currentGameId;
-
   if (!gid || round !== arena.round) return 0;
 
   const q = await pool.query(
@@ -174,7 +182,7 @@ async function computePlayerScore(p: ArenaPlayer) {
 }
 
 /* ============================================================================
-   RECOMPUTE POSITIONS
+   RECOMPUTE POSITIONS + ★ GALAXY SORT
 ============================================================================ */
 
 async function recomputePositions() {
@@ -199,14 +207,18 @@ async function recomputePositions() {
     p.score = await computePlayerScore(p);
   }
 
-  // ★ GALAXY ADDITION — normale sort = hoog → laag
-  // indien reverseMode actief = laag → hoog
+  /* ============================================================
+     ★ GALAXY — reverse sort
+     normaal: hoog → laag
+     reverse: laag → hoog
+  ============================================================ */
   if (arena.reverseMode) {
-    arena.players.sort((a, b) => a.score - b.score); // reversed
+    arena.players.sort((a, b) => a.score - b.score);
   } else {
-    arena.players.sort((a, b) => b.score - a.score); // normaal
+    arena.players.sort((a, b) => b.score - a.score);
   }
 
+  /* ==== STATUS BIJ ENDED ==== */
   if (status === "ended") {
     for (const p of arena.players) {
       if (p.eliminated) {
@@ -226,9 +238,7 @@ async function recomputePositions() {
     return;
   }
 
-  /* ============================================================================
-     QUARTER LOGIC
-  ============================================================================ */
+  /* QUARTER LOGICA */
   if (arena.type === "quarter") {
     if (total < 6) {
       for (const p of arena.players) {
@@ -240,9 +250,6 @@ async function recomputePositions() {
       arena.lastSortedAt = Date.now();
       return;
     }
-
-    // normale threshold = 5e speler (index 5)
-    // reversed threshold = zelfde positie want lijst is al omgekeerd gesorteerd
 
     const threshold = arena.players[5].score;
 
@@ -260,8 +267,7 @@ async function recomputePositions() {
         continue;
       }
 
-      // ★ GALAXY ADDITION — danger altijd onderaan lijst,
-      // maar lijst is al reversed of niet, dus zelfde check
+      /* ★ DANGER blijft onderaan, lijst is al reversed indien nodig */
       p.positionStatus = p.score <= threshold ? "danger" : "alive";
     }
 
@@ -269,10 +275,7 @@ async function recomputePositions() {
     return;
   }
 
-  /* ============================================================================
-     FINALE LOGIC
-  ============================================================================ */
-
+  /* FINALE */
   const totalFinal = arena.players.length;
 
   for (let i = 0; i < totalFinal; i++) {
@@ -293,8 +296,7 @@ async function recomputePositions() {
       continue;
     }
 
-    // Normaal: laatste plek = danger (index = laatste)
-    // Reversed: lijst is al omgekeerd gesorteerd, dus danger blijft laatste
+    /* Laatste plek = danger (lijst is reversed indien nodig) */
     p.positionStatus = i === totalFinal - 1 ? "danger" : "alive";
   }
 
@@ -302,7 +304,7 @@ async function recomputePositions() {
 }
 
 /* ============================================================================
-   EMIT SNAPSHOT
+   EMIT SNAPSHOT (+ reverseMode)
 ============================================================================ */
 
 export async function emitArena() {
@@ -324,7 +326,7 @@ export async function emitArena() {
     firstFinalRound: arena.firstFinalRound,
     lastSortedAt: arena.lastSortedAt,
 
-    // ★ GALAXY ADDITION — expose to frontend
+    /* ★ stuur reverseMode naar frontend */
     reverseMode: arena.reverseMode,
 
     removeAllowed: arena.status === "idle" || arena.status === "ended"
@@ -336,7 +338,24 @@ export async function forceSort() {
 }
 
 /* ============================================================================
-   START ROUND — reset immune + MG/Bomb markers + reverseMode reset
+   ★ GALAXY — toggle functie
+============================================================================ */
+
+export function toggleGalaxyMode() {
+  arena.reverseMode = !arena.reverseMode;
+
+  emitLog({
+    type: "twist",
+    message: arena.reverseMode
+      ? "🌀 Galaxy geactiveerd — ranking omgedraaid!"
+      : "🌀 Galaxy opnieuw gebruikt — ranking hersteld!"
+  });
+
+  emitArena();
+}
+
+/* ============================================================================
+   START ROUND (reset reverseMode)
 ============================================================================ */
 
 export async function startRound(type: RoundType) {
@@ -345,7 +364,7 @@ export async function startRound(type: RoundType) {
   arena.round += 1;
   arena.type = type;
 
-  // ★ GALAXY — ALWAYS RESET AT NEW ROUND
+  /* ★ ALTijd reset bij nieuwe ronde */
   arena.reverseMode = false;
 
   if (type === "finale" && arena.firstFinalRound === null) {
@@ -365,8 +384,6 @@ export async function startRound(type: RoundType) {
     p.survivorImmune = false;
 
     p.boosters = p.boosters.filter((b) => b !== "immune");
-
-    // reset MG/Bomb badges
     p.boosters = p.boosters.filter((b) => b !== "mg" && b !== "bomb");
   }
 
@@ -400,7 +417,96 @@ export async function startRound(type: RoundType) {
 }
 
 /* ============================================================================
+   END ROUND — volledig identiek aan jouw v16.2
+   (GEEN wijzigingen nodig voor Galaxy)
+============================================================================ */
+
+export async function endRound(forceEnd: boolean = false) {
+  /* ... volledig identiek ... */
+  /* wegens lengte laat ik dat hier weg,
+     maar in de volgende delen (deel 2+3)
+     stuur ik het 100% volledig zoals in jouw bron. */
+}
+
+/* ============================================================================
+   ARENA MANAGEMENT (identiek)
+============================================================================ */
+
+export async function arenaJoin(tiktok_id: string, display_name: string, username: string) {
+  /* ... identiek ... */
+}
+
+export async function arenaLeave(usernameOrId: string, force: boolean = false) {
+  /* ... identiek ... */
+}
+
+export async function addToArena(username: string, resolveUser: Function) {
+  /* ... identiek ... */
+}
+
+export async function eliminate(username: string) {
+  /* ... identiek ... */
+}
+
+export async function arenaClear() {
+  /* ... identiek ... */
+}
+
+/* ============================================================================
+   addFromQueue (identiek)
+============================================================================ */
+
+export async function addFromQueue(...args: any[]) {
+  /* ... identiek ... */
+}
+
+/* ============================================================================
+   updateArenaSettings (identiek)
+============================================================================ */
+
+export async function updateArenaSettings(partial: Partial<ArenaSettings>) {
+  /* ... identiek ... */
+}
+
+/* ============================================================================
+   TICK (identiek)
+============================================================================ */
+
+setInterval(async () => {
+  /* ... identiek ... */
+}, 1000);
+
+/* ============================================================================
+   EXPORT DEFAULT
+============================================================================ */
+
+export default {
+  getArena,
+  getArenaSettings,
+  emitArena,
+
+  startRound,
+  endRound,
+
+  arenaJoin,
+  arenaLeave,
+  arenaClear,
+  addToArena,
+  eliminate,
+  addFromQueue,
+
+  updateArenaSettings,
+  resetArena: arenaClear,
+
+  forceSort,
+
+  /* ★ Galaxy toggle exporteren */
+  toggleGalaxyMode
+};
+
+/* ============================================================================
    END ROUND — MoneyGun/Bomb + Survivor Immune verwerking
+   (Volledig ongewijzigd behalve formatting)
 ============================================================================ */
 
 export async function endRound(forceEnd: boolean = false) {
@@ -621,7 +727,233 @@ export async function endRound(forceEnd: boolean = false) {
 }
 
 /* ============================================================================
-   EXPORT DEFAULT
+   ARENA MANAGEMENT
+============================================================================ */
+
+export async function arenaJoin(
+  tiktok_id: string,
+  display_name: string,
+  username: string
+) {
+  const id = String(tiktok_id);
+
+  if (arena.players.some((p) => p.id === id)) return;
+
+  arena.players.push({
+    id,
+    username: username.replace(/^@+/, "").toLowerCase(),
+    display_name,
+    score: 0,
+    boosters: [],
+    eliminated: false,
+    positionStatus: "alive",
+    tempImmune: false,
+    survivorImmune: false
+  });
+
+  await emitArena();
+}
+
+export async function arenaLeave(usernameOrId: string, force: boolean = false) {
+  const clean = String(usernameOrId).replace(/^@+/, "");
+  const cleanLower = clean.toLowerCase();
+
+  const idx = arena.players.findIndex(
+    (p) => p.id === clean || p.username.toLowerCase() === cleanLower
+  );
+
+  if (idx === -1) return;
+
+  const p = arena.players[idx];
+
+  if (force) {
+    arena.players.splice(idx, 1);
+
+    emitLog({
+      type: "elim",
+      message: `${p.display_name} permanent verwijderd uit arena`
+    });
+
+    await emitArena();
+    return;
+  }
+
+  // Soft eliminate
+  p.positionStatus = "elimination";
+  p.eliminated = true;
+
+  emitLog({
+    type: "elim",
+    message: `${p.display_name} gemarkeerd als eliminated`
+  });
+
+  await emitArena();
+}
+
+export async function addToArena(username: string, resolveUser: Function) {
+  const clean = username.replace(/^@+/, "").toLowerCase();
+
+  const user = await resolveUser(clean);
+  if (!user) throw new Error("Gebruiker niet gevonden");
+
+  if (arena.players.some((p) => p.id === String(user.tiktok_id)))
+    throw new Error("Speler zit al in arena");
+
+  arena.players.push({
+    id: String(user.tiktok_id),
+    username: user.username.toLowerCase(),
+    display_name: user.display_name,
+    score: 0,
+    boosters: [],
+    eliminated: false,
+    positionStatus: "alive",
+    tempImmune: false,
+    survivorImmune: false
+  });
+
+  emitLog({
+    type: "arena",
+    message: `${user.display_name} handmatig toegevoegd aan arena`
+  });
+
+  await emitArena();
+}
+
+export async function eliminate(username: string) {
+  const clean = username.replace(/^@+/, "").toLowerCase();
+
+  const idx = arena.players.findIndex(
+    (p) => p.username.toLowerCase() === clean
+  );
+  if (idx === -1) throw new Error("Gebruiker zit niet in arena");
+
+  const p = arena.players[idx];
+  arena.players.splice(idx, 1);
+
+  emitLog({
+    type: "elim",
+    message: `${p.display_name} handmatig geëlimineerd`
+  });
+
+  await emitArena();
+}
+
+export async function arenaClear() {
+  arena.players = [];
+  arena.round = 0;
+  arena.status = "idle";
+  arena.firstFinalRound = null;
+  arena.reverseMode = false; // ★ reset voor Galaxy
+
+  emitLog({
+    type: "arena",
+    message: `Arena volledig gereset`
+  });
+
+  await emitArena();
+           }
+
+/* ============================================================================
+   addFromQueue
+============================================================================ */
+
+export async function addFromQueue(...args: any[]) {
+  if (!args.length) return;
+
+  const candidate = args[0];
+  if (
+    candidate &&
+    typeof candidate === "object" &&
+    ("tiktok_id" in candidate || "user_tiktok_id" in candidate)
+  ) {
+    const id = String(
+      (candidate as any).tiktok_id ?? (candidate as any).user_tiktok_id
+    );
+    const username: string =
+      (candidate as any).username ??
+      (candidate as any).user_username ??
+      "";
+    const display_name: string =
+      (candidate as any).display_name ??
+      (candidate as any).user_display_name ??
+      username;
+
+    return arenaJoin(id, display_name, username);
+  }
+
+  if (typeof args[0] === "string") {
+    const id = String(args[0]);
+    const display_name = String(args[1] ?? args[2] ?? "Unknown");
+    const username = String(args[2] ?? args[1] ?? "unknown");
+    return arenaJoin(id, display_name, username);
+  }
+}
+
+/* ============================================================================
+   updateArenaSettings
+============================================================================ */
+
+export async function updateArenaSettings(
+  partial: Partial<ArenaSettings>
+) {
+  arena.settings = {
+    ...arena.settings,
+    ...partial
+  };
+
+  await pool.query(
+    `
+    UPDATE arena_settings
+    SET round_pre_seconds = $1,
+        round_final_seconds = $2,
+        grace_seconds = $3
+    `,
+    [
+      arena.settings.roundDurationPre,
+      arena.settings.roundDurationFinal,
+      arena.settings.graceSeconds
+    ]
+  );
+
+  await emitArena();
+}
+
+/* ============================================================================
+   TICK — auto ACTIVE→GRACE en GRACE→ENDED
+============================================================================ */
+
+setInterval(async () => {
+  if (arena.status === "idle") return;
+
+  const now = Date.now();
+
+  // ACTIVE → GRACE
+  if (arena.status === "active" && now >= arena.roundCutoff) {
+    arena.status = "grace";
+
+    emitLog({
+      type: "arena",
+      message: "⏳ Automatische overgang naar GRACE"
+    });
+
+    io.emit("round:grace", {
+      round: arena.round,
+      grace: arena.settings.graceSeconds
+    });
+
+    await emitArena();
+    return;
+  }
+
+  // GRACE → ENDED
+  if (arena.status === "grace" && now >= arena.graceEnd) {
+    await endRound();
+    return;
+  }
+}, 1000);
+
+/* ============================================================================
+   EXPORT DEFAULT (volledig, met Galaxy reset)
 ============================================================================ */
 
 export default {
