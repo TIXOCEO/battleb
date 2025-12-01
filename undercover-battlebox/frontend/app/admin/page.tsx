@@ -142,7 +142,7 @@ export default function AdminDashboardPage() {
     };
   }, []);
 
-  /* ============================================
+/* ============================================
      INITIAL SNAPSHOT
   ============================================ */
   useEffect(() => {
@@ -175,7 +175,6 @@ export default function AdminDashboardPage() {
     const t = setInterval(() => {
       setArena((a) => (a ? { ...a } : a));
     }, 1000);
-
     return () => clearInterval(t);
   }, []);
 
@@ -311,11 +310,13 @@ export default function AdminDashboardPage() {
     }
   };
 
-/* ============================================
+  /* ============================================
      UI
   ============================================ */
+
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
+
       {/* HEADER */}
       <header className="mb-6 relative">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-2">
@@ -355,18 +356,12 @@ export default function AdminDashboardPage() {
             <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold">
               {arena.status === "active" &&
                 formatTime(
-                  Math.max(
-                    0,
-                    Math.floor((arena.roundCutoff - Date.now()) / 1000)
-                  )
+                  Math.max(0, Math.floor((arena.roundCutoff - Date.now()) / 1000))
                 )}
 
               {arena.status === "grace" &&
                 formatTime(
-                  Math.max(
-                    0,
-                    Math.floor((arena.graceEnd - Date.now()) / 1000)
-                  )
+                  Math.max(0, Math.floor((arena.graceEnd - Date.now()) / 1000))
                 )}
 
               {arena.status === "ended" && "00:00"}
@@ -381,7 +376,6 @@ export default function AdminDashboardPage() {
       <section className="bg-white rounded-2xl shadow p-4 mb-6">
         <h2 className="text-sm font-semibold mb-3">Spelbesturing</h2>
 
-        {/* START/STOP SPEL */}
         <div className="flex flex-wrap gap-2 mb-4">
           <button
             onClick={() => emitAdmin("startGame")}
@@ -408,7 +402,6 @@ export default function AdminDashboardPage() {
           </button>
         </div>
 
-        {/* RONDE-KNOPPEN */}
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => emitAdmin("startRound", { type: "quarter" })}
@@ -487,7 +480,7 @@ export default function AdminDashboardPage() {
             </div>
           </div>
 
-          {/* ACTIONS */}
+          {/* ACTION BUTTONS */}
           <div className="flex gap-2 text-xs flex-wrap">
             <button
               onClick={() => emitAdmin("addToArena", { username })}
@@ -533,10 +526,11 @@ export default function AdminDashboardPage() {
         </div>
 
         {/* =====================
-            ARENA CARDS
+            ARENA CARD GRID
         ===================== */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Arena</h2>
+
           <p className="text-sm text-gray-500 mb-4">
             {arena
               ? `Ronde #${arena.round} • ${arena.type} • ${arena.status}`
@@ -552,14 +546,12 @@ export default function AdminDashboardPage() {
                     p
                   )}`}
                 >
-
-                  {/* DELETE KNOP */}
+                  {/* DELETE BUTTON */}
                   <button
                     onClick={() => {
-                      const raw = p.username || "";
-                      const formatted = raw.startsWith("@")
-                        ? raw
-                        : `@${raw}`;
+                      const formatted = p.username.startsWith("@")
+                        ? p.username
+                        : `@${p.username}`;
 
                       openConfirm({
                         message: `Weet je zeker dat je ${formatted} permanent uit de arena wilt verwijderen?`,
@@ -588,7 +580,7 @@ export default function AdminDashboardPage() {
                     ✕
                   </button>
 
-                  {/* POS + STATUS */}
+                  {/* POSITION + STATUS */}
                   <div className="flex justify-between items-center">
                     <span className="font-bold">#{idx + 1}</span>
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-300 text-gray-700">
@@ -596,19 +588,18 @@ export default function AdminDashboardPage() {
                     </span>
                   </div>
 
-                  {/* NAAM */}
+                  {/* PLAYER NAME */}
                   <div className="font-semibold truncate">
                     {p.display_name} (@{p.username})
                   </div>
 
-                  {/* BADGES — MG / BOMB */}
+                  {/* BADGES MG + BOMB */}
                   <div className="flex gap-1 mt-1 flex-wrap">
                     {p.boosters?.includes("mg") && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-pink-200 text-pink-800 border border-pink-300">
                         MG
                       </span>
                     )}
-
                     {p.boosters?.includes("bomb") && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-200 text-red-800 border border-red-300">
                         BOMB
@@ -621,16 +612,16 @@ export default function AdminDashboardPage() {
                     Score: {fmt(p.score)} 💎
                   </div>
 
-                  {/* ELIMINATE BUTTON */}
+                  {/* ELIMINATION ACTION */}
                   {p.positionStatus === "elimination" && (
                     <button
                       onClick={() => {
-                        const raw = p.username || "";
-                        const formatted = raw.startsWith("@")
-                          ? raw
-                          : `@${raw}`;
+                        const formatted = p.username.startsWith("@")
+                          ? p.username
+                          : `@${p.username}`;
+
                         openConfirm({
-                          message: `Speler ${formatted} staat op elimination. Permanent uit de arena verwijderen?`,
+                          message: `Speler ${formatted} staat op elimination. Permanent verwijderen?`,
                           onConfirm: () => {
                             const socket = getAdminSocket();
                             setStatus(
@@ -676,6 +667,7 @@ export default function AdminDashboardPage() {
         ===================== */}
         <div className="bg-white rounded-2xl shadow p-4">
           <h2 className="text-xl font-semibold mb-2">Wachtrij</h2>
+
           <p className="text-sm text-gray-500 mb-3">
             {queue.length} speler{queue.length !== 1 && "s"} • Queue:{" "}
             <span
@@ -700,20 +692,17 @@ export default function AdminDashboardPage() {
                     {q.display_name} (@{q.username})
                   </div>
 
-                  {/* BADGES */}
                   <div className="flex flex-wrap gap-1 mt-1">
                     {q.is_vip && (
                       <span className="px-2 py-0.5 text-[10px] rounded-full bg-yellow-200 text-yellow-900 border border-yellow-400">
                         VIP
                       </span>
                     )}
-
                     {q.is_fan && !q.is_vip && (
                       <span className="px-2 py-0.5 text-[10px] rounded-full bg-blue-100 text-blue-700 border-blue-300">
                         Fan
                       </span>
                     )}
-
                     {q.priorityDelta > 0 && (
                       <span className="px-2 py-0.5 text-[10px] rounded-full bg-purple-100 text-purple-700 border-purple-300">
                         Boost +{q.priorityDelta}
@@ -726,7 +715,6 @@ export default function AdminDashboardPage() {
                   </div>
                 </div>
 
-                {/* BUTTONS RIGHT */}
                 <div className="flex flex-col sm:flex-row gap-1 mt-2 sm:mt-0 justify-end sm:items-center">
                   <div className="flex gap-1 mr-1">
                     <button
@@ -759,9 +747,7 @@ export default function AdminDashboardPage() {
 
                   <button
                     onClick={() =>
-                      emitAdmin("removeFromQueue", {
-                        username: q.username,
-                      })
+                      emitAdmin("removeFromQueue", { username: q.username })
                     }
                     className="px-2 py-1 rounded-full border border-red-300 text-red-700 bg-red-50"
                   >
@@ -817,7 +803,7 @@ export default function AdminDashboardPage() {
             </div>
           </div>
 
-          {/* PLAYER LEADERBOARD */}
+          {/* PLAYERS LB */}
           {activeLbTab === "players" && (
             <div className="p-4 max-h-96 overflow-y-auto text-sm">
               <h2 className="text-xl font-semibold mb-2">Player Leaderboard</h2>
@@ -865,10 +851,12 @@ export default function AdminDashboardPage() {
             </div>
           )}
 
-          {/* GIFTER LEADERBOARD */}
+          {/* GIFTERS LB */}
           {activeLbTab === "gifters" && (
             <div className="p-4 max-h-96 overflow-y-auto text-sm">
-              <h2 className="text-xl font-semibold mb-2">Gifter Leaderboard</hh2>
+              <h2 className="text-xl font-semibold mb-2">
+                Gifter Leaderboard
+              </h2>
               <p className="text-xs text-gray-500 mb-3">
                 Diamanten verstuurd in deze stream
               </p>
@@ -1175,4 +1163,4 @@ export default function AdminDashboardPage() {
       )}
     </main>
   );
-            }
+              }
