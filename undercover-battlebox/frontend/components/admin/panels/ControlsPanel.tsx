@@ -35,7 +35,6 @@ export default function ControlsPanel({
       <SectionHeader title="Spelbesturing" />
 
       <div className="flex flex-wrap gap-3 mb-4">
-        {/* ===== START GAME ===== */}
         <Button
           variant="success"
           disabled={gameSession.active}
@@ -44,7 +43,6 @@ export default function ControlsPanel({
           Start spel
         </Button>
 
-        {/* ===== STOP GAME ===== */}
         <Button
           variant="warning"
           disabled={!gameSession.active}
@@ -55,7 +53,6 @@ export default function ControlsPanel({
       </div>
 
       <div className="flex flex-wrap gap-3">
-        {/* ===== ROUND: VOORRONDE ===== */}
         <Button
           variant="danger"
           disabled={!canStartRound}
@@ -64,16 +61,14 @@ export default function ControlsPanel({
           Start voorronde
         </Button>
 
-        {/* ===== ROUND: FINALE ===== */}
         <Button
-          variant="purple"
+          variant="danger"
           disabled={!canStartRound}
           onClick={() => emitAdmin("startRound", { type: "finale" })}
         >
           Start finale
         </Button>
 
-        {/* ===== STOP ROUND ===== */}
         <Button
           variant="dark"
           disabled={!canStopRound}
