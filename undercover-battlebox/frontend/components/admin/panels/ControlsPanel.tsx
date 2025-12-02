@@ -34,6 +34,7 @@ export default function ControlsPanel({
     <Panel>
       <SectionHeader title="Spelbesturing" />
 
+      {/* GAME START / STOP */}
       <div className="flex flex-wrap gap-3 mb-4">
         <Button
           variant="success"
@@ -52,6 +53,7 @@ export default function ControlsPanel({
         </Button>
       </div>
 
+      {/* RONDE CONTROLS */}
       <div className="flex flex-wrap gap-3">
         <Button
           variant="danger"
@@ -62,7 +64,7 @@ export default function ControlsPanel({
         </Button>
 
         <Button
-          variant="danger"
+          variant="info"   // jouw paars variant
           disabled={!canStartRound}
           onClick={() => emitAdmin("startRound", { type: "finale" })}
         >
@@ -70,7 +72,7 @@ export default function ControlsPanel({
         </Button>
 
         <Button
-          variant="dark"
+          variant="default"
           disabled={!canStopRound}
           onClick={() => emitAdmin("endRound")}
         >
