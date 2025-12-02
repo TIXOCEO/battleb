@@ -1,11 +1,11 @@
 // ============================================================================
-// twist-definitions.ts — v4.3 (Breaker Patch + Full Compatibility Build)
+// twist-definitions.ts — v4.4 (DiamondPistol Mark-Only Patch + Breaker Support)
 // ----------------------------------------------------------------------------
 // ✔ MoneyGun mark-model velden
 // ✔ Bomb mark-model velden
 // ✔ Heal verwijdert MG/Bomb markeringen
-// ✔ DiamondPistol ongewijzigd
-// ✔ NIEUW: BREAKER twist toegevoegd
+// ✔ DiamondPistol → MARK ONLY (NIET direct elimineren)
+// ✔ BREAKER twist volledig geïntegreerd
 // ✔ 100% compatibel met twist-engine v15.2 + game-engine v16.4
 // ============================================================================
 
@@ -16,7 +16,7 @@ export type TwistType =
   | "immune"
   | "heal"
   | "diamondpistol"
-  | "breaker";            // <── ★ NIEUW
+  | "breaker";
 
 // ============================================================================
 // DEFINITIE STRUCTUUR
@@ -123,7 +123,7 @@ export const TWIST_MAP: Record<TwistType, TwistDefinition> = {
   },
 
   // --------------------------------------------------------------------------
-  // HEAL — verwijdert MG/Bomb markeringen
+  // HEAL
   // --------------------------------------------------------------------------
   heal: {
     giftId: 14210,
@@ -141,7 +141,7 @@ export const TWIST_MAP: Record<TwistType, TwistDefinition> = {
   },
 
   // --------------------------------------------------------------------------
-  // DIAMOND PISTOL
+  // DIAMOND PISTOL — MARK ONLY (BELANGRIJKE FIX)
   // --------------------------------------------------------------------------
   diamondpistol: {
     giftId: 14768,
@@ -149,12 +149,16 @@ export const TWIST_MAP: Record<TwistType, TwistDefinition> = {
     diamonds: 5000,
     aliases: ["pistol", "dp", "diamondgun", "diamondpistol"],
     description:
-      "Gekozen speler overleeft, wordt immune; alle anderen worden geëlimineerd. Slechts één keer per ronde.",
+      "Gekozen speler overleeft, wordt immune; alle anderen worden gemarkeerd voor end-round eliminatie. Slechts één keer per ronde.",
+
     requiresTarget: true,
     targeted: true,
     isOffensive: true,
 
-    instantEliminate: true,
+    // 🔥 CORE FIX:
+    instantEliminate: false,   // <── NIET meer instant elimineren
+    markForRoundEnd: true,     // <── markeren zoals MG/Bomb
+
     blockIfImmune: false,
     healEliminationMark: false,
     onePerRound: true,
@@ -162,25 +166,25 @@ export const TWIST_MAP: Record<TwistType, TwistDefinition> = {
   },
 
   // --------------------------------------------------------------------------
-  // ★★★★★ BREAKER — NIEUW ★★★★★
+  // BREAKER
   // --------------------------------------------------------------------------
   breaker: {
-    giftId: 5978,       // Train gift
+    giftId: 5978,
     giftName: "Breaker",
     diamonds: 899,
     aliases: ["breaker", "break", "train"],
     description:
-      "Breekt immuniteit in 2 stappen. 1× = cracked shield, 2× = immuniteit volledig weg.",
+      "Breekt immuniteit in 2 stappen. 1× = cracked, 2× = immune weg.",
+
     requiresTarget: true,
     targeted: true,
     isOffensive: true,
 
-    // Belangrijk:
-    blockIfImmune: false,       // immune moet NIET blokkeren
-    markForRoundEnd: false,     // geen MG/Bomb markering
-    healEliminationMark: false, // Heal doet niets
+    blockIfImmune: false,
+    markForRoundEnd: false,
+    healEliminationMark: false,
     instantEliminate: false,
-    onePerRound: false,         // mag vaker (verschillende gifters)
+    onePerRound: false,
     allowedDuring: "both",
   },
 };
