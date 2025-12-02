@@ -1,9 +1,8 @@
-/* ---------------------------------------------------------
-   TICKER PANEL (1200×100)
-   --------------------------------------------------------- */
+/* PANEL */
 .bb-ticker {
   width: 1200px;
   height: 100px;
+
   background:
     linear-gradient(to right, rgba(255,77,79,0.2), rgba(0,0,0,0.45), rgba(255,77,79,0.2)),
     var(--glass-dark);
@@ -15,11 +14,11 @@
   box-shadow:
     0 0 35px rgba(255,77,79,0.55),
     0 0 45px rgba(255,77,79,0.35) inset;
+
+  animation: panelPowerOn 0.7s ease-out forwards;
 }
 
-/* ---------------------------------------------------------
-   MARQUEE TEXT
-   --------------------------------------------------------- */
+/* SCROLLING TEXT */
 .bb-ticker-inner {
   white-space: nowrap;
   font-size: 28px;
@@ -29,12 +28,20 @@
   font-weight: 700;
   color: white;
   letter-spacing: 1.1px;
+
   text-shadow:
     0 0 8px rgba(255,77,79,0.75),
     0 0 18px rgba(255,77,79,0.55);
+
+  animation: marquee 18s linear infinite, pulse 3s ease-in-out infinite;
 }
 
 @keyframes marquee {
   0% { transform: translateX(0); }
   100% { transform: translateX(-220%); }
+}
+
+@keyframes pulse {
+  0%,100% { opacity: 1; }
+  50% { opacity: 0.85; }
 }
