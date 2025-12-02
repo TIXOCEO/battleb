@@ -4,12 +4,12 @@ import React, { useEffect, useMemo, useState, useRef } from "react";
 import { getAdminSocket } from "@/lib/socketClient";
 import clsx from "clsx";
 
-import {
-  Panel,
-  PanelHeader,
-  PanelBody,
-  PanelSectionTitle,
-} from "@/components/admin/ui/Panel";
+import Panel from "@/components/admin/ui/Panel";
+import SectionHeader from "@/components/admin/ui/SectionHeader";
+import Button from "@/components/admin/ui/Button";
+import Input from "@/components/admin/ui/Input";
+import Label from "@/components/admin/ui/Label";
+import Badge from "@/components/admin/ui/Badge";
 
 import type {
   ArenaState,
