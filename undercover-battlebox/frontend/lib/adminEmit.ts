@@ -1,34 +1,35 @@
-"use client";
-
 import { getAdminSocket } from "@/lib/socketClient";
-import type { AdminAckResponse } from "@/lib/adminTypes";
+import type { AdminAckResponse, AdminSocketOutbound } from "@/lib/adminTypes";
 
 /**
- * Standaard emitter voor admin-events die een ACK teruggeven.
- * Panels gebruiken ALTIJD deze functie.
+ * Universele admin emitters
+ * Gebruikt door panels die niet de hook willen importeren.
  */
-export function emitAdmin(
-  event: string,
-  payload: any = {},
+
+export function emitAdmin<E extends keyof AdminSocketOutbound>(
+  event: E,
+  payload: Parameters<AdminSocketOutbound[E]>[0],
   setStatus?: (msg: string) => void
 ) {
   const socket = getAdminSocket();
 
   if (setStatus) setStatus(`Bezig met ${event}...`);
 
-  socket.emit(event, payload, (res: AdminAckResponse) => {
-    if (!setStatus) return;
+  // Overload fix voor socket.io
+  (socket as any).emit(
+    event,
+    payload,
+    (res: AdminAckResponse) => {
+      if (!setStatus) return;
 
-    if (res?.success) setStatus("✅ Uitgevoerd");
-    else setStatus(`❌ ${res?.message ?? "Onbekende fout"}`);
-  });
+      if (res?.success) setStatus("✅ Uitgevoerd");
+      else setStatus(`❌ ${res?.message ?? "Onbekende fout"}`);
+    }
+  );
 }
 
-/**
- * Voor events die username bevatten.
- */
-export function emitAdminUser(
-  event: string,
+export function emitAdminUser<E extends keyof AdminSocketOutbound>(
+  event: E,
   username: string,
   setStatus?: (msg: string) => void
 ) {
@@ -39,18 +40,14 @@ export function emitAdminUser(
 
   if (setStatus) setStatus(`Bezig met ${event}...`);
 
-  socket.emit(event, { username: formatted }, (res: AdminAckResponse) => {
-    if (!setStatus) return;
+  (socket as any).emit(
+    event,
+    { username: formatted } as Parameters<AdminSocketOutbound[E]>[0],
+    (res: AdminAckResponse) => {
+      if (!setStatus) return;
 
-    if (res?.success) setStatus("✅ Uitgevoerd");
-    else setStatus(`❌ ${res?.message ?? "Onbekende fout"}`);
-  });
-}
-
-/**
- * Voor custom emit zonder ACK, wanneer UI geen feedback hoeft.
- */
-export function emitSilent(event: string, payload: any = {}) {
-  const socket = getAdminSocket();
-  socket.emit(event, payload);
+      if (res?.success) setStatus("✅ Uitgevoerd");
+      else setStatus(`❌ ${res?.message ?? "Onbekende fout"}`);
+    }
+  );
 }
