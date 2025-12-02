@@ -2,82 +2,67 @@
 
 import React from "react";
 import Panel from "@/components/admin/ui/Panel";
-import SectionHeader from "@/components/admin/ui/SectionHeader";
 import Button from "@/components/admin/ui/Button";
+import SectionHeader from "@/components/admin/ui/SectionHeader";
 
 export default function ControlsPanel({
   gameSession,
-  arenaStatus,
-  canStartRound,
-  canStopRound,
-  canGraceEnd,
+  arena,
   emitAdmin,
-}: {
-  gameSession: any;
-  arenaStatus: string;
-  canStartRound: boolean;
-  canStopRound: boolean;
-  canGraceEnd: boolean;
-  emitAdmin: (event: string, payload?: any) => void;
 }) {
+  const arenaStatus = arena?.status ?? "idle";
+
+  const canStartRound =
+    !!arena && (arenaStatus === "idle" || arenaStatus === "ended");
+
+  const canStopRound = arenaStatus === "active";
+  const canGraceEnd = arenaStatus === "grace";
+
   return (
     <Panel>
-      <SectionHeader title="Spelbesturing" subtitle="Main controls" />
+      <SectionHeader title="Spelbesturing" />
 
-      {/* STATUS BADGE */}
-      <div className="mb-4">
-        {gameSession.active ? (
-          <div className="text-sm text-green-400 font-semibold">
-            Spel actief #{gameSession.gameId}
-          </div>
-        ) : (
-          <div className="text-sm text-slate-400">Geen spel actief</div>
-        )}
-      </div>
-
-      {/* GAME */}
-      <div className="flex flex-wrap gap-2 mb-6">
+      <div className="flex flex-wrap gap-3 mb-4">
+        {/* ===== GAME START/STOP ===== */}
         <Button
-          variant="success"
-          disabled={gameSession.active}
+          variant={gameSession.active ? "disabled" : "success"}
           onClick={() => emitAdmin("startGame")}
+          disabled={gameSession.active}
         >
-          ▶ Start spel
+          Start spel
         </Button>
 
         <Button
-          variant="warning"
-          disabled={!gameSession.active}
+          variant={!gameSession.active ? "disabled" : "warning"}
           onClick={() => emitAdmin("stopGame")}
+          disabled={!gameSession.active}
         >
-          ⏹ Stop spel
+          Stop spel
         </Button>
       </div>
 
-      {/* ROUNDS */}
-      <SectionHeader title="Ronde acties" />
-
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-3">
+        {/* ===== ROUND CONTROLS ===== */}
         <Button
-          variant="danger"
-          disabled={!canStartRound}
+          variant={canStartRound ? "danger" : "disabled"}
           onClick={() => emitAdmin("startRound", { type: "quarter" })}
+          disabled={!canStartRound}
         >
           Start voorronde
         </Button>
 
         <Button
-          variant="info"
-          disabled={!canStartRound}
+          variant={canStartRound ? "purple" : "disabled"}
           onClick={() => emitAdmin("startRound", { type: "finale" })}
+          disabled={!canStartRound}
         >
           Start finale
         </Button>
 
         <Button
-          variant="ghost"
-          disabled={!canStopRound}
+          variant={canStopRound ? "dark" : "disabled"}
           onClick={() => emitAdmin("endRound")}
+          disabled={!canStopRound}
         >
           Stop ronde
         </Button>
