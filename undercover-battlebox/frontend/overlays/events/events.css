@@ -1,1 +1,71 @@
+.bb-events-panel {
+  width: 250px;
+  height: 700px;
+  background: var(--glass-bg);
+  border: 2px solid rgba(255,255,255,0.12);
+  box-shadow:
+    0 0 20px rgba(255,77,79,0.45),
+    0 0 30px rgba(255,77,79,0.2) inset;
+  padding: 12px;
+  overflow: hidden;
+}
 
+.bb-events-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ITEM */
+.bb-event-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(12,12,15,0.85);
+  padding: 8px;
+  border: 1px solid rgba(255,255,255,0.08);
+  clip-path: polygon(
+    10% 0%, 90% 0%,
+    100% 20%, 100% 80%,
+    90% 100%, 10% 100%,
+    0% 80%, 0% 20%
+  );
+  box-shadow:
+    0 0 10px rgba(0,0,0,0.7),
+    0 0 12px rgba(255,77,79,0.25) inset;
+}
+
+/* ICONS */
+.event-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.event-icon.join {
+  background: url('data:image/svg+xml;...') no-repeat center;
+}
+
+.event-icon.leave {
+  background: url('data:image/svg+xml;...') no-repeat center;
+}
+
+/* TEXT */
+.event-text .name {
+  font-weight: 600;
+  color: white;
+}
+
+.event-text .user {
+  opacity: 0.8;
+  font-size: 12px;
+}
+
+/* VIP BADGE */
+.event-vip {
+  width: 12px;
+  height: 12px;
+  background: gold;
+  border-radius: 50%;
+  margin-left: auto;
+  box-shadow: 0 0 8px gold;
+}
