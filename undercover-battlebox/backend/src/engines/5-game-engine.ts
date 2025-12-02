@@ -1,6 +1,7 @@
 /* ============================================================================
    5-game-engine.ts — BattleBox Arena Engine v16.4
    (Galaxy Reverse + DiamondPistol 1-per-Round Patch)
+
    ✔ Immune = 1 ronde geldig
    ✔ Survivor immune = 1 ronde geldig
    ✔ MoneyGun/Bomb markeringen = eliminated=true
@@ -228,7 +229,7 @@ async function recomputePositions() {
     return;
   }
 
-  // ================================
+// ================================
   // QUARTER LOGICA
   // ================================
   if (arena.type === "quarter") {
@@ -290,7 +291,7 @@ async function recomputePositions() {
       continue;
     }
 
-    // reverseMode → gevaarste positie is index 0
+    // reverseMode → gevaarste positie = index 0
     if (arena.reverseMode) {
       p.positionStatus = i === 0 ? "danger" : "alive";
     } else {
@@ -314,7 +315,7 @@ export async function emitArena() {
     type: arena.type,
     status: arena.status,
     reverseMode: arena.reverseMode,
-    diamondPistolUsed: arena.diamondPistolUsed,   // ✔ toegevoegd aan snapshot
+    diamondPistolUsed: arena.diamondPistolUsed, // ✔ toegevoegd
 
     isRunning: arena.status === "active",
 
@@ -335,7 +336,7 @@ export async function forceSort() {
 }
 
 /* ============================================================================
-   toggleGalaxyMode() — Galaxy UNO reverse
+   toggleGalaxyMode() — Galaxy UNO-reverse
 ============================================================================ */
 
 export function toggleGalaxyMode(): boolean {
@@ -343,7 +344,9 @@ export function toggleGalaxyMode(): boolean {
 
   emitLog({
     type: "twist",
-    message: `GALAXY toggle → reverseMode = ${arena.reverseMode ? "AAN" : "UIT"}`
+    message: `GALAXY toggle → reverseMode = ${
+      arena.reverseMode ? "AAN" : "UIT"
+    }`
   });
 
   return arena.reverseMode;
@@ -362,7 +365,7 @@ export async function startRound(type: RoundType) {
   // RESET GALAXY
   arena.reverseMode = false;
 
-  // ✔ RESET DIAMOND PISTOL LIMIET
+  // ✔ RESET DIAMOND PISTOL-limiter
   arena.diamondPistolUsed = false;
 
   if (type === "finale" && arena.firstFinalRound === null) {
@@ -381,7 +384,10 @@ export async function startRound(type: RoundType) {
     p.tempImmune = false;
     p.survivorImmune = false;
 
+    // immune opschonen
     p.boosters = p.boosters.filter((b) => b !== "immune");
+
+    // remove mg/bomb badges
     p.boosters = p.boosters.filter((b) => b !== "mg" && b !== "bomb");
   }
 
@@ -416,7 +422,7 @@ export async function startRound(type: RoundType) {
 }
 
 /* ============================================================================
-   END ROUND — MoneyGun/Bomb + Survivor Immune verwerking
+   END ROUND — MG/Bomb → danger/ties → eliminaties
 ============================================================================ */
 
 export async function endRound(forceEnd: boolean = false) {
@@ -430,7 +436,7 @@ export async function endRound(forceEnd: boolean = false) {
     await recomputePositions();
     const total = arena.players.length;
 
-    // ------ FINALE FORCE END ------
+    // ======= FINALE FORCE END =======
     if (arena.type === "finale") {
       if (total <= 1) {
         emitLog({
@@ -465,7 +471,7 @@ export async function endRound(forceEnd: boolean = false) {
         type: "arena",
         message: `🔥 Finale eliminaties: ${doomed
           .map((x) => x.display_name)
-          .join(", ")}`
+          .join(", ")}`,
       });
 
       io.emit("round:end", {
@@ -480,7 +486,7 @@ export async function endRound(forceEnd: boolean = false) {
       return;
     }
 
-    // ------ QUARTER FORCE END ------
+    // ======= QUARTER FORCE END =======
     if (total < 6) {
       io.emit("round:end", {
         round: arena.round,
@@ -492,9 +498,9 @@ export async function endRound(forceEnd: boolean = false) {
 
       await emitArena();
       return;
-    }
+     }
 
-    const doomed = arena.players.filter((p) => p.positionStatus === "danger");
+   const doomed = arena.players.filter((p) => p.positionStatus === "danger");
 
     for (const p of doomed) {
       p.positionStatus = "elimination";
@@ -630,7 +636,7 @@ export async function endRound(forceEnd: boolean = false) {
 }
 
 /* ============================================================================
-   ARENA MANAGEMENT (ongewijzigd)
+   ARENA MANAGEMENT (NIET GEWIJZIGD)
 ============================================================================ */
 
 export async function arenaJoin(id: string, display_name: string, username: string) {
@@ -653,7 +659,202 @@ export async function arenaJoin(id: string, display_name: string, username: stri
   await emitArena();
 }
 
-/* (rest van dit stuk is onveranderd, volledig identiek aan jouw originele code) */
+export async function arenaLeave(usernameOrId: string, force: boolean = false) {
+  const clean = String(usernameOrId).replace(/^@+/, "");
+  const cleanLower = clean.toLowerCase();
+
+  const idx = arena.players.findIndex(
+    (p) => p.id === clean || p.username.toLowerCase() === cleanLower
+  );
+
+  if (idx === -1) return;
+
+  const p = arena.players[idx];
+
+  if (force) {
+    arena.players.splice(idx, 1);
+
+    emitLog({
+      type: "elim",
+      message: `${p.display_name} permanent verwijderd uit arena`
+    });
+
+    await emitArena();
+    return;
+  }
+
+  p.positionStatus = "elimination";
+  p.eliminated = true;
+
+  emitLog({
+    type: "elim",
+    message: `${p.display_name} gemarkeerd als eliminated`
+  });
+
+  await emitArena();
+}
+
+export async function addToArena(username: string, resolveUser: Function) {
+  const clean = username.replace(/^@+/, "").toLowerCase();
+
+  const user = await resolveUser(clean);
+  if (!user) throw new Error("Gebruiker niet gevonden");
+
+  if (arena.players.some((p) => p.id === String(user.tiktok_id)))
+    throw new Error("Speler zit al in arena");
+
+  arena.players.push({
+    id: String(user.tiktok_id),
+    username: user.username.toLowerCase(),
+    display_name: user.display_name,
+    score: 0,
+    boosters: [],
+    eliminated: false,
+    positionStatus: "alive",
+    tempImmune: false,
+    survivorImmune: false
+  });
+
+  emitLog({
+    type: "arena",
+    message: `${user.display_name} handmatig toegevoegd aan arena`
+  });
+
+  await emitArena();
+}
+
+export async function eliminate(username: string) {
+  const clean = username.replace(/^@+/, "").toLowerCase();
+
+  const idx = arena.players.findIndex(
+    (p) => p.username.toLowerCase() === clean
+  );
+  if (idx === -1) throw new Error("Gebruiker zit niet in arena");
+
+  const p = arena.players[idx];
+  arena.players.splice(idx, 1);
+
+  emitLog({
+    type: "elim",
+    message: `${p.display_name} handmatig geëlimineerd`
+  });
+
+  await emitArena();
+}
+
+export async function arenaClear() {
+  arena.players = [];
+  arena.round = 0;
+  arena.status = "idle";
+  arena.firstFinalRound = null;
+  arena.reverseMode = false;
+  arena.diamondPistolUsed = false;
+
+  emitLog({
+    type: "arena",
+    message: `Arena volledig gereset`
+  });
+
+  await emitArena();
+}
+
+/* ============================================================================
+   addFromQueue (NIET GEWIJZIGD)
+============================================================================ */
+
+export async function addFromQueue(...args: any[]) {
+  if (!args.length) return;
+
+  const candidate = args[0];
+  if (
+    candidate &&
+    typeof candidate === "object" &&
+    ("tiktok_id" in candidate || "user_tiktok_id" in candidate)
+  ) {
+    const id = String(
+      (candidate as any).tiktok_id ?? (candidate as any).user_tiktok_id
+    );
+    const username: string =
+      (candidate as any).username ??
+      (candidate as any).user_username ??
+      "";
+    const display_name: string =
+      (candidate as any).display_name ??
+      (candidate as any).user_display_name ??
+      username;
+
+    return arenaJoin(id, display_name, username);
+  }
+
+  if (typeof args[0] === "string") {
+    const id = String(args[0]);
+    const display_name = String(args[1] ?? args[2] ?? "Unknown");
+    const username = String(args[2] ?? args[1] ?? "unknown");
+    return arenaJoin(id, display_name, username);
+  }
+}
+
+/* ============================================================================
+   updateArenaSettings
+============================================================================ */
+
+export async function updateArenaSettings(
+  partial: Partial<ArenaSettings>
+) {
+  arena.settings = {
+    ...arena.settings,
+    ...partial
+  };
+
+  await pool.query(
+    `
+    UPDATE arena_settings
+    SET round_pre_seconds = $1,
+        round_final_seconds = $2,
+        grace_seconds = $3
+    `,
+    [
+      arena.settings.roundDurationPre,
+      arena.settings.roundDurationFinal,
+      arena.settings.graceSeconds
+    ]
+  );
+
+  await emitArena();
+}
+
+/* ============================================================================
+   TICK — automatische overgang naar GRACE/ENDED
+============================================================================ */
+
+setInterval(async () => {
+  if (arena.status === "idle") return;
+
+  const now = Date.now();
+
+  if (arena.status === "active" && now >= arena.roundCutoff) {
+    arena.status = "grace";
+
+    emitLog({
+      type: "arena",
+      message: "⏳ Automatische overgang naar GRACE"
+    });
+
+      io.emit("round:grace", {
+      round: arena.round,
+      grace: arena.settings.graceSeconds,
+      reverseMode: arena.reverseMode
+    });
+
+    await emitArena();
+    return;
+  }
+
+  if (arena.status === "grace" && now >= arena.graceEnd) {
+    await endRound();
+    return;
+  }
+}, 1000);
 
 /* ============================================================================
    EXPORT DEFAULT
