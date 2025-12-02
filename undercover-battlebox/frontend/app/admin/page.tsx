@@ -179,6 +179,39 @@ export default function AdminDashboardPage() {
   }, []);
 
   /* ============================================
+     EMITTER HELPERS — TERUG OP JUISTE POSITIE
+  ============================================ */
+  const emitAdmin = (
+    event: keyof AdminSocketOutbound,
+    payload?: any
+  ) => {
+    const socket = getAdminSocket();
+    setStatus(`Bezig met ${event}...`);
+
+    socket.emit(event, payload ?? {}, (res: AdminAckResponse) => {
+      setStatus(
+        res?.success ? "✅ Uitgevoerd" : `❌ ${res?.message ?? "Geen antwoord"}`
+      );
+    });
+  };
+
+  const emitAdminWithUser = (
+    event: keyof AdminSocketOutbound,
+    userTarget?: string
+  ) => {
+    const uname = (userTarget || username || "").trim();
+    if (!uname) return;
+
+    const socket = getAdminSocket();
+    const formatted = uname.startsWith("@") ? uname : `@${uname}`;
+
+    setStatus(`Bezig met ${event}...`);
+    socket.emit(event, { username: formatted }, (res: AdminAckResponse) => {
+      setStatus(res?.success ? "✅ Uitgevoerd" : `❌ ${res?.message}`);
+    });
+  };
+
+  /* ============================================
      HELPERS
   ============================================ */
   const fmt = (n: number | string | undefined | null) =>
@@ -187,7 +220,7 @@ export default function AdminDashboardPage() {
   const players = useMemo(() => arena?.players ?? [], [arena]);
   const arenaStatus = arena?.status ?? "idle";
 
-  const canStartRound =
+const canStartRound =
     !!arena && (arenaStatus === "idle" || arenaStatus === "ended");
 
   const canStopRound = arenaStatus === "active";
@@ -466,7 +499,7 @@ export default function AdminDashboardPage() {
                       </span>
                     )}
 
-                    {/* ★★★ BREAKER BADGE — FIXED ★★★ */}
+                    {/* ★★★ BREAKER BADGE — TYPE-SAFE ★★★ */}
                     {(p.breakerHits ?? 0) > 0 && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-200 text-purple-800 border border-purple-300">
                         BREAK {(p.breakerHits ?? 0)}/2
@@ -569,7 +602,7 @@ export default function AdminDashboardPage() {
                       </span>
                     )}
                     {q.priorityDelta > 0 && (
-                      <span className="px-2 py-0.5 text-[10px] rounded-full bg-purple-100 text-purple-700 border-purple-300">
+                      <span className="px-2 py-0.5 text-[10px] rounded-full bg-purple-100 text-purple-700 border border-purple-300">
                         Boost +{q.priorityDelta}
                       </span>
                     )}
@@ -830,8 +863,6 @@ export default function AdminDashboardPage() {
               <option value="heal">Heal</option>
               <option value="bomb">Bomb</option>
               <option value="diamondpistol">Diamond Pistol</option>
-
-              {/* ★★★ BREAKER — NIEUW ★★★ */}
               <option value="breaker">Breaker</option>
             </select>
 
@@ -871,7 +902,7 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
-            {/* AUTOCOMPLETE USE */}
+            {/* AUTOCOMPLETE — USE */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "use" && (
@@ -902,8 +933,6 @@ export default function AdminDashboardPage() {
               <option value="heal">Heal</option>
               <option value="bomb">Bomb</option>
               <option value="diamondpistol">Diamond Pistol</option>
-
-              {/* ★★★ BREAKER — NIEUW ★★★ */}
               <option value="breaker">Breaker</option>
             </select>
 
@@ -926,7 +955,7 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-3"
             />
 
-            {/* AUTOCOMPLETE TARGET */}
+            {/* AUTOCOMPLETE — TARGET */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "target" && (
@@ -1034,4 +1063,4 @@ export default function AdminDashboardPage() {
       )}
     </main>
   );
-                                                                        }
+              }
