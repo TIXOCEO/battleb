@@ -15,8 +15,7 @@ import type {
 } from "@/lib/adminTypes";
 
 /**
- * De centrale socket-hook voor het hele Admin Dashboard.
- * Houdt ALLE realtime data bij.
+ * Centrale realtime socket hook voor BattleBox Admin Dashboard.
  */
 export function useAdminSocket() {
   // ===============================
@@ -57,8 +56,8 @@ export function useAdminSocket() {
         setQueue(snap.queue.entries ?? []);
         setQueueOpen(snap.queue.open ?? true);
       }
-      if (snap.logs) setLogs(snap.logs.slice(0, 200));
 
+      if (snap.logs) setLogs(snap.logs.slice(0, 200));
       if (snap.playerLeaderboard) setPlayerLeaderboard(snap.playerLeaderboard);
       if (snap.gifterLeaderboard) setGifterLeaderboard(snap.gifterLeaderboard);
 
@@ -135,17 +134,17 @@ export function useAdminSocket() {
   }, []);
 
   // ===============================
-  // TYPESAFE EMIT
+  // TYPESAFE EMIT (FIXED)
   // ===============================
   function emitAdmin<E extends keyof AdminSocketOutbound>(
     event: E,
     payload: Parameters<AdminSocketOutbound[E]>[0]
   ) {
     const socket = getAdminSocket();
-
     setStatus(`Bezig met ${event}...`);
 
-    socket.emit(
+    // Cast naar any om socket.emit overload mismatch op te lossen
+    (socket as any).emit(
       event,
       payload,
       (res: AdminAckResponse) => {
@@ -163,10 +162,9 @@ export function useAdminSocket() {
 
     const socket = getAdminSocket();
     const formatted = username.startsWith("@") ? username : `@${username}`;
-
     setStatus(`Bezig met ${event}...`);
 
-    socket.emit(
+    (socket as any).emit(
       event,
       { username: formatted } as Parameters<AdminSocketOutbound[E]>[0],
       (res: AdminAckResponse) => {
