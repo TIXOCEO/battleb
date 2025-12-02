@@ -1,10 +1,18 @@
-/* PANEL */
+@import "../shared/theme.css";
+
+/* ---------------------------------------------------------
+   TICKER PANEL (1200×100)
+--------------------------------------------------------- */
 .bb-ticker {
   width: 1200px;
   height: 100px;
 
   background:
-    linear-gradient(to right, rgba(255,77,79,0.2), rgba(0,0,0,0.45), rgba(255,77,79,0.2)),
+    linear-gradient(to right,
+      rgba(255,77,79,0.22),
+      rgba(0,0,0,0.55),
+      rgba(255,77,79,0.22)
+    ),
     var(--glass-dark);
 
   border: 2px solid var(--border-light);
@@ -15,15 +23,22 @@
     0 0 35px rgba(255,77,79,0.55),
     0 0 45px rgba(255,77,79,0.35) inset;
 
-  animation: panelPowerOn 0.7s ease-out forwards;
+  animation: panelPowerOn 0.6s ease-out forwards;
 }
 
-/* SCROLLING TEXT */
+@keyframes panelPowerOn {
+  0% { opacity: 0; transform: translateY(20px) scale(0.95); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ---------------------------------------------------------
+   SCROLLING TEXT
+--------------------------------------------------------- */
 .bb-ticker-inner {
   white-space: nowrap;
   font-size: 28px;
   padding-left: 1200px;
-  animation: marquee 18s linear infinite;
+  animation: marquee 18s linear infinite, glowPulse 3s ease-in-out infinite;
 
   font-weight: 700;
   color: white;
@@ -32,8 +47,6 @@
   text-shadow:
     0 0 8px rgba(255,77,79,0.75),
     0 0 18px rgba(255,77,79,0.55);
-
-  animation: marquee 18s linear infinite, pulse 3s ease-in-out infinite;
 }
 
 @keyframes marquee {
@@ -41,7 +54,8 @@
   100% { transform: translateX(-220%); }
 }
 
-@keyframes pulse {
+/* subtle breathing */
+@keyframes glowPulse {
   0%,100% { opacity: 1; }
-  50% { opacity: 0.85; }
+  50% { opacity: 0.87; }
 }
