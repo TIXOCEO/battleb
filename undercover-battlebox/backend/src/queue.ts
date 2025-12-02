@@ -80,6 +80,7 @@ export async function getQueue() {
       is_vip: isVip,
       is_fan: isFan,
       reason,
+      avatar_url: null // 🔥 NIEUW: placeholder avatar
     };
   });
 }
@@ -343,6 +344,8 @@ export async function removeFromQueue(tiktok_id: string): Promise<void> {
   );
   if (!r.rows.length) return;
 
+  const pos = Number(r.rows[0].position);
+
   // 🔥 QUEUE EVENT → LEAVE
   emitQueueEvent("leave", {
     tiktok_id,
@@ -351,10 +354,7 @@ export async function removeFromQueue(tiktok_id: string): Promise<void> {
     is_vip: false
   });
 
-  const entry = r.rows[0];
-  const pos = Number(entry.position);
-
-  await pool.query(`DELETE FROM queue WHERE id=$1`, [entry.id]);
+  await pool.query(`DELETE FROM queue WHERE id=$1`, [r.rows[0].id]);
 
   await pool.query(
     `
@@ -367,7 +367,7 @@ export async function removeFromQueue(tiktok_id: string): Promise<void> {
 
   await normalizePositions();
   await pushQueueUpdate();
-}
+    }
 
 /**
  * leaveQueue — !leave
@@ -397,12 +397,23 @@ export async function leaveQueue(tiktok_id: string): Promise<number> {
     [refund, userTid]
   );
 
+  const userData = await pool.query(
+    `
+    SELECT display_name, username, is_vip
+    FROM users
+    WHERE tiktok_id=$1
+    `,
+    [userTid]
+  );
+
+  const user = userData.rows[0];
+
   // 🔥 QUEUE EVENT → LEAVE (Chat !leave)
   emitQueueEvent("leave", {
     tiktok_id,
-    username: "",
-    display_name: "",
-    is_vip: false
+    username: user?.username?.replace(/^@+/, "") ?? "",
+    display_name: user?.display_name ?? "",
+    is_vip: !!user?.is_vip
   });
 
   await pool.query(`DELETE FROM queue WHERE id=$1`, [entry.id]);
@@ -434,14 +445,6 @@ export async function promoteQueue(tiktok_id: string): Promise<void> {
   );
   if (!r.rows.length) return;
 
-  // 🔥 QUEUE EVENT → PROMOTE
-  emitQueueEvent("promote", {
-    tiktok_id,
-    username: "",
-    display_name: "",
-    is_vip: false
-  });
-
   const { id, position } = r.rows[0];
   const pos = Number(position);
 
@@ -469,14 +472,6 @@ export async function demoteQueue(tiktok_id: string): Promise<void> {
     [tid]
   );
   if (!r.rows.length) return;
-
-  // 🔥 QUEUE EVENT → DEMOTE
-  emitQueueEvent("demote", {
-    tiktok_id,
-    username: "",
-    display_name: "",
-    is_vip: false
-  });
 
   const { id, position } = r.rows[0];
   const pos = Number(position);
@@ -509,12 +504,23 @@ export async function addToArenaFromQueue(tiktok_id: string): Promise<void> {
   );
   if (!r.rows.length) return;
 
+  const userData = await pool.query(
+    `
+    SELECT display_name, username, is_vip
+    FROM users
+    WHERE tiktok_id=$1
+    `,
+    [tid]
+  );
+
+  const user = userData.rows[0];
+
   // 🔥 QUEUE EVENT → LEAVE (automatische verwijdering)
   emitQueueEvent("leave", {
     tiktok_id,
-    username: "",
-    display_name: "",
-    is_vip: false
+    username: user?.username?.replace(/^@+/, "") ?? "",
+    display_name: user?.display_name ?? "",
+    is_vip: !!user?.is_vip
   });
 
   const pos = Number(r.rows[0].position);
