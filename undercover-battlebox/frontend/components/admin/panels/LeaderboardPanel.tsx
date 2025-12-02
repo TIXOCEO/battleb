@@ -5,19 +5,31 @@ import Panel from "@/components/admin/ui/Panel";
 import SectionHeader from "@/components/admin/ui/SectionHeader";
 import Button from "@/components/admin/ui/Button";
 
+import type {
+  PlayerLeaderboardEntry,
+  GifterLeaderboardEntry,
+} from "@/lib/adminTypes";
+
+interface LeaderboardPanelProps {
+  activeLbTab: "players" | "gifters";
+  setActiveLbTab: (tab: "players" | "gifters") => void;
+
+  playerLeaderboard: PlayerLeaderboardEntry[];
+  gifterLeaderboard: GifterLeaderboardEntry[];
+
+  fmt: (v: number | string) => string;
+}
+
 export default function LeaderboardPanel({
   activeLbTab,
   setActiveLbTab,
   playerLeaderboard,
   gifterLeaderboard,
   fmt,
-}: any) {
+}: LeaderboardPanelProps) {
   return (
     <Panel>
-      <SectionHeader 
-        title="Leaderboards" 
-        subtitle="Spelers • Gifters" 
-      />
+      <SectionHeader title="Leaderboards" subtitle="Spelers • Gifters" />
 
       {/* TABS */}
       <div className="flex gap-2 mb-4">
@@ -38,21 +50,24 @@ export default function LeaderboardPanel({
         </Button>
       </div>
 
-      {/* PLAYERS LB */}
+      {/* ========================================================= */}
+      {/*                    PLAYER LEADERBOARD                      */}
+      {/* ========================================================= */}
       {activeLbTab === "players" && (
         <div className="max-h-80 overflow-y-auto pr-1">
           <h3 className="text-md font-semibold text-slate-200 mb-1">
             Player Leaderboard
           </h3>
+
           <p className="text-xs text-slate-500 mb-3">
             Diamanten ontvangen (total_score)
           </p>
 
           {playerLeaderboard.length ? (
             <>
-              {playerLeaderboard.map((p: any, idx: number) => (
+              {playerLeaderboard.map((p, idx) => (
                 <div
-                  key={idx}
+                  key={p.tiktok_id}
                   className="border-b border-[#2A3038] py-1.5 flex justify-between text-sm"
                 >
                   <div className="text-slate-200">
@@ -72,7 +87,7 @@ export default function LeaderboardPanel({
                 Totaal:{" "}
                 {fmt(
                   playerLeaderboard.reduce(
-                    (acc: any, p: any) => acc + (p.total_score || 0),
+                    (acc, p) => acc + (p.total_score || 0),
                     0
                   )
                 )}{" "}
@@ -87,21 +102,24 @@ export default function LeaderboardPanel({
         </div>
       )}
 
-      {/* GIFTERS LB */}
+      {/* ========================================================= */}
+      {/*                   GIFTER LEADERBOARD                       */}
+      {/* ========================================================= */}
       {activeLbTab === "gifters" && (
         <div className="max-h-80 overflow-y-auto pr-1">
           <h3 className="text-md font-semibold text-slate-200 mb-1">
             Gifter Leaderboard
           </h3>
+
           <p className="text-xs text-slate-500 mb-3">
             Diamanten verstuurd
           </p>
 
           {gifterLeaderboard.length ? (
             <>
-              {gifterLeaderboard.map((g: any, idx: number) => (
+              {gifterLeaderboard.map((g, idx) => (
                 <div
-                  key={idx}
+                  key={g.user_id}
                   className="border-b border-[#2A3038] py-1.5 flex justify-between text-sm"
                 >
                   <div className="text-slate-200">
@@ -121,7 +139,7 @@ export default function LeaderboardPanel({
                 Totaal:{" "}
                 {fmt(
                   gifterLeaderboard.reduce(
-                    (acc: any, g: any) => acc + (g.total_diamonds || 0),
+                    (acc, g) => acc + (g.total_diamonds || 0),
                     0
                   )
                 )}{" "}
