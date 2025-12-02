@@ -7,33 +7,40 @@ import Input from "@/components/admin/ui/Input";
 import Label from "@/components/admin/ui/Label";
 import Button from "@/components/admin/ui/Button";
 
+import type { EmitAdminFn, EmitAdminUserFn } from "@/types/EmitAdminFn";
 import type { SearchUser } from "@/lib/adminTypes";
-import type { EmitAdminFn } from "@/types/EmitAdminFn";
 
-interface PlayerActionsPanelProps {
+export interface PlayerActionsPanelProps {
   username: string;
   setUsername: (v: string) => void;
 
-  searchResults: SearchUser[];
-  showResults: boolean;
-  applyAutoFill: (u: SearchUser) => void;
-
-  activeAutoField: string | null;
-  onAutoFocus: (field: string, value: string) => void;
-
   emitAdmin: EmitAdminFn;
+  emitAdminUser: EmitAdminUserFn;
+
+  autocomplete: {
+    searchResults: SearchUser[];
+    showResults: boolean;
+    activeAutoField: string | null;
+    applyAutoFill: (u: SearchUser) => void;
+    onAutoFocus: (field: string, value: string) => void;
+  };
 }
 
 export default function PlayerActionsPanel({
   username,
   setUsername,
-  searchResults,
-  showResults,
-  applyAutoFill,
-  activeAutoField,
-  onAutoFocus,
   emitAdmin,
+  emitAdminUser,
+  autocomplete,
 }: PlayerActionsPanelProps) {
+  const {
+    searchResults,
+    showResults,
+    activeAutoField,
+    applyAutoFill,
+    onAutoFocus,
+  } = autocomplete;
+
   return (
     <Panel>
       <SectionHeader
@@ -72,36 +79,28 @@ export default function PlayerActionsPanel({
       <div className="flex flex-wrap gap-2 mt-4">
         <Button
           variant="danger"
-          onClick={() =>
-            emitAdmin("addToArena", { username })
-          }
+          onClick={() => emitAdminUser("addToArena", username)}
         >
           → Arena
         </Button>
 
         <Button
           variant="ghost"
-          onClick={() =>
-            emitAdmin("addToQueue", { username })
-          }
+          onClick={() => emitAdminUser("addToQueue", username)}
         >
           → Queue
         </Button>
 
         <Button
           variant="warning"
-          onClick={() =>
-            emitAdmin("giveVip", { username })
-          }
+          onClick={() => emitAdminUser("giveVip", username)}
         >
           ⭐ Geef VIP
         </Button>
 
         <Button
           variant="default"
-          onClick={() =>
-            emitAdmin("removeVip", { username })
-          }
+          onClick={() => emitAdminUser("removeVip", username)}
         >
           Verwijder VIP
         </Button>
