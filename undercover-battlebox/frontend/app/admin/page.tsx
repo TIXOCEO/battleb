@@ -1,11 +1,6 @@
 "use client";
 
-import React, {
-  useEffect,
-  useMemo,
-  useState,
-  useRef
-} from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import { getAdminSocket } from "@/lib/socketClient";
 
 import type {
@@ -47,8 +42,7 @@ export default function AdminDashboardPage() {
   const [queueOpen, setQueueOpen] = useState(true);
 
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [streamStats, setStreamStats] =
-    useState<StreamStats | null>(null);
+  const [streamStats, setStreamStats] = useState<StreamStats | null>(null);
 
   const [playerLeaderboard, setPlayerLeaderboard] =
     useState<PlayerLeaderboardEntry[]>([]);
@@ -58,11 +52,10 @@ export default function AdminDashboardPage() {
   const [activeLbTab, setActiveLbTab] =
     useState<"players" | "gifters">("players");
 
-  const [gameSession, setGameSession] =
-    useState<GameSessionState>({
-      active: false,
-      gameId: null,
-    });
+  const [gameSession, setGameSession] = useState<GameSessionState>({
+    active: false,
+    gameId: null,
+  });
 
   const [hostDiamonds, setHostDiamonds] = useState(0);
 
@@ -79,21 +72,18 @@ export default function AdminDashboardPage() {
 
   /* AUTOCOMPLETE */
   const [typing, setTyping] = useState("");
-  const [searchResults, setSearchResults] =
-    useState<SearchUser[]>([]);
+  const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
   const [showResults, setShowResults] = useState(false);
   const [activeAutoField, setActiveAutoField] = useState<
     null | "main" | "give" | "use" | "target"
   >(null);
 
-  /* CONFIRM POPUP */
-  const [confirmData, setConfirmData] =
-    useState<ConfirmState | null>(null);
+  /* CONFIRM POPUP STATE */
+  const [confirmData, setConfirmData] = useState<ConfirmState | null>(null);
 
   const autoRef = useRef<HTMLDivElement | null>(null);
 
-  const openConfirm = (data: ConfirmState) =>
-    setConfirmData(data);
+  const openConfirm = (data: ConfirmState) => setConfirmData(data);
   const cancelConfirm = () => setConfirmData(null);
 
   /* ============================================
@@ -101,17 +91,13 @@ export default function AdminDashboardPage() {
   ============================================ */
   useEffect(() => {
     function handler(e: any) {
-      if (
-        autoRef.current &&
-        !autoRef.current.contains(e.target)
-      ) {
+      if (autoRef.current && !autoRef.current.contains(e.target)) {
         setShowResults(false);
         setActiveAutoField(null);
       }
     }
     document.addEventListener("mousedown", handler);
-    return () =>
-      document.removeEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
   }, []);
 
   /* ============================================
@@ -121,57 +107,39 @@ export default function AdminDashboardPage() {
     const socket = getAdminSocket();
 
     socket.on("updateArena", (data) => setArena(data));
-
     socket.on("updateQueue", (d) => {
       setQueue(d.entries ?? []);
       setQueueOpen(d.open ?? true);
     });
 
-    socket.on("log", (l) =>
-      setLogs((p) => [l, ...p].slice(0, 200))
-    );
-
-    socket.on("initialLogs", (d) =>
-      setLogs(d.slice(0, 200))
-    );
+    socket.on("log", (l) => setLogs((p) => [l, ...p].slice(0, 200)));
+    socket.on("initialLogs", (d) => setLogs(d.slice(0, 200)));
 
     socket.on("streamStats", (s) => setStreamStats(s));
     socket.on("gameSession", (s) => setGameSession(s));
 
-    socket.on("leaderboardPlayers", (rows) =>
-      setPlayerLeaderboard(rows)
-    );
+    socket.on("leaderboardPlayers", (rows) => setPlayerLeaderboard(rows));
+    socket.on("leaderboardGifters", (rows) => setGifterLeaderboard(rows));
 
-    socket.on("leaderboardGifters", (rows) =>
-      setGifterLeaderboard(rows)
-    );
+    socket.on("hostDiamonds", (d) => setHostDiamonds(d.total));
 
-    socket.on("hostDiamonds", (d) =>
-      setHostDiamonds(d.total)
-    );
-
-    /* ROUND EVENT STATUS */
     socket.on("round:start", (d) =>
-      setStatus(
-        `▶️ Ronde gestart (${d.type}) – ${d.duration}s`
-      )
+      setStatus(`▶️ Ronde gestart (${d.type}) – ${d.duration}s`)
     );
-
     socket.on("round:grace", (d) =>
       setStatus(`⏳ Grace periode (${d.grace}s)`)
     );
-
     socket.on("round:end", () =>
-      setStatus(
-        "⛔ Ronde beëindigd – eliminatiefase"
-      )
+      setStatus("⛔ Ronde beëindigd – eliminatiefase")
     );
 
     socket.on("connect_error", () =>
       setStatus("❌ Socket verbinding weggevallen")
     );
 
-    return () => socket.removeAllListeners();
+    return () => {
+      socket.removeAllListeners();
+    };
   }, []);
 
   /* ============================================
@@ -180,41 +148,28 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     const socket = getAdminSocket();
 
-    socket.emit(
-      "getInitialSnapshot",
-      {},
-      (snap: any) => {
-        if (!snap) return;
+    socket.emit("getInitialSnapshot", {}, (snap: any) => {
+      if (!snap) return;
 
-        if (snap.arena) setArena(snap.arena);
-
-        if (snap.queue) {
-          setQueue(snap.queue.entries || []);
-          setQueueOpen(snap.queue.open ?? true);
-        }
-
-        if (snap.logs)
-          setLogs(snap.logs.slice(0, 200));
-
-        if (snap.stats) setStreamStats(snap.stats);
-        if (snap.gameSession)
-          setGameSession(snap.gameSession);
-
-        if (snap.playerLeaderboard)
-          setPlayerLeaderboard(
-            snap.playerLeaderboard
-          );
-
-        if (snap.gifterLeaderboard)
-          setGifterLeaderboard(
-            snap.gifterLeaderboard
-          );
+      if (snap.arena) setArena(snap.arena);
+      if (snap.queue) {
+        setQueue(snap.queue.entries ?? []);
+        setQueueOpen(snap.queue.open ?? true);
       }
-    );
+      if (snap.logs) setLogs(snap.logs.slice(0, 200));
+      if (snap.stats) setStreamStats(snap.stats);
+      if (snap.gameSession) setGameSession(snap.gameSession);
+
+      if (snap.playerLeaderboard)
+        setPlayerLeaderboard(snap.playerLeaderboard);
+
+      if (snap.gifterLeaderboard)
+        setGifterLeaderboard(snap.gifterLeaderboard);
+    });
   }, []);
 
   /* ============================================
-     ARENA TIMER TICK
+     RONDE TIMER REALTIME UPDATE
   ============================================ */
   useEffect(() => {
     const t = setInterval(() => {
@@ -224,7 +179,7 @@ export default function AdminDashboardPage() {
   }, []);
 
   /* ============================================
-     EMIT HELPERS
+     EMITTER HELPERS
   ============================================ */
   const emitAdmin = (
     event: keyof AdminSocketOutbound,
@@ -233,11 +188,9 @@ export default function AdminDashboardPage() {
     const socket = getAdminSocket();
     setStatus(`Bezig met ${event}...`);
 
-    socket.emit(event, payload ?? {}, (res) => {
+    socket.emit(event, payload ?? {}, (res: AdminAckResponse) => {
       setStatus(
-        res?.success
-          ? "✅ Uitgevoerd"
-          : `❌ ${res?.message ?? "Geen antwoord"}`
+        res?.success ? "✅ Uitgevoerd" : `❌ ${res?.message ?? "Geen antwoord"}`
       );
     });
   };
@@ -246,15 +199,16 @@ export default function AdminDashboardPage() {
     event: keyof AdminSocketOutbound,
     userTarget?: string
   ) => {
-    const uname = (userTarget || username || "")
-      .trim();
+    const uname = (userTarget || username || "").trim();
     if (!uname) return;
 
-    const formatted = uname.startsWith("@")
-      ? uname
-      : `@${uname}`;
+    const socket = getAdminSocket();
+    const formatted = uname.startsWith("@") ? uname : `@${uname}`;
 
-    emitAdmin(event, { username: formatted });
+    setStatus(`Bezig met ${event}...`);
+    socket.emit(event, { username: formatted }, (res: AdminAckResponse) => {
+      setStatus(res?.success ? "✅ Uitgevoerd" : `❌ ${res?.message}`);
+    });
   };
 
   /* ============================================
@@ -288,14 +242,10 @@ export default function AdminDashboardPage() {
       ? user.username
       : `@${user.username}`;
 
-    if (activeAutoField === "main")
-      setUsername(formatted);
-    if (activeAutoField === "give")
-      setTwistUserGive(formatted);
-    if (activeAutoField === "use")
-      setTwistUserUse(formatted);
-    if (activeAutoField === "target")
-      setTwistTargetUse(formatted);
+    if (activeAutoField === "main") setUsername(formatted);
+    if (activeAutoField === "give") setTwistUserGive(formatted);
+    if (activeAutoField === "use") setTwistUserUse(formatted);
+    if (activeAutoField === "target") setTwistTargetUse(formatted);
 
     setTyping("");
     setSearchResults([]);
@@ -304,22 +254,16 @@ export default function AdminDashboardPage() {
   }
 
   /* ============================================
-     UI HELPERS
+     HELPERS
   ============================================ */
-  const fmt = (n: number | string | null | undefined) =>
+  const fmt = (n: number | string | undefined | null) =>
     Number(n ?? 0).toLocaleString("nl-NL");
 
-  const players = useMemo(
-    () => arena?.players ?? [],
-    [arena]
-  );
-
+  const players = useMemo(() => arena?.players ?? [], [arena]);
   const arenaStatus = arena?.status ?? "idle";
 
   const canStartRound =
-    !!arena &&
-    (arenaStatus === "idle" ||
-      arenaStatus === "ended");
+    !!arena && (arenaStatus === "idle" || arenaStatus === "ended");
 
   const canStopRound = arenaStatus === "active";
   const canGraceEnd = arenaStatus === "grace";
@@ -329,21 +273,15 @@ export default function AdminDashboardPage() {
     const now = Date.now();
 
     if (arena.status === "active") {
-      const s = arena.roundStartTime;
-      const e = arena.roundCutoff;
-      return Math.min(
-        100,
-        Math.max(0, ((now - s) / (e - s)) * 100)
-      );
+      const start = arena.roundStartTime;
+      const end = arena.roundCutoff;
+      return Math.min(100, Math.max(0, ((now - start) / (end - start)) * 100));
     }
 
     if (arena.status === "grace") {
-      const s = arena.roundCutoff;
-      const e = arena.graceEnd;
-      return Math.min(
-        100,
-        Math.max(0, ((now - s) / (e - s)) * 100)
-      );
+      const start = arena.roundCutoff;
+      const end = arena.graceEnd;
+      return Math.min(100, Math.max(0, ((now - start) / (end - start)) * 100));
     }
 
     return 0;
@@ -353,9 +291,7 @@ export default function AdminDashboardPage() {
     if (!sec || sec < 0) sec = 0;
     const m = Math.floor(sec / 60);
     const s = sec % 60;
-    return `${String(m).padStart(2, "0")}:${String(
-      s
-    ).padStart(2, "0")}`;
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   };
 
   const colorForPosition = (p: any) => {
@@ -374,7 +310,7 @@ export default function AdminDashboardPage() {
     }
   };
 
-/* ============================================
+  /* ============================================
      UI
   ============================================ */
 
@@ -392,14 +328,11 @@ export default function AdminDashboardPage() {
               </div>
               <div className="text-xs text-gray-500">
                 Verbonden als{" "}
-                <span className="font-semibold text-green-600">
-                  Admin
-                </span>
+                <span className="font-semibold text-green-600">Admin</span>
               </div>
             </div>
           </div>
 
-          {/* GAME SESSION BADGE */}
           <div className="text-xs px-3 py-1 rounded-full bg-gray-200 text-gray-800">
             {gameSession.active
               ? `Spel actief (#${gameSession.gameId})`
@@ -419,25 +352,16 @@ export default function AdminDashboardPage() {
               `}
               style={{ width: `${roundProgress}%` }}
             />
+
             <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold">
               {arena.status === "active" &&
                 formatTime(
-                  Math.max(
-                    0,
-                    Math.floor(
-                      (arena.roundCutoff - Date.now()) / 1000
-                    )
-                  )
+                  Math.max(0, Math.floor((arena.roundCutoff - Date.now()) / 1000))
                 )}
 
               {arena.status === "grace" &&
                 formatTime(
-                  Math.max(
-                    0,
-                    Math.floor(
-                      (arena.graceEnd - Date.now()) / 1000
-                    )
-                  )
+                  Math.max(0, Math.floor((arena.graceEnd - Date.now()) / 1000))
                 )}
 
               {arena.status === "ended" && "00:00"}
@@ -480,9 +404,7 @@ export default function AdminDashboardPage() {
 
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() =>
-              emitAdmin("startRound", { type: "quarter" })
-            }
+            onClick={() => emitAdmin("startRound", { type: "quarter" })}
             disabled={!canStartRound}
             className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full text-xs disabled:bg-gray-400"
           >
@@ -490,9 +412,7 @@ export default function AdminDashboardPage() {
           </button>
 
           <button
-            onClick={() =>
-              emitAdmin("startRound", { type: "finale" })
-            }
+            onClick={() => emitAdmin("startRound", { type: "finale" })}
             disabled={!canStartRound}
             className="px-3 py-1.5 bg-purple-600 text-white rounded-full text-xs disabled:bg-gray-400"
           >
@@ -505,124 +425,6 @@ export default function AdminDashboardPage() {
             className="px-3 py-1.5 bg-gray-800 text-white rounded-full text-xs disabled:bg-gray-400"
           >
             Stop ronde
-          </button>
-        </div>
-      </section>
-
-      {/* ============================================================
-          USER ACTIONS  (DIT WAS VERDWENEN — NU TERUG!)
-      ============================================================ */}
-      <section className="bg-white rounded-2xl shadow p-4 mb-6">
-        <h2 className="text-sm font-semibold mb-3">
-          Spelersbeheer
-        </h2>
-
-        {/* MAIN USER INPUT */}
-        <div className="relative mb-3" ref={autoRef}>
-          <label className="text-xs font-semibold">
-            @username
-          </label>
-
-          <input
-            type="text"
-            value={username}
-            placeholder="@gebruiker"
-            onFocus={() => {
-              setActiveAutoField("main");
-              setShowResults(true);
-              setTyping(username);
-            }}
-            onChange={(e) => {
-              setUsername(e.target.value);
-              setTyping(e.target.value);
-              setActiveAutoField("main");
-              setShowResults(true);
-            }}
-            className="w-full border rounded-lg px-3 py-2 text-sm"
-          />
-
-          {/* AUTOCOMPLETE MAIN FIELD */}
-          {showResults &&
-            activeAutoField === "main" &&
-            searchResults.length > 0 && (
-              <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
-                {searchResults.map((u) => (
-                  <div
-                    key={u.tiktok_id}
-                    onClick={() => applyAutoFill(u)}
-                    className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
-                  >
-                    <span className="font-semibold">
-                      {u.display_name}
-                    </span>{" "}
-                    <span className="text-gray-500">
-                      @{u.username}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-        </div>
-
-        {/* ACTION BUTTONS */}
-        <div className="flex flex-wrap gap-2 text-xs">
-          <button
-            onClick={() => emitAdmin("addToQueue", { username })}
-            className="px-3 py-1.5 bg-blue-500 text-white rounded-full"
-          >
-            → Queue
-          </button>
-
-          <button
-            onClick={() => emitAdmin("addToArena", { username })}
-            className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full"
-          >
-            → Arena
-          </button>
-
-          <button
-            onClick={() =>
-              emitAdmin("addVIP", { username })
-            }
-            className="px-3 py-1.5 bg-yellow-500 text-white rounded-full"
-          >
-            VIP
-          </button>
-
-          <button
-            onClick={() =>
-              emitAdmin("addFan", { username })
-            }
-            className="px-3 py-1.5 bg-blue-300 text-white rounded-full"
-          >
-            Fan
-          </button>
-
-          <button
-            onClick={() =>
-              emitAdmin("promoteUser", { username })
-            }
-            className="px-3 py-1.5 bg-green-600 text-white rounded-full"
-          >
-            Promote
-          </button>
-
-          <button
-            onClick={() =>
-              emitAdmin("demoteUser", { username })
-            }
-            className="px-3 py-1.5 bg-orange-500 text-white rounded-full"
-          >
-            Demote
-          </button>
-
-          <button
-            onClick={() =>
-              emitAdmin("removeFromQueue", { username })
-            }
-            className="px-3 py-1.5 bg-red-600 text-white rounded-full"
-          >
-            Verwijder uit queue
           </button>
         </div>
       </section>
@@ -675,7 +477,9 @@ export default function AdminDashboardPage() {
               players.map((p, idx) => (
                 <div
                   key={p.id}
-                  className={`relative rounded-lg p-3 border text-sm shadow ${colorForPosition(p)}`}
+                  className={`relative rounded-lg p-3 border text-sm shadow ${colorForPosition(
+                    p
+                  )}`}
                 >
                   {/* DELETE BUTTON */}
                   <button
@@ -711,31 +515,19 @@ export default function AdminDashboardPage() {
                     ✕
                   </button>
 
-                  {/* POSITION + STATUS */}
+                  {/* POSITION */}
                   <div className="flex justify-between items-center">
                     <span className="font-bold">#{idx + 1}</span>
-
-                    <div className="flex gap-1 items-center">
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-300 text-gray-700">
-                        {p.positionStatus}
-                      </span>
-
-                      {/* BREAKER BADGE (OPTIONEEL) */}
-                      {typeof p.breakerHits === "number" &&
-                        p.breakerHits > 0 && (
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-200 text-purple-800 border border-purple-300">
-                            BREAK {p.breakerHits}/2
-                          </span>
-                        )}
-                    </div>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-300 text-gray-700">
+                      {p.positionStatus}
+                    </span>
                   </div>
 
-                  {/* NAME */}
                   <div className="font-semibold truncate">
                     {p.display_name} (@{p.username})
                   </div>
 
-                  {/* BOOSTER BADGES */}
+                  {/* BADGES */}
                   <div className="flex gap-1 mt-1 flex-wrap">
                     {p.boosters?.includes("mg") && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-pink-200 text-pink-800 border border-pink-300">
@@ -753,7 +545,6 @@ export default function AdminDashboardPage() {
                     Score: {fmt(p.score)} 💎
                   </div>
 
-                  {/* ELIMINATION BUTTON */}
                   {p.positionStatus === "elimination" && (
                     <button
                       onClick={() => {
@@ -922,7 +713,8 @@ export default function AdminDashboardPage() {
                     activeLbTab === "players"
                       ? "bg-[#ff4d4f] text-white border-[#ff4d4f]"
                       : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
-                  }`}
+                  }
+                `}
               >
                 Players
               </button>
@@ -935,19 +727,18 @@ export default function AdminDashboardPage() {
                     activeLbTab === "gifters"
                       ? "bg-[#ff4d4f] text-white border-[#ff4d4f]"
                       : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
-                  }`}
+                  }
+                `}
               >
                 Gifters
               </button>
             </div>
           </div>
 
-          {/* PLAYER LB */}
+          {/* PLAYERS LB */}
           {activeLbTab === "players" && (
             <div className="p-4 max-h-96 overflow-y-auto text-sm">
-              <h2 className="text-xl font-semibold mb-2">
-                Player Leaderboard
-              </h2>
+              <h2 className="text-xl font-semibold mb-2">Player Leaderboard</h2>
               <p className="text-xs text-gray-500 mb-3">
                 Diamanten ontvangen in deze stream (total_score)
               </p>
@@ -1106,6 +897,7 @@ export default function AdminDashboardPage() {
               <option value="heal">Heal</option>
               <option value="bomb">Bomb</option>
               <option value="diamondpistol">Diamond Pistol</option>
+              <option value="breaker">Breaker</option>
             </select>
 
             <button
@@ -1175,11 +967,10 @@ export default function AdminDashboardPage() {
               <option value="heal">Heal</option>
               <option value="bomb">Bomb</option>
               <option value="diamondpistol">Diamond Pistol</option>
+              <option value="breaker">Breaker</option>
             </select>
 
-            <label className="text-xs font-semibold">
-              Target (optioneel)
-            </label>
+            <label className="text-xs font-semibold">Target (optioneel)</label>
             <input
               type="text"
               value={twistTargetUse}
@@ -1209,12 +1000,8 @@ export default function AdminDashboardPage() {
                       onClick={() => applyAutoFill(u)}
                       className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
                     >
-                      <span className="font-semibold">
-                        {u.display_name}
-                      </span>{" "}
-                      <span className="text-gray-500">
-                        @{u.username}
-                      </span>
+                      <span className="font-semibold">{u.display_name}</span>{" "}
+                      <span className="text-gray-500">@{u.username}</span>
                     </div>
                   ))}
                 </div>
@@ -1264,8 +1051,7 @@ export default function AdminDashboardPage() {
                     hour12: false,
                   })}
                 </span>{" "}
-                <strong>{log.type.toUpperCase()}</strong> –{" "}
-                {log.message}
+                <strong>{log.type.toUpperCase()}</strong> – {log.message}
               </div>
             ))
           ) : (
@@ -1276,7 +1062,6 @@ export default function AdminDashboardPage() {
         </div>
       </section>
 
-      {/* FOOTER */}
       <footer className="mt-4 text-xs text-gray-400 text-center">
         BattleBox Engine v3.3 – Danny Stable
       </footer>
@@ -1312,4 +1097,4 @@ export default function AdminDashboardPage() {
       )}
     </main>
   );
-            }
+                  }
