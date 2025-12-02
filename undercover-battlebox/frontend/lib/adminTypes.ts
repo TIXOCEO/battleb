@@ -1,13 +1,8 @@
 /* ============================================================================
-   adminTypes.ts — BattleBox v16
+   adminTypes.ts — BattleBox v16 (Patched)
    ✔ Gesynchroniseerd met server.ts v16 & queue.ts v16
-   ✔ Queue-entry volledig consistent (VIP/FAN/Boost/Reason/Position)
-   ✔ Nieuwe admin actions toegevoegd:
-     - promoteUser
-     - demoteUser
-     - giveVip / removeVip (realtime queue refresh)
-   ✔ Galaxy reverseMode + breakerHits veld voor breaker twist
-   ✔ Overige logica volledig ongewijzigd gelaten
+   ✔ Toegevoegd: GameSessionState (compatibel met frontend)
+   ✔ InitialSnapshot gebruikt nu GameSessionState
 ============================================================================ */
 
 /* ================================
@@ -26,7 +21,7 @@ export interface ArenaPlayer {
   display_name: string;
   username: string;
 
-  /** v15 legacy field — blijft bestaan */
+  /** Legacy maar nog aanwezig */
   score: number;
 
   /** Realtime diamonds uit gift-engine */
@@ -34,7 +29,7 @@ export interface ArenaPlayer {
 
   boosters: string[];
 
-  /** Legacy, niet gebruikt voor sorting */
+  /** Legacy — niet gebruikt voor sorting */
   status: "alive" | "eliminated";
 
   positionStatus: ArenaPlayerStatus;
@@ -78,7 +73,6 @@ export interface ArenaState {
   };
 
   firstFinalRound: number | null;
-
   lastSortedAt: number;
 
   host_diamonds?: number;
@@ -195,7 +189,15 @@ export interface GifterLeaderboardEntry {
 }
 
 /* ================================
-   INITIAL SNAPSHOT
+   GAME SESSION (Added for Frontend)
+================================ */
+export interface GameSessionState {
+  active: boolean;
+  gameId: number | null;
+}
+
+/* ================================
+   INITIAL SNAPSHOT — UPDATED
 ================================ */
 export interface InitialSnapshot {
   arena: ArenaState;
@@ -208,10 +210,8 @@ export interface InitialSnapshot {
   logs: LogEntry[];
   settings: ArenaSettings;
 
-  gameSession: {
-    active: boolean;
-    gameId: number | null;
-  };
+  /** ✨ Nu correct getypt */
+  gameSession: GameSessionState;
 
   stats:
     | {
@@ -246,7 +246,7 @@ export interface AdminSocketInbound {
   leaderboardGifters: (rows: GifterLeaderboardEntry[]) => void;
 
   connectState: (state: any) => void;
-  gameSession: (session: any) => void;
+  gameSession: (session: GameSessionState) => void;
 
   hostDiamonds: (data: { username: string; total: number }) => void;
 
@@ -322,7 +322,6 @@ export interface AdminSocketOutbound {
     ack: (res: AdminAckResponse) => void
   ) => void;
 
-  /** 🎯 NIEUW: push uit queue + direct naar arena */
   addToArena: (
     payload: { username: string },
     ack: (res: AdminAckResponse) => void
@@ -338,7 +337,6 @@ export interface AdminSocketOutbound {
     ack: (res: AdminAckResponse) => void
   ) => void;
 
-  /** 🎯 NIEUW — Admin knoppen voor queue positie */
   promoteUser: (
     payload: { username: string },
     ack: (res: AdminAckResponse) => void
@@ -349,7 +347,6 @@ export interface AdminSocketOutbound {
     ack: (res: AdminAckResponse) => void
   ) => void;
 
-  /** 🎯 NIEUW — VIP Controls */
   giveVip: (
     payload: { username: string },
     ack: (res: AdminAckResponse) => void
