@@ -1,26 +1,40 @@
-
+/* ---------------------------------------------------------
+   TICKER PANEL (1200×100)
+   --------------------------------------------------------- */
 .bb-ticker {
   width: 1200px;
   height: 100px;
-  background: rgba(12,12,15,0.85);
-  border: 2px solid rgba(255,255,255,0.12);
+  background:
+    linear-gradient(to right, rgba(255,77,79,0.2), rgba(0,0,0,0.45), rgba(255,77,79,0.2)),
+    var(--glass-dark);
+
+  border: 2px solid var(--border-light);
   overflow: hidden;
   position: relative;
+
   box-shadow:
-    0 0 25px rgba(255,77,79,0.45),
-    0 0 40px rgba(255,77,79,0.25) inset;
+    0 0 35px rgba(255,77,79,0.55),
+    0 0 45px rgba(255,77,79,0.35) inset;
 }
 
+/* ---------------------------------------------------------
+   MARQUEE TEXT
+   --------------------------------------------------------- */
 .bb-ticker-inner {
   white-space: nowrap;
   font-size: 28px;
   padding-left: 1200px;
-  animation: marquee 22s linear infinite;
+  animation: marquee 18s linear infinite;
+
+  font-weight: 700;
   color: white;
-  text-shadow: var(--neon-orange-glow);
+  letter-spacing: 1.1px;
+  text-shadow:
+    0 0 8px rgba(255,77,79,0.75),
+    0 0 18px rgba(255,77,79,0.55);
 }
 
 @keyframes marquee {
   0% { transform: translateX(0); }
-  100% { transform: translateX(-200%); }
+  100% { transform: translateX(-220%); }
 }
