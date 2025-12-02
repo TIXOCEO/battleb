@@ -1,4 +1,8 @@
-/* PANEL */
+@import "../shared/theme.css";
+
+/* ---------------------------------------------------------
+   PANEL
+--------------------------------------------------------- */
 .bb-events-panel {
   width: 250px;
   height: 700px;
@@ -14,13 +18,20 @@
   animation: panelPowerOn 0.6s ease-out forwards;
 }
 
+@keyframes panelPowerOn {
+  0% { opacity: 0; transform: translateX(20px) scale(0.95); }
+  100% { opacity: 1; transform: translateX(0) scale(1); }
+}
+
 .bb-events-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-/* EVENT ITEM */
+/* ---------------------------------------------------------
+   EVENT ITEM — SLIDE-IN, FADE-OUT
+--------------------------------------------------------- */
 .bb-event-item {
   display: flex;
   align-items: center;
@@ -42,7 +53,7 @@
     inset 0 0 24px rgba(0,0,0,0.6),
     0 0 12px rgba(255,77,79,0.35) inset;
 
-  animation: eventSlideIn 0.4s cubic-bezier(.17,.67,.4,1.25) both;
+  animation: eventSlideIn 0.45s cubic-bezier(.17,.67,.4,1.25) both;
 }
 
 @keyframes eventSlideIn {
@@ -50,9 +61,9 @@
   100% { opacity: 1; transform: translateX(0); }
 }
 
-/* EVENT HIDE */
+/* Fade-out class (triggered by JS) */
 .event-fade {
-  animation: eventFadeOut 0.6s ease-out forwards;
+  animation: eventFadeOut 0.6s ease-out forwards !important;
 }
 
 @keyframes eventFadeOut {
@@ -60,11 +71,14 @@
   100% { opacity: 0; transform: translateX(18px); }
 }
 
-/* ICON animations */
+/* ---------------------------------------------------------
+   ICONS
+--------------------------------------------------------- */
 .event-icon {
   width: 20px;
   height: 20px;
   background-size: cover;
+  background-position: center;
 
   animation: iconGlow 3s ease-in-out infinite;
 }
@@ -74,7 +88,39 @@
   50% { filter: brightness(1.4); }
 }
 
-/* VIP badge pulse */
+.event-icon.join {
+  background-image: url("data:image/svg+xml;utf8,<svg width='20' height='20' fill='%2300ff99' xmlns='http://www.w3.org/2000/svg'><polygon points='10,0 20,20 0,20'/></svg>");
+}
+
+.event-icon.leave {
+  background-image: url("data:image/svg+xml;utf8,<svg width='20' height='20' fill='%23ff4d4f' xmlns='http://www.w3.org/2000/svg'><polygon points='10,20 20,0 0,0'/></svg>");
+}
+
+.event-icon.promote {
+  background-image: url("data:image/svg+xml;utf8,<svg width='20' height='20' fill='%2300d9ff' xmlns='http://www.w3.org/2000/svg'><polygon points='10,0 20,20 0,20'/></svg>");
+}
+
+.event-icon.demote {
+  background-image: url("data:image/svg+xml;utf8,<svg width='20' height='20' fill='%23ffaa00' xmlns='http://www.w3.org/2000/svg'><polygon points='10,20 20,0 0,0'/></svg>");
+}
+
+/* ---------------------------------------------------------
+   TEXT
+--------------------------------------------------------- */
+.event-text .name {
+  font-weight: 700;
+  color: white;
+  font-size: 13px;
+}
+
+.event-text .user {
+  opacity: 0.8;
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------
+   VIP indicator
+--------------------------------------------------------- */
 .event-vip {
   width: 12px;
   height: 12px;
@@ -84,5 +130,10 @@
 
   box-shadow: 0 0 12px gold;
 
-  animation: vipPulse 2.2s infinite ease-in-out;
+  animation: vipPulse 2s ease-in-out infinite;
+}
+
+@keyframes vipPulse {
+  0%,100% { transform: scale(1); }
+  50% { transform: scale(1.25); }
 }
