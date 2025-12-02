@@ -1,11 +1,11 @@
 // ============================================================================
-// 8-twist-engine.ts — Twist Engine v16.0 (Breaker Patch + Stable Build)
+// 8-twist-engine.ts — Twist Engine v16.1 (Inventory FIX + Breaker Patch)
 // ============================================================================
 //
-// ✔ Twist wordt pas geconsumeerd NA validatie
-// ✔ DiamondPistol mag 1× per ronde
-// ✔ BREAKER twist toegevoegd (cracked → broken → immune verwijderd)
-// ✔ Rest code onaangeraakt
+// ✔ FIX: consumeTwistFromUser gebruikt nu senderId (tiktok_id) i.p.v. senderName
+// ✔ ALL applyX calls gepatcht
+// ✔ UI / Logs blijven senderName tonen
+// ✔ BREAKER, MG, Bomb, Immune, Heal, DiamondPistol werken nu correct
 //
 // ============================================================================
 
@@ -114,13 +114,13 @@ function emitOverlay(name: string, data: any) {
 // ============================================================================
 
 
-// GALAXY — toggle reverseMode
-async function applyGalaxy(sender: string) {
-  const ok = await consumeTwistFromUser(sender, "galaxy");
+// GALAXY — toggle reverseMode (FIXED → consume using senderId)
+async function applyGalaxy(senderId: string, senderName: string) {
+  const ok = await consumeTwistFromUser(senderId, "galaxy");
   if (!ok) {
     emitLog({
       type: "twist",
-      message: `${sender} probeerde Galaxy, maar heeft geen twist`
+      message: `${senderName} probeerde Galaxy, maar heeft geen twist`
     });
     return;
   }
@@ -128,13 +128,13 @@ async function applyGalaxy(sender: string) {
   const reversedNow = toggleGalaxyMode();
 
   emitOverlay("galaxy", {
-    by: sender,
+    by: senderName,
     reverse: reversedNow
   });
 
   emitLog({
     type: "twist",
-    message: `${sender} gebruikte GALAXY → ranking nu ${
+    message: `${senderName} gebruikte GALAXY → ranking nu ${
       reversedNow
         ? "omgekeerd (laagste bovenaan)"
         : "normaal (hoogste bovenaan)"
@@ -146,10 +146,10 @@ async function applyGalaxy(sender: string) {
 
 
 // ============================================================================
-// MONEYGUN
+// MONEYGUN (FIXED: consume senderId)
 // ============================================================================
 
-async function applyMoneyGun(sender: string, target: any) {
+async function applyMoneyGun(senderId: string, senderName: string, target: any) {
   if (!target) return;
 
   const arena = getArena();
@@ -160,7 +160,7 @@ async function applyMoneyGun(sender: string, target: any) {
   if (isImmune(target.id)) {
     emitLog({
       type: "twist",
-      message: `${sender} MoneyGun → ${target.display_name} is IMMUNE!`
+      message: `${senderName} MoneyGun → ${target.display_name} is IMMUNE!`
     });
     return;
   }
@@ -168,16 +168,16 @@ async function applyMoneyGun(sender: string, target: any) {
   if (p.eliminated === true) {
     emitLog({
       type: "twist",
-      message: `${sender} MoneyGun → ${target.display_name} is al gemarkeerd (Heal nodig)`
+      message: `${senderName} MoneyGun → ${target.display_name} is al gemarkeerd (Heal nodig)`
     });
     return;
   }
 
-  const ok = await consumeTwistFromUser(sender, "moneygun");
+  const ok = await consumeTwistFromUser(senderId, "moneygun");
   if (!ok) {
     emitLog({
       type: "twist",
-      message: `${sender} probeerde MoneyGun, maar heeft geen twist`
+      message: `${senderName} probeerde MoneyGun, maar heeft geen twist`
     });
     return;
   }
@@ -185,11 +185,11 @@ async function applyMoneyGun(sender: string, target: any) {
   if (!p.boosters.includes("mg")) p.boosters.push("mg");
   markEliminated(target.id);
 
-  emitOverlay("moneygun", { by: sender, target: target.display_name });
+  emitOverlay("moneygun", { by: senderName, target: target.display_name });
 
   emitLog({
     type: "twist",
-    message: `${sender} MoneyGun → ${target.display_name} gemarkeerd`
+    message: `${senderName} MoneyGun → ${target.display_name} gemarkeerd`
   });
 
   await emitArena();
@@ -197,18 +197,18 @@ async function applyMoneyGun(sender: string, target: any) {
 
 
 // ============================================================================
-// BOMB
+// BOMB (FIXED: consume senderId)
 // ============================================================================
 
 let bombInProgress = false;
 
-async function applyBomb(sender: string) {
+async function applyBomb(senderId: string, senderName: string) {
   const arena = getArena();
 
   if (bombInProgress) {
     emitLog({
       type: "twist",
-      message: `${sender} Bomb → bezig, wacht tot huidige klaar is`
+      message: `${senderName} Bomb → bezig, wacht tot huidige klaar is`
     });
     return;
   }
@@ -220,24 +220,24 @@ async function applyBomb(sender: string) {
   if (!poolTargets.length) {
     emitLog({
       type: "twist",
-      message: `${sender} Bomb → geen geldige targets (immune/marked)`
+      message: `${senderName} Bomb → geen geldige targets (immune/marked)`
     });
     return;
   }
 
-  const ok = await consumeTwistFromUser(sender, "bomb");
+  const ok = await consumeTwistFromUser(senderId, "bomb");
   if (!ok) {
     emitLog({
       type: "twist",
-      message: `${sender} probeerde Bomb, maar heeft geen twist`
+      message: `${senderName} probeerde Bomb, maar heeft geen twist`
     });
     return;
   }
 
   bombInProgress = true;
 
-  emitOverlay("bomb_start", { by: sender });
-  emitLog({ type: "twist", message: `${sender} activeert BOMB…` });
+  emitOverlay("bomb_start", { by: senderName });
+  emitLog({ type: "twist", message: `${senderName} activeert BOMB…` });
 
   for (let i = 3; i >= 1; i--) {
     emitLog({ type: "twist", message: `💣 Bomb → ${i}…` });
@@ -252,7 +252,7 @@ async function applyBomb(sender: string) {
   if (!valid.length) {
     emitLog({
       type: "twist",
-      message: `${sender} Bomb → niemand meer geldig`
+      message: `${senderName} Bomb → niemand meer geldig`
     });
     bombInProgress = false;
     return;
@@ -263,11 +263,11 @@ async function applyBomb(sender: string) {
   if (!chosen.boosters.includes("bomb")) chosen.boosters.push("bomb");
   markEliminated(chosen.id);
 
-  emitOverlay("bomb", { by: sender, target: chosen.display_name });
+  emitOverlay("bomb", { by: senderName, target: chosen.display_name });
 
   emitLog({
     type: "twist",
-    message: `${sender} BOMB → ${chosen.display_name} gemarkeerd`
+    message: `${senderName} BOMB → ${chosen.display_name} gemarkeerd`
   });
 
   await emitArena();
@@ -277,33 +277,33 @@ async function applyBomb(sender: string) {
 
 
 // ============================================================================
-// IMMUNE
+// IMMUNE (FIXED consume senderId)
 // ============================================================================
 
-async function applyImmuneTwist(sender: string, target: any) {
+async function applyImmuneTwist(senderId: string, senderName: string, target: any) {
   if (!target) return;
 
-  const ok = await consumeTwistFromUser(sender, "immune");
+  const ok = await consumeTwistFromUser(senderId, "immune");
   if (!ok) {
     emitLog({
       type: "twist",
-      message: `${sender} probeerde Immune, maar heeft geen twist`
+      message: `${senderName} probeerde Immune, maar heeft geen twist`
     });
     return;
   }
 
   await applyImmune(target.id);
 
-  emitOverlay("immune", { by: sender, target: target.display_name });
+  emitOverlay("immune", { by: senderName, target: target.display_name });
   await emitArena();
 }
 
 
 // ============================================================================
-// HEAL
+// HEAL (FIXED consume senderId)
 // ============================================================================
 
-async function applyHeal(sender: string, target: any) {
+async function applyHeal(senderId: string, senderName: string, target: any) {
   if (!target) return;
 
   const arena = getArena();
@@ -313,16 +313,16 @@ async function applyHeal(sender: string, target: any) {
   if (!p.eliminated) {
     emitLog({
       type: "twist",
-      message: `${sender} HEAL → ${target.display_name} heeft geen MG/Bomb markering`
+      message: `${senderName} HEAL → ${target.display_name} heeft geen MG/Bomb markering`
     });
     return;
   }
 
-  const ok = await consumeTwistFromUser(sender, "heal");
+  const ok = await consumeTwistFromUser(senderId, "heal");
   if (!ok) {
     emitLog({
       type: "twist",
-      message: `${sender} probeerde Heal, maar heeft geen twist`
+      message: `${senderName} probeerde Heal, maar heeft geen twist`
     });
     return;
   }
@@ -330,26 +330,29 @@ async function applyHeal(sender: string, target: any) {
   p.boosters = p.boosters.filter((b) => b !== "mg" && b !== "bomb");
   clearEliminationMark(target.id);
 
-  emitOverlay("heal", { by: sender, target: target.display_name });
+  emitOverlay("heal", { by: senderName, target: target.display_name });
 
   emitLog({
     type: "twist",
-    message: `${sender} HEAL → ${target.display_name} is hersteld`
+    message: `${senderName} HEAL → ${target.display_name} is hersteld`
   });
 
   await emitArena();
 }
 
-
 // ============================================================================
-// ★★★★★ BREAKER — Nieuw ★★★★★
+// ★★★★★ BREAKER — Nieuw (FIXED consume senderId) ★★★★★
 // ============================================================================
 //
 // 1 breaker  → cracked shield   (breakerHits = 1)
 // 2 breakers → immune verwijderd + overlay “broken”
 //
 
-async function applyBreaker(sender: string, target: any) {
+async function applyBreaker(
+  senderId: string,
+  senderName: string,
+  target: any
+) {
   if (!target) return;
 
   const arena = getArena();
@@ -357,11 +360,11 @@ async function applyBreaker(sender: string, target: any) {
   if (!p) return;
 
   // Eerst validatie → daarna consume
-  const consumed = await consumeTwistFromUser(sender, "breaker");
+  const consumed = await consumeTwistFromUser(senderId, "breaker");
   if (!consumed) {
     emitLog({
       type: "twist",
-      message: `${sender} probeerde Breaker, maar heeft geen twist`
+      message: `${senderName} probeerde Breaker, maar heeft geen twist`
     });
     return;
   }
@@ -371,11 +374,11 @@ async function applyBreaker(sender: string, target: any) {
 
   if (p.breakerHits === 1) {
     // cracked
-    emitOverlay("breaker_cracked", { by: sender, target: p.display_name });
+    emitOverlay("breaker_cracked", { by: senderName, target: p.display_name });
 
     emitLog({
       type: "twist",
-      message: `${sender} BREAKER → ${p.display_name} shield CRACKED (50%)`
+      message: `${senderName} BREAKER → ${p.display_name} shield CRACKED (50%)`
     });
   }
 
@@ -384,22 +387,27 @@ async function applyBreaker(sender: string, target: any) {
     p.boosters = p.boosters.filter(b => b !== "immune");
     if (p.positionStatus === "immune") p.positionStatus = "alive";
 
-    emitOverlay("breaker_broken", { by: sender, target: p.display_name });
+    emitOverlay("breaker_broken", { by: senderName, target: p.display_name });
 
     emitLog({
       type: "twist",
-      message: `${sender} BREAKER → ${p.display_name} IMMUNE volledig GEBROKEN`
+      message: `${senderName} BREAKER → ${p.display_name} IMMUNE volledig GEBROKEN`
     });
   }
 
   await emitArena();
 }
 
+
 // ============================================================================
-// DIAMOND PISTOL — *Patched*
+// DIAMOND PISTOL — *Patched + senderId consume*
 // ============================================================================
 
-async function applyDiamondPistol(sender: string, survivor: any) {
+async function applyDiamondPistol(
+  senderId: string,
+  senderName: string,
+  survivor: any
+) {
   if (!survivor) return;
 
   const arena = getArena();
@@ -408,26 +416,26 @@ async function applyDiamondPistol(sender: string, survivor: any) {
   if (arena.diamondPistolUsed === true) {
     emitLog({
       type: "twist",
-      message: `${sender} probeerde DiamondPistol → maar deze ronde is het al gebruikt`
+      message: `${senderName} probeerde DiamondPistol → maar deze ronde is het al gebruikt`
     });
     return;
   }
 
   // ❌ 2) Je kunt DP niet op jezelf gebruiken
-  if (String(survivor.id) === String(sender)) {
+  if (String(survivor.id) === String(senderId)) {
     emitLog({
       type: "twist",
-      message: `${sender} probeerde DiamondPistol → maar je kunt jezelf niet kiezen`
+      message: `${senderName} probeerde DiamondPistol → maar je kunt jezelf niet kiezen`
     });
     return;
   }
 
-  // Consume
-  const ok = await consumeTwistFromUser(sender, "diamondpistol");
+  // Consume (FIXED → gebruik senderId)
+  const ok = await consumeTwistFromUser(senderId, "diamondpistol");
   if (!ok) {
     emitLog({
       type: "twist",
-      message: `${sender} probeerde DiamondPistol, maar heeft geen twist`
+      message: `${senderName} probeerde DiamondPistol, maar heeft geen twist`
     });
     return;
   }
@@ -445,13 +453,13 @@ async function applyDiamondPistol(sender: string, survivor: any) {
   arena.diamondPistolUsed = true;
 
   emitOverlay("diamondpistol", {
-    by: sender,
+    by: senderName,
     survivor: survivor.display_name
   });
 
   emitLog({
     type: "twist",
-    message: `${sender} DIAMOND PISTOL → ${survivor.display_name} overleeft`
+    message: `${senderName} DIAMOND PISTOL → ${survivor.display_name} overleeft`
   });
 
   await emitArena();
@@ -460,7 +468,7 @@ async function applyDiamondPistol(sender: string, survivor: any) {
 
 
 // ============================================================================
-// MAIN USE TWIST
+// MAIN USE TWIST — FIXED (gebruikt senderId overal)
 // ============================================================================
 
 export async function useTwist(
@@ -495,25 +503,25 @@ export async function useTwist(
 
   switch (twist) {
     case "galaxy":
-      return applyGalaxy(senderName);
+      return applyGalaxy(senderId, senderName);
 
     case "moneygun":
-      return applyMoneyGun(senderName, target);
+      return applyMoneyGun(senderId, senderName, target);
 
     case "bomb":
-      return applyBomb(senderName);
+      return applyBomb(senderId, senderName);
 
     case "immune":
-      return applyImmuneTwist(senderName, target);
+      return applyImmuneTwist(senderId, senderName, target);
 
     case "heal":
-      return applyHeal(senderName, target);
+      return applyHeal(senderId, senderName, target);
 
     case "diamondpistol":
-      return applyDiamondPistol(senderName, target);
+      return applyDiamondPistol(senderId, senderName, target);
 
     case "breaker":
-      return applyBreaker(senderName, target);
+      return applyBreaker(senderId, senderName, target);
   }
 }
 
