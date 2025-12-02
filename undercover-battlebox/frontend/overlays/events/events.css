@@ -1,13 +1,17 @@
+/* ---------------------------------------------------------
+   EVENTS PANEL (250×700)
+   --------------------------------------------------------- */
 .bb-events-panel {
   width: 250px;
   height: 700px;
-  background: var(--glass-bg);
-  border: 2px solid rgba(255,255,255,0.12);
-  box-shadow:
-    0 0 20px rgba(255,77,79,0.45),
-    0 0 30px rgba(255,77,79,0.2) inset;
+  background: var(--glass-mid);
+  border: 2px solid var(--border-light);
   padding: 12px;
   overflow: hidden;
+
+  box-shadow:
+    0 0 20px rgba(255,77,79,0.45),
+    0 0 30px rgba(255,77,79,0.25) inset;
 }
 
 .bb-events-list {
@@ -16,37 +20,57 @@
   gap: 12px;
 }
 
-/* ITEM */
+/* ---------------------------------------------------------
+   EVENT ITEM
+   --------------------------------------------------------- */
 .bb-event-item {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: rgba(12,12,15,0.85);
   padding: 8px;
-  border: 1px solid rgba(255,255,255,0.08);
+
+  background: var(--glass-dark);
+  border: 2px solid var(--border-light);
+  position: relative;
+
   clip-path: polygon(
-    10% 0%, 90% 0%,
+    12% 0%, 88% 0%,
     100% 20%, 100% 80%,
-    90% 100%, 10% 100%,
+    88% 100%, 12% 100%,
     0% 80%, 0% 20%
   );
+
   box-shadow:
-    0 0 10px rgba(0,0,0,0.7),
-    0 0 12px rgba(255,77,79,0.25) inset;
+    0 0 20px rgba(0,0,0,0.9),
+    inset 0 0 24px rgba(0,0,0,0.6),
+    0 0 12px rgba(255,77,79,0.35) inset;
+}
+
+.bb-event-item::after {
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  border: 2px solid rgba(255,77,79,0.35);
+  clip-path:inherit;
+  box-shadow: var(--neon-orange-glow);
+  opacity: 0.28;
 }
 
 /* ICONS */
 .event-icon {
   width: 20px;
   height: 20px;
+  background-size: cover;
 }
 
+/* Placeholder SVGs (replace with real arrows later) */
 .event-icon.join {
-  background: url('data:image/svg+xml;...') no-repeat center;
+  background: url("data:image/svg+xml;utf8,<svg width='20' height='20' fill='%2300ff99' xmlns='http://www.w3.org/2000/svg'><polygon points='10,0 20,20 0,20'/></svg>");
 }
 
 .event-icon.leave {
-  background: url('data:image/svg+xml;...') no-repeat center;
+  background: url("data:image/svg+xml;utf8,<svg width='20' height='20' fill='%23ff4d4f' xmlns='http://www.w3.org/2000/svg'><polygon points='10,20 20,0 0,0'/></svg>");
 }
 
 /* TEXT */
@@ -54,18 +78,17 @@
   font-weight: 600;
   color: white;
 }
-
 .event-text .user {
   opacity: 0.8;
   font-size: 12px;
 }
 
-/* VIP BADGE */
+/* VIP ICON */
 .event-vip {
   width: 12px;
   height: 12px;
   background: gold;
   border-radius: 50%;
   margin-left: auto;
-  box-shadow: 0 0 8px gold;
+  box-shadow: 0 0 12px gold;
 }
