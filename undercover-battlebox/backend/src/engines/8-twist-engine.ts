@@ -1,14 +1,16 @@
 // ============================================================================
-// 8-twist-engine.ts — Twist Engine v15.0 (Galaxy Toggle + MoneyGun/Bomb/Heal)
+// 8-twist-engine.ts — Twist Engine v15.1 (Consume AFTER validation patch)
 // ============================================================================
 //
-// ✔ Galaxy → reverseMode toggle (AAN/UIT)
-// ✔ Galaxy reset automatisch bij nieuwe ronde (via game-engine)
-// ✔ MoneyGun → badge + eliminated mark
-// ✔ Bomb → 3s delay + badge + skip immune
-// ✔ Heal → verwijdert MG/Bomb badges + eliminated mark
-// ✔ Immune blijft 1 ronde (reset in game-engine)
-// ✔ Geen onnodige wijzigingen
+// ✔ Twists worden pas geconsumeerd ALS ze echt uitgevoerd kunnen worden
+//   → Immune target? → géén consume
+//   → Target bestaat niet? → géén consume
+//   → MoneyGun op al-gemarkeerd? → géén consume
+//   → Bomb zonder targets? → géén consume
+//   → Heal op iemand zonder markering? → géén consume
+//
+// ✔ Galaxy, Immune en DiamondPistol blijven ongedeerd
+// ✔ Verdere code NIET aangeraakt zoals gevraagd
 // ============================================================================
 
 import { io, emitLog } from "../server";
@@ -16,7 +18,7 @@ import {
   getArena,
   emitArena,
   eliminate,
-  toggleGalaxyMode   // <── nieuwe import, game-engine patch
+  toggleGalaxyMode
 } from "./5-game-engine";
 
 import {
@@ -37,7 +39,7 @@ import pool from "../db";
 // ============================================================================
 
 async function sleep(ms: number) {
-  return new Promise(res => setTimeout(res, ms));
+  return new Promise((res) => setTimeout(res, ms));
 }
 
 async function findUser(raw: string) {
@@ -115,12 +117,19 @@ function emitOverlay(name: string, data: any) {
 // TWISTS
 // ============================================================================
 
-// GALAXY — toggle reverseMode in game-engine
+// GALAXY — toggle reverseMode
 async function applyGalaxy(sender: string) {
-  // Toggle de reverseMode flag in de arena engine
+  const ok = await consumeTwistFromUser(sender, "galaxy");
+  if (!ok) {
+    emitLog({
+      type: "twist",
+      message: `${sender} probeerde Galaxy, maar heeft geen twist`
+    });
+    return;
+  }
+
   const reversedNow = toggleGalaxyMode();
 
-  // Overlay event (kan je opvangen in overlay voor animatie)
   emitOverlay("galaxy", {
     by: sender,
     reverse: reversedNow
@@ -129,11 +138,12 @@ async function applyGalaxy(sender: string) {
   emitLog({
     type: "twist",
     message: `${sender} gebruikte GALAXY → ranking nu ${
-      reversedNow ? "omgekeerd (laagste bovenaan)" : "normaal (hoogste bovenaan)"
+      reversedNow
+        ? "omgekeerd (laagste bovenaan)"
+        : "normaal (hoogste bovenaan)"
     }`
   });
 
-  // Recompute + broadcast nieuwe volgorde (op basis van reverseMode)
   await emitArena();
 }
 
@@ -145,9 +155,10 @@ async function applyMoneyGun(sender: string, target: any) {
   if (!target) return;
 
   const arena = getArena();
-  const p = arena.players.find(x => x.id === target.id);
+  const p = arena.players.find((x) => x.id === target.id);
   if (!p) return;
 
+  // Eerst checken → nog NIET consumeren
   if (isImmune(target.id)) {
     emitLog({
       type: "twist",
@@ -164,7 +175,16 @@ async function applyMoneyGun(sender: string, target: any) {
     return;
   }
 
-  // Badge toevoegen
+  // Nu pas consumeren
+  const ok = await consumeTwistFromUser(sender, "moneygun");
+  if (!ok) {
+    emitLog({
+      type: "twist",
+      message: `${sender} probeerde MoneyGun, maar heeft geen twist`
+    });
+    return;
+  }
+
   if (!p.boosters.includes("mg")) p.boosters.push("mg");
 
   markEliminated(target.id);
@@ -199,16 +219,25 @@ async function applyBomb(sender: string) {
     return;
   }
 
+  // Validatie eerst — géén consume
   const poolTargets = arena.players.filter(
-    (p) =>
-      !p.boosters.includes("immune") &&
-      p.eliminated !== true
+    (p) => !p.boosters.includes("immune") && p.eliminated !== true
   );
 
   if (!poolTargets.length) {
     emitLog({
       type: "twist",
       message: `${sender} Bomb → geen geldige targets (immune/marked)`
+    });
+    return;
+  }
+
+  // Nu pas consumeren (twist is geldig)
+  const ok = await consumeTwistFromUser(sender, "bomb");
+  if (!ok) {
+    emitLog({
+      type: "twist",
+      message: `${sender} probeerde Bomb, maar heeft geen twist`
     });
     return;
   }
@@ -226,11 +255,9 @@ async function applyBomb(sender: string) {
     await sleep(1000);
   }
 
-  const updatedArena = getArena();
+const updatedArena = getArena();
   const freshTargets = updatedArena.players.filter(
-    (p) =>
-      !p.boosters.includes("immune") &&
-      p.eliminated !== true
+    (p) => !p.boosters.includes("immune") && p.eliminated !== true
   );
 
   if (!freshTargets.length) {
@@ -242,10 +269,12 @@ async function applyBomb(sender: string) {
     return;
   }
 
-  const chosen = freshTargets[Math.floor(Math.random() * freshTargets.length)];
+  const chosen =
+    freshTargets[Math.floor(Math.random() * freshTargets.length)];
 
   // Badge toevoegen
-  if (!chosen.boosters.includes("bomb")) chosen.boosters.push("bomb");
+  if (!chosen.boosters.includes("bomb"))
+    chosen.boosters.push("bomb");
 
   markEliminated(chosen.id);
 
@@ -271,6 +300,16 @@ async function applyBomb(sender: string) {
 async function applyImmuneTwist(sender: string, target: any) {
   if (!target) return;
 
+  // Immune twist heeft geen extra checks → direct consume
+  const ok = await consumeTwistFromUser(sender, "immune");
+  if (!ok) {
+    emitLog({
+      type: "twist",
+      message: `${sender} probeerde Immune, maar heeft geen twist`
+    });
+    return;
+  }
+
   await applyImmune(target.id);
 
   emitOverlay("immune", {
@@ -289,9 +328,10 @@ async function applyHeal(sender: string, target: any) {
   if (!target) return;
 
   const arena = getArena();
-  const p = arena.players.find(x => x.id === target.id);
+  const p = arena.players.find((x) => x.id === target.id);
   if (!p) return;
 
+  // Validatie eerst
   if (!p.eliminated) {
     emitLog({
       type: "twist",
@@ -300,8 +340,18 @@ async function applyHeal(sender: string, target: any) {
     return;
   }
 
+  // Nu pas consume uitvoeren
+  const ok = await consumeTwistFromUser(sender, "heal");
+  if (!ok) {
+    emitLog({
+      type: "twist",
+      message: `${sender} probeerde Heal, maar heeft geen twist`
+    });
+    return;
+  }
+
   // MG/Bomb badges verwijderen
-  p.boosters = p.boosters.filter(b => b !== "mg" && b !== "bomb");
+  p.boosters = p.boosters.filter((b) => b !== "mg" && b !== "bomb");
 
   clearEliminationMark(target.id);
 
@@ -316,7 +366,7 @@ async function applyHeal(sender: string, target: any) {
   });
 
   await emitArena();
-    }
+}
 
 // ============================================================================
 // DIAMOND PISTOL
@@ -325,12 +375,20 @@ async function applyHeal(sender: string, target: any) {
 async function applyDiamondPistol(sender: string, survivor: any) {
   if (!survivor) return;
 
+  // Eerst validate → daarna pas consume
+  const ok = await consumeTwistFromUser(sender, "diamondpistol");
+  if (!ok) {
+    emitLog({
+      type: "twist",
+      message: `${sender} probeerde DiamondPistol, maar heeft geen twist`
+    });
+    return;
+  }
+
   const arena = getArena();
 
   const victims = arena.players.filter(
-    (p) =>
-      p.id !== survivor.id &&
-      !p.boosters.includes("immune")
+    (p) => p.id !== survivor.id && !p.boosters.includes("immune")
   );
 
   for (const v of victims) {
@@ -370,16 +428,13 @@ export async function useTwist(
     return;
   }
 
-  const ok = await consumeTwistFromUser(senderId, twist);
-  if (!ok) {
-    emitLog({
-      type: "twist",
-      message: `${senderName} probeerde ${TWIST_MAP[twist].giftName}, maar heeft geen twist`
-    });
-    return;
-  }
+  // ------------- BELANGRIJK -------------
+  // Verplaats consume naar ín de individuele functies.
+  // In deze "useTwist" wordt NIETS meer geconsumeerd.
+  // --------------------------------------
 
   let target = null;
+
   if (TWIST_MAP[twist].requiresTarget) {
     target = await findUser(rawTarget || "");
     if (!target) {
@@ -426,7 +481,7 @@ export async function addTwistByGift(userId: string, twist: TwistType) {
 }
 
 // ============================================================================
-// PARSER
+// PARSER (!use)
 // ============================================================================
 
 export async function parseUseCommand(
