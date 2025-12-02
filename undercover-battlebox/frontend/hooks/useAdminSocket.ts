@@ -11,13 +11,12 @@ import type {
   GifterLeaderboardEntry,
   AdminAckResponse,
   GameSessionState,
+  AdminSocketOutbound,
 } from "@/lib/adminTypes";
 
 /**
  * De centrale socket-hook voor het hele Admin Dashboard.
- * Houdt ALLE realtime data bij op een nette, modulaire, schaalbare manier.
- *
- * Panels ontvangen state via props vanuit page.tsx.
+ * Houdt ALLE realtime data bij.
  */
 export function useAdminSocket() {
   // ===============================
@@ -45,7 +44,7 @@ export function useAdminSocket() {
   const [status, setStatus] = useState<string | null>(null);
 
   // ===============================
-  // INITIAL SNAPSHOT LOADING
+  // INITIAL SNAPSHOT
   // ===============================
   useEffect(() => {
     const socket = getAdminSocket();
@@ -69,21 +68,18 @@ export function useAdminSocket() {
   }, []);
 
   // ===============================
-  // SOCKET LISTENERS REGISTEREN
+  // SOCKET LISTENERS
   // ===============================
   useEffect(() => {
     const socket = getAdminSocket();
 
-    socket.on("updateArena", (data: ArenaState) => {
-      setArena(data);
-    });
+    socket.on("updateArena", (data: ArenaState) => setArena(data));
 
     socket.on("updateQueue", (d: any) => {
       setQueue(d.entries ?? []);
       setQueueOpen(d.open ?? true);
     });
 
-    // logs
     socket.on("log", (l: LogEntry) =>
       setLogs((prev) => [l, ...prev].slice(0, 200))
     );
@@ -91,7 +87,6 @@ export function useAdminSocket() {
       setLogs(rows.slice(0, 200))
     );
 
-    // leaderboard
     socket.on("leaderboardPlayers", (rows: PlayerLeaderboardEntry[]) =>
       setPlayerLeaderboard(rows)
     );
@@ -99,15 +94,10 @@ export function useAdminSocket() {
       setGifterLeaderboard(rows)
     );
 
-    // host diamonds
     socket.on("hostDiamonds", (d) => setHostDiamonds(d.total ?? 0));
 
-    // game session
-    socket.on("gameSession", (s: GameSessionState) => {
-      setGameSession(s);
-    });
+    socket.on("gameSession", (s: GameSessionState) => setGameSession(s));
 
-    // round events (UI feedback)
     socket.on("round:start", (d) =>
       setStatus(`▶️ Ronde gestart (${d.type}) – ${d.duration}s`)
     );
@@ -118,7 +108,6 @@ export function useAdminSocket() {
       setStatus("⛔ Ronde beëindigd – eliminatiefase")
     );
 
-    // disconnect
     socket.on("connect_error", () =>
       setStatus("❌ Verbinding verloren met server")
     );
@@ -129,14 +118,13 @@ export function useAdminSocket() {
       setStatus("🔌 Verbonden met server")
     );
 
-    // Cleanup
     return () => {
       socket.removeAllListeners();
     };
   }, []);
 
   // ===============================
-  // RONDE TIMER UPDATES
+  // RONDE TIMER
   // ===============================
   useEffect(() => {
     const t = setInterval(() => {
@@ -147,20 +135,30 @@ export function useAdminSocket() {
   }, []);
 
   // ===============================
-  // HELPER: ADMIN EVENTS (met ACK response)
+  // TYPESAFE EMIT
   // ===============================
-  function emitAdmin(event: string, payload?: any) {
+  function emitAdmin<E extends keyof AdminSocketOutbound>(
+    event: E,
+    payload: Parameters<AdminSocketOutbound[E]>[0]
+  ) {
     const socket = getAdminSocket();
 
     setStatus(`Bezig met ${event}...`);
 
-    socket.emit(event, payload ?? {}, (res: AdminAckResponse) => {
-      if (res?.success) setStatus("✅ Uitgevoerd");
-      else setStatus(`❌ ${res?.message ?? "Onbekende fout"}`);
-    });
+    socket.emit(
+      event,
+      payload,
+      (res: AdminAckResponse) => {
+        if (res?.success) setStatus("✅ Uitgevoerd");
+        else setStatus(`❌ ${res?.message ?? "Onbekende fout"}`);
+      }
+    );
   }
 
-  function emitAdminWithUser(event: string, username: string) {
+  function emitAdminWithUser<E extends keyof AdminSocketOutbound>(
+    event: E,
+    username: string
+  ) {
     if (!username) return;
 
     const socket = getAdminSocket();
@@ -168,14 +166,18 @@ export function useAdminSocket() {
 
     setStatus(`Bezig met ${event}...`);
 
-    socket.emit(event, { username: formatted }, (res: AdminAckResponse) => {
-      if (res?.success) setStatus("✅ Uitgevoerd");
-      else setStatus(`❌ ${res?.message ?? "Onbekende fout"}`);
-    });
+    socket.emit(
+      event,
+      { username: formatted } as Parameters<AdminSocketOutbound[E]>[0],
+      (res: AdminAckResponse) => {
+        if (res?.success) setStatus("✅ Uitgevoerd");
+        else setStatus(`❌ ${res?.message ?? "Onbekende fout"}`);
+      }
+    );
   }
 
   // ===============================
-  // EXPOSED API
+  // API RETURN
   // ===============================
   return {
     // state
