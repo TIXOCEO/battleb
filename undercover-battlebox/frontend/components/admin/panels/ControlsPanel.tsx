@@ -7,10 +7,6 @@ import SectionHeader from "@/components/admin/ui/SectionHeader";
 
 import type { ArenaState } from "@/lib/adminTypes";
 
-/** Because GameSessionState is not exported from adminTypes,
- *  we define the shape based on your socket payload:
- *  { active: boolean; gameId: number | null }
- */
 export interface GameSessionState {
   active: boolean;
   gameId: number | null;
@@ -33,53 +29,55 @@ export default function ControlsPanel({
     !!arena && (arenaStatus === "idle" || arenaStatus === "ended");
 
   const canStopRound = arenaStatus === "active";
-  const canGraceEnd = arenaStatus === "grace";
 
   return (
     <Panel>
       <SectionHeader title="Spelbesturing" />
 
       <div className="flex flex-wrap gap-3 mb-4">
-        {/* ===== GAME START/STOP ===== */}
+        {/* ===== START GAME ===== */}
         <Button
-          variant={gameSession.active ? "disabled" : "success"}
-          onClick={() => emitAdmin("startGame")}
+          variant="success"
           disabled={gameSession.active}
+          onClick={() => emitAdmin("startGame")}
         >
           Start spel
         </Button>
 
+        {/* ===== STOP GAME ===== */}
         <Button
-          variant={!gameSession.active ? "disabled" : "warning"}
-          onClick={() => emitAdmin("stopGame")}
+          variant="warning"
           disabled={!gameSession.active}
+          onClick={() => emitAdmin("stopGame")}
         >
           Stop spel
         </Button>
       </div>
 
       <div className="flex flex-wrap gap-3">
-        {/* ===== ROUND CONTROLS ===== */}
+        {/* ===== ROUND: VOORRONDE ===== */}
         <Button
-          variant={canStartRound ? "danger" : "disabled"}
-          onClick={() => emitAdmin("startRound", { type: "quarter" })}
+          variant="danger"
           disabled={!canStartRound}
+          onClick={() => emitAdmin("startRound", { type: "quarter" })}
         >
           Start voorronde
         </Button>
 
+        {/* ===== ROUND: FINALE ===== */}
         <Button
-          variant={canStartRound ? "purple" : "disabled"}
-          onClick={() => emitAdmin("startRound", { type: "finale" })}
+          variant="purple"
           disabled={!canStartRound}
+          onClick={() => emitAdmin("startRound", { type: "finale" })}
         >
           Start finale
         </Button>
 
+        {/* ===== STOP ROUND ===== */}
         <Button
-          variant={canStopRound ? "dark" : "disabled"}
-          onClick={() => emitAdmin("endRound")}
+          variant="dark"
           disabled={!canStopRound}
+          onClick={() => emitAdmin("endRound")}
         >
           Stop ronde
         </Button>
