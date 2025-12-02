@@ -1,6 +1,4 @@
-/* ---------------------------------------------------------
-   EVENTS PANEL (250×700)
-   --------------------------------------------------------- */
+/* PANEL */
 .bb-events-panel {
   width: 250px;
   height: 700px;
@@ -12,6 +10,8 @@
   box-shadow:
     0 0 20px rgba(255,77,79,0.45),
     0 0 30px rgba(255,77,79,0.25) inset;
+
+  animation: panelPowerOn 0.6s ease-out forwards;
 }
 
 .bb-events-list {
@@ -20,9 +20,7 @@
   gap: 12px;
 }
 
-/* ---------------------------------------------------------
-   EVENT ITEM
-   --------------------------------------------------------- */
+/* EVENT ITEM */
 .bb-event-item {
   display: flex;
   align-items: center;
@@ -31,7 +29,6 @@
 
   background: var(--glass-dark);
   border: 2px solid var(--border-light);
-  position: relative;
 
   clip-path: polygon(
     12% 0%, 88% 0%,
@@ -44,51 +41,48 @@
     0 0 20px rgba(0,0,0,0.9),
     inset 0 0 24px rgba(0,0,0,0.6),
     0 0 12px rgba(255,77,79,0.35) inset;
+
+  animation: eventSlideIn 0.4s cubic-bezier(.17,.67,.4,1.25) both;
 }
 
-.bb-event-item::after {
-  content:"";
-  position:absolute;
-  inset:0;
-  pointer-events:none;
-  border: 2px solid rgba(255,77,79,0.35);
-  clip-path:inherit;
-  box-shadow: var(--neon-orange-glow);
-  opacity: 0.28;
+@keyframes eventSlideIn {
+  0% { opacity: 0; transform: translateX(22px); }
+  100% { opacity: 1; transform: translateX(0); }
 }
 
-/* ICONS */
+/* EVENT HIDE */
+.event-fade {
+  animation: eventFadeOut 0.6s ease-out forwards;
+}
+
+@keyframes eventFadeOut {
+  0% { opacity: 1; transform: translateX(0); }
+  100% { opacity: 0; transform: translateX(18px); }
+}
+
+/* ICON animations */
 .event-icon {
   width: 20px;
   height: 20px;
   background-size: cover;
+
+  animation: iconGlow 3s ease-in-out infinite;
 }
 
-/* Placeholder SVGs (replace with real arrows later) */
-.event-icon.join {
-  background: url("data:image/svg+xml;utf8,<svg width='20' height='20' fill='%2300ff99' xmlns='http://www.w3.org/2000/svg'><polygon points='10,0 20,20 0,20'/></svg>");
+@keyframes iconGlow {
+  0%,100% { filter: brightness(1); }
+  50% { filter: brightness(1.4); }
 }
 
-.event-icon.leave {
-  background: url("data:image/svg+xml;utf8,<svg width='20' height='20' fill='%23ff4d4f' xmlns='http://www.w3.org/2000/svg'><polygon points='10,20 20,0 0,0'/></svg>");
-}
-
-/* TEXT */
-.event-text .name {
-  font-weight: 600;
-  color: white;
-}
-.event-text .user {
-  opacity: 0.8;
-  font-size: 12px;
-}
-
-/* VIP ICON */
+/* VIP badge pulse */
 .event-vip {
   width: 12px;
   height: 12px;
   background: gold;
   border-radius: 50%;
   margin-left: auto;
+
   box-shadow: 0 0 12px gold;
+
+  animation: vipPulse 2.2s infinite ease-in-out;
 }
