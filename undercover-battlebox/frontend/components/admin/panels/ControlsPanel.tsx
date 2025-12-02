@@ -5,7 +5,16 @@ import Panel from "@/components/admin/ui/Panel";
 import Button from "@/components/admin/ui/Button";
 import SectionHeader from "@/components/admin/ui/SectionHeader";
 
-import type { ArenaState, GameSessionState } from "@/lib/adminTypes";
+import type { ArenaState } from "@/lib/adminTypes";
+
+/** Because GameSessionState is not exported from adminTypes,
+ *  we define the shape based on your socket payload:
+ *  { active: boolean; gameId: number | null }
+ */
+export interface GameSessionState {
+  active: boolean;
+  gameId: number | null;
+}
 
 interface ControlsPanelProps {
   gameSession: GameSessionState;
