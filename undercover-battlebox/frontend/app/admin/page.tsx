@@ -253,7 +253,7 @@ export default function AdminDashboardPage() {
     setActiveAutoField(null);
   }
 
-  /* ============================================
+/* ============================================
      HELPERS
   ============================================ */
   const fmt = (n: number | string | undefined | null) =>
@@ -539,6 +539,13 @@ export default function AdminDashboardPage() {
                         BOMB
                       </span>
                     )}
+
+                    {/* ★★★ BREAKER BADGE ★★★ */}
+                    {p.breakerHits > 0 && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-200 text-purple-800 border border-purple-300">
+                        BREAK {p.breakerHits}/2
+                      </span>
+                    )}
                   </div>
 
                   <div className="text-xs text-gray-600 mt-1">
@@ -735,7 +742,7 @@ export default function AdminDashboardPage() {
             </div>
           </div>
 
-          {/* PLAYERS LB */}
+          {/* PLAYER LB */}
           {activeLbTab === "players" && (
             <div className="p-4 max-h-96 overflow-y-auto text-sm">
               <h2 className="text-xl font-semibold mb-2">Player Leaderboard</h2>
@@ -772,7 +779,8 @@ export default function AdminDashboardPage() {
                         (acc, p) => acc + (p.total_score || 0),
                         0
                       )
-                    )} 💎
+                    )}{" "}
+                    💎
                   </div>
                 </>
               ) : (
@@ -783,12 +791,10 @@ export default function AdminDashboardPage() {
             </div>
           )}
 
-          {/* GIFTERS LB */}
+          {/* GIFTER LB */}
           {activeLbTab === "gifters" && (
             <div className="p-4 max-h-96 overflow-y-auto text-sm">
-              <h2 className="text-xl font-semibold mb-2">
-                Gifter Leaderboard
-              </h2>
+              <h2 className="text-xl font-semibold mb-2">Gifter Leaderboard</h2>
               <p className="text-xs text-gray-500 mb-3">
                 Diamanten verstuurd in deze stream
               </p>
@@ -822,7 +828,8 @@ export default function AdminDashboardPage() {
                         (acc, g) => acc + (g.total_diamonds || 0),
                         0
                       )
-                    )} 💎
+                    )}{" "}
+                    💎
                   </div>
                 </>
               ) : (
@@ -866,7 +873,7 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
-            {/* AUTOCOMPLETE */}
+            {/* AUTOCOMPLETE GIVE */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "give" && (
@@ -897,6 +904,9 @@ export default function AdminDashboardPage() {
               <option value="heal">Heal</option>
               <option value="bomb">Bomb</option>
               <option value="diamondpistol">Diamond Pistol</option>
+
+              {/* ★★★ BREAKER — NIEUW ★★★ */}
+              <option value="breaker">Breaker</option>
             </select>
 
             <button
@@ -935,7 +945,7 @@ export default function AdminDashboardPage() {
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
-            {/* AUTOCOMPLETE */}
+            {/* AUTOCOMPLETE USE */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "use" && (
@@ -966,6 +976,9 @@ export default function AdminDashboardPage() {
               <option value="heal">Heal</option>
               <option value="bomb">Bomb</option>
               <option value="diamondpistol">Diamond Pistol</option>
+
+              {/* ★★★ BREAKER — NIEUW ★★★ */}
+              <option value="breaker">Breaker</option>
             </select>
 
             <label className="text-xs font-semibold">Target (optioneel)</label>
@@ -1095,4 +1108,4 @@ export default function AdminDashboardPage() {
       )}
     </main>
   );
-                  }
+                }
