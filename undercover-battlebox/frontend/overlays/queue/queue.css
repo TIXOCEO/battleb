@@ -1,18 +1,27 @@
-/* PANEL FRAME */
+/* ---------------------------------------------------------
+   QUEUE PANEL (1200×700)
+   --------------------------------------------------------- */
 .bb-queue-panel {
   width: 1200px;
   height: 700px;
-  background: var(--glass-bg);
-  border: 2px solid rgba(255,255,255,0.12);
-  box-shadow:
-    0 0 25px rgba(255, 77, 79, 0.4),
-    0 0 40px rgba(255, 77, 79, 0.2) inset;
-  backdrop-filter: blur(6px);
-  position: relative;
+  background: var(--glass-mid);
+  border: 2px solid var(--border-light);
   padding: 20px;
+  position: relative;
+  backdrop-filter: blur(6px);
+  overflow: hidden;
+
+  /* LED + neon frame look */
+  box-shadow:
+    0 0 25px rgba(255,77,79,0.45),
+    0 0 40px rgba(255,77,79,0.25) inset;
 }
 
-/* GRID */
+.bb-queue-panel.esports-led-grid {
+  background-size: 4px 4px;
+}
+
+/* GRID: 30 cards */
 .bb-queue-grid {
   display: grid;
   grid-template-columns: repeat(10, 1fr);
@@ -20,10 +29,12 @@
   gap: 14px;
 }
 
-/* CARD BASE */
+/* ---------------------------------------------------------
+   CARD BASE (octagon cards)
+   --------------------------------------------------------- */
 .bb-card {
-  background: rgba(12,12,15,0.75);
-  border: 1px solid rgba(255,255,255,0.1);
+  background: var(--glass-dark);
+  border: 2px solid var(--border-light);
   position: relative;
   color: white;
   padding: 10px;
@@ -35,12 +46,77 @@
     0% 85%, 0% 15%
   );
   box-shadow:
-    0 0 10px rgba(0,0,0,0.8),
-    0 0 12px rgba(255, 77, 79, 0.25) inset;
+    0 0 20px rgba(0,0,0,0.9),
+    inset 0 0 24px rgba(0,0,0,0.6),
+    0 0 14px rgba(255,77,79,0.3) inset;
 }
 
-/* CARD WHEN EMPTY */
+/* Orange neon rim */
+.bb-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: 2px solid rgba(255,77,79,0.45);
+  clip-path: inherit;
+  box-shadow: var(--neon-orange-glow);
+  opacity: 0.35;
+}
+
+/* ---------------------------------------------------------
+   EMPTY CARD
+   --------------------------------------------------------- */
 .empty-card {
-  opacity: 0.25;
-  border-color: rgba(255,255,255,0.05);
+  opacity: 0.18;
+  border-color: rgba(255,255,255,0.05) !important;
+}
+
+/* ---------------------------------------------------------
+   POSITION BADGE
+   --------------------------------------------------------- */
+.pos-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 26px;
+  height: 26px;
+  clip-path: polygon(
+    25% 0%, 75% 0%,
+    100% 50%, 75% 100%,
+    25% 100%, 0% 50%
+  );
+  background: var(--neon-orange);
+  color: black;
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 26px;
+  text-align: center;
+  text-shadow: var(--neon-orange-glow);
+}
+
+/* ---------------------------------------------------------
+   AVATAR
+   --------------------------------------------------------- */
+.card-avatar {
+  width: 54px;
+  height: 54px;
+  background-size: cover;
+  background-position: center;
+  clip-path: polygon(
+    15% 0%, 85% 0%,
+    100% 25%, 100% 75%,
+    85% 100%, 15% 100%,
+    0% 75%, 0% 25%
+  );
+  box-shadow:
+    0 0 12px rgba(0,0,0,0.8),
+    inset 0 0 14px rgba(255,255,255,0.22);
+}
+
+/* ---------------------------------------------------------
+   VIP GLOW
+   --------------------------------------------------------- */
+.vip-glow {
+  box-shadow: var(--vip-glow) !important;
+  border-color: rgba(255,220,0,0.65) !important;
 }
