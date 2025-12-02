@@ -1,16 +1,31 @@
-<div class="bb-queue-panel led-sweep holo-scan">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>BattleBox Queue Overlay</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <div class="bb-queue-grid">
-    
-    <!-- 30 cards -->
-    <!-- I generate 30 here as placeholders, actual data fills them -->
-    <!-- Each card is an esports octagon card -->
+  <!-- GLOBAL THEME -->
+  <link rel="stylesheet" href="../shared/theme.css" />
 
-    <div class="bb-card octagon empty-card" data-slot="1"></div>
-    <div class="bb-card octagon empty-card" data-slot="2"></div>
-    ...
-    ...
-    <div class="bb-card octagon empty-card" data-slot="30"></div>
+  <!-- QUEUE STYLES -->
+  <link rel="stylesheet" href="./queue.css" />
 
+  <style>
+    body {
+      margin: 0;
+      background: transparent;
+      overflow: hidden;
+    }
+  </style>
+</head>
+
+<body>
+  <!-- MAIN WRAPPER -->
+  <div class="bb-queue-panel holo-scan led-sweep">
+    <div id="queue-grid" class="bb-queue-grid"></div>
   </div>
-</div>
+
+  <script type="module" src="./queue.js"></script>
+</body>
+</html>
