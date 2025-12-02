@@ -72,6 +72,7 @@ export default function AdminDashboardPage() {
   // ======================================================
   return (
     <main className="min-h-screen bg-[#0D0F12] text-white p-6">
+      
       {/* PAGE HEADER */}
       <header className="max-w-[1600px] mx-auto mb-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
@@ -108,9 +109,7 @@ export default function AdminDashboardPage() {
         <ControlsPanel
           gameSession={gameSession}
           arena={arena}
-          emitAdmin={(event: string, payload?: any) =>
-            emitAdmin(event, payload)
-          }
+          emitAdmin={emitAdmin}
         />
 
         {/* ---------- PLAYER ACTIONS PANEL ---------- */}
