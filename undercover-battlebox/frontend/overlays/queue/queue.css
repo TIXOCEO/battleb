@@ -1,1 +1,46 @@
+/* PANEL FRAME */
+.bb-queue-panel {
+  width: 1200px;
+  height: 700px;
+  background: var(--glass-bg);
+  border: 2px solid rgba(255,255,255,0.12);
+  box-shadow:
+    0 0 25px rgba(255, 77, 79, 0.4),
+    0 0 40px rgba(255, 77, 79, 0.2) inset;
+  backdrop-filter: blur(6px);
+  position: relative;
+  padding: 20px;
+}
 
+/* GRID */
+.bb-queue-grid {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 14px;
+}
+
+/* CARD BASE */
+.bb-card {
+  background: rgba(12,12,15,0.75);
+  border: 1px solid rgba(255,255,255,0.1);
+  position: relative;
+  color: white;
+  padding: 10px;
+  overflow: hidden;
+  clip-path: polygon(
+    10% 0%, 90% 0%,
+    100% 15%, 100% 85%,
+    90% 100%, 10% 100%,
+    0% 85%, 0% 15%
+  );
+  box-shadow:
+    0 0 10px rgba(0,0,0,0.8),
+    0 0 12px rgba(255, 77, 79, 0.25) inset;
+}
+
+/* CARD WHEN EMPTY */
+.empty-card {
+  opacity: 0.25;
+  border-color: rgba(255,255,255,0.05);
+}
