@@ -1,32 +1,30 @@
-<div class="bb-events-panel holo-scan">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>BattleBox Events Overlay</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <div class="bb-events-list">
+  <!-- THEME + SHARED -->
+  <link rel="stylesheet" href="../shared/theme.css" />
 
-    <div class="bb-event-item">
-      <div class="event-icon join"></div>
-      <div class="event-text">
-        <div class="name">DisplayName</div>
-        <div class="user">@username</div>
-      </div>
-      <div class="event-vip"></div>
-    </div>
+  <!-- EVENTS-SPECIFIC CSS -->
+  <link rel="stylesheet" href="./events.css" />
 
-    <div class="bb-event-item">
-      <div class="event-icon leave"></div>
-      <div class="event-text">
-        <div class="name">DisplayName</div>
-        <div class="user">@username</div>
-      </div>
-    </div>
+  <style>
+    body {
+      margin: 0;
+      background: transparent;
+      overflow: hidden;
+    }
+  </style>
+</head>
 
-    <div class="bb-event-item">
-      <div class="event-icon join"></div>
-      <div class="event-text">
-        <div class="name">DisplayName</div>
-        <div class="user">@username</div>
-      </div>
-    </div>
-
+<body>
+  <div class="bb-events-panel holo-scan led-sweep">
+    <div id="events-list" class="bb-events-list"></div>
   </div>
 
-</div>
+  <script type="module" src="./events.js"></script>
+</body>
+</html>
