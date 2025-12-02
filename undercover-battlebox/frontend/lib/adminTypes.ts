@@ -6,7 +6,7 @@
      - promoteUser
      - demoteUser
      - giveVip / removeVip (realtime queue refresh)
-   ✔ Galaxy reverseMode toegevoegd aan ArenaState
+   ✔ Galaxy reverseMode + breakerHits veld voor breaker twist
    ✔ Overige logica volledig ongewijzigd gelaten
 ============================================================================ */
 
@@ -44,6 +44,9 @@ export interface ArenaPlayer {
 
   vip_expires_at?: string | null;
   fan_expires_at?: string | null;
+
+  /** ★ BREAKER PATCH — aantal hits op immune (0–2) */
+  breakerHits?: number;
 }
 
 /* ================================
@@ -362,7 +365,7 @@ export interface AdminSocketOutbound {
 
   startRound: (
     payload: { type: "quarter" | "finale" },
-   ack: (res: AdminAckResponse) => void
+    ack: (res: AdminAckResponse) => void
   ) => void;
 
   endRound: (payload: {}, ack: (res: AdminAckResponse) => void) => void;
