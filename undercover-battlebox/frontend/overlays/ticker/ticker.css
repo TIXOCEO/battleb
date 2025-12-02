@@ -1,1 +1,26 @@
 
+.bb-ticker {
+  width: 1200px;
+  height: 100px;
+  background: rgba(12,12,15,0.85);
+  border: 2px solid rgba(255,255,255,0.12);
+  overflow: hidden;
+  position: relative;
+  box-shadow:
+    0 0 25px rgba(255,77,79,0.45),
+    0 0 40px rgba(255,77,79,0.25) inset;
+}
+
+.bb-ticker-inner {
+  white-space: nowrap;
+  font-size: 28px;
+  padding-left: 1200px;
+  animation: marquee 22s linear infinite;
+  color: white;
+  text-shadow: var(--neon-orange-glow);
+}
+
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-200%); }
+}
