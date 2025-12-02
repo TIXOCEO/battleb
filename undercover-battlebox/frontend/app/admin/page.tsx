@@ -179,81 +179,6 @@ export default function AdminDashboardPage() {
   }, []);
 
   /* ============================================
-     EMITTER HELPERS
-  ============================================ */
-  const emitAdmin = (
-    event: keyof AdminSocketOutbound,
-    payload?: any
-  ) => {
-    const socket = getAdminSocket();
-    setStatus(`Bezig met ${event}...`);
-
-    socket.emit(event, payload ?? {}, (res: AdminAckResponse) => {
-      setStatus(
-        res?.success ? "✅ Uitgevoerd" : `❌ ${res?.message ?? "Geen antwoord"}`
-      );
-    });
-  };
-
-  const emitAdminWithUser = (
-    event: keyof AdminSocketOutbound,
-    userTarget?: string
-  ) => {
-    const uname = (userTarget || username || "").trim();
-    if (!uname) return;
-
-    const socket = getAdminSocket();
-    const formatted = uname.startsWith("@") ? uname : `@${uname}`;
-
-    setStatus(`Bezig met ${event}...`);
-    socket.emit(event, { username: formatted }, (res: AdminAckResponse) => {
-      setStatus(res?.success ? "✅ Uitgevoerd" : `❌ ${res?.message}`);
-    });
-  };
-
-  /* ============================================
-     AUTOCOMPLETE SEARCH
-  ============================================ */
-  useEffect(() => {
-    const q = typing.trim().replace(/^@+/, "");
-    if (!q || q.length < 2) {
-      setSearchResults([]);
-      return;
-    }
-
-    const socket = getAdminSocket();
-    const handle = setTimeout(() => {
-      socket.emit(
-        "searchUsers",
-        { query: q },
-        (res: { users: SearchUser[] }) => {
-          setSearchResults(res?.users || []);
-        }
-      );
-    }, 250);
-
-    return () => clearTimeout(handle);
-  }, [typing]);
-
-  function applyAutoFill(user: SearchUser) {
-    if (!user) return;
-
-    const formatted = user.username.startsWith("@")
-      ? user.username
-      : `@${user.username}`;
-
-    if (activeAutoField === "main") setUsername(formatted);
-    if (activeAutoField === "give") setTwistUserGive(formatted);
-    if (activeAutoField === "use") setTwistUserUse(formatted);
-    if (activeAutoField === "target") setTwistTargetUse(formatted);
-
-    setTyping("");
-    setSearchResults([]);
-    setShowResults(false);
-    setActiveAutoField(null);
-  }
-
-/* ============================================
      HELPERS
   ============================================ */
   const fmt = (n: number | string | undefined | null) =>
@@ -473,6 +398,7 @@ export default function AdminDashboardPage() {
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 relative">
+
             {players.length ? (
               players.map((p, idx) => (
                 <div
@@ -540,10 +466,10 @@ export default function AdminDashboardPage() {
                       </span>
                     )}
 
-                    {/* ★★★ BREAKER BADGE ★★★ */}
-                    {p.breakerHits > 0 && (
+                    {/* ★★★ BREAKER BADGE — FIXED ★★★ */}
+                    {(p.breakerHits ?? 0) > 0 && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-200 text-purple-800 border border-purple-300">
-                        BREAK {p.breakerHits}/2
+                        BREAK {(p.breakerHits ?? 0)}/2
                       </span>
                     )}
                   </div>
@@ -1108,4 +1034,4 @@ export default function AdminDashboardPage() {
       )}
     </main>
   );
-                }
+                                                                        }
