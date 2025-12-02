@@ -1,48 +1,30 @@
-<div class="bb-twists-panel holo-scan">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>BattleBox Twists Overlay</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <div class="bb-twists-stack">
+  <!-- GLOBAL THEME -->
+  <link rel="stylesheet" href="../shared/theme.css" />
 
-    <div class="bb-twist-card octagon-card">
-      <div class="twist-icon octagon-icon"></div>
-      <div class="twist-info">
-        <div class="twist-name">Twist Name</div>
-        <div class="twist-gift">Gift Name</div>
-        <div class="twist-cost">1000💎</div>
-        <div class="twist-desc">Short description text goes here.</div>
-        <div class="twist-commands">
-          <span class="cmd-buy">!buy alias</span>
-          <span class="cmd-use">!use alias @target</span>
-        </div>
-      </div>
-    </div>
+  <!-- TWIST PANEL CSS -->
+  <link rel="stylesheet" href="./twists.css" />
 
-    <div class="bb-twist-card octagon-card">
-      <div class="twist-icon octagon-icon"></div>
-      <div class="twist-info">
-        <div class="twist-name">Twist Name</div>
-        <div class="twist-gift">Gift Name</div>
-        <div class="twist-cost">2500💎</div>
-        <div class="twist-desc">Short description text goes here.</div>
-        <div class="twist-commands">
-          <span class="cmd-buy">!buy alias</span>
-          <span class="cmd-use">!use alias</span>
-        </div>
-      </div>
-    </div>
+  <style>
+    body {
+      margin: 0;
+      background: transparent;
+      overflow: hidden;
+    }
+  </style>
+</head>
 
-    <div class="bb-twist-card octagon-card">
-      <div class="twist-icon octagon-icon"></div>
-      <div class="twist-info">
-        <div class="twist-name">Twist Name</div>
-        <div class="twist-gift">Gift Name</div>
-        <div class="twist-cost">1599💎</div>
-        <div class="twist-desc">Short description text goes here.</div>
-        <div class="twist-commands">
-          <span class="cmd-buy">!buy alias</span>
-          <span class="cmd-use">!use alias</span>
-        </div>
-      </div>
-    </div>
-
+<body>
+  <div class="bb-twists-panel holo-scan led-sweep">
+    <div id="twist-stack" class="bb-twists-stack"></div>
   </div>
-</div>
+
+  <script type="module" src="./twists.js"></script>
+</body>
+</html>
