@@ -23,7 +23,7 @@ import LogsPanel from "@/components/admin/panels/LogsPanel";
 
 export default function AdminDashboardPage() {
   // ======================================================
-  // 1. GLOBAL REALTIME STATE
+  // SOCKET STATE
   // ======================================================
   const {
     arena,
@@ -36,26 +36,45 @@ export default function AdminDashboardPage() {
     hostDiamonds,
     status,
     fmt,
-    emitAdmin,        // ⬅️ typesafe emit
-    emitAdminWithUser // ⬅️ typesafe emit user
   } = useAdminSocket();
 
   // ======================================================
-  // 2. Confirm dialog
+  // CONFIRMDIALOG STATE
   // ======================================================
   const [confirm, setConfirm] = useState<{
     message: string;
     onConfirm: () => void;
   } | null>(null);
 
-  const openConfirm = (msg: string, onConfirm: () => void) => {
-    setConfirm({ message: msg, onConfirm });
+  // Wrapper die OOK ArenaPanel calls accepteert
+  const openConfirm = (arg1: any, arg2?: any) => {
+    // Case 1: Panels zoals Controls / Players gebruiken: openConfirm("msg", fn)
+    if (typeof arg1 === "string" && typeof arg2 === "function") {
+      return setConfirm({
+        message: arg1,
+        onConfirm: arg2,
+      });
+    }
+
+    // Case 2: ArenaPanel gebruikt object { message, username, action }
+    if (arg1 && typeof arg1 === "object") {
+      const { message, username, action } = arg1;
+
+      return setConfirm({
+        message,
+        onConfirm: () => {
+          emitAdmin(action, { username });
+        },
+      });
+    }
+
+    console.warn("openConfirm() kreeg een onbekend format:", arg1, arg2);
   };
 
   const closeConfirm = () => setConfirm(null);
 
   // ======================================================
-  // 3. AUTOCOMPLETE + connected fields
+  // AUTOCOMPLETE
   // ======================================================
   const [username, setUsername] = useState("");
   const [twistUserGive, setTwistUserGive] = useState("");
@@ -70,12 +89,11 @@ export default function AdminDashboardPage() {
   });
 
   // ======================================================
-  // 4. UI
+  // PAGE UI
   // ======================================================
   return (
     <main className="min-h-screen bg-[#0D0F12] text-white p-6">
-
-      {/* PAGE HEADER */}
+      {/* HEADER */}
       <header className="max-w-[1600px] mx-auto mb-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
           <div className="flex items-center gap-3">
@@ -83,8 +101,7 @@ export default function AdminDashboardPage() {
             <div>
               <h1 className="text-2xl font-bold">Undercover BattleBox – Admin</h1>
               <p className="text-sm text-slate-400">
-                Verbonden als{" "}
-                <span className="text-green-400 font-semibold">Admin</span>
+                Verbonden als <span className="text-green-400 font-semibold">Admin</span>
               </p>
             </div>
           </div>
@@ -99,17 +116,17 @@ export default function AdminDashboardPage() {
         {status && <div className="mt-3 text-sm text-slate-300">{status}</div>}
       </header>
 
-      {/* MAIN GRID */}
+      {/* GRID */}
       <div className="max-w-[1600px] mx-auto grid gap-6">
 
-        {/* ---------- CONTROLS PANEL ---------- */}
+        {/* CONTROLS */}
         <ControlsPanel
           gameSession={gameSession}
           arena={arena}
-          emitAdmin={emitAdmin}        // ✔ correct
+          emitAdmin={emitAdmin}
         />
 
-        {/* ---------- PLAYER ACTIONS PANEL ---------- */}
+        {/* PLAYER ACTIONS */}
         <PlayerActionsPanel
           username={username}
           setUsername={setUsername}
@@ -118,16 +135,17 @@ export default function AdminDashboardPage() {
           autocomplete={autocomplete}
         />
 
-        {/* ---------- ARENA PANEL ---------- */}
+        {/* ARENA */}
         <ArenaPanel
           arena={arena}
           players={arena?.players ?? []}
           fmt={fmt}
+          hostDiamonds={hostDiamonds}
           emitAdmin={emitAdmin}
           openConfirm={openConfirm}
         />
 
-        {/* ---------- QUEUE PANEL ---------- */}
+        {/* QUEUE */}
         <QueuePanel
           queue={queue}
           queueOpen={queueOpen}
@@ -135,26 +153,26 @@ export default function AdminDashboardPage() {
           fmt={fmt}
         />
 
-        {/* ---------- LEADERBOARD PANEL ---------- */}
+        {/* LEADERBOARD */}
         <LeaderboardPanel
           playerLeaderboard={playerLeaderboard}
           gifterLeaderboard={gifterLeaderboard}
           fmt={fmt}
         />
 
-        {/* ---------- TWISTS PANEL ---------- */}
+        {/* TWISTS */}
         <TwistsPanel
           twistUserGive={twistUserGive}
           setTwistUserGive={setTwistUserGive}
           twistUserUse={twistUserUse}
           setTwistUserUse={setTwistUserUse}
-          twistTarget={twistTarget}
-          setTwistTarget={setTwistTarget}
+          twistTargetUse={twistTarget}
+          setTwistTargetUse={setTwistTarget}
           emitAdmin={emitAdmin}
           autocomplete={autocomplete}
         />
 
-        {/* ---------- LOGS PANEL ---------- */}
+        {/* LOGS */}
         <LogsPanel logs={logs} />
       </div>
 
@@ -163,7 +181,7 @@ export default function AdminDashboardPage() {
         BattleBox Admin v3.0 • Dark Mode • Reworked UI/UX
       </footer>
 
-      {/* CONFIRM */}
+      {/* CONFIRM MODAL */}
       <ConfirmDialog
         open={!!confirm}
         message={confirm?.message ?? ""}
