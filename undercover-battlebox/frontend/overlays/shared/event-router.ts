@@ -97,7 +97,7 @@ export function initEventRouter() {
     gift: def.giftName,
     diamonds: def.diamonds,
     description: def.description,
-    aliases: def.aliases,
+    aliases: [...def.aliases],
     icon: EMPTY_AVATAR, // replace later
   }));
 
