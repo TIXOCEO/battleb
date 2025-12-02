@@ -7,6 +7,44 @@ import Input from "@/components/admin/ui/Input";
 import Label from "@/components/admin/ui/Label";
 import Button from "@/components/admin/ui/Button";
 
+import type { AdminSocketOutbound } from "@/lib/adminTypes";
+import type { AutocompleteUser } from "@/types/AutocompleteUser";
+import type { TwistType } from "@/lib/twist-definitions";
+import type { EmitAdminFn } from "@/types/EmitAdminFn";
+
+interface TwistsPanelProps {
+  twistUserGive: string;
+  twistTypeGive: TwistType | "";
+  twistUserUse: string;
+  twistTargetUse: string;
+  twistTypeUse: TwistType | "";
+
+  setTwistUserGive: (v: string) => void;
+  setTwistTypeGive: (v: TwistType | "") => void;
+  setTwistUserUse: (v: string) => void;
+  setTwistTargetUse: (v: string) => void;
+  setTwistTypeUse: (v: TwistType | "") => void;
+
+  searchResults: AutocompleteUser[];
+  showResults: boolean;
+  activeAutoField: "give" | "use" | "target" | "main" | null;
+
+  applyAutoFill: (u: AutocompleteUser) => void;
+  onAutoFocus: (field: "give" | "use" | "target" | "main", value: string) => void;
+
+  emitAdmin: EmitAdminFn;
+}
+
+const TWIST_OPTIONS: TwistType[] = [
+  "galaxy",
+  "moneygun",
+  "immune",
+  "heal",
+  "bomb",
+  "diamondpistol",
+  "breaker",
+];
+
 export default function TwistsPanel({
   twistUserGive,
   twistTypeGive,
@@ -27,7 +65,7 @@ export default function TwistsPanel({
   onAutoFocus,
 
   emitAdmin,
-}: any) {
+}: TwistsPanelProps) {
   return (
     <Panel>
       <SectionHeader title="Twists" subtitle="Geven & gebruiken (admin)" />
@@ -55,7 +93,7 @@ export default function TwistsPanel({
               searchResults.length > 0 &&
               activeAutoField === "give" && (
                 <div className="absolute left-0 mt-1 w-full bg-[#1C2129] border border-[#2A3038] rounded-[4px] shadow-xl max-h-56 overflow-auto z-30">
-                  {searchResults.map((u: any) => (
+                  {searchResults.map((u) => (
                     <div
                       key={u.tiktok_id}
                       onClick={() => applyAutoFill(u)}
@@ -72,17 +110,15 @@ export default function TwistsPanel({
           <Label className="mt-3">Kies twist</Label>
           <select
             value={twistTypeGive}
-            onChange={(e) => setTwistTypeGive(e.target.value)}
+            onChange={(e) => setTwistTypeGive(e.target.value as TwistType)}
             className="w-full bg-[#13161C] border border-[#2A3038] rounded-[4px] px-3 py-2 text-sm text-slate-200 focus:border-[#4E97FF]"
           >
             <option value="">-- Kies twist --</option>
-            <option value="galaxy">Galaxy</option>
-            <option value="moneygun">MoneyGun</option>
-            <option value="immune">Immune</option>
-            <option value="heal">Heal</option>
-            <option value="bomb">Bomb</option>
-            <option value="diamondpistol">Diamond Pistol</option>
-            <option value="breaker">Breaker</option>
+            {TWIST_OPTIONS.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
           </select>
 
           <Button
@@ -121,7 +157,7 @@ export default function TwistsPanel({
               searchResults.length > 0 &&
               activeAutoField === "use" && (
                 <div className="absolute left-0 mt-1 w-full bg-[#1C2129] border border-[#2A3038] rounded-[4px] shadow-xl max-h-56 overflow-auto z-30">
-                  {searchResults.map((u: any) => (
+                  {searchResults.map((u) => (
                     <div
                       key={u.tiktok_id}
                       onClick={() => applyAutoFill(u)}
@@ -138,17 +174,15 @@ export default function TwistsPanel({
           <Label className="mt-3">Twist</Label>
           <select
             value={twistTypeUse}
-            onChange={(e) => setTwistTypeUse(e.target.value)}
+            onChange={(e) => setTwistTypeUse(e.target.value as TwistType)}
             className="w-full bg-[#13161C] border border-[#2A3038] rounded-[4px] px-3 py-2 text-sm text-slate-200 focus:border-[#4E97FF]"
           >
             <option value="">-- Kies twist --</option>
-            <option value="galaxy">Galaxy</option>
-            <option value="moneygun">MoneyGun</option>
-            <option value="immune">Immune</option>
-            <option value="heal">Heal</option>
-            <option value="bomb">Bomb</option>
-            <option value="diamondpistol">Diamond Pistol</option>
-            <option value="breaker">Breaker</option>
+            {TWIST_OPTIONS.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
           </select>
 
           <Label className="mt-3">Target (optioneel)</Label>
@@ -165,7 +199,7 @@ export default function TwistsPanel({
               searchResults.length > 0 &&
               activeAutoField === "target" && (
                 <div className="absolute left-0 mt-1 w-full bg-[#1C2129] border border-[#2A3038] rounded-[4px] shadow-xl max-h-56 overflow-auto z-30">
-                  {searchResults.map((u: any) => (
+                  {searchResults.map((u) => (
                     <div
                       key={u.tiktok_id}
                       onClick={() => applyAutoFill(u)}
