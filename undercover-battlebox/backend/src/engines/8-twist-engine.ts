@@ -1,11 +1,11 @@
 // ============================================================================
-// 8-twist-engine.ts — Twist Engine v15.2 (DiamondPistol Round-Lock Patch)
+// 8-twist-engine.ts — Twist Engine v16.0 (Breaker Patch + Stable Build)
 // ============================================================================
 //
-// ✔ Twist wordt pas geconsumeerd NA validatie (behouden uit v15.1)
-// ✔ DiamondPistol mag 1× per ronde — check op arena.diamondPistolUsed
-// ✔ DiamondPistol target mag nooit de gebruiker zelf zijn
-// ✔ Rest van alle code 100% ongemoeid gelaten
+// ✔ Twist wordt pas geconsumeerd NA validatie
+// ✔ DiamondPistol mag 1× per ronde
+// ✔ BREAKER twist toegevoegd (cracked → broken → immune verwijderd)
+// ✔ Rest code onaangeraakt
 //
 // ============================================================================
 
@@ -156,7 +156,7 @@ async function applyMoneyGun(sender: string, target: any) {
   const p = arena.players.find((x) => x.id === target.id);
   if (!p) return;
 
-  // Validaties vóór consume
+  // IMMUNE blokkeert
   if (isImmune(target.id)) {
     emitLog({
       type: "twist",
@@ -173,7 +173,6 @@ async function applyMoneyGun(sender: string, target: any) {
     return;
   }
 
-  // Nu pas consumeren
   const ok = await consumeTwistFromUser(sender, "moneygun");
   if (!ok) {
     emitLog({
@@ -214,7 +213,6 @@ async function applyBomb(sender: string) {
     return;
   }
 
-  // Validatie eerst (nog géén consume)
   const poolTargets = arena.players.filter(
     (p) => !p.boosters.includes("immune") && p.eliminated !== true
   );
@@ -227,7 +225,6 @@ async function applyBomb(sender: string) {
     return;
   }
 
-  // Nu pas consumeren
   const ok = await consumeTwistFromUser(sender, "bomb");
   if (!ok) {
     emitLog({
@@ -313,7 +310,6 @@ async function applyHeal(sender: string, target: any) {
   const p = arena.players.find((x) => x.id === target.id);
   if (!p) return;
 
-  // Validatie
   if (!p.eliminated) {
     emitLog({
       type: "twist",
@@ -322,7 +318,6 @@ async function applyHeal(sender: string, target: any) {
     return;
   }
 
-  // Nu pas consumeren
   const ok = await consumeTwistFromUser(sender, "heal");
   if (!ok) {
     emitLog({
@@ -345,6 +340,60 @@ async function applyHeal(sender: string, target: any) {
   await emitArena();
 }
 
+
+// ============================================================================
+// ★★★★★ BREAKER — Nieuw ★★★★★
+// ============================================================================
+//
+// 1 breaker  → cracked shield   (breakerHits = 1)
+// 2 breakers → immune verwijderd + overlay “broken”
+//
+
+async function applyBreaker(sender: string, target: any) {
+  if (!target) return;
+
+  const arena = getArena();
+  const p = arena.players.find((x) => x.id === target.id);
+  if (!p) return;
+
+  // Eerst validatie → daarna consume
+  const consumed = await consumeTwistFromUser(sender, "breaker");
+  if (!consumed) {
+    emitLog({
+      type: "twist",
+      message: `${sender} probeerde Breaker, maar heeft geen twist`
+    });
+    return;
+  }
+
+  // Init value
+  p.breakerHits = (p.breakerHits ?? 0) + 1;
+
+  if (p.breakerHits === 1) {
+    // cracked
+    emitOverlay("breaker_cracked", { by: sender, target: p.display_name });
+
+    emitLog({
+      type: "twist",
+      message: `${sender} BREAKER → ${p.display_name} shield CRACKED (50%)`
+    });
+  }
+
+  if (p.breakerHits >= 2) {
+    // volledig breken → immune verwijderen
+    p.boosters = p.boosters.filter(b => b !== "immune");
+    if (p.positionStatus === "immune") p.positionStatus = "alive";
+
+    emitOverlay("breaker_broken", { by: sender, target: p.display_name });
+
+    emitLog({
+      type: "twist",
+      message: `${sender} BREAKER → ${p.display_name} IMMUNE volledig GEBROKEN`
+    });
+  }
+
+  await emitArena();
+}
 
 // ============================================================================
 // DIAMOND PISTOL — *Patched*
@@ -373,7 +422,7 @@ async function applyDiamondPistol(sender: string, survivor: any) {
     return;
   }
 
-  // Nu pas consumeren
+  // Consume
   const ok = await consumeTwistFromUser(sender, "diamondpistol");
   if (!ok) {
     emitLog({
@@ -383,7 +432,7 @@ async function applyDiamondPistol(sender: string, survivor: any) {
     return;
   }
 
-  // Alle victims behalve de overlever
+  // victims (immune overleeft, zoals jouw systeem)
   const victims = arena.players.filter(
     (p) => p.id !== survivor.id && !p.boosters.includes("immune")
   );
@@ -392,7 +441,7 @@ async function applyDiamondPistol(sender: string, survivor: any) {
     await eliminate(v.username);
   }
 
-  // Markeer dat DP is gebruikt in deze ronde
+  // Flag voor deze ronde
   arena.diamondPistolUsed = true;
 
   emitOverlay("diamondpistol", {
@@ -406,7 +455,9 @@ async function applyDiamondPistol(sender: string, survivor: any) {
   });
 
   await emitArena();
-        }
+}
+
+
 
 // ============================================================================
 // MAIN USE TWIST
@@ -428,7 +479,7 @@ export async function useTwist(
     return;
   }
 
-  // Geen consume hier — dat gebeurt in de individuele apply-functies
+  // Target-resolutie
   let target = null;
 
   if (TWIST_MAP[twist].requiresTarget) {
@@ -460,8 +511,12 @@ export async function useTwist(
 
     case "diamondpistol":
       return applyDiamondPistol(senderName, target);
+
+    case "breaker":
+      return applyBreaker(senderName, target);
   }
 }
+
 
 
 // ============================================================================
@@ -476,6 +531,7 @@ export async function addTwistByGift(userId: string, twist: TwistType) {
     message: `Twist ontvangen: ${TWIST_MAP[twist].giftName}`
   });
 }
+
 
 
 // ============================================================================
@@ -498,6 +554,7 @@ export async function parseUseCommand(
 
   await useTwist(senderId, senderName, twist, target);
 }
+
 
 
 // ============================================================================
