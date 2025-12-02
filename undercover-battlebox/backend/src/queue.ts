@@ -1,11 +1,12 @@
 // ============================================================================
-// src/queue.ts — QUEUE ENGINE v16.3 (Admin Override Edition)
+// src/queue.ts — QUEUE ENGINE v16.4 (Overlay Upgrade Edition)
 // Position-based queue system (VIP/FAN aware)
 // Compatibel met server.ts v16+ en admin dashboard acties
 // ============================================================================
 
 import pool from "./db";
 import { io } from "./server";
+import { emitQueueEvent } from "./queue-events";   // 🔥 NIEUW
 
 // ============================================================================
 // HELPERS
@@ -156,7 +157,6 @@ export async function addToQueue(
   const isFan = !!fanActive;
   const isVip = !!user.is_vip;
 
-  // ❗ CHAT → FAN verplicht
   if (!isFan) throw new Error("Gebruiker is geen FAN (kan niet joinen).");
 
   const qr = await pool.query(
@@ -219,6 +219,14 @@ export async function addToQueue(
 
   await normalizePositions();
   await pushQueueUpdate();
+
+  // 🔥 QUEUE EVENT → JOIN
+  emitQueueEvent("join", {
+    tiktok_id,
+    username: cleanUsername,
+    display_name: user.display_name,
+    is_vip: isVip
+  });
 }
 
 /**
@@ -313,6 +321,14 @@ export async function addToQueueAdminOverride(
 
   await normalizePositions();
   await pushQueueUpdate();
+
+  // 🔥 QUEUE EVENT → JOIN (Admin override)
+  emitQueueEvent("join", {
+    tiktok_id,
+    username: user.username.replace(/^@+/, "").toLowerCase(),
+    display_name: user.display_name,
+    is_vip: isVip
+  });
 }
 
 /**
@@ -326,6 +342,14 @@ export async function removeFromQueue(tiktok_id: string): Promise<void> {
     [userTid]
   );
   if (!r.rows.length) return;
+
+  // 🔥 QUEUE EVENT → LEAVE
+  emitQueueEvent("leave", {
+    tiktok_id,
+    username: "",
+    display_name: "",
+    is_vip: false
+  });
 
   const entry = r.rows[0];
   const pos = Number(entry.position);
@@ -373,6 +397,14 @@ export async function leaveQueue(tiktok_id: string): Promise<number> {
     [refund, userTid]
   );
 
+  // 🔥 QUEUE EVENT → LEAVE (Chat !leave)
+  emitQueueEvent("leave", {
+    tiktok_id,
+    username: "",
+    display_name: "",
+    is_vip: false
+  });
+
   await pool.query(`DELETE FROM queue WHERE id=$1`, [entry.id]);
 
   await pool.query(
@@ -402,6 +434,14 @@ export async function promoteQueue(tiktok_id: string): Promise<void> {
   );
   if (!r.rows.length) return;
 
+  // 🔥 QUEUE EVENT → PROMOTE
+  emitQueueEvent("promote", {
+    tiktok_id,
+    username: "",
+    display_name: "",
+    is_vip: false
+  });
+
   const { id, position } = r.rows[0];
   const pos = Number(position);
 
@@ -429,6 +469,14 @@ export async function demoteQueue(tiktok_id: string): Promise<void> {
     [tid]
   );
   if (!r.rows.length) return;
+
+  // 🔥 QUEUE EVENT → DEMOTE
+  emitQueueEvent("demote", {
+    tiktok_id,
+    username: "",
+    display_name: "",
+    is_vip: false
+  });
 
   const { id, position } = r.rows[0];
   const pos = Number(position);
@@ -460,6 +508,14 @@ export async function addToArenaFromQueue(tiktok_id: string): Promise<void> {
     [tid]
   );
   if (!r.rows.length) return;
+
+  // 🔥 QUEUE EVENT → LEAVE (automatische verwijdering)
+  emitQueueEvent("leave", {
+    tiktok_id,
+    username: "",
+    display_name: "",
+    is_vip: false
+  });
 
   const pos = Number(r.rows[0].position);
 
@@ -507,7 +563,7 @@ export default {
   getQueue,
   pushQueueUpdate,
   addToQueue,
-  addToQueueAdminOverride,    // ⭐ belangrijk
+  addToQueueAdminOverride,
   removeFromQueue,
   leaveQueue,
   promoteQueue,
