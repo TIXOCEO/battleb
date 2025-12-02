@@ -35,13 +35,11 @@ export default function AdminDashboardPage() {
     gameSession,
     hostDiamonds,
     status,
-    emitAdmin: socketEmit, // legacy compatibility if needed
-    emitAdminWithUser: socketEmitUser,
     fmt,
   } = useAdminSocket();
 
   // ======================================================
-  // 2. ACL / confirm state
+  // 2. Confirm dialog state
   // ======================================================
   const [confirm, setConfirm] = useState<{
     message: string;
@@ -51,6 +49,7 @@ export default function AdminDashboardPage() {
   const openConfirm = (msg: string, fn: () => void) => {
     setConfirm({ message: msg, onConfirm: fn });
   };
+
   const closeConfirm = () => setConfirm(null);
 
   // ======================================================
@@ -73,7 +72,6 @@ export default function AdminDashboardPage() {
   // ======================================================
   return (
     <main className="min-h-screen bg-[#0D0F12] text-white p-6">
-      
       {/* PAGE HEADER */}
       <header className="max-w-[1600px] mx-auto mb-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
@@ -82,7 +80,8 @@ export default function AdminDashboardPage() {
             <div>
               <h1 className="text-2xl font-bold">Undercover BattleBox – Admin</h1>
               <p className="text-sm text-slate-400">
-                Verbonden als <span className="text-green-400 font-semibold">Admin</span>
+                Verbonden als{" "}
+                <span className="text-green-400 font-semibold">Admin</span>
               </p>
             </div>
           </div>
@@ -104,12 +103,14 @@ export default function AdminDashboardPage() {
 
       {/* MAIN GRID LAYOUT */}
       <div className="max-w-[1600px] mx-auto grid gap-6">
-        
+
         {/* ---------- CONTROLS PANEL ---------- */}
         <ControlsPanel
           gameSession={gameSession}
           arena={arena}
-          emitAdmin={(evt, payload) => emitAdmin(evt, payload, () => {})}
+          emitAdmin={(event: string, payload?: any) =>
+            emitAdmin(event, payload)
+          }
         />
 
         {/* ---------- PLAYER ACTIONS PANEL ---------- */}
@@ -159,10 +160,7 @@ export default function AdminDashboardPage() {
 
         {/* ---------- LOGS PANEL ---------- */}
         <LogsPanel logs={logs} />
-
       </div>
-      {/* END main grid */}
-
 
       {/* FOOTER */}
       <footer className="max-w-[1600px] mx-auto mt-10 text-xs text-slate-600 text-center py-6">
