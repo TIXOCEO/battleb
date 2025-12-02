@@ -179,7 +179,7 @@ export default function AdminDashboardPage() {
   }, []);
 
   /* ============================================
-     EMITTER HELPERS — TERUG OP JUISTE POSITIE
+     EMITTER HELPERS
   ============================================ */
   const emitAdmin = (
     event: keyof AdminSocketOutbound,
@@ -212,6 +212,48 @@ export default function AdminDashboardPage() {
   };
 
   /* ============================================
+     AUTOCOMPLETE SEARCH
+  ============================================ */
+  useEffect(() => {
+    const q = typing.trim().replace(/^@+/, "");
+    if (!q || q.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+
+    const socket = getAdminSocket();
+    const handle = setTimeout(() => {
+      socket.emit(
+        "searchUsers",
+        { query: q },
+        (res: { users: SearchUser[] }) => {
+          setSearchResults(res?.users || []);
+        }
+      );
+    }, 250);
+
+    return () => clearTimeout(handle);
+  }, [typing]);
+
+  function applyAutoFill(user: SearchUser) {
+    if (!user) return;
+
+    const formatted = user.username.startsWith("@")
+      ? user.username
+      : `@${user.username}`;
+
+    if (activeAutoField === "main") setUsername(formatted);
+    if (activeAutoField === "give") setTwistUserGive(formatted);
+    if (activeAutoField === "use") setTwistUserUse(formatted);
+    if (activeAutoField === "target") setTwistTargetUse(formatted);
+
+    setTyping("");
+    setSearchResults([]);
+    setShowResults(false);
+    setActiveAutoField(null);
+  }
+
+/* ============================================
      HELPERS
   ============================================ */
   const fmt = (n: number | string | undefined | null) =>
@@ -220,7 +262,7 @@ export default function AdminDashboardPage() {
   const players = useMemo(() => arena?.players ?? [], [arena]);
   const arenaStatus = arena?.status ?? "idle";
 
-const canStartRound =
+  const canStartRound =
     !!arena && (arenaStatus === "idle" || arenaStatus === "ended");
 
   const canStopRound = arenaStatus === "active";
@@ -431,7 +473,6 @@ const canStartRound =
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 relative">
-
             {players.length ? (
               players.map((p, idx) => (
                 <div
@@ -440,7 +481,7 @@ const canStartRound =
                     p
                   )}`}
                 >
-                  {/* DELETE BUTTON */}
+                  {/* DELETE */}
                   <button
                     onClick={() => {
                       const formatted = p.username.startsWith("@")
@@ -486,20 +527,21 @@ const canStartRound =
                     {p.display_name} (@{p.username})
                   </div>
 
-                  {/* BADGES */}
+                  {/* BADGES (MG, BOMB, BREAKER ADDED) */}
                   <div className="flex gap-1 mt-1 flex-wrap">
                     {p.boosters?.includes("mg") && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-pink-200 text-pink-800 border border-pink-300">
                         MG
                       </span>
                     )}
+
                     {p.boosters?.includes("bomb") && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-200 text-red-800 border-red-300">
                         BOMB
                       </span>
                     )}
 
-                    {/* ★★★ BREAKER BADGE — TYPE-SAFE ★★★ */}
+                    {/* ★★★ BREAKER BADGE (ENIGE TOEVOEGING) ★★★ */}
                     {(p.breakerHits ?? 0) > 0 && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-200 text-purple-800 border border-purple-300">
                         BREAK {(p.breakerHits ?? 0)}/2
@@ -511,6 +553,7 @@ const canStartRound =
                     Score: {fmt(p.score)} 💎
                   </div>
 
+                  {/* ELIMINATION ACTION */}
                   {p.positionStatus === "elimination" && (
                     <button
                       onClick={() => {
@@ -602,7 +645,7 @@ const canStartRound =
                       </span>
                     )}
                     {q.priorityDelta > 0 && (
-                      <span className="px-2 py-0.5 text-[10px] rounded-full bg-purple-100 text-purple-700 border border-purple-300">
+                      <span className="px-2 py-0.5 text-[10px] rounded-full bg-purple-100 text-purple-700 border-purple-300">
                         Boost +{q.priorityDelta}
                       </span>
                     )}
@@ -701,7 +744,7 @@ const canStartRound =
             </div>
           </div>
 
-          {/* PLAYER LB */}
+          {/* PLAYERS LB */}
           {activeLbTab === "players" && (
             <div className="p-4 max-h-96 overflow-y-auto text-sm">
               <h2 className="text-xl font-semibold mb-2">Player Leaderboard</h2>
@@ -738,8 +781,7 @@ const canStartRound =
                         (acc, p) => acc + (p.total_score || 0),
                         0
                       )
-                    )}{" "}
-                    💎
+                    )} 💎
                   </div>
                 </>
               ) : (
@@ -750,10 +792,12 @@ const canStartRound =
             </div>
           )}
 
-          {/* GIFTER LB */}
+          {/* GIFTERS LB */}
           {activeLbTab === "gifters" && (
             <div className="p-4 max-h-96 overflow-y-auto text-sm">
-              <h2 className="text-xl font-semibold mb-2">Gifter Leaderboard</h2>
+              <h2 className="text-xl font-semibold mb-2">
+                Gifter Leaderboard
+              </h2>
               <p className="text-xs text-gray-500 mb-3">
                 Diamanten verstuurd in deze stream
               </p>
@@ -787,8 +831,7 @@ const canStartRound =
                         (acc, g) => acc + (g.total_diamonds || 0),
                         0
                       )
-                    )}{" "}
-                    💎
+                    )} 💎
                   </div>
                 </>
               ) : (
@@ -832,7 +875,7 @@ const canStartRound =
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
-            {/* AUTOCOMPLETE GIVE */}
+            {/* AUTOCOMPLETE */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "give" && (
@@ -863,6 +906,7 @@ const canStartRound =
               <option value="heal">Heal</option>
               <option value="bomb">Bomb</option>
               <option value="diamondpistol">Diamond Pistol</option>
+              {/* ★ BREAKER TOEGEVOEGD */}
               <option value="breaker">Breaker</option>
             </select>
 
@@ -902,7 +946,7 @@ const canStartRound =
               className="w-full border rounded-lg px-3 py-2 text-sm mb-2"
             />
 
-            {/* AUTOCOMPLETE — USE */}
+            {/* AUTOCOMPLETE */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "use" && (
@@ -933,6 +977,7 @@ const canStartRound =
               <option value="heal">Heal</option>
               <option value="bomb">Bomb</option>
               <option value="diamondpistol">Diamond Pistol</option>
+              {/* ★ BREAKER TOEGEVOEGD */}
               <option value="breaker">Breaker</option>
             </select>
 
@@ -955,7 +1000,7 @@ const canStartRound =
               className="w-full border rounded-lg px-3 py-2 text-sm mb-3"
             />
 
-            {/* AUTOCOMPLETE — TARGET */}
+            {/* AUTOCOMPLETE TARGET */}
             {showResults &&
               searchResults.length > 0 &&
               activeAutoField === "target" && (
@@ -1063,4 +1108,4 @@ const canStartRound =
       )}
     </main>
   );
-              }
+                        }
