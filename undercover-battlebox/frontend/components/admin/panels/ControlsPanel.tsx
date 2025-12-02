@@ -5,11 +5,19 @@ import Panel from "@/components/admin/ui/Panel";
 import Button from "@/components/admin/ui/Button";
 import SectionHeader from "@/components/admin/ui/SectionHeader";
 
+import type { ArenaState, GameSessionState } from "@/lib/adminTypes";
+
+interface ControlsPanelProps {
+  gameSession: GameSessionState;
+  arena: ArenaState | null;
+  emitAdmin: (event: string, payload?: any) => void;
+}
+
 export default function ControlsPanel({
   gameSession,
   arena,
   emitAdmin,
-}) {
+}: ControlsPanelProps) {
   const arenaStatus = arena?.status ?? "idle";
 
   const canStartRound =
