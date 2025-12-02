@@ -5,15 +5,8 @@ import { getAdminSocket } from "@/lib/socketClient";
 import type { SearchUser } from "@/lib/adminTypes";
 
 /**
- * Het dashboard verwacht deze velden:
- *
- * searchResults
- * showResults
- * activeAutoField
- * applyAutoFill(user)
- * onAutoFocus(field, value)
- *
- * Dit bestand levert nu exact die API aan.
+ * AUTOCOMPLETE HOOK
+ * Dit sluit 100% aan op de props die panels verwachten.
  */
 
 export type AutoField = "main" | "give" | "use" | "target" | null;
@@ -23,8 +16,10 @@ export interface UseAutocompleteReturn {
   showResults: boolean;
   activeAutoField: AutoField;
 
-  applyAutoFill: (user: SearchUser) => void;
-  onAutoFocus: (field: AutoField, value: string) => void;
+  applyAutoFill: (u: SearchUser) => void;
+
+  /** <-- Panel expects string, so we cast here */
+  onAutoFocus: (field: string, value: string) => void;
 
   containerRef: React.RefObject<HTMLDivElement>;
 }
@@ -39,9 +34,7 @@ export function useAutocomplete(
   const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
   const [showResults, setShowResults] = useState(false);
 
-  // -----------------------------------------------------
-  // OUTSIDE CLICK → sluit dropdown
-  // -----------------------------------------------------
+  // Close dropdown on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (
@@ -56,9 +49,7 @@ export function useAutocomplete(
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  // -----------------------------------------------------
-  // SOCKET SEARCH
-  // -----------------------------------------------------
+  // Perform search
   useEffect(() => {
     const q = typing.trim().replace(/^@+/, "");
 
@@ -73,27 +64,22 @@ export function useAutocomplete(
       socket.emit(
         "searchUsers",
         { query: q },
-        (res: { users: SearchUser[] }) => {
-          setSearchResults(res?.users ?? []);
-        }
+        (res: { users: SearchUser[] }) => setSearchResults(res?.users ?? [])
       );
     }, 250);
 
     return () => clearTimeout(timeout);
   }, [typing]);
 
-  // -----------------------------------------------------
-  // Wanneer een field focus krijgt / typed
-  // -----------------------------------------------------
-  function onAutoFocus(field: AutoField, value: string) {
-    setActiveAutoField(field);
+  // Panels call onAutoFocus("main", value)
+  const onAutoFocus = (field: string, value: string) => {
+    const f = field as AutoField; // <-- CAST naar AutoField (fix build)
+    setActiveAutoField(f);
     setTyping(value);
     setShowResults(true);
-  }
+  };
 
-  // -----------------------------------------------------
-  // User selecteren uit dropdown
-  // -----------------------------------------------------
+  // User selected
   function applyAutoFill(user: SearchUser) {
     if (!user) return;
 
@@ -103,24 +89,18 @@ export function useAutocomplete(
 
     setValueForField(activeAutoField, formatted);
 
-    // cleanup
     setTyping("");
     setSearchResults([]);
     setShowResults(false);
     setActiveAutoField(null);
   }
 
-  // -----------------------------------------------------
-  // RETURN: exact zoals panels nodig hebben
-  // -----------------------------------------------------
   return {
     searchResults,
     showResults,
     activeAutoField,
-
     applyAutoFill,
     onAutoFocus,
-
     containerRef,
   };
 }
