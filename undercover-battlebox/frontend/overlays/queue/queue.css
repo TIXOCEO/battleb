@@ -8,20 +8,22 @@
   border: 2px solid var(--border-light);
   padding: 20px;
   position: relative;
-  backdrop-filter: blur(6px);
   overflow: hidden;
+  backdrop-filter: blur(6px);
 
-  /* LED + neon frame look */
   box-shadow:
     0 0 25px rgba(255,77,79,0.45),
     0 0 40px rgba(255,77,79,0.25) inset;
+
+  animation: panelPowerOn 0.7s ease-out forwards;
 }
 
-.bb-queue-panel.esports-led-grid {
-  background-size: 4px 4px;
+@keyframes panelPowerOn {
+  0% { opacity: 0; transform: translateY(25px) scale(0.95); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* GRID: 30 cards */
+/* GRID */
 .bb-queue-grid {
   display: grid;
   grid-template-columns: repeat(10, 1fr);
@@ -30,28 +32,37 @@
 }
 
 /* ---------------------------------------------------------
-   CARD BASE (octagon cards)
+   CARD BASE (octagon)
    --------------------------------------------------------- */
 .bb-card {
   background: var(--glass-dark);
   border: 2px solid var(--border-light);
   position: relative;
-  color: white;
   padding: 10px;
+  color: white;
   overflow: hidden;
+
   clip-path: polygon(
     10% 0%, 90% 0%,
     100% 15%, 100% 85%,
     90% 100%, 10% 100%,
     0% 85%, 0% 15%
   );
+
   box-shadow:
     0 0 20px rgba(0,0,0,0.9),
     inset 0 0 24px rgba(0,0,0,0.6),
     0 0 14px rgba(255,77,79,0.3) inset;
+
+  animation: cardSpawn 0.25s ease-out both;
 }
 
-/* Orange neon rim */
+@keyframes cardSpawn {
+  0% { opacity: 0; transform: scale(0.85) rotateX(10deg); }
+  100% { opacity: 1; transform: scale(1) rotateX(0deg); }
+}
+
+/* NEON RIM */
 .bb-card::after {
   content: "";
   position: absolute;
@@ -61,14 +72,32 @@
   clip-path: inherit;
   box-shadow: var(--neon-orange-glow);
   opacity: 0.35;
+
+  animation: rimPulse 2.4s ease-in-out infinite;
+}
+
+@keyframes rimPulse {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.45; }
 }
 
 /* ---------------------------------------------------------
-   EMPTY CARD
+   ON UPDATE — highlight flash
    --------------------------------------------------------- */
+.card-update {
+  animation: cardFlash 0.6s ease-out;
+}
+
+@keyframes cardFlash {
+  0% { box-shadow: 0 0 18px rgba(255,255,255,0.9); }
+  100% { box-shadow: none; }
+}
+
+/* EMPTY CARD */
 .empty-card {
   opacity: 0.18;
-  border-color: rgba(255,255,255,0.05) !important;
+  border-color: rgba(255,255,255,0.05);
+  animation: none; /* don't animate empty slots */
 }
 
 /* ---------------------------------------------------------
@@ -80,11 +109,13 @@
   left: 6px;
   width: 26px;
   height: 26px;
+
   clip-path: polygon(
     25% 0%, 75% 0%,
     100% 50%, 75% 100%,
     25% 100%, 0% 50%
   );
+
   background: var(--neon-orange);
   color: black;
   font-weight: 700;
@@ -92,31 +123,47 @@
   line-height: 26px;
   text-align: center;
   text-shadow: var(--neon-orange-glow);
+
+  animation: posPop 0.35s cubic-bezier(.17,.67,.4,1.35);
 }
 
-/* ---------------------------------------------------------
-   AVATAR
-   --------------------------------------------------------- */
+@keyframes posPop {
+  0% { transform: scale(0.6); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* AVATAR */
 .card-avatar {
   width: 54px;
   height: 54px;
   background-size: cover;
   background-position: center;
+
   clip-path: polygon(
     15% 0%, 85% 0%,
     100% 25%, 100% 75%,
     85% 100%, 15% 100%,
     0% 75%, 0% 25%
   );
+
   box-shadow:
     0 0 12px rgba(0,0,0,0.8),
     inset 0 0 14px rgba(255,255,255,0.22);
+
+  animation: avatarGlow 2.3s ease-in-out infinite;
 }
 
-/* ---------------------------------------------------------
-   VIP GLOW
-   --------------------------------------------------------- */
+@keyframes avatarGlow {
+  0%,100% { filter: brightness(1); }
+  50% { filter: brightness(1.2); }
+}
+
+/* VIP */
 .vip-glow {
-  box-shadow: var(--vip-glow) !important;
-  border-color: rgba(255,220,0,0.65) !important;
+  animation: vipPulse 2s ease-in-out infinite !important;
+}
+
+@keyframes vipPulse {
+  0%, 100% { box-shadow: var(--vip-glow); }
+  50% { box-shadow: 0 0 45px rgba(255,220,0,0.9); }
 }
