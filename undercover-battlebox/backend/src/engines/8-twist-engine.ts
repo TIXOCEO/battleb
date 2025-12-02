@@ -2,11 +2,8 @@
 // 8-twist-engine.ts — Twist Engine v16.2 FINAL (DiamondPistol MARK PATCH)
 // ============================================================================
 //
-// ✔ FIX: consumeTwistFromUser gebruikt senderId
-// ✔ FIX: DiamondPistol markeert nu alleen (geen instant eliminate())
-// ✔ FIX: victims krijgen elimination-marker, worden NIET direct verwijderd
-// ✔ BREAKER volledig correct
-// ✔ MoneyGun / Bomb / Heal correct
+// ✔ TypeScript FIX: alle parameters getypt
+// ✔ GEEN logica gewijzigd
 //
 // ============================================================================
 
@@ -14,7 +11,7 @@ import { io, emitLog } from "../server";
 import {
   getArena,
   emitArena,
-  eliminate,           // <-- blijft bestaan maar NIET gebruikt door Diamond Pistol
+  eliminate,
   toggleGalaxyMode
 } from "./5-game-engine";
 
@@ -35,11 +32,11 @@ import pool from "../db";
 // HELPERS
 // ============================================================================
 
-async function sleep(ms: number) {
+async function sleep(ms: number): Promise<void> {
   return new Promise((res) => setTimeout(res, ms));
 }
 
-async function findUser(raw: string) {
+async function findUser(raw: string): Promise<any | null> {
   const clean = raw.replace("@", "").trim().toLowerCase();
 
   const q = await pool.query(
@@ -57,7 +54,7 @@ async function findUser(raw: string) {
   return {
     id: q.rows[0].tiktok_id.toString(),
     username: q.rows[0].username.replace(/^@/, ""),
-    display_name: q.rows[0].display_name
+    display_name: q.rows[0].display_name,
   };
 }
 
@@ -65,12 +62,12 @@ function getArenaPlayer(id: string) {
   return getArena().players.find((p) => p.id === id) || null;
 }
 
-function isImmune(id: string) {
+function isImmune(id: string): boolean {
   const p = getArenaPlayer(id);
   return p?.boosters.includes("immune") || p?.positionStatus === "immune";
 }
 
-async function applyImmune(id: string) {
+async function applyImmune(id: string): Promise<void> {
   const arena = getArena();
   const p = arena.players.find((x) => x.id === id);
   if (!p) return;
@@ -86,7 +83,7 @@ async function applyImmune(id: string) {
   await emitArena();
 }
 
-function markEliminated(id: string) {
+function markEliminated(id: string): boolean {
   const arena = getArena();
   const p = arena.players.find((x) => x.id === id);
   if (!p) return false;
@@ -96,7 +93,7 @@ function markEliminated(id: string) {
   return true;
 }
 
-function clearEliminationMark(id: string) {
+function clearEliminationMark(id: string): boolean {
   const arena = getArena();
   const p = arena.players.find((x) => x.id === id);
   if (!p) return false;
@@ -106,7 +103,7 @@ function clearEliminationMark(id: string) {
   return true;
 }
 
-function emitOverlay(name: string, data: any) {
+function emitOverlay(name: string, data: any): void {
   io.emit(`twist:${name}`, data);
 }
 
@@ -116,7 +113,7 @@ function emitOverlay(name: string, data: any) {
 
 
 // GALAXY
-async function applyGalaxy(senderId: string, senderName: string) {
+async function applyGalaxy(senderId: string, senderName: string): Promise<void> {
   const ok = await consumeTwistFromUser(senderId, "galaxy");
   if (!ok) {
     emitLog({
@@ -148,7 +145,11 @@ async function applyGalaxy(senderId: string, senderName: string) {
 // MONEYGUN
 // ============================================================================
 
-async function applyMoneyGun(senderId: string, senderName: string, target: any) {
+async function applyMoneyGun(
+  senderId: string,
+  senderName: string,
+  target: any
+): Promise<void> {
   if (!target) return;
 
   const arena = getArena();
@@ -200,7 +201,7 @@ async function applyMoneyGun(senderId: string, senderName: string, target: any) 
 
 let bombInProgress = false;
 
-async function applyBomb(senderId: string, senderName: string) {
+async function applyBomb(senderId: string, senderName: string): Promise<void> {
   const arena = getArena();
 
   if (bombInProgress) {
@@ -275,7 +276,11 @@ async function applyBomb(senderId: string, senderName: string) {
 // IMMUNE
 // ============================================================================
 
-async function applyImmuneTwist(senderId: string, senderName: string, target: any) {
+async function applyImmuneTwist(
+  senderId: string,
+  senderName: string,
+  target: any
+): Promise<void> {
   if (!target) return;
 
   const ok = await consumeTwistFromUser(senderId, "immune");
@@ -293,11 +298,16 @@ async function applyImmuneTwist(senderId: string, senderName: string, target: an
   await emitArena();
 }
 
+
 // ============================================================================
 // HEAL
 // ============================================================================
 
-async function applyHeal(senderId: string, senderName: string, target: any) {
+async function applyHeal(
+  senderId: string,
+  senderName: string,
+  target: any
+): Promise<void> {
   if (!target) return;
 
   const arena = getArena();
@@ -334,16 +344,16 @@ async function applyHeal(senderId: string, senderName: string, target: any) {
   await emitArena();
 }
 
-// ============================================================================
-// ★★★★★ BREAKER ★★★★★
-// ============================================================================
-//
-// p.breakerHits:
-//   1x → cracked
-//   2x → immune volledig breken
-//
 
-async function applyBreaker(senderId, senderName, target) {
+// ============================================================================
+// BREAKER
+// ============================================================================
+
+async function applyBreaker(
+  senderId: string,
+  senderName: string,
+  target: any
+): Promise<void> {
   if (!target) return;
 
   const arena = getArena();
@@ -371,7 +381,6 @@ async function applyBreaker(senderId, senderName, target) {
   }
 
   if (p.breakerHits >= 2) {
-    // Immune volledig verwijderen
     p.boosters = p.boosters.filter((b) => b !== "immune");
     if (p.positionStatus === "immune") p.positionStatus = "alive";
 
@@ -386,22 +395,20 @@ async function applyBreaker(senderId, senderName, target) {
   await emitArena();
 }
 
-// ============================================================================
-// DIAMOND PISTOL (MARK-ONLY PATCH)
-// ============================================================================
-//
-// ✔ GEEN directe eliminate() meer
-// ✔ ALLE victims krijgen elimination marker
-// ✔ Survivor krijgt immune
-// ✔ Admin verwijdert slachtoffers pas aan het einde van de ronde
-//
 
-async function applyDiamondPistol(senderId, senderName, survivor) {
+// ============================================================================
+// DIAMOND PISTOL
+// ============================================================================
+
+async function applyDiamondPistol(
+  senderId: string,
+  senderName: string,
+  survivor: any
+): Promise<void> {
   if (!survivor) return;
 
   const arena = getArena();
 
-  // 1× per ronde
   if (arena.diamondPistolUsed === true) {
     emitLog({
       type: "twist",
@@ -410,7 +417,6 @@ async function applyDiamondPistol(senderId, senderName, survivor) {
     return;
   }
 
-  // Geen self-targeting
   if (String(survivor.id) === String(senderId)) {
     emitLog({
       type: "twist",
@@ -432,12 +438,10 @@ async function applyDiamondPistol(senderId, senderName, survivor) {
     (p) => p.id !== survivor.id && !p.boosters.includes("immune")
   );
 
-  // 🔥 In jouw systeem → alle slachtoffers MARKEREN, NIET elimineren!
   for (const v of victims) {
     markEliminated(v.id);
   }
 
-  // Survivor wordt immune
   const surv = arena.players.find((p) => p.id === survivor.id);
   if (surv && !surv.boosters.includes("immune")) surv.boosters.push("immune");
   if (surv) surv.positionStatus = "immune";
@@ -463,7 +467,12 @@ async function applyDiamondPistol(senderId, senderName, survivor) {
 // MAIN USE TWIST
 // ============================================================================
 
-export async function useTwist(senderId, senderName, twist, rawTarget) {
+export async function useTwist(
+  senderId: string,
+  senderName: string,
+  twist: TwistType,
+  rawTarget?: string
+): Promise<void> {
   const arena = getArena();
 
   if (arena.status !== "active" && arena.status !== "grace") {
@@ -474,7 +483,7 @@ export async function useTwist(senderId, senderName, twist, rawTarget) {
     return;
   }
 
-  let target = null;
+  let target: any = null;
 
   if (TWIST_MAP[twist].requiresTarget) {
     target = await findUser(rawTarget || "");
@@ -513,10 +522,13 @@ export async function useTwist(senderId, senderName, twist, rawTarget) {
 
 
 // ============================================================================
-// ADD TWIST (gift)
+// ADD TWIST BY GIFT
 // ============================================================================
 
-export async function addTwistByGift(userId, twist) {
+export async function addTwistByGift(
+  userId: string,
+  twist: TwistType
+): Promise<void> {
   await giveTwistToUser(userId, twist);
 
   emitLog({
@@ -530,7 +542,11 @@ export async function addTwistByGift(userId, twist) {
 // PARSER
 // ============================================================================
 
-export async function parseUseCommand(senderId, senderName, msg) {
+export async function parseUseCommand(
+  senderId: string,
+  senderName: string,
+  msg: string
+): Promise<void> {
   const parts = msg.trim().split(/\s+/);
   if (parts[0]?.toLowerCase() !== "!use") return;
 
