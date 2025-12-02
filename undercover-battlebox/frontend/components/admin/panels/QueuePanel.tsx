@@ -6,12 +6,22 @@ import SectionHeader from "@/components/admin/ui/SectionHeader";
 import Badge from "@/components/admin/ui/Badge";
 import Button from "@/components/admin/ui/Button";
 
+import type { QueueEntry } from "@/lib/adminTypes";
+import type { EmitAdminFn } from "@/types/EmitAdminFn";
+
+interface QueuePanelProps {
+  queue: QueueEntry[];
+  queueOpen: boolean;
+  emitAdmin: EmitAdminFn;
+  fmt: (v: number | string) => string;
+}
+
 export default function QueuePanel({
   queue,
   queueOpen,
   emitAdmin,
   fmt,
-}: any) {
+}: QueuePanelProps) {
   return (
     <Panel>
       <SectionHeader title="Wachtrij" subtitle="Inkomende spelers" />
@@ -20,7 +30,9 @@ export default function QueuePanel({
         {queue.length} speler{queue.length !== 1 && "s"} • Queue:{" "}
         <span
           className={
-            queueOpen ? "text-green-400 font-semibold" : "text-red-400 font-semibold"
+            queueOpen
+              ? "text-green-400 font-semibold"
+              : "text-red-400 font-semibold"
           }
         >
           {queueOpen ? "OPEN" : "DICHT"}
@@ -28,15 +40,17 @@ export default function QueuePanel({
       </p>
 
       {queue.length ? (
-        queue.map((q: any) => (
+        queue.map((q) => (
           <div
             key={q.tiktok_id}
             className="rounded-[4px] border border-[#2A3038] bg-[#13161C] p-3 mb-3 text-sm shadow-sm"
           >
+            {/* NAME */}
             <div className="font-semibold text-slate-200">
               {q.display_name} (@{q.username})
             </div>
 
+            {/* BADGES */}
             <div className="flex gap-1 mt-1 flex-wrap">
               {q.is_vip && <Badge color="yellow">VIP</Badge>}
               {q.is_fan && !q.is_vip && <Badge color="blue">Fan</Badge>}
@@ -45,10 +59,12 @@ export default function QueuePanel({
               )}
             </div>
 
+            {/* POSITION + REASON */}
             <div className="text-xs text-slate-500 mt-1">
               #{q.position} • {q.reason}
             </div>
 
+            {/* ACTION BUTTONS */}
             <div className="flex items-center gap-2 mt-3">
               <Button
                 variant="success"
