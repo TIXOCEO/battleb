@@ -23,7 +23,7 @@ import LogsPanel from "@/components/admin/panels/LogsPanel";
 
 export default function AdminDashboardPage() {
   // ======================================================
-  // 1. GLOBAL REALTIME STATE (van socket)
+  // 1. GLOBAL REALTIME STATE
   // ======================================================
   const {
     arena,
@@ -36,18 +36,20 @@ export default function AdminDashboardPage() {
     hostDiamonds,
     status,
     fmt,
+    emitAdmin,        // ⬅️ typesafe emit
+    emitAdminWithUser // ⬅️ typesafe emit user
   } = useAdminSocket();
 
   // ======================================================
-  // 2. Confirm dialog state
+  // 2. Confirm dialog
   // ======================================================
   const [confirm, setConfirm] = useState<{
     message: string;
     onConfirm: () => void;
   } | null>(null);
 
-  const openConfirm = (msg: string, fn: () => void) => {
-    setConfirm({ message: msg, onConfirm: fn });
+  const openConfirm = (msg: string, onConfirm: () => void) => {
+    setConfirm({ message: msg, onConfirm });
   };
 
   const closeConfirm = () => setConfirm(null);
@@ -72,7 +74,7 @@ export default function AdminDashboardPage() {
   // ======================================================
   return (
     <main className="min-h-screen bg-[#0D0F12] text-white p-6">
-      
+
       {/* PAGE HEADER */}
       <header className="max-w-[1600px] mx-auto mb-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
@@ -94,22 +96,17 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* STATUS BAR */}
-        {status && (
-          <div className="mt-3 text-sm text-slate-300">
-            {status}
-          </div>
-        )}
+        {status && <div className="mt-3 text-sm text-slate-300">{status}</div>}
       </header>
 
-      {/* MAIN GRID LAYOUT */}
+      {/* MAIN GRID */}
       <div className="max-w-[1600px] mx-auto grid gap-6">
 
         {/* ---------- CONTROLS PANEL ---------- */}
         <ControlsPanel
           gameSession={gameSession}
           arena={arena}
-          emitAdmin={emitAdmin}
+          emitAdmin={emitAdmin}        // ✔ correct
         />
 
         {/* ---------- PLAYER ACTIONS PANEL ---------- */}
@@ -166,7 +163,7 @@ export default function AdminDashboardPage() {
         BattleBox Admin v3.0 • Dark Mode • Reworked UI/UX
       </footer>
 
-      {/* CONFIRM DIALOG */}
+      {/* CONFIRM */}
       <ConfirmDialog
         open={!!confirm}
         message={confirm?.message ?? ""}
