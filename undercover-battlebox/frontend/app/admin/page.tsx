@@ -142,7 +142,7 @@ export default function AdminDashboardPage() {
     };
   }, []);
 
-  /* ============================================
+/* ============================================
      INITIAL SNAPSHOT
   ============================================ */
   useEffect(() => {
@@ -179,7 +179,7 @@ export default function AdminDashboardPage() {
   }, []);
 
   /* ============================================
-     EMITTER HELPERS
+     EMITTER HELPERS (FIXED)
   ============================================ */
   const emitAdmin = (
     event: keyof AdminSocketOutbound,
@@ -430,6 +430,90 @@ export default function AdminDashboardPage() {
       </section>
 
       {/* ============================================================
+          SPELERSACTIES
+      ============================================================ */}
+      <section className="bg-white rounded-2xl shadow p-4 mb-6">
+        <h2 className="text-sm font-semibold mb-3">Speleracties</h2>
+
+        <div className="flex flex-col md:flex-row gap-3 md:items-end relative">
+          <div className="flex-1">
+            <label className="text-xs text-gray-600 font-semibold mb-1 block">
+              @username (zoek)
+            </label>
+
+            <div className="relative" ref={autoRef}>
+              <input
+                type="text"
+                value={username}
+                onFocus={() => {
+                  setActiveAutoField("main");
+                  setTyping(username);
+                  setShowResults(true);
+                }}
+                onChange={(e) => {
+                  setUsername(e.target.value);
+                  setActiveAutoField("main");
+                  setTyping(e.target.value);
+                  setShowResults(true);
+                }}
+                placeholder="@zoeken"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              />
+
+              {/* AUTOCOMPLETE */}
+              {showResults &&
+                searchResults.length > 0 &&
+                activeAutoField === "main" && (
+                  <div className="absolute left-0 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg z-20 max-h-60 overflow-auto">
+                    {searchResults.map((u) => (
+                      <div
+                        key={u.tiktok_id}
+                        onClick={() => applyAutoFill(u)}
+                        className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer"
+                      >
+                        <span className="font-semibold">{u.display_name}</span>{" "}
+                        <span className="text-gray-500">@{u.username}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+            </div>
+          </div>
+
+          {/* ACTION BUTTONS */}
+          <div className="flex gap-2 text-xs flex-wrap">
+            <button
+              onClick={() => emitAdmin("addToArena", { username })}
+              className="px-3 py-1.5 bg-[#ff4d4f] text-white rounded-full"
+            >
+              → Arena
+            </button>
+
+            <button
+              onClick={() => emitAdminWithUser("addToQueue", username)}
+              className="px-3 py-1.5 bg-gray-800 text-white rounded-full"
+            >
+              → Queue
+            </button>
+
+            <button
+              onClick={() => emitAdmin("giveVip", { username })}
+              className="px-3 py-1.5 bg-yellow-400 text-black rounded-full border border-yellow-600"
+            >
+              Geef VIP
+            </button>
+
+            <button
+              onClick={() => emitAdmin("removeVip", { username })}
+              className="px-3 py-1.5 bg-yellow-200 text-yellow-800 rounded-full border border-yellow-500"
+            >
+              Verwijder VIP
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* ============================================================
           ARENA + QUEUE
       ============================================================ */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4 relative">
@@ -444,27 +528,8 @@ export default function AdminDashboardPage() {
         {/* =====================
             ARENA CARD GRID
         ===================== */}
-        <div className="bg-white rounded-2xl shadow p-4 relative overflow-hidden">
-
-          {/* ★ REV WATERMARK */}
-          {arena?.reverseMode && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-10 select-none">
-              <div className="text-[140px] font-black text-gray-700 tracking-widest rotate-[-20deg]">
-                REV
-              </div>
-            </div>
-          )}
-
-          <h2 className="text-xl font-semibold mb-2 flex items-center gap-2">
-            Arena
-
-            {/* ★ REV BADGE */}
-            {arena?.reverseMode && (
-              <span className="px-2 py-0.5 rounded-full bg-purple-700 text-white text-[11px] shadow">
-                REV
-              </span>
-            )}
-          </h2>
+        <div className="bg-white rounded-2xl shadow p-4">
+          <h2 className="text-xl font-semibold mb-2">Arena</h2>
 
           <p className="text-sm text-gray-500 mb-4">
             {arena
@@ -472,7 +537,7 @@ export default function AdminDashboardPage() {
               : "Geen ronde actief"}
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 relative">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {players.length ? (
               players.map((p, idx) => (
                 <div
@@ -515,7 +580,7 @@ export default function AdminDashboardPage() {
                     ✕
                   </button>
 
-                  {/* POSITION */}
+                  {/* POSITION + STATUS */}
                   <div className="flex justify-between items-center">
                     <span className="font-bold">#{idx + 1}</span>
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-300 text-gray-700">
@@ -523,11 +588,12 @@ export default function AdminDashboardPage() {
                     </span>
                   </div>
 
+                  {/* PLAYER NAME */}
                   <div className="font-semibold truncate">
                     {p.display_name} (@{p.username})
                   </div>
 
-                  {/* BADGES */}
+                  {/* BADGES MG + BOMB */}
                   <div className="flex gap-1 mt-1 flex-wrap">
                     {p.boosters?.includes("mg") && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-pink-200 text-pink-800 border border-pink-300">
@@ -535,16 +601,18 @@ export default function AdminDashboardPage() {
                       </span>
                     )}
                     {p.boosters?.includes("bomb") && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-200 text-red-800 border-red-300">
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-200 text-red-800 border border-red-300">
                         BOMB
                       </span>
                     )}
                   </div>
 
+                  {/* SCORE */}
                   <div className="text-xs text-gray-600 mt-1">
                     Score: {fmt(p.score)} 💎
                   </div>
 
+                  {/* ELIMINATION ACTION */}
                   {p.positionStatus === "elimination" && (
                     <button
                       onClick={() => {
@@ -1097,4 +1165,4 @@ export default function AdminDashboardPage() {
       )}
     </main>
   );
-                  }
+              }
