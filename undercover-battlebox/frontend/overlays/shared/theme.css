@@ -1,16 +1,41 @@
+/* ---------------------------------------------------------
+   BATTLEBOX OVERLAYS — FULL ESPORTS THEME ENGINE
+   Colors • Neon • Glows • Holograms • Glitch • LED Grid
+   --------------------------------------------------------- */
+
 @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&display=swap');
 
+/* ---------------------------------------------------------
+   COLOR TOKENS (ESPORTS)
+   --------------------------------------------------------- */
 :root {
-  --color-orange: #ff4d4f;
-  --color-turquoise: #0fffd7;
-  --color-purple: #8b5cf6;
+  /* Primary neon palette */
+  --neon-orange: #ff4d4f;
+  --neon-turquoise: #0fffd7;
+  --neon-purple: #8b5cf6;
 
-  --glass-bg: rgba(10, 10, 14, 0.65);
-  --border-light: rgba(255, 255, 255, 0.08);
+  /* Strong neon glows */
+  --neon-orange-glow: 0 0 12px #ff4d4f, 0 0 32px rgba(255,30,30,0.75);
+  --neon-turquoise-glow: 0 0 10px #0fffd7, 0 0 26px rgba(0,255,230,0.6);
+  --neon-purple-glow: 0 0 12px #8b5cf6, 0 0 30px rgba(139,92,246,0.45);
 
-  --vip-glow: 0 0 14px #ffdd55, inset 0 0 12px #ffdd55;
+  /* Glass layers */
+  --glass-dark: rgba(12,12,18,0.85);
+  --glass-mid: rgba(22,22,30,0.65);
+  --glass-bg: rgba(10,10,14,0.65);
+
+  --border-light: rgba(255,255,255,0.12);
+
+  /* VIP Aura */
+  --vip-glow: 
+      0 0 20px rgba(255,220,0,0.8),
+      0 0 35px rgba(255,220,0,0.55),
+      inset 0 0 25px rgba(255,200,0,0.65);
 }
 
+/* ---------------------------------------------------------
+   GLOBAL BASE
+   --------------------------------------------------------- */
 body {
   margin: 0;
   padding: 0;
@@ -19,9 +44,103 @@ body {
   font-family: 'Rajdhani', sans-serif;
   background: transparent;
   overflow: hidden;
+  color: white;
 }
 
-/* ✨ Hologram scan */
+/* ---------------------------------------------------------
+   LED GRID BACKDROP (use: .esports-led-grid)
+   --------------------------------------------------------- */
+.esports-led-grid {
+  background:
+      linear-gradient(90deg, rgba(255,77,79,0.18) 0px, transparent 1px),
+      linear-gradient(rgba(255,77,79,0.12) 1px, transparent 1px),
+      var(--glass-mid);
+  background-size: 4px 4px;
+}
+
+/* ---------------------------------------------------------
+   OCTAGON CARDS / PANELS
+   --------------------------------------------------------- */
+.octagon-card {
+  clip-path: polygon(
+    8% 0%, 92% 0%,
+    100% 12%, 100% 88%,
+    92% 100%, 8% 100%,
+    0% 88%, 0% 12%
+  );
+  border: 2px solid var(--border-light);
+  background: var(--glass-dark);
+  position: relative;
+  box-shadow:
+    0 0 20px rgba(0,0,0,0.9),
+    inset 0 0 24px rgba(0,0,0,0.6);
+}
+
+/* Orange neon rim */
+.octagon-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: 2px solid rgba(255,77,79,0.45);
+  clip-path: inherit;
+  box-shadow: var(--neon-orange-glow);
+  opacity: 0.35;
+}
+
+/* ---------------------------------------------------------
+   VIP GLOW EFFECT (add class 'vip-glow')
+   --------------------------------------------------------- */
+.vip-glow {
+  box-shadow: var(--vip-glow) !important;
+  border-color: rgba(255,220,0,0.65) !important;
+}
+
+/* ---------------------------------------------------------
+   AVATAR OCTAGON (small)
+   --------------------------------------------------------- */
+.octagon-avatar {
+  width: 54px;
+  height: 54px;
+  background-size: cover;
+  background-position: center;
+  clip-path: polygon(
+    15% 0%, 85% 0%,
+    100% 25%, 100% 75%,
+    85% 100%, 15% 100%,
+    0% 75%, 0% 25%
+  );
+  box-shadow:
+    0 0 12px rgba(0,0,0,0.8),
+    inset 0 0 14px rgba(255,255,255,0.22);
+}
+
+/* ---------------------------------------------------------
+   POSITION BADGE (ESPORTS HEX)
+   --------------------------------------------------------- */
+.pos-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 26px;
+  height: 26px;
+  clip-path: polygon(
+    25% 0%, 75% 0%,
+    100% 50%, 75% 100%,
+    25% 100%, 0% 50%
+  );
+  background: var(--neon-orange);
+  color: black;
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 26px;
+  text-align: center;
+  text-shadow: var(--neon-orange-glow);
+}
+
+/* ---------------------------------------------------------
+   HOLOGRAM SCAN (enhanced)
+   --------------------------------------------------------- */
 .holo-scan {
   position: relative;
 }
@@ -31,17 +150,19 @@ body {
   inset: 0;
   background: linear-gradient(
     to bottom,
-    rgba(255,255,255,0.05),
-    rgba(255,255,255,0.00)
+    rgba(255,255,255,0.12),
+    rgba(255,255,255,0.02)
   );
-  animation: scan 2.5s infinite;
+  animation: holoScan 3s cubic-bezier(0.52, 0.01, 0.16, 1) infinite;
 }
-@keyframes scan {
+@keyframes holoScan {
   0% { transform: translateY(-100%); }
   100% { transform: translateY(100%); }
 }
 
-/* ✨ LED Sweep */
+/* ---------------------------------------------------------
+   LED SWEEP (enhanced)
+   --------------------------------------------------------- */
 .led-sweep {
   position: relative;
 }
@@ -49,13 +170,49 @@ body {
   content: "";
   position: absolute;
   top: 0;
-  left: -150%;
-  width: 50%;
+  left: -200%;
+  width: 80%;
   height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent);
-  animation: sweep 3s infinite;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255,127,80,0.35),
+    transparent
+  );
+  animation: sweep 5s ease-in-out infinite;
 }
 @keyframes sweep {
-  0% { left: -150%; }
-  100% { left: 150%; }
+  0% { left: -200%; }
+  100% { left: 200%; }
+}
+
+/* ---------------------------------------------------------
+   GLITCH MICRO EFFECT (for cards & items)
+   --------------------------------------------------------- */
+.glitch {
+  animation: glitch-flicker 2.8s infinite steps(2, end);
+}
+@keyframes glitch-flicker {
+  0%, 96%, 100% { opacity: 1; }
+  97% { opacity: 0.82; }
+  98% { opacity: 0.55; }
+  99% { opacity: 0.82; }
+}
+
+/* ---------------------------------------------------------
+   TEXT GLOW UTILS
+   --------------------------------------------------------- */
+.glow-orange {
+  color: var(--neon-orange);
+  text-shadow: var(--neon-orange-glow);
+}
+
+.glow-turquoise {
+  color: var(--neon-turquoise);
+  text-shadow: var(--neon-turquoise-glow);
+}
+
+.glow-purple {
+  color: var(--neon-purple);
+  text-shadow: var(--neon-purple-glow);
 }
