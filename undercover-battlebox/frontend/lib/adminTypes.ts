@@ -6,6 +6,7 @@
      - promoteUser
      - demoteUser
      - giveVip / removeVip (realtime queue refresh)
+   ✔ Galaxy reverseMode toegevoegd aan ArenaState
    ✔ Overige logica volledig ongewijzigd gelaten
 ============================================================================ */
 
@@ -55,6 +56,9 @@ export interface ArenaState {
   type: "quarter" | "finale";
 
   status: "idle" | "active" | "grace" | "ended";
+
+  /** ★ Galaxy: ranking is reversed */
+  reverseMode: boolean;
 
   timeLeft: number;
   isRunning: boolean;
@@ -358,7 +362,7 @@ export interface AdminSocketOutbound {
 
   startRound: (
     payload: { type: "quarter" | "finale" },
-    ack: (res: AdminAckResponse) => void
+   ack: (res: AdminAckResponse) => void
   ) => void;
 
   endRound: (payload: {}, ack: (res: AdminAckResponse) => void) => void;
