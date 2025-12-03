@@ -27,8 +27,8 @@ const EVENT_LIFETIME_MS = 6000;
 // MAIN ROUTER
 // ---------------------------------------------------------------------------
 
-export function initEventRouter() {
-  const socket = getSocket();
+export async function initEventRouter() {
+  const socket = await getSocket();
 
   // Prevent double registration (OBS reloads iframe sometimes)
   if (window.__BB_ROUTER_ACTIVE__) return;
@@ -64,14 +64,11 @@ export function initEventRouter() {
   socket.on("queueEvent", (evt) => {
     if (!evt || !evt.type) return;
 
-    // Add to event feed (right panel)
     eventStore.pushEvent(evt);
 
-    // Flash card in queue grid
     queueStore.highlightCard(evt.username);
     setTimeout(() => queueStore.clearHighlight(), 900);
 
-    // Remove event from feed after fade timer
     setTimeout(() => {
       eventStore.fadeOutEvent(evt.timestamp);
     }, EVENT_LIFETIME_MS);
@@ -107,7 +104,7 @@ export function initEventRouter() {
   setInterval(rotateTwists, TWIST_ROTATION_MS);
 
   // ---------------------------------------------------------------------------
-  // 4. Ticker text (future dynamic update)
+  // 4. Ticker updates
   // ---------------------------------------------------------------------------
   socket.on("hudTickerUpdate", (text) => {
     tickerStore.setText(text || "");
