@@ -1,5 +1,5 @@
 import { initEventRouter } from "/overlays/shared/event-router.js";
-import { useQueueStore } from "/overlays/shared/stores.js";
+import { queueStore } from "/overlays/shared/stores.js";
 
 initEventRouter();
 
@@ -15,7 +15,7 @@ cards.forEach((c) => grid.appendChild(c));
 
 const EMPTY_AVATAR = "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
 
-useQueueStore.subscribe((state) => {
+queueStore.subscribe((state) => {
   const entries = state.entries || [];
   const highlight = state.lastUpdatedId;
 
