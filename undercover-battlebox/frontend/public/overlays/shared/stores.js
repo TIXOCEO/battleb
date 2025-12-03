@@ -1,130 +1,103 @@
 // ============================================================================
-// shared/stores.ts — BattleBox Overlay Stores (Zustand) v1.0
-// No SSR • Overlay-safe • Socket-driven
+// stores.js — BattleBox Overlay Stores v2.0 (Pure JS)
+// Custom mini-Zustand engine → Works in OBS BrowserSource
+// No bundler, no imports, no TypeScript.
 // ============================================================================
 
-import { create } from "zustand";
+// ---------------------------------------------------------
+// INTERNAL MICRO-ZUSTAND ENGINE
+// ---------------------------------------------------------
 
-// ============================================================================
-// TYPES
-// ============================================================================
+function createStore(initialState) {
+  let state = { ...initialState };
+  const listeners = new Set();
 
-export interface QueueEntry {
-  position: number;
-  display_name: string;
-  username: string;
-  priorityDelta: number;
-  is_vip: boolean;
-  is_fan: boolean;
-  avatar_url: string | null; // placeholder of echte avatar
-}
+  return {
+    get: () => state,
 
-export interface QueueEvent {
-  type: "join" | "leave" | "promote" | "demote";
-  tiktok_id: string;
-  username: string;
-  display_name: string;
-  is_vip: boolean;
-  timestamp: number;
-}
+    set: (partial) => {
+      state = { ...state, ...partial };
+      listeners.forEach((l) => l(state));
+    },
 
-export interface TwistItem {
-  key: string;
-  name: string;
-  gift: string;
-  diamonds: number;
-  description: string;
-  aliases: string[];
-  icon: string;
+    subscribe: (callback) => {
+      listeners.add(callback);
+      callback(state); // immediately notify
+
+      return () => listeners.delete(callback);
+    },
+  };
 }
 
 // ============================================================================
-// 1. QUEUE STORE (30 grid cards)
+// 1. QUEUE STORE (30-card grid)
 // ============================================================================
 
-interface QueueState {
-  entries: QueueEntry[];
-  lastUpdatedId: string | null;
-
-  setQueue: (entries: QueueEntry[]) => void;
-  highlightCard: (username: string) => void;
-  clearHighlight: () => void;
-}
-
-export const useQueueStore = create<QueueState>((set) => ({
+export const queueStore = createStore({
   entries: [],
   lastUpdatedId: null,
+});
 
-  setQueue: (entries) =>
-    set({
-      entries,
-      lastUpdatedId: null,
-    }),
+queueStore.setQueue = (entries) => {
+  queueStore.set({
+    entries,
+    lastUpdatedId: null,
+  });
+};
 
-  highlightCard: (username) =>
-    set({
-      lastUpdatedId: username,
-    }),
+queueStore.highlightCard = (username) => {
+  queueStore.set({
+    lastUpdatedId: username,
+  });
+};
 
-  clearHighlight: () =>
-    set({
-      lastUpdatedId: null,
-    }),
-}));
+queueStore.clearHighlight = () => {
+  queueStore.set({
+    lastUpdatedId: null,
+  });
+};
 
 // ============================================================================
-// 2. EVENT STORE (last 5 overlay events)
+// 2. EVENT STORE (latest 5 queue events)
 // ============================================================================
 
-interface EventState {
-  events: QueueEvent[];
-  pushEvent: (evt: QueueEvent) => void;
-  fadeOutEvent: (timestamp: number) => void;
-}
-
-export const useEventStore = create<EventState>((set, get) => ({
+export const eventStore = createStore({
   events: [],
+});
 
-  pushEvent: (evt) => {
-    const current = get().events;
+eventStore.pushEvent = (evt) => {
+  const current = eventStore.get().events;
+  const next = [evt, ...current].slice(0, 5);
 
-    // always keep newest first
-    const next = [evt, ...current].slice(0, 5);
+  eventStore.set({ events: next });
+};
 
-    set({ events: next });
-  },
-
-  fadeOutEvent: (timestamp) => {
-    const current = get().events;
-    const filtered = current.filter((e) => e.timestamp !== timestamp);
-    set({ events: filtered });
-  },
-}));
+eventStore.fadeOutEvent = (timestamp) => {
+  const current = eventStore.get().events;
+  const filtered = current.filter((e) => e.timestamp !== timestamp);
+  eventStore.set({ events: filtered });
+};
 
 // ============================================================================
-// 3. TWIST STORE (3 rotating visible twists)
+// 3. TWIST STORE (rotating visible twists)
 // ============================================================================
 
-interface TwistState {
-  visibleTwists: TwistItem[];
-  setTwists: (tw: TwistItem[]) => void;
-}
-
-export const useTwistStore = create<TwistState>((set) => ({
+export const twistStore = createStore({
   visibleTwists: [],
-  setTwists: (tw) => set({ visibleTwists: tw }),
-}));
+});
+
+twistStore.setTwists = (tw) => {
+  twistStore.set({ visibleTwists: tw });
+};
 
 // ============================================================================
-// (Optional) 4. TICKER STORE
+// 4. TICKER STORE (dynamic HUD text)
 // ============================================================================
 
-interface TickerState {
-  text: string;
-  setText: (txt: string) => void;
-}
-
-export const useTickerStore = create<TickerState>((set) => ({
+export const tickerStore = createStore({
   text: "BattleBox — The Ultimate Underground Arena",
-  setText: (t) => set({ text: t }),
-}));
+});
+
+tickerStore.setText = (txt) => {
+  tickerStore.set({ text: txt });
+};
