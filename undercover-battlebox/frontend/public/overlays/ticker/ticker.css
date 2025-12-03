@@ -61,7 +61,6 @@
 
   padding-left: 1200px;
 
-  /* Dual animation: scroll + subtle glow breathing */
   animation:
     tickerScroll 18s linear infinite,
     tickerGlow 3.6s ease-in-out infinite;
@@ -77,9 +76,7 @@
   50% { opacity: 0.88; }
 }
 
-/* ---------------------------------------------------------
-   OPTIONAL GLITCH VARIANT (add .glitch to bb-ticker-inner)
---------------------------------------------------------- */
+/* GLITCH */
 .bb-ticker-inner.glitch {
   animation:
     tickerScroll 18s linear infinite,
