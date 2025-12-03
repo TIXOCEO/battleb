@@ -2,8 +2,8 @@
 // ticker.js — BattleBox HUD Ticker Renderer
 // ============================================================================
 
-import { initEventRouter } from "../shared/event-router.js";
-import { useTickerStore } from "../shared/stores.js";
+import { initEventRouter } from "overlays/shared/event-router.js";
+import { useTickerStore } from "overlays/shared/stores.js";
 
 // Start event router (enables hudTickerUpdate)
 initEventRouter();
