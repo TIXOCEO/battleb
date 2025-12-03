@@ -1,42 +1,42 @@
 // ============================================================================
-// twists.js — Renders 3 rotating twist-cards
+// twists.js — Renders rotating twist cards
 // ============================================================================
 
-import { initEventRouter } from "overlays/shared/event-router.js";
-import { useTwistStore } from "overlays/shared/stores.js";
+import { initEventRouter } from "/overlays/shared/event-router.js";
+import { twistStore } from "/overlays/shared/stores.js";
 
-// Start the event router (sets up twist rotation automatically)
+// Enable socket listeners
 initEventRouter();
 
 const stack = document.getElementById("twist-stack");
 
-// Subscribe to twist changes
-useTwistStore.subscribe((state) => {
-  const twists = state.visibleTwists || [];
+// When twist rotation updates:
+twistStore.subscribe((visibleTwists) => {
 
-  // Fade existing cards out
+  // Fade out existing cards
   Array.from(stack.children).forEach((child) => {
     child.classList.add("twist-fade");
   });
 
-  // Clear after fade animation
+  // After fade, rebuild stack
   setTimeout(() => {
     stack.innerHTML = "";
 
-    twists.forEach((tw) => {
-      const el = document.createElement("div");
-      el.className = "bb-twist-card";
+    visibleTwists.forEach((tw) => {
+      const card = document.createElement("div");
+      card.className = "bb-twist-card";
 
-      el.innerHTML = `
-        <div class="twist-icon"></div>
+      const iconUrl =
+        tw.icon ||
+        "/overlays/shared/default-icon.png";
+
+      card.innerHTML = `
+        <div class="twist-icon" style="background-image:url('${iconUrl}')"></div>
 
         <div class="twist-info">
           <div class="twist-name">${tw.name}</div>
-
           <div class="twist-gift">${tw.gift}</div>
-
           <div class="twist-cost">${tw.diamonds} 💎</div>
-
           <div class="twist-desc">${tw.description}</div>
 
           <div class="twist-commands">
@@ -50,7 +50,7 @@ useTwistStore.subscribe((state) => {
         </div>
       `;
 
-      stack.appendChild(el);
+      stack.appendChild(card);
     });
-  }, 300); // sync with twist-fade keyframe duration
+  }, 300);
 });
