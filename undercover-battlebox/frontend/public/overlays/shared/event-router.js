@@ -1,5 +1,5 @@
 // ============================================================================
-// event-router.js — BattleBox Overlay Event Brain v1.2 (15 SLOT EDITION)
+// event-router.js — BattleBox Overlay Event Brain v1.3 (SNAPSHOT EDITION)
 // ============================================================================
 
 import { getSocket } from "/overlays/shared/socket.js";
@@ -7,7 +7,8 @@ import {
   queueStore,
   eventStore,
   twistStore,
-  tickerStore
+  tickerStore,
+  applySnapshot
 } from "/overlays/shared/stores.js";
 
 const EMPTY_AVATAR =
@@ -53,7 +54,15 @@ export async function initEventRouter() {
   console.log("%c[BattleBox] Event Router Ready", "color:#0fffd7;font-weight:bold;");
 
   // -------------------------------------------------------------------------
-  // updateQueue → ONLY FIRST 15 slots
+  // SNAPSHOT (NEW!)
+  // -------------------------------------------------------------------------
+  socket.on("overlayInitialSnapshot", (snap) => {
+    console.log("%c[BattleBox] SNAPSHOT ontvangen", "color:#0fffd7;font-weight:bold;");
+    applySnapshot(snap);
+  });
+
+  // -------------------------------------------------------------------------
+  // updateQueue → only first 15 slots
   // -------------------------------------------------------------------------
   socket.on("updateQueue", (packet) => {
     if (!packet || !Array.isArray(packet.entries)) return;
@@ -79,6 +88,7 @@ export async function initEventRouter() {
 
     evt.display_name = evt.display_name || "Onbekend";
     evt.username = evt.username || "";
+    evt.reason = evt.reason || "";
 
     eventStore.pushEvent(evt);
 
@@ -91,7 +101,7 @@ export async function initEventRouter() {
   });
 
   // -------------------------------------------------------------------------
-  // Twist rotation (unchanged)
+  // Twist rotation
   // -------------------------------------------------------------------------
   let twistIndex = 0;
 
