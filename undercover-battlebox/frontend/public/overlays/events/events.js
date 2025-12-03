@@ -1,26 +1,26 @@
 // ============================================================================
-// events.js — BattleBox Events Overlay Renderer (Pure JS Store)
+// events.js — BattleBox Events Overlay Renderer (ESPORTS V3 FIXED)
 // ============================================================================
 
-import { initEventRouter } from "/overlays/shared/event-router.js";
 import { eventStore } from "/overlays/shared/stores.js";
+import { initEventRouter } from "/overlays/shared/event-router.js";
 
-// Start socket listeners
+// Start router once
 initEventRouter();
 
 const root = document.getElementById("events-list");
 
-// Subscribe to event store
+// Zustand subscribe
 eventStore.subscribe((state) => {
   const events = state.events || [];
 
   root.innerHTML = "";
 
   events.forEach((evt) => {
-    const el = document.createElement("div");
-    el.className = "bb-event-item";
+    const item = document.createElement("div");
+    item.className = "bb-event-item";
 
-    el.innerHTML = `
+    item.innerHTML = `
       <div class="event-icon ${evt.type}"></div>
 
       <div class="event-text">
@@ -31,11 +31,9 @@ eventStore.subscribe((state) => {
       ${evt.is_vip ? `<div class="event-vip"></div>` : ""}
     `;
 
-    root.appendChild(el);
+    root.appendChild(item);
 
-    // Fade-out animation
-    setTimeout(() => {
-      el.classList.add("event-fade");
-    }, 4500);
+    // Fade-out CSS animation
+    setTimeout(() => item.classList.add("event-fade"), 4500);
   });
 });
