@@ -6,50 +6,52 @@
 .bb-queue-panel {
   width: 1200px;
   height: 700px;
-  background: var(--glass-mid);
-  border: 2px solid var(--border-light);
-  padding: 20px;
+  background: rgba(5, 5, 8, 0.75);
+  border: 2px solid rgba(255,255,255,0.08);
+  padding: 25px;
   position: relative;
   overflow: hidden;
-  backdrop-filter: blur(7px);
+  backdrop-filter: blur(8px);
 
   box-shadow:
-    0 0 30px rgba(255,77,79,0.45),
-    inset 0 0 40px rgba(255,77,79,0.25);
+    0 0 40px rgba(255,77,79,0.45),
+    inset 0 0 60px rgba(255,77,79,0.25);
 
-  animation: queuePanelIn 0.7s ease-out forwards;
+  animation: panelIn 0.6s ease-out forwards;
 }
 
-@keyframes queuePanelIn {
-  0% { opacity: 0; transform: translateY(25px) scale(0.92); }
+@keyframes panelIn {
+  0% { opacity: 0; transform: translateY(30px) scale(0.94); }
   100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 /* ---------------------------------------------------------
-   30-SLOT GRID (10 × 3)
+   GRID — 3 kolommen × 5 rijen
 --------------------------------------------------------- */
 .bb-queue-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(10, 1fr);
-  gap: 14px;
+  grid-template-rows: repeat(5, 1fr);
+  gap: 20px;
+  width: 100%;
+  height: 100%;
 }
 
 /* ---------------------------------------------------------
-   CARD — OCTAGON BASE
+   CARD BASE — grotere esports style
 --------------------------------------------------------- */
 .bb-card {
-  background: var(--glass-dark);
-  border: 2px solid var(--border-light);
+  background: rgba(15, 15, 20, 0.85);
+  border: 2px solid rgba(255,255,255,0.08);
   position: relative;
-  padding: 10px;
-  color: white;
-  overflow: hidden;
+
+  padding: 12px 14px;
+  color: #f7f7f7;
 
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
 
   clip-path: polygon(
     10% 0%, 90% 0%,
@@ -59,15 +61,15 @@
   );
 
   box-shadow:
-    0 0 22px rgba(0,0,0,0.9),
-    inset 0 0 25px rgba(0,0,0,0.65),
-    inset 0 0 14px rgba(255,77,79,0.28);
+    0 0 25px rgba(0,0,0,0.9),
+    inset 0 0 35px rgba(0,0,0,0.7),
+    inset 0 0 20px rgba(255,77,79,0.22);
 
-  animation: cardPop 0.3s ease-out both;
+  animation: cardSpawn 0.28s ease-out both;
 }
 
-@keyframes cardPop {
-  0% { opacity: 0; transform: scale(0.82) rotateX(8deg); }
+@keyframes cardSpawn {
+  0% { opacity: 0; transform: scale(0.88) rotateX(6deg); }
   100% { opacity: 1; transform: scale(1) rotateX(0deg); }
 }
 
@@ -77,23 +79,25 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  border: 2px solid rgba(255,77,79,0.45);
+
+  border: 2px solid rgba(255,77,79,0.35);
   clip-path: inherit;
   box-shadow: var(--neon-orange-glow);
-  opacity: 0.32;
-  animation: rimPulseCard 2.7s ease-in-out infinite;
+  opacity: 0.28;
+
+  animation: rimPulse 2.8s ease-in-out infinite;
 }
 
-@keyframes rimPulseCard {
+@keyframes rimPulse {
   0%,100% { opacity: 0.25; }
-  50% { opacity: 0.45; }
+  50%     { opacity: 0.45; }
 }
 
 /* ---------------------------------------------------------
-   EMPTY CARD (FREE SPOT)
+   Empty card (FREE)
 --------------------------------------------------------- */
 .empty-card {
-  opacity: 0.35;
+  opacity: 0.4;
   animation: none !important;
 }
 
@@ -102,10 +106,10 @@
 --------------------------------------------------------- */
 .pos-badge {
   position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 26px;
-  height: 26px;
+  top: 8px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
 
   clip-path: polygon(
     25% 0%, 75% 0%,
@@ -116,18 +120,17 @@
   background: var(--neon-orange);
   color: black;
   font-weight: 700;
-  font-size: 13px;
-  line-height: 26px;
+  font-size: 15px;
+  line-height: 30px;
   text-align: center;
-  text-shadow: var(--neon-orange-glow);
 }
 
 /* ---------------------------------------------------------
    AVATAR — 30% smaller
 --------------------------------------------------------- */
 .card-avatar {
-  width: 38px;  /* was 54px */
-  height: 38px; /* was 54px */
+  width: 42px;
+  height: 42px;
 
   background-size: cover;
   background-position: center;
@@ -141,42 +144,43 @@
 
   box-shadow:
     0 0 12px rgba(0,0,0,0.8),
-    inset 0 0 12px rgba(255,255,255,0.22);
-
-  flex-shrink: 0;
+    inset 0 0 12px rgba(255,255,255,0.2);
 }
 
 /* ---------------------------------------------------------
-   TEXT BLOCK (Right of Avatar)
+   TEXT BLOCK (rechts van avatar)
 --------------------------------------------------------- */
 .card-info {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  line-height: 1.2;
 }
 
 .card-info .name {
   font-weight: 700;
-  font-size: 14px;
+  font-size: 16px;
+  color: #ffffff;
 }
 
 .card-info .user {
+  font-size: 13px;
   opacity: 0.75;
-  font-size: 12px;
 }
 
-/* Highlight flash */
+/* Highlight */
 .card-update {
-  animation: cardFlash 0.6s ease-out !important;
+  animation: flashCard 0.6s ease-out !important;
 }
-
-@keyframes cardFlash {
-  0% { filter: brightness(1.8); }
+@keyframes flashCard {
+  0% { filter: brightness(1.9); }
   100% { filter: brightness(1); }
 }
 
-/* VIP glow */
+/* VIP AURA */
 .vip-glow {
-  animation: vipAura 2s ease-in-out infinite !important;
+  animation: vipPulse 2s ease-in-out infinite !important;
+}
+@keyframes vipPulse {
+  0%, 100% { box-shadow: var(--vip-glow); }
+  50% { box-shadow: 0 0 65px rgba(255,220,0,0.95); }
 }
