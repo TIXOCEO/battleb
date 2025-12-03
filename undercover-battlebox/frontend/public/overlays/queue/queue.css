@@ -102,14 +102,14 @@
 }
 
 /* ---------------------------------------------------------
-   POSITION BADGE — RIGHT TOP
+   POSITION BADGE — RIGHT TOP (NEON ORANJE)
 --------------------------------------------------------- */
 .pos-badge {
   position: absolute;
   top: 8px;
   right: 10px;
-  width: 30px;
-  height: 30px;
+  width: 34px;
+  height: 34px;
 
   clip-path: polygon(
     25% 0%, 75% 0%,
@@ -117,16 +117,21 @@
     25% 100%, 0% 50%
   );
 
-  background: var(--neon-orange);
+  background: var(--bb-orange); /* NEON ORANGE */
   color: black;
-  font-weight: 700;
-  font-size: 15px;
-  line-height: 30px;
+  font-weight: 900;
+  font-size: 17px;
+  line-height: 34px;
   text-align: center;
+
+  box-shadow:
+    0 0 12px rgba(255,77,79,0.9),
+    0 0 22px rgba(255,77,79,0.65),
+    inset 0 0 12px rgba(255,77,79,0.6);
 }
 
 /* ---------------------------------------------------------
-   AVATAR — 30% smaller
+   AVATAR — compact esport style
 --------------------------------------------------------- */
 .card-avatar {
   width: 42px;
@@ -148,7 +153,7 @@
 }
 
 /* ---------------------------------------------------------
-   TEXT BLOCK (rechts van avatar)
+   TEXT BLOCK
 --------------------------------------------------------- */
 .card-info {
   display: flex;
@@ -167,19 +172,23 @@
   opacity: 0.75;
 }
 
-/* Highlight */
+/* Highlight effect */
 .card-update {
   animation: flashCard 0.6s ease-out !important;
 }
+
 @keyframes flashCard {
   0% { filter: brightness(1.9); }
   100% { filter: brightness(1); }
 }
 
-/* VIP AURA */
+/* ---------------------------------------------------------
+   VIP AURA (gold pulse)
+--------------------------------------------------------- */
 .vip-glow {
   animation: vipPulse 2s ease-in-out infinite !important;
 }
+
 @keyframes vipPulse {
   0%, 100% { box-shadow: var(--vip-glow); }
   50% { box-shadow: 0 0 65px rgba(255,220,0,0.95); }
