@@ -1,5 +1,5 @@
 // ============================================================================
-// event-router.js — BattleBox Overlay Event Brain v1.2 (Fixed Edition)
+// event-router.js — BattleBox Overlay Event Brain v1.2 (15 SLOT EDITION)
 // ============================================================================
 
 import { getSocket } from "/overlays/shared/socket.js";
@@ -10,10 +10,6 @@ import {
   tickerStore
 } from "/overlays/shared/stores.js";
 
-// ---------------------------------------------------------------------------
-// CONSTANTS
-// ---------------------------------------------------------------------------
-
 const EMPTY_AVATAR =
   "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
 
@@ -23,55 +19,18 @@ const EVENT_LIFETIME_MS = 6000;
 let routerStarted = false;
 
 // ============================================================================
-// LIGHTWEIGHT TWIST MAP (overlay only)
-// *MUST* be declared BEFORE router uses it
+// TWIST MAP
 // ============================================================================
 const TWIST_MAP = {
-  galaxy: {
-    giftName: "Galaxy",
-    diamonds: 1000,
-    description: "Keert de ranking om.",
-    aliases: ["galaxy", "gxy"],
-  },
-  moneygun: {
-    giftName: "Money Gun",
-    diamonds: 500,
-    description: "Markeert speler voor eliminatie.",
-    aliases: ["moneygun", "mg"],
-  },
-  bomb: {
-    giftName: "Bomb",
-    diamonds: 2500,
-    description: "Markeert willekeurig een speler.",
-    aliases: ["bomb"],
-  },
-  immune: {
-    giftName: "Immune",
-    diamonds: 1599,
-    description: "Beschermt tegen eliminaties.",
-    aliases: ["immune", "save"],
-  },
-  heal: {
-    giftName: "Heal",
-    diamonds: 1500,
-    description: "Verwijdert eliminatie-mark.",
-    aliases: ["heal"],
-  },
-  diamondpistol: {
-    giftName: "Diamond Gun",
-    diamonds: 5000,
-    description: "Alleen gekozen speler overleeft.",
-    aliases: ["dp", "pistol"],
-  },
-  breaker: {
-    giftName: "Breaker",
-    diamonds: 899,
-    description: "Crackt of verwijdert immune.",
-    aliases: ["breaker"],
-  },
+  galaxy: { giftName: "Galaxy", diamonds: 1000, description: "Keert ranking om.", aliases: ["galaxy","gxy"] },
+  moneygun: { giftName: "Money Gun", diamonds: 500, description: "Markeert speler.", aliases: ["moneygun","mg"] },
+  bomb: { giftName: "Bomb", diamonds: 2500, description: "Random markering.", aliases: ["bomb"] },
+  immune: { giftName: "Immune", diamonds: 1599, description: "Beschermt.", aliases: ["immune","save"] },
+  heal: { giftName: "Heal", diamonds: 1500, description: "Verwijdert markering.", aliases: ["heal"] },
+  diamondpistol: { giftName: "Diamond Gun", diamonds: 5000, description: "1 speler overleeft.", aliases: ["dp","pistol"] },
+  breaker: { giftName: "Breaker", diamonds: 899, description: "Crackt immune.", aliases: ["breaker"] },
 };
 
-// Prebuild twist array once
 const twistKeys = Object.entries(TWIST_MAP).map(([key, def]) => ({
   key,
   name: def.giftName,
@@ -91,13 +50,10 @@ export async function initEventRouter() {
 
   const socket = await getSocket();
 
-  console.log(
-    "%c[BattleBox] Event Router Ready",
-    "color:#0fffd7;font-weight:bold;"
-  );
+  console.log("%c[BattleBox] Event Router Ready", "color:#0fffd7;font-weight:bold;");
 
   // -------------------------------------------------------------------------
-  // 1. updateQueue — FULL 30-slot refresh
+  // updateQueue → ONLY FIRST 15 slots
   // -------------------------------------------------------------------------
   socket.on("updateQueue", (packet) => {
     if (!packet || !Array.isArray(packet.entries)) return;
@@ -112,20 +68,17 @@ export async function initEventRouter() {
       avatar_url: e.avatar_url || EMPTY_AVATAR,
     }));
 
-    // 100% guaranteed 30 slots padded in store:
     queueStore.setQueue(mapped);
   });
 
   // -------------------------------------------------------------------------
-  // 2. queueEvent — join/leave/promote/demote
+  // queueEvent
   // -------------------------------------------------------------------------
   socket.on("queueEvent", (evt) => {
     if (!evt || !evt.type) return;
 
-    // Fix undefined
     evt.display_name = evt.display_name || "Onbekend";
     evt.username = evt.username || "";
-    evt.reason = evt.reason || "";
 
     eventStore.pushEvent(evt);
 
@@ -134,23 +87,19 @@ export async function initEventRouter() {
       setTimeout(() => queueStore.clearHighlight(), 900);
     }
 
-    setTimeout(() => {
-      eventStore.fadeOutEvent(evt.timestamp);
-    }, EVENT_LIFETIME_MS);
+    setTimeout(() => eventStore.fadeOutEvent(evt.timestamp), EVENT_LIFETIME_MS);
   });
 
   // -------------------------------------------------------------------------
-  // 3. Twist rotation — 3 cards every 10s
+  // Twist rotation (unchanged)
   // -------------------------------------------------------------------------
   let twistIndex = 0;
 
   function rotateTwists() {
     const slice = twistKeys.slice(twistIndex, twistIndex + 3);
-    if (slice.length < 3) {
-      slice.push(...twistKeys.slice(0, 3 - slice.length));
-    }
-    twistStore.setTwists(slice);
+    if (slice.length < 3) slice.push(...twistKeys.slice(0, 3 - slice.length));
 
+    twistStore.setTwists(slice);
     twistIndex = (twistIndex + 3) % twistKeys.length;
   }
 
@@ -158,7 +107,7 @@ export async function initEventRouter() {
   setInterval(rotateTwists, TWIST_ROTATION_MS);
 
   // -------------------------------------------------------------------------
-  // 4. Ticker updates
+  // Ticker
   // -------------------------------------------------------------------------
   socket.on("hudTickerUpdate", (text) => {
     tickerStore.setText(text || "");
