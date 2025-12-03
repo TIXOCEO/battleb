@@ -1,6 +1,5 @@
 // ============================================================================
-// event-router.js — BattleBox Overlay Event Brain v1.1 (Pure JS)
-// Clean, stable, OBS-proof — no race conditions, no double init
+// event-router.js — BattleBox Overlay Event Brain v1.2 (Fixed Edition)
 // ============================================================================
 
 import { getSocket } from "/overlays/shared/socket.js";
@@ -21,100 +20,12 @@ const EMPTY_AVATAR =
 const TWIST_ROTATION_MS = 10000;
 const EVENT_LIFETIME_MS = 6000;
 
-// Only run router one time globally
 let routerStarted = false;
-
-// ---------------------------------------------------------------------------
-// MAIN ROUTER
-// ---------------------------------------------------------------------------
-
-export async function initEventRouter() {
-  if (routerStarted) return;
-  routerStarted = true;
-
-  const socket = await getSocket();
-
-  console.log(
-    "%c[BattleBox] Event Router Ready",
-    "color:#0fffd7;font-weight:bold;"
-  );
-
-  // -------------------------------------------------------------------------
-  // 1. updateQueue — refresh full 30 slot grid
-  // -------------------------------------------------------------------------
-  socket.on("updateQueue", (packet) => {
-    if (!packet || !Array.isArray(packet.entries)) return;
-
-    const mapped = packet.entries.map((e) => ({
-      position: e.position,
-      display_name: e.display_name,
-      username: e.username,
-      priorityDelta: e.priorityDelta || 0,
-      is_vip: !!e.is_vip,
-      is_fan: !!e.is_fan,
-      avatar_url: e.avatar_url || EMPTY_AVATAR,
-    }));
-
-    queueStore.setQueue(mapped);
-  });
-
-  // -------------------------------------------------------------------------
-  // 2. queueEvent — join/leave/promote/demote
-  // -------------------------------------------------------------------------
-  socket.on("queueEvent", (evt) => {
-    if (!evt || !evt.type) return;
-
-    eventStore.pushEvent(evt);
-
-    queueStore.highlightCard(evt.username);
-    setTimeout(() => queueStore.clearHighlight(), 900);
-
-    setTimeout(() => {
-      eventStore.fadeOutEvent(evt.timestamp);
-    }, EVENT_LIFETIME_MS);
-  });
-
-  // -------------------------------------------------------------------------
-  // 3. Twist rotation — 3 cards every 10s
-  // -------------------------------------------------------------------------
-  let twistIndex = 0;
-
-  const twistKeys = Object.entries(TWIST_MAP).map(([key, def]) => ({
-    key,
-    name: def.giftName,
-    gift: def.giftName,
-    diamonds: def.diamonds,
-    description: def.description,
-    aliases: [...def.aliases],
-    icon: EMPTY_AVATAR
-  }));
-
-  function rotateTwists() {
-    const slice = twistKeys.slice(twistIndex, twistIndex + 3);
-
-    if (slice.length < 3) {
-      slice.push(...twistKeys.slice(0, 3 - slice.length));
-    }
-
-    twistStore.setTwists(slice);
-    twistIndex = (twistIndex + 3) % twistKeys.length;
-  }
-
-  rotateTwists();
-  setInterval(rotateTwists, TWIST_ROTATION_MS);
-
-  // -------------------------------------------------------------------------
-  // 4. Ticker text update
-  // -------------------------------------------------------------------------
-  socket.on("hudTickerUpdate", (text) => {
-    tickerStore.setText(text || "");
-  });
-}
 
 // ============================================================================
 // LIGHTWEIGHT TWIST MAP (overlay only)
+// *MUST* be declared BEFORE router uses it
 // ============================================================================
-
 const TWIST_MAP = {
   galaxy: {
     giftName: "Galaxy",
@@ -159,3 +70,97 @@ const TWIST_MAP = {
     aliases: ["breaker"],
   },
 };
+
+// Prebuild twist array once
+const twistKeys = Object.entries(TWIST_MAP).map(([key, def]) => ({
+  key,
+  name: def.giftName,
+  gift: def.giftName,
+  diamonds: def.diamonds,
+  description: def.description,
+  aliases: [...def.aliases],
+  icon: EMPTY_AVATAR
+}));
+
+// ============================================================================
+// MAIN ROUTER
+// ============================================================================
+export async function initEventRouter() {
+  if (routerStarted) return;
+  routerStarted = true;
+
+  const socket = await getSocket();
+
+  console.log(
+    "%c[BattleBox] Event Router Ready",
+    "color:#0fffd7;font-weight:bold;"
+  );
+
+  // -------------------------------------------------------------------------
+  // 1. updateQueue — FULL 30-slot refresh
+  // -------------------------------------------------------------------------
+  socket.on("updateQueue", (packet) => {
+    if (!packet || !Array.isArray(packet.entries)) return;
+
+    const mapped = packet.entries.map((e) => ({
+      position: e.position,
+      display_name: e.display_name,
+      username: e.username,
+      priorityDelta: e.priorityDelta || 0,
+      is_vip: !!e.is_vip,
+      is_fan: !!e.is_fan,
+      avatar_url: e.avatar_url || EMPTY_AVATAR,
+    }));
+
+    // 100% guaranteed 30 slots padded in store:
+    queueStore.setQueue(mapped);
+  });
+
+  // -------------------------------------------------------------------------
+  // 2. queueEvent — join/leave/promote/demote
+  // -------------------------------------------------------------------------
+  socket.on("queueEvent", (evt) => {
+    if (!evt || !evt.type) return;
+
+    // Fix undefined
+    evt.display_name = evt.display_name || "Onbekend";
+    evt.username = evt.username || "";
+    evt.reason = evt.reason || "";
+
+    eventStore.pushEvent(evt);
+
+    if (evt.username) {
+      queueStore.highlightCard(evt.username);
+      setTimeout(() => queueStore.clearHighlight(), 900);
+    }
+
+    setTimeout(() => {
+      eventStore.fadeOutEvent(evt.timestamp);
+    }, EVENT_LIFETIME_MS);
+  });
+
+  // -------------------------------------------------------------------------
+  // 3. Twist rotation — 3 cards every 10s
+  // -------------------------------------------------------------------------
+  let twistIndex = 0;
+
+  function rotateTwists() {
+    const slice = twistKeys.slice(twistIndex, twistIndex + 3);
+    if (slice.length < 3) {
+      slice.push(...twistKeys.slice(0, 3 - slice.length));
+    }
+    twistStore.setTwists(slice);
+
+    twistIndex = (twistIndex + 3) % twistKeys.length;
+  }
+
+  rotateTwists();
+  setInterval(rotateTwists, TWIST_ROTATION_MS);
+
+  // -------------------------------------------------------------------------
+  // 4. Ticker updates
+  // -------------------------------------------------------------------------
+  socket.on("hudTickerUpdate", (text) => {
+    tickerStore.setText(text || "");
+  });
+}
