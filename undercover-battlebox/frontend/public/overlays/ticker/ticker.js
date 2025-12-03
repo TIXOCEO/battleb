@@ -1,11 +1,11 @@
 // ============================================================================
-// ticker.js — BattleBox HUD Ticker Renderer (FIXED)
+// ticker.js — BattleBox HUD Ticker Renderer (SNAPSHOT EDITION)
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
 import { tickerStore } from "/overlays/shared/stores.js";
 
-// Init event listener
+// Enable router + snapshot
 initEventRouter();
 
 const inner = document.getElementById("ticker-inner");
