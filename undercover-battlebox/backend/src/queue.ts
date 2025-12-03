@@ -46,7 +46,8 @@ export async function getQueue() {
       u.is_vip,
       u.vip_expires_at,
       u.is_fan,
-      u.fan_expires_at
+      u.fan_expires_at,
+      u.avatar_url   -- 🔥 PATCH: avatar ophalen
     FROM queue q
     JOIN users u ON u.tiktok_id = q.user_tiktok_id
     ORDER BY q.position ASC, q.id ASC
@@ -57,6 +58,7 @@ export async function getQueue() {
 
   return result.rows.map((row: any) => {
     const isVip = !!row.is_vip;
+
     const fanActive =
       row.is_fan &&
       row.fan_expires_at &&
@@ -80,7 +82,9 @@ export async function getQueue() {
       is_vip: isVip,
       is_fan: isFan,
       reason,
-      avatar_url: null // 🔥 verplicht voor frontend-compat
+
+      // 🔥 PATCH: avatars doorgeven aan frontend & overlay
+      avatar_url: row.avatar_url || null
     };
   });
 }
@@ -132,7 +136,7 @@ export async function addToQueue(
 
   const ur = await pool.query(
     `
-    SELECT display_name, username, is_fan, fan_expires_at, is_vip
+    SELECT display_name, username, is_fan, fan_expires_at, is_vip, avatar_url
     FROM users 
     WHERE tiktok_id=$1
     `,
@@ -210,7 +214,7 @@ export async function addToQueue(
     username: cleanUsername,
     display_name: user.display_name,
     is_vip: isVip,
-    avatar_url: null
+    avatar_url: user.avatar_url || null
   });
 }
 
@@ -227,7 +231,7 @@ export async function addToQueueAdminOverride(
 
   const ur = await pool.query(
     `
-    SELECT display_name, username, is_vip
+    SELECT display_name, username, is_vip, avatar_url
     FROM users 
     WHERE tiktok_id=$1
     `,
@@ -293,7 +297,7 @@ export async function addToQueueAdminOverride(
     username: user.username.replace(/^@+/, "").toLowerCase(),
     display_name: user.display_name,
     is_vip: isVip,
-    avatar_url: null
+    avatar_url: user.avatar_url || null
   });
 }
 
@@ -360,7 +364,7 @@ export async function leaveQueue(tiktok_id: string): Promise<number> {
   );
 
   const userData = await pool.query(
-    `SELECT display_name, username, is_vip FROM users WHERE tiktok_id=$1`,
+    `SELECT display_name, username, is_vip, avatar_url FROM users WHERE tiktok_id=$1`,
     [userTid]
   );
   const user = userData.rows[0];
@@ -370,7 +374,7 @@ export async function leaveQueue(tiktok_id: string): Promise<number> {
     username: user?.username?.replace(/^@+/, "").toLowerCase() ?? "",
     display_name: user?.display_name ?? "",
     is_vip: !!user?.is_vip,
-    avatar_url: null
+    avatar_url: user?.avatar_url || null
   });
 
   await pool.query(`DELETE FROM queue WHERE id=$1`, [entry.id]);
@@ -452,7 +456,7 @@ export async function addToArenaFromQueue(tiktok_id: string): Promise<void> {
   if (!r.rows.length) return;
 
   const userData = await pool.query(
-    `SELECT display_name, username, is_vip FROM users WHERE tiktok_id=$1`,
+    `SELECT display_name, username, is_vip, avatar_url FROM users WHERE tiktok_id=$1`,
     [tid]
   );
   const user = userData.rows[0];
@@ -462,7 +466,7 @@ export async function addToArenaFromQueue(tiktok_id: string): Promise<void> {
     username: user?.username?.replace(/^@+/, "").toLowerCase() ?? "",
     display_name: user?.display_name ?? "",
     is_vip: !!user?.is_vip,
-    avatar_url: null
+    avatar_url: user?.avatar_url || null
   });
 
   const pos = Number(r.rows[0].position);
@@ -481,6 +485,7 @@ export async function addToArenaFromQueue(tiktok_id: string): Promise<void> {
 // ============================================================================
 // EXPORT DEFAULT
 // ============================================================================
+
 export default {
   getQueue,
   pushQueueUpdate,
