@@ -1,5 +1,5 @@
 // ============================================================================
-// 2-user-engine.ts — v11.4 FINAL (Danny Build)
+// 2-user-engine.ts — v11.5 AVATAR UPGRADE (Danny Build)
 // ============================================================================
 
 import pool from "../db";
@@ -32,10 +32,16 @@ function big(v: string | number): bigint {
 }
 
 // ============================================================================
-// UNIVERSAL IDENTITY EXTRACTOR
+// UNIVERSAL IDENTITY EXTRACTOR (PATCHED — AVATAR SUPPORT)
 // ============================================================================
 function extractIdentity(raw: any) {
-  if (!raw) return { id: null, username: null, display: null };
+  if (!raw)
+    return {
+      id: null,
+      username: null,
+      display: null,
+      avatar: null
+    };
 
   const u =
     raw.user ||
@@ -70,10 +76,23 @@ function extractIdentity(raw: any) {
     raw?.displayName ||
     null;
 
+  // ⭐ TikTok levert avatars via meerdere keys → wij pakken ALLES
+  const avatar =
+    u?.profilePictureUrl ||
+    u?.avatarLarger ||
+    u?.avatarMedium ||
+    u?.avatarThumb ||
+    raw?.profilePictureUrl ||
+    raw?.avatarLarger ||
+    raw?.avatarMedium ||
+    raw?.avatarThumb ||
+    null;
+
   return {
     id: id ? String(id) : null,
     username: username ? normUsername(username) : null,
     display: display ? normDisplay(display) : null,
+    avatar
   };
 }
 
@@ -98,10 +117,10 @@ export async function getUserByUsername(username: string) {
 }
 
 // ============================================================================
-// UPSERT IDENTITY FROM ANY TIKTOK EVENT
+// UPSERT IDENTITY FROM ANY TIKTOK EVENT (PATCHED — AVATAR SUPPORT)
 // ============================================================================
 export async function upsertIdentityFromLooseEvent(raw: any) {
-  const { id, username, display } = extractIdentity(raw);
+  const { id, username, display, avatar } = extractIdentity(raw);
   if (!id) return;
 
   const activeHost = getActiveHost();
@@ -109,6 +128,7 @@ export async function upsertIdentityFromLooseEvent(raw: any) {
 
   let finalUsername = username || "unknown";
   let finalDisplay = display || "Onbekend";
+  const finalAvatar = avatar || null;
 
   if (isHost && isStreamLive()) {
     const existing = await getUserByTikTokId(id);
@@ -119,40 +139,44 @@ export async function upsertIdentityFromLooseEvent(raw: any) {
 
     await pool.query(
       `
-      INSERT INTO users (tiktok_id, username, display_name, last_seen_at)
-      VALUES ($1,$2,$3,NOW())
+      INSERT INTO users (tiktok_id, username, display_name, avatar_url, last_seen_at)
+      VALUES ($1,$2,$3,$4,NOW())
       ON CONFLICT(tiktok_id) DO UPDATE SET
         display_name = EXCLUDED.display_name,
+        avatar_url   = COALESCE(EXCLUDED.avatar_url, users.avatar_url),
         last_seen_at = NOW()
     `,
-      [big(id), finalUsername, finalDisplay]
+      [big(id), finalUsername, finalDisplay, finalAvatar]
     );
     return;
   }
 
   await pool.query(
     `
-    INSERT INTO users (tiktok_id, username, display_name, last_seen_at)
-    VALUES ($1,$2,$3,NOW())
+    INSERT INTO users (tiktok_id, username, display_name, avatar_url, last_seen_at)
+    VALUES ($1,$2,$3,$4,NOW())
     ON CONFLICT(tiktok_id) DO UPDATE SET
-      username = EXCLUDED.username,
+      username     = EXCLUDED.username,
       display_name = EXCLUDED.display_name,
+      avatar_url   = COALESCE(EXCLUDED.avatar_url, users.avatar_url),
       last_seen_at = NOW()
   `,
-    [big(id), finalUsername, finalDisplay]
+    [big(id), finalUsername, finalDisplay, finalAvatar]
   );
 }
 
 // ============================================================================
-// DIRECT UPSERT
+// DIRECT UPSERT (PATCHED — OPTIONAL AVATAR)
 // ============================================================================
 export async function upsertUser(
   tiktok_id: string,
   username: string,
-  display_name: string
+  display_name: string,
+  avatar_url?: string | null
 ) {
   const cleanUser = normUsername(username);
   const cleanDisp = normDisplay(display_name);
+  const avatar = avatar_url || null;
 
   const activeHost = getActiveHost();
   const isHost = activeHost && String(activeHost.id) === String(tiktok_id);
@@ -164,27 +188,29 @@ export async function upsertUser(
 
     await pool.query(
       `
-      INSERT INTO users (tiktok_id, username, display_name, last_seen_at)
-      VALUES ($1,$2,$3,NOW())
+      INSERT INTO users (tiktok_id, username, display_name, avatar_url, last_seen_at)
+      VALUES ($1,$2,$3,$4,NOW())
       ON CONFLICT(tiktok_id) DO UPDATE SET
         display_name = EXCLUDED.display_name,
+        avatar_url   = COALESCE(EXCLUDED.avatar_url, users.avatar_url),
         last_seen_at = NOW()
     `,
-      [big(tiktok_id), finalUsername, cleanDisp]
+      [big(tiktok_id), finalUsername, cleanDisp, avatar]
     );
     return;
   }
 
   await pool.query(
     `
-    INSERT INTO users (tiktok_id, username, display_name, last_seen_at)
-    VALUES ($1,$2,$3,NOW())
+    INSERT INTO users (tiktok_id, username, display_name, avatar_url, last_seen_at)
+    VALUES ($1,$2,$3,$4,NOW())
     ON CONFLICT(tiktok_id) DO UPDATE SET
-      username = EXCLUDED.username,
+      username     = EXCLUDED.username,
       display_name = EXCLUDED.display_name,
+      avatar_url   = COALESCE(EXCLUDED.avatar_url, users.avatar_url),
       last_seen_at = NOW()
   `,
-    [big(tiktok_id), cleanUser, cleanDisp]
+    [big(tiktok_id), cleanUser, cleanDisp, avatar]
   );
 }
 
@@ -218,7 +244,8 @@ export async function getOrUpdateUser(
       ? existing?.display_name || "Onbekend"
       : existing?.display_name || "Onbekend");
 
-  await upsertUser(id, finalUsername, finalDisplay);
+  // We hebben hier geen avatar-informatie → laten we die null
+  await upsertUser(id, finalUsername, finalDisplay, null);
 
   return await getUserByTikTokId(id);
 }
