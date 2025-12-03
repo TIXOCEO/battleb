@@ -1,61 +1,95 @@
 @import "/overlays/shared/theme.css";
 
 /* ---------------------------------------------------------
-   TICKER PANEL (1200×100)
+   BATTLEBOX BROADCAST TICKER PANEL (1200 × 100)
 --------------------------------------------------------- */
 .bb-ticker {
   width: 1200px;
   height: 100px;
 
   background:
-    linear-gradient(to right,
-      rgba(255,77,79,0.22),
-      rgba(0,0,0,0.55),
-      rgba(255,77,79,0.22)
+    linear-gradient(
+      to right,
+      rgba(255,77,79,0.18) 0%,
+      rgba(0,0,0,0.65) 45%,
+      rgba(0,0,0,0.65) 55%,
+      rgba(255,77,79,0.18) 100%
     ),
     var(--glass-dark);
 
   border: 2px solid var(--border-light);
-  overflow: hidden;
   position: relative;
+  overflow: hidden;
+
+  backdrop-filter: blur(6px);
 
   box-shadow:
-    0 0 35px rgba(255,77,79,0.55),
-    0 0 45px rgba(255,77,79,0.35) inset;
+    0 0 28px rgba(255,77,79,0.55),
+    inset 0 0 42px rgba(255,77,79,0.35),
+    inset 0 0 22px rgba(255,77,79,0.25);
 
-  animation: panelPowerOn 0.6s ease-out forwards;
+  clip-path: polygon(
+    3% 0%, 97% 0%,
+    100% 20%, 100% 80%,
+    97% 100%, 3% 100%,
+    0% 80%, 0% 20%
+  );
+
+  animation: tickerPanelIn 0.55s ease-out forwards;
 }
 
-@keyframes panelPowerOn {
-  0% { opacity: 0; transform: translateY(20px) scale(0.95); }
+@keyframes tickerPanelIn {
+  0% { opacity: 0; transform: translateY(20px) scale(0.96); }
   100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 /* ---------------------------------------------------------
-   SCROLLING TEXT
+   INNER MARQUEE
 --------------------------------------------------------- */
 .bb-ticker-inner {
   white-space: nowrap;
+
   font-size: 28px;
-  padding-left: 1200px;
-  animation: marquee 18s linear infinite, glowPulse 3s ease-in-out infinite;
-
   font-weight: 700;
+  letter-spacing: 1.2px;
+
   color: white;
-  letter-spacing: 1.1px;
-
   text-shadow:
-    0 0 8px rgba(255,77,79,0.75),
-    0 0 18px rgba(255,77,79,0.55);
+    0 0 8px rgba(255,77,79,0.8),
+    0 0 18px rgba(255,77,79,0.55),
+    0 0 28px rgba(255,77,79,0.35);
+
+  padding-left: 1200px;
+
+  /* Dual animation: scroll + subtle glow breathing */
+  animation:
+    tickerScroll 18s linear infinite,
+    tickerGlow 3.6s ease-in-out infinite;
 }
 
-@keyframes marquee {
+@keyframes tickerScroll {
   0% { transform: translateX(0); }
-  100% { transform: translateX(-220%); }
+  100% { transform: translateX(-240%); }
 }
 
-/* subtle breathing */
-@keyframes glowPulse {
-  0%,100% { opacity: 1; }
-  50% { opacity: 0.87; }
+@keyframes tickerGlow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.88; }
+}
+
+/* ---------------------------------------------------------
+   OPTIONAL GLITCH VARIANT (add .glitch to bb-ticker-inner)
+--------------------------------------------------------- */
+.bb-ticker-inner.glitch {
+  animation:
+    tickerScroll 18s linear infinite,
+    tickerGlow 3.6s ease-in-out infinite,
+    tickerGlitch 2.8s steps(2, end) infinite;
+}
+
+@keyframes tickerGlitch {
+  0%, 96%, 100% { text-shadow: var(--neon-orange-glow); }
+  97% { text-shadow: 0 0 12px rgba(255,255,255,0.5); }
+  98% { text-shadow: 0 0 20px rgba(0,255,255,0.5); }
+  99% { text-shadow: var(--neon-orange-glow); }
 }
