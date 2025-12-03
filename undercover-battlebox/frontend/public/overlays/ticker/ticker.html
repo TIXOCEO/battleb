@@ -16,20 +16,20 @@
       margin: 0;
       background: transparent;
       overflow: hidden;
+      font-family: "Rajdhani", sans-serif;
     }
   </style>
 </head>
 
 <body>
   <div class="bb-ticker holo-scan led-sweep">
-    <div id="ticker-inner" class="bb-ticker-inner">
-      Loading ticker...
-    </div>
+    <div id="ticker-inner" class="bb-ticker-inner">Loading ticker...</div>
   </div>
 
   <!-- SHARED SOCKET + STORES + ROUTER -->
-  <script type="module" src="/overlays/shared/event-router.js"></script>
+  <script type="module" src="/overlays/shared/socket.js"></script>
   <script type="module" src="/overlays/shared/stores.js"></script>
+  <script type="module" src="/overlays/shared/event-router.js"></script>
 
   <!-- TICKER LOGIC -->
   <script type="module" src="/overlays/ticker/ticker.js"></script>
