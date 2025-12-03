@@ -1,65 +1,59 @@
 // ============================================================================
-// socket.js — BattleBox Overlay Socket Client v1.0 (Pure JS)
-// Connects static OBS HTML overlays → backend Socket.IO server
-// Fully browser-compatible, no TypeScript, no bundler required
+// socket.js — BattleBox Overlay Socket Client v1.1 (Pure JS)
+// Stable. Async. OBS-safe.
 // ============================================================================
 
 let socketInstance = null;
 
-// ----------------------------------------------------------------------------
-// CONFIG (update if your server IP/domain changes)
-// ----------------------------------------------------------------------------
-
+// Backend config
 const SOCKET_URL = "http://178.251.232.12:4000";
 const FRONTEND_URL = "http://178.251.232.12:3000";
 
-// ----------------------------------------------------------------------------
-// Load Socket.IO client script dynamically
-// ----------------------------------------------------------------------------
+let scriptLoaded = false;
 
-let socketIoLoaded = false;
-
+// -------------------------------------------------------------
+// Load socket.io script dynamically — required for static HTML
+// -------------------------------------------------------------
 function loadSocketIoClient() {
   return new Promise((resolve, reject) => {
-    if (socketIoLoaded) return resolve();
+    if (scriptLoaded) return resolve();
 
     const script = document.createElement("script");
     script.src = `${SOCKET_URL}/socket.io/socket.io.js`;
     script.onload = () => {
-      socketIoLoaded = true;
+      scriptLoaded = true;
       resolve();
     };
     script.onerror = reject;
-
     document.head.appendChild(script);
   });
 }
 
-// ----------------------------------------------------------------------------
-// INIT FUNCTION — returns a SINGLE live socket instance
-// ----------------------------------------------------------------------------
-
+// -------------------------------------------------------------
+// getSocket() — always returns a READY socket
+// -------------------------------------------------------------
 export async function getSocket() {
+  // return existing instance
   if (socketInstance) return socketInstance;
 
+  // load client lib
   await loadSocketIoClient();
 
+  // create socket
   socketInstance = window.io(SOCKET_URL, {
     transports: ["websocket"],
     path: "/socket.io",
-
     reconnection: true,
-    reconnectionAttempts: Infinity,
     reconnectionDelay: 500,
-
+    reconnectionAttempts: Infinity,
     withCredentials: false,
     secure: false,
-
     extraHeaders: {
-      "x-overlay-origin": FRONTEND_URL,
+      "x-overlay-origin": FRONTEND_URL
     }
   });
 
+  // Debug
   socketInstance.on("connect", () => {
     console.log(
       "%c[BattleBox Socket] Connected",
@@ -76,7 +70,7 @@ export async function getSocket() {
 
   socketInstance.on("connect_error", (err) => {
     console.log(
-      "%c[BattleBox Socket] Error:",
+      "%c[BattleBox Socket] ERROR",
       "color:#ff4d4f;font-weight:bold;",
       err.message
     );
