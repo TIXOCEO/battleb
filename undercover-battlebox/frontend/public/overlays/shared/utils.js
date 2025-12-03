@@ -1,35 +1,37 @@
 // ============================================================================
-// utils.ts — Shared DOM Helpers (Strict Mode Safe)
+// utils.js — BattleBox Overlay DOM Utilities v1.0 (Pure JS)
+// Lightweight DOM helpers used across overlays
+// Works in OBS BrowserSource / static HTML
 // ============================================================================
 
 /**
  * Create a DOM element with an optional class
+ * @param {string} tag
+ * @param {string} [cls]
+ * @returns {HTMLElement}
  */
-export function createDom<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  cls?: string
-): HTMLElementTagNameMap[K] {
+export function createDom(tag, cls) {
   const el = document.createElement(tag);
-
-  if (cls) {
-    (el as HTMLElement).className = cls;
-  }
-
+  if (cls) el.className = cls;
   return el;
 }
 
 /**
- * Create a div with classes
+ * Shortcut for <div>
+ * @param {string} [cls]
+ * @returns {HTMLDivElement}
  */
-export function div(cls?: string): HTMLDivElement {
+export function div(cls) {
   const el = document.createElement("div");
   if (cls) el.className = cls;
   return el;
 }
 
 /**
- * Create text node
+ * Create a text node
+ * @param {string} str
+ * @returns {Text}
  */
-export function text(str: string): Text {
+export function text(str) {
   return document.createTextNode(str);
 }
