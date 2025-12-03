@@ -5,11 +5,11 @@
   <title>BattleBox Events Overlay</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <!-- THEME + SHARED -->
+  <!-- GLOBAL THEME -->
   <link rel="stylesheet" href="/overlays/shared/theme.css">
 
-  <!-- EVENTS-SPECIFIC CSS -->
-  <link rel="stylesheet" href="./events.css" />
+  <!-- PANEL STYLES -->
+  <link rel="stylesheet" href="/overlays/events/events.css" />
 
   <style>
     body {
@@ -25,6 +25,8 @@
     <div id="events-list" class="bb-events-list"></div>
   </div>
 
-  <script type="module" src="./events.js"></script>
+  <script type="module" src="/overlays/shared/event-router.js"></script>
+  <script type="module" src="/overlays/shared/stores.js"></script>
+  <script type="module" src="/overlays/events/events.js"></script>
 </body>
 </html>
