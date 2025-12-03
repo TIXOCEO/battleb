@@ -6,10 +6,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
   <!-- GLOBAL THEME -->
-  <link rel="stylesheet" href="overlays/shared/theme.css" />
+  <link rel="stylesheet" href="/overlays/shared/theme.css" />
 
   <!-- QUEUE STYLES -->
-  <link rel="stylesheet" href="./queue.css" />
+  <link rel="stylesheet" href="/overlays/queue/queue.css" />
 
   <style>
     body {
@@ -21,11 +21,12 @@
 </head>
 
 <body>
-  <!-- MAIN WRAPPER -->
   <div class="bb-queue-panel holo-scan led-sweep">
     <div id="queue-grid" class="bb-queue-grid"></div>
   </div>
 
-  <script type="module" src="./queue.js"></script>
+  <script type="module" src="/overlays/shared/event-router.js"></script>
+  <script type="module" src="/overlays/shared/stores.js"></script>
+  <script type="module" src="/overlays/queue/queue.js"></script>
 </body>
 </html>
