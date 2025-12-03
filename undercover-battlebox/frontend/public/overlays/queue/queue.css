@@ -1,8 +1,8 @@
 @import "/overlays/shared/theme.css";
 
-/* ---------------------------------------------
-   PANEL (1200×700)
---------------------------------------------- */
+/* ---------------------------------------------------------
+   QUEUE PANEL (1200 × 700)
+--------------------------------------------------------- */
 .bb-queue-panel {
   width: 1200px;
   height: 700px;
@@ -11,21 +11,23 @@
   padding: 20px;
   position: relative;
   overflow: hidden;
-  backdrop-filter: blur(6px);
+  backdrop-filter: blur(7px);
 
   box-shadow:
-    0 0 25px rgba(255,77,79,0.45),
-    0 0 40px rgba(255,77,79,0.25) inset;
+    0 0 30px rgba(255,77,79,0.45),
+    inset 0 0 40px rgba(255,77,79,0.25);
 
-  animation: panelPowerOn 0.7s ease-out forwards;
+  animation: queuePanelIn 0.7s ease-out forwards;
 }
 
-@keyframes panelPowerOn {
-  0% { opacity: 0; transform: translateY(25px) scale(0.95); }
+@keyframes queuePanelIn {
+  0% { opacity: 0; transform: translateY(25px) scale(0.92); }
   100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* GRID -------------------------------------------------- */
+/* ---------------------------------------------------------
+   30-SLOT GRID (10 × 3)
+--------------------------------------------------------- */
 .bb-queue-grid {
   display: grid;
   grid-template-columns: repeat(10, 1fr);
@@ -33,11 +35,14 @@
   gap: 14px;
 }
 
-/* CARD -------------------------------------------------- */
+/* ---------------------------------------------------------
+   CARD BASE — OCTAGON
+--------------------------------------------------------- */
 .bb-card {
   background: var(--glass-dark);
   border: 2px solid var(--border-light);
   position: relative;
+
   padding: 10px;
   color: white;
   overflow: hidden;
@@ -50,53 +55,63 @@
   );
 
   box-shadow:
-    0 0 20px rgba(0,0,0,0.9),
-    inset 0 0 24px rgba(0,0,0,0.6),
-    0 0 14px rgba(255,77,79,0.3) inset;
+    0 0 22px rgba(0,0,0,0.9),
+    inset 0 0 25px rgba(0,0,0,0.65),
+    inset 0 0 14px rgba(255,77,79,0.28);
 
-  animation: cardSpawn 0.25s ease-out both;
+  animation: cardPop 0.3s ease-out both;
 }
 
-@keyframes cardSpawn {
-  0% { opacity: 0; transform: scale(0.85) rotateX(10deg); }
+@keyframes cardPop {
+  0% { opacity: 0; transform: scale(0.82) rotateX(8deg); }
   100% { opacity: 1; transform: scale(1) rotateX(0deg); }
 }
 
-/* NEON RIM -------------------------------------------------- */
+/* Glowing orange octagon rim */
 .bb-card::after {
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
+
   border: 2px solid rgba(255,77,79,0.45);
   clip-path: inherit;
+
   box-shadow: var(--neon-orange-glow);
-  opacity: 0.35;
-  animation: rimPulse 2.4s ease-in-out infinite;
+  opacity: 0.32;
+
+  animation: rimPulseCard 2.7s ease-in-out infinite;
 }
 
-@keyframes rimPulse {
-  0%, 100% { opacity: 0.25; }
+@keyframes rimPulseCard {
+  0%,100% { opacity: 0.25; }
   50% { opacity: 0.45; }
 }
 
+/* ---------------------------------------------------------
+   EMPTY CARD
+--------------------------------------------------------- */
 .empty-card {
   opacity: 0.18;
   border-color: rgba(255,255,255,0.05);
   animation: none !important;
 }
 
-/* Highlight for updates */
+/* ---------------------------------------------------------
+   CARD UPDATE — highlight flash
+--------------------------------------------------------- */
 .card-update {
   animation: cardFlash 0.6s ease-out !important;
 }
 
 @keyframes cardFlash {
-  0% { box-shadow: 0 0 18px rgba(255,255,255,0.9); }
-  100% { box-shadow: none; }
+  0% { filter: brightness(1.8); }
+  100% { filter: brightness(1); }
 }
 
-/* POSITION BADGE -------------------------------------------------- */
+/* ---------------------------------------------------------
+   POSITION BADGE (HEX)
+--------------------------------------------------------- */
 .pos-badge {
   position: absolute;
   top: 6px;
@@ -110,22 +125,25 @@
     25% 100%, 0% 50%
   );
 
-  background: var(--color-orange);
+  background: var(--neon-orange);
   color: black;
   font-weight: 700;
   font-size: 13px;
   line-height: 26px;
   text-align: center;
 
-  animation: posPop 0.35s cubic-bezier(.17,.67,.4,1.35);
+  text-shadow: var(--neon-orange-glow);
+  animation: posPulse 0.35s cubic-bezier(.17,.67,.4,1.35);
 }
 
-@keyframes posPop {
+@keyframes posPulse {
   0% { transform: scale(0.6); opacity: 0; }
   100% { transform: scale(1); opacity: 1; }
 }
 
-/* AVATAR -------------------------------------------------- */
+/* ---------------------------------------------------------
+   AVATAR (Octagon shape)
+--------------------------------------------------------- */
 .card-avatar {
   width: 54px;
   height: 54px;
@@ -140,23 +158,25 @@
   );
 
   box-shadow:
-    0 0 12px rgba(0,0,0,0.8),
+    0 0 15px rgba(0,0,0,0.9),
     inset 0 0 14px rgba(255,255,255,0.22);
 
-  animation: avatarGlow 2.3s ease-in-out infinite;
+  animation: avatarPulse 2.6s ease-in-out infinite;
 }
 
-@keyframes avatarGlow {
+@keyframes avatarPulse {
   0%,100% { filter: brightness(1); }
-  50% { filter: brightness(1.2); }
+  50% { filter: brightness(1.25); }
 }
 
-/* VIP glow */
+/* ---------------------------------------------------------
+   VIP GLOW
+--------------------------------------------------------- */
 .vip-glow {
-  animation: vipPulse 2s ease-in-out infinite !important;
+  animation: vipAura 2s ease-in-out infinite !important;
 }
 
-@keyframes vipPulse {
-  0%, 100% { box-shadow: 0 0 30px gold; }
-  50% { box-shadow: 0 0 60px gold; }
+@keyframes vipAura {
+  0%, 100% { box-shadow: var(--vip-glow); }
+  50% { box-shadow: 0 0 55px rgba(255,220,0,0.95); }
 }
