@@ -1,5 +1,5 @@
 // ============================================================================
-// queue.js — BattleBox Queue Overlay (ESPORTS MODE 3×5)
+// queue.js — BattleBox Queue Overlay (ESPORTS MODE 3×5) — FINAL SNAPSHOT EDITION
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -24,12 +24,6 @@ const cards = Array.from({ length: TOTAL }, () => {
 
 cards.forEach((c) => grid.appendChild(c));
 
-/**
- * Custom position mapping:
- * index 0–4   → col 1 (pos 1–5)
- * index 5–9   → col 2 (pos 6–10)
- * index 10–14 → col 3 (pos 11–15)
- */
 function indexToPosition(i) {
   return i + 1;
 }
@@ -64,13 +58,16 @@ queueStore.subscribe((state) => {
     // FILLED SPOT
     el.className = "bb-card";
 
+    // VIP
     if (entry.is_vip) el.classList.add("vip-glow");
 
+    // Highlight
     if (highlightUser && highlightUser === entry.username) {
       el.classList.add("card-update");
       setTimeout(() => el.classList.remove("card-update"), 650);
     }
 
+    // 🔥 PATCH — avatar_url fallback
     const avatar = entry.avatar_url || EMPTY_AVATAR;
 
     el.innerHTML = `
@@ -81,8 +78,8 @@ queueStore.subscribe((state) => {
       </div>
 
       <div class="card-info">
-        <div class="name">${entry.display_name}</div>
-        <div class="user">@${entry.username}</div>
+        <div class="name">${entry.display_name || "?"}</div>
+        <div class="user">@${entry.username || ""}</div>
       </div>
     `;
   }
