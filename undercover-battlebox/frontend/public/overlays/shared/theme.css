@@ -1,41 +1,59 @@
-/* ---------------------------------------------------------
-   BATTLEBOX OVERLAYS — FULL ESPORTS THEME ENGINE
-   Colors • Neon • Glows • Holograms • Glitch • LED Grid
-   --------------------------------------------------------- */
+/* ============================================================================
+   BATTLEBOX BROADCAST THEME v3.0
+   Ultimate Esports Overlay Theme
+   Tokens • Neon • Glows • LED Grid • Hologram • Glitch Engine
+   ============================================================================ */
 
 @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&display=swap');
 
-/* ---------------------------------------------------------
-   COLOR TOKENS (ESPORTS)
-   --------------------------------------------------------- */
+/* ============================================================================
+   1) ROOT TOKENS — BRAND, GLOW LEVELS, GLASS, DEPTH
+   ============================================================================ */
+
 :root {
-  /* Primary neon palette */
-  --neon-orange: #ff4d4f;
-  --neon-turquoise: #0fffd7;
-  --neon-purple: #8b5cf6;
+  /* BRAND COLORS ------------------------------------------------------------ */
+  --bb-orange: #ff4d4f;
+  --bb-turquoise: #0fffd7;
+  --bb-purple: #8b5cf6;
+  --bb-gold: #ffd700;
+  --bb-white: #ffffff;
+  --bb-black: #000000;
 
-  /* Strong neon glows */
-  --neon-orange-glow: 0 0 12px #ff4d4f, 0 0 32px rgba(255,30,30,0.75);
-  --neon-turquoise-glow: 0 0 10px #0fffd7, 0 0 26px rgba(0,255,230,0.6);
-  --neon-purple-glow: 0 0 12px #8b5cf6, 0 0 30px rgba(139,92,246,0.45);
+  /* NEON GLOW LEVELS -------------------------------------------------------- */
+  --glow-soft-orange: 0 0 8px rgba(255,77,79,0.55);
+  --glow-mid-orange: 0 0 16px rgba(255,77,79,0.75);
+  --glow-hard-orange: 0 0 32px rgba(255,77,79,0.9);
 
-  /* Glass layers */
-  --glass-dark: rgba(12,12,18,0.85);
-  --glass-mid: rgba(22,22,30,0.65);
-  --glass-bg: rgba(10,10,14,0.65);
+  --glow-soft-turq: 0 0 8px rgba(0,255,215,0.55);
+  --glow-mid-turq: 0 0 16px rgba(0,255,215,0.75);
+  --glow-hard-turq: 0 0 32px rgba(0,255,215,0.9);
 
-  --border-light: rgba(255,255,255,0.12);
+  --glow-gold: 0 0 22px rgba(255,220,0,0.85), inset 0 0 18px rgba(255,220,0,0.5);
 
-  /* VIP Aura */
-  --vip-glow: 
-      0 0 20px rgba(255,220,0,0.8),
-      0 0 35px rgba(255,220,0,0.55),
-      inset 0 0 25px rgba(255,200,0,0.65);
+  /* GLASS BACKGROUNDS ------------------------------------------------------ */
+  --glass-0: rgba(10,10,14,0.35);
+  --glass-1: rgba(12,12,18,0.50);
+  --glass-2: rgba(15,15,20,0.65);
+  --glass-3: rgba(20,20,25,0.80);
+
+  /* BORDERS ---------------------------------------------------------------- */
+  --border-lite: rgba(255,255,255,0.12);
+  --border-mid: rgba(255,255,255,0.20);
+
+  /* DEPTH SHADOWS ---------------------------------------------------------- */
+  --shadow-depth-1: 0 0 12px rgba(0,0,0,0.45);
+  --shadow-depth-2: 0 0 22px rgba(0,0,0,0.65);
+  --shadow-depth-3: 0 0 32px rgba(0,0,0,0.75);
+
+  /* SIZING ----------------------------------------------------------------- */
+  --octagon-pad: 12px;
+  --panel-radius: 0px; /* we gebruiken octagon shapes ipv rounding */
 }
 
-/* ---------------------------------------------------------
-   GLOBAL BASE
-   --------------------------------------------------------- */
+/* ============================================================================
+   2) GLOBAL RESET
+   ============================================================================ */
+
 body {
   margin: 0;
   padding: 0;
@@ -47,59 +65,65 @@ body {
   color: white;
 }
 
-/* ---------------------------------------------------------
-   LED GRID BACKDROP (use: .esports-led-grid)
-   --------------------------------------------------------- */
-.esports-led-grid {
+/* ============================================================================
+   3) LED GRID BACKDROP (add class="bb-led-grid")
+   ============================================================================ */
+
+.bb-led-grid {
   background:
-      linear-gradient(90deg, rgba(255,77,79,0.18) 0px, transparent 1px),
-      linear-gradient(rgba(255,77,79,0.12) 1px, transparent 1px),
-      var(--glass-mid);
+    linear-gradient(90deg, rgba(255,77,79,0.18) 0px, transparent 1px),
+    linear-gradient(rgba(255,77,79,0.12) 1px, transparent 1px),
+    var(--glass-2);
   background-size: 4px 4px;
 }
 
-/* ---------------------------------------------------------
-   OCTAGON CARDS / PANELS
-   --------------------------------------------------------- */
-.octagon-card {
+/* ============================================================================
+   4) OCTAGON PANELS / CARDS — universal shape
+   ============================================================================ */
+
+.bb-octagon {
+  position: relative;
+  padding: var(--octagon-pad);
+  background: var(--glass-3);
+  border: 2px solid var(--border-lite);
   clip-path: polygon(
     8% 0%, 92% 0%,
     100% 12%, 100% 88%,
     92% 100%, 8% 100%,
     0% 88%, 0% 12%
   );
-  border: 2px solid var(--border-light);
-  background: var(--glass-dark);
-  position: relative;
+
   box-shadow:
-    0 0 20px rgba(0,0,0,0.9),
-    inset 0 0 24px rgba(0,0,0,0.6);
+    var(--shadow-depth-3),
+    inset 0 0 24px rgba(0,0,0,0.55);
 }
 
-/* Orange neon rim */
-.octagon-card::after {
+/* Neon rim ring */
+.bb-octagon::after {
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
-  border: 2px solid rgba(255,77,79,0.45);
+  border: 2px solid rgba(255,77,79,0.35);
   clip-path: inherit;
-  box-shadow: var(--neon-orange-glow);
-  opacity: 0.35;
+  box-shadow: var(--glow-mid-orange);
+  opacity: 0.45;
 }
 
-/* ---------------------------------------------------------
-   VIP GLOW EFFECT (add class 'vip-glow')
-   --------------------------------------------------------- */
-.vip-glow {
-  box-shadow: var(--vip-glow) !important;
-  border-color: rgba(255,220,0,0.65) !important;
+/* ============================================================================
+   5) VIP GLOW (add class="bb-vip")
+   ============================================================================ */
+
+.bb-vip {
+  border-color: rgba(255,220,0,0.8) !important;
+  box-shadow: var(--glow-gold) !important;
 }
 
-/* ---------------------------------------------------------
-   AVATAR OCTAGON (small)
-   --------------------------------------------------------- */
-.octagon-avatar {
+/* ============================================================================
+   6) AVATAR OCTAGON
+   ============================================================================ */
+
+.bb-avatar {
   width: 54px;
   height: 54px;
   background-size: cover;
@@ -111,108 +135,120 @@ body {
     0% 75%, 0% 25%
   );
   box-shadow:
-    0 0 12px rgba(0,0,0,0.8),
+    var(--shadow-depth-2),
     inset 0 0 14px rgba(255,255,255,0.22);
 }
 
-/* ---------------------------------------------------------
-   POSITION BADGE (ESPORTS HEX)
-   --------------------------------------------------------- */
-.pos-badge {
+/* ============================================================================
+   7) POSITION BADGE HEX
+   ============================================================================ */
+
+.bb-pos {
   position: absolute;
   top: 6px;
   left: 6px;
   width: 26px;
   height: 26px;
-  clip-path: polygon(
-    25% 0%, 75% 0%,
-    100% 50%, 75% 100%,
-    25% 100%, 0% 50%
-  );
-  background: var(--neon-orange);
+
+  background: var(--bb-orange);
   color: black;
   font-weight: 700;
   font-size: 13px;
   line-height: 26px;
   text-align: center;
-  text-shadow: var(--neon-orange-glow);
+
+  clip-path: polygon(
+    25% 0%, 75% 0%,
+    100% 50%, 75% 100%,
+    25% 100%, 0% 50%
+  );
+
+  text-shadow: var(--glow-soft-orange);
 }
 
-/* ---------------------------------------------------------
-   HOLOGRAM SCAN (enhanced)
-   --------------------------------------------------------- */
-.holo-scan {
+/* ============================================================================
+   8) HOLOGRAM SCAN (add class="bb-holo")
+   ============================================================================ */
+
+.bb-holo {
   position: relative;
 }
-.holo-scan::before {
+.bb-holo::before {
   content: "";
   position: absolute;
   inset: 0;
   background: linear-gradient(
     to bottom,
-    rgba(255,255,255,0.12),
+    rgba(255,255,255,0.15),
     rgba(255,255,255,0.02)
   );
-  animation: holoScan 3s cubic-bezier(0.52, 0.01, 0.16, 1) infinite;
+  animation: bbScan 3.2s cubic-bezier(0.52,0.01,0.16,1) infinite;
 }
-@keyframes holoScan {
+
+@keyframes bbScan {
   0% { transform: translateY(-100%); }
   100% { transform: translateY(100%); }
 }
 
-/* ---------------------------------------------------------
-   LED SWEEP (enhanced)
-   --------------------------------------------------------- */
-.led-sweep {
+/* ============================================================================
+   9) LED SWEEP (add class="bb-sweep")
+   ============================================================================ */
+
+.bb-sweep {
   position: relative;
 }
-.led-sweep::after {
+.bb-sweep::after {
   content: "";
   position: absolute;
   top: 0;
   left: -200%;
   width: 80%;
   height: 100%;
+
   background: linear-gradient(
     90deg,
     transparent,
-    rgba(255,127,80,0.35),
+    rgba(255,127,80,0.40),
     transparent
   );
-  animation: sweep 5s ease-in-out infinite;
+
+  animation: bbSweep 4.4s ease-in-out infinite;
 }
-@keyframes sweep {
+
+@keyframes bbSweep {
   0% { left: -200%; }
   100% { left: 200%; }
 }
 
-/* ---------------------------------------------------------
-   GLITCH MICRO EFFECT (for cards & items)
-   --------------------------------------------------------- */
-.glitch {
-  animation: glitch-flicker 2.8s infinite steps(2, end);
+/* ============================================================================
+   10) GLITCH (add class="bb-glitch")
+   ============================================================================ */
+
+.bb-glitch {
+  animation: bbGlitch 2.9s infinite steps(2, end);
 }
-@keyframes glitch-flicker {
+
+@keyframes bbGlitch {
   0%, 96%, 100% { opacity: 1; }
-  97% { opacity: 0.82; }
-  98% { opacity: 0.55; }
-  99% { opacity: 0.82; }
+  97% { opacity: 0.85; }
+  98% { opacity: 0.45; }
+  99% { opacity: 0.85; }
 }
 
-/* ---------------------------------------------------------
-   TEXT GLOW UTILS
-   --------------------------------------------------------- */
-.glow-orange {
-  color: var(--neon-orange);
-  text-shadow: var(--neon-orange-glow);
+/* ============================================================================
+   11) TEXT GLOW HELPERS
+   ============================================================================ */
+.bb-glow-orange {
+  color: var(--bb-orange);
+  text-shadow: var(--glow-hard-orange);
 }
 
-.glow-turquoise {
-  color: var(--neon-turquoise);
-  text-shadow: var(--neon-turquoise-glow);
+.bb-glow-turquoise {
+  color: var(--bb-turquoise);
+  text-shadow: var(--glow-hard-turq);
 }
 
-.glow-purple {
-  color: var(--neon-purple);
-  text-shadow: var(--neon-purple-glow);
+.bb-glow-purple {
+  color: var(--bb-purple);
+  text-shadow: var(--glow-hard-purple);
 }
