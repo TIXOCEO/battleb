@@ -2,8 +2,8 @@
 // queue.js — Renders the 30-card BattleBox queue overlay
 // ============================================================================
 
-import { initEventRouter } from "../shared/event-router.js";
-import { useQueueStore } from "../shared/stores.js";
+import { initEventRouter } from "overlays/shared/event-router.js";
+import { useQueueStore } from "overlays/shared/stores.js";
 
 // Init router ONCE
 initEventRouter();
