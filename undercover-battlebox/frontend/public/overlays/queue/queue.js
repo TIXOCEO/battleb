@@ -1,5 +1,5 @@
 // ============================================================================
-// queue.js — BattleBox Queue Overlay (ESPORTS MODE 3×5) — FINAL SNAPSHOT EDITION
+// queue.js — BattleBox Queue Overlay (ESPORTS MODE 3×5) — FINAL PATCHED EDITION
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -25,6 +25,7 @@ const cards = Array.from({ length: TOTAL }, () => {
 cards.forEach((c) => grid.appendChild(c));
 
 function indexToPosition(i) {
+  // ✔ Mapping is correct with the 3×5 grid
   return i + 1;
 }
 
@@ -44,7 +45,7 @@ queueStore.subscribe((state) => {
       el.innerHTML = `
         <div class="pos-badge">${pos}</div>
 
-        <div class="card-avatar" 
+        <div class="card-avatar"
              style="background-image:url('${EMPTY_AVATAR}')"></div>
 
         <div class="card-info">
@@ -58,22 +59,22 @@ queueStore.subscribe((state) => {
     // FILLED SPOT
     el.className = "bb-card";
 
-    // VIP
+    // VIP highlight
     if (entry.is_vip) el.classList.add("vip-glow");
 
-    // Highlight
+    // Highlight after update
     if (highlightUser && highlightUser === entry.username) {
       el.classList.add("card-update");
       setTimeout(() => el.classList.remove("card-update"), 650);
     }
 
-    // 🔥 PATCH — avatar_url fallback
+    // ✔ Avatar fallback
     const avatar = entry.avatar_url || EMPTY_AVATAR;
 
     el.innerHTML = `
       <div class="pos-badge">${pos}</div>
 
-      <div class="card-avatar" 
+      <div class="card-avatar"
            style="background-image:url('${avatar}')">
       </div>
 
