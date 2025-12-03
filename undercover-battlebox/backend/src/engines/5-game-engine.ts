@@ -11,6 +11,7 @@
    ✔ toggleGalaxyMode() toegevoegd voor Twist Engine v15
    ✔ Diamond Pistol nu max 1x per ronde
    ✔ Breaker ondersteuning (breakerHits)
+   ✔ AVATAR ondersteuning (avatar_url op ArenaPlayer)
 ============================================================================ */
 
 import pool from "../db";
@@ -35,6 +36,9 @@ export interface ArenaPlayer {
 
   /** PATCH: support voor breaker 50%/100% immunity break */
   breakerHits?: number;   // <── PATCH 1
+
+  /** AVATAR: profielfoto voor overlays / UI */
+  avatar_url?: string | null;
 }
 
 export interface ArenaSettings {
@@ -326,6 +330,12 @@ export async function emitArena() {
       breakerHits: p.breakerHits ?? 0,
     })),
 
+    // ★ PATCH: avatars worden nu meegestuurd!
+    playersAvatars: arena.players.map((p) => ({
+      id: p.id,
+      avatar_url: p.avatar_url || null,
+    })),
+
     isRunning: arena.status === "active",
 
     roundStartTime: arena.roundStartTime,
@@ -392,19 +402,18 @@ export async function startRound(type: RoundType) {
 
     p.tempImmune = false;
     p.survivorImmune = false;
-
-    // --- PATCH: reset breaker hits ---
-    p.breakerHits = 0; // <── BREAKER PATCH
+    p.breakerHits = 0;
 
     // immune opschonen
     p.boosters = p.boosters.filter((b) => b !== "immune");
 
-    // remove mg/bomb badges
-    p.boosters = p.boosters.filter((b) => b !== "mg" && b !== "bomb");
+    // mg/bomb badges opschonen
+    p.boosters = p.boosters.filter(
+      (b) => b !== "mg" && b !== "bomb"
+    );
   }
 
   arena.status = "active";
-
   (io as any).roundActive = true;
   (io as any).currentRound = arena.round;
 
@@ -416,7 +425,8 @@ export async function startRound(type: RoundType) {
 
   arena.roundStartTime = now;
   arena.roundCutoff = now + duration * 1000;
-  arena.graceEnd = arena.roundCutoff + arena.settings.graceSeconds * 1000;
+  arena.graceEnd =
+    arena.roundCutoff + arena.settings.graceSeconds * 1000;
 
   emitLog({
     type: "arena",
@@ -434,13 +444,11 @@ export async function startRound(type: RoundType) {
 }
 
 /* ============================================================================
-   END ROUND — MG/Bomb → danger/ties → eliminaties
+   END ROUND (MG/Bomb → danger/tie → eliminaties)
 ============================================================================ */
 
 export async function endRound(forceEnd: boolean = false) {
-  // ---------------------------------------------------------
-  // FORCE STOP
-  // ---------------------------------------------------------
+  // FORCEEND
   if (forceEnd) {
     arena.status = "ended";
     (io as any).roundActive = false;
@@ -458,7 +466,7 @@ export async function endRound(forceEnd: boolean = false) {
 
         io.emit("round:end", {
           round: arena.round,
-          type: arena.type,
+          type: "finale",
           pendingEliminations: [],
           winner: arena.players[0] || null,
           top3: arena.players.slice(0, 3),
@@ -472,7 +480,9 @@ export async function endRound(forceEnd: boolean = false) {
       const lowest =
         arena.players[arena.reverseMode ? 0 : total - 1].score;
 
-      const doomed = arena.players.filter((p) => p.score === lowest);
+      const doomed = arena.players.filter(
+        (p) => p.score === lowest
+      );
 
       for (const p of doomed) {
         p.positionStatus = "elimination";
@@ -512,7 +522,9 @@ export async function endRound(forceEnd: boolean = false) {
       return;
     }
 
-    const doomed = arena.players.filter((p) => p.positionStatus === "danger");
+    const doomed = arena.players.filter(
+      (p) => p.positionStatus === "danger"
+    );
 
     for (const p of doomed) {
       p.positionStatus = "elimination";
@@ -531,9 +543,7 @@ export async function endRound(forceEnd: boolean = false) {
     return;
   }
 
-  // ---------------------------------------------------------
   // ACTIVE → GRACE
-  // ---------------------------------------------------------
   if (arena.status === "active") {
     arena.status = "grace";
 
@@ -552,9 +562,7 @@ export async function endRound(forceEnd: boolean = false) {
     return;
   }
 
-  // ---------------------------------------------------------
   // GRACE → END
-  // ---------------------------------------------------------
   if (arena.status === "grace") {
     arena.status = "ended";
     (io as any).roundActive = false;
@@ -563,7 +571,7 @@ export async function endRound(forceEnd: boolean = false) {
     const total = arena.players.length;
 
     // ================================
-    // FINALE EERST MG/BOMB
+    // FINALE → eerst MG/Bomb
     // ================================
     if (arena.type === "finale") {
       const doomedMG = arena.players.filter((p) => p.eliminated);
@@ -578,7 +586,7 @@ export async function endRound(forceEnd: boolean = false) {
 
         io.emit("round:end", {
           round: arena.round,
-          type: arena.type,
+          type: "finale",
           pendingEliminations: doomedMG.map((x) => x.username),
           top3: arena.players.slice(0, 3),
           reverseMode: arena.reverseMode,
@@ -591,7 +599,9 @@ export async function endRound(forceEnd: boolean = false) {
       // tie eliminatie
       const index = arena.reverseMode ? 0 : total - 1;
       const lowest = arena.players[index].score;
-      const doomedTie = arena.players.filter((p) => p.score === lowest);
+      const doomedTie = arena.players.filter(
+        (p) => p.score === lowest
+      );
 
       for (const p of doomedTie) {
         p.positionStatus = "elimination";
@@ -618,12 +628,14 @@ export async function endRound(forceEnd: boolean = false) {
     }
 
     // ================================
-    // QUARTER MG/BOMB + danger
+    // QUARTER → MG/Bomb + danger
     // ================================
     const doomedMG = arena.players.filter((p) => p.eliminated);
     const doomedDanger =
       arena.settings.forceEliminations &&
-      arena.players.filter((p) => p.positionStatus === "danger");
+      arena.players.filter(
+        (p) => p.positionStatus === "danger"
+      );
 
     const doomed = [
       ...doomedMG.map((x) => x.username),
@@ -648,10 +660,15 @@ export async function endRound(forceEnd: boolean = false) {
 }
 
 /* ============================================================================
-   ARENA MANAGEMENT (NIET GEWIJZIGD)
+   ARENA MANAGEMENT (GEPATCHT MET avatar_url)
 ============================================================================ */
 
-export async function arenaJoin(id: string, display_name: string, username: string) {
+export async function arenaJoin(
+  id: string,
+  display_name: string,
+  username: string,
+  avatar_url: string | null = null      // ★ PATCH: avatar binnenhalen
+) {
   const cleanId = String(id);
 
   if (arena.players.some((p) => p.id === cleanId)) return;
@@ -660,15 +677,19 @@ export async function arenaJoin(id: string, display_name: string, username: stri
     id: cleanId,
     username: username.replace(/^@+/, "").toLowerCase(),
     display_name,
+
     score: 0,
     boosters: [],
     eliminated: false,
     positionStatus: "alive",
+
     tempImmune: false,
     survivorImmune: false,
 
-    // PATCH: reputatie veld
-    breakerHits: 0, // BREAKER INIT
+    breakerHits: 0,
+
+    // ★ PATCH: avatar opslaan in arena
+    avatar_url: avatar_url || null,
   });
 
   await emitArena();
@@ -709,7 +730,10 @@ export async function arenaLeave(usernameOrId: string, force: boolean = false) {
   await emitArena();
 }
 
-export async function addToArena(username: string, resolveUser: Function) {
+export async function addToArena(
+  username: string,
+  resolveUser: Function
+) {
   const clean = username.replace(/^@+/, "").toLowerCase();
 
   const user = await resolveUser(clean);
@@ -728,8 +752,10 @@ export async function addToArena(username: string, resolveUser: Function) {
     positionStatus: "alive",
     tempImmune: false,
     survivorImmune: false,
+    breakerHits: 0,
 
-    breakerHits: 0, // PATCH
+    // ★ avatar vanuit DB
+    avatar_url: user.avatar_url || null,
   });
 
   emitLog({
@@ -776,7 +802,7 @@ export async function arenaClear() {
 }
 
 /* ============================================================================
-   addFromQueue (NIET GEWIJZIGD)
+   addFromQueue (GEPATCHT MET avatar_url DOORGEVEN)
 ============================================================================ */
 
 export async function addFromQueue(...args: any[]) {
@@ -800,14 +826,21 @@ export async function addFromQueue(...args: any[]) {
       (candidate as any).user_display_name ??
       username;
 
-    return arenaJoin(id, display_name, username);
+    // ★ PATCH: avatar inlezen uit queue records
+    const avatar_url: string | null =
+      (candidate as any).avatar_url ?? null;
+
+    return arenaJoin(id, display_name, username, avatar_url);
   }
 
+  // fallback string+parms
   if (typeof args[0] === "string") {
     const id = String(args[0]);
     const display_name = String(args[1] ?? args[2] ?? "Unknown");
     const username = String(args[2] ?? args[1] ?? "unknown");
-    return arenaJoin(id, display_name, username);
+
+    // ★ Geen avatar bekend → null
+    return arenaJoin(id, display_name, username, null);
   }
 }
 
