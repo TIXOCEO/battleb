@@ -1,71 +1,69 @@
-// ============================================================================
-// queue.js — BattleBox Queue Overlay (ESPORTS V3 FIXED)
-// ============================================================================
-
 import { initEventRouter } from "/overlays/shared/event-router.js";
-import { queueStore } from "/overlays/shared/stores.js";
+import { useQueueStore } from "/overlays/shared/stores.js";
 
-// Start socket listeners
 initEventRouter();
 
 const grid = document.getElementById("queue-grid");
 
-// Pre-render 30 static card elements
-const cardEls = Array.from({ length: 30 }, () => {
-  const el = document.createElement("div");
-  el.className = "bb-card empty-card";
-  return el;
+// Create 30 fixed card containers
+const cards = Array.from({ length: 30 }, () => {
+  const c = document.createElement("div");
+  c.className = "bb-card empty-card";
+  return c;
 });
+cards.forEach((c) => grid.appendChild(c));
 
-cardEls.forEach((c) => grid.appendChild(c));
+const EMPTY_AVATAR = "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
 
-// Subscribe to Zustand queue store
-queueStore.subscribe((state) => {
+useQueueStore.subscribe((state) => {
   const entries = state.entries || [];
-  const highlightUser = state.lastUpdatedId;
+  const highlight = state.lastUpdatedId;
 
   for (let i = 0; i < 30; i++) {
-    const el = cardEls[i];
+    const el = cards[i];
     const entry = entries[i];
 
+    // ============================================
+    // FREE SPOT
+    // ============================================
     if (!entry) {
       el.className = "bb-card empty-card";
-      el.innerHTML = "";
+
+      el.innerHTML = `
+        <div class="pos-badge">${i + 1}</div>
+
+        <div class="card-avatar" style="background-image:url('${EMPTY_AVATAR}')"></div>
+
+        <div class="card-info">
+          <div class="name">VRIJ</div>
+          <div class="user"></div>
+        </div>
+      `;
       continue;
     }
 
-    // Filled card
+    // ============================================
+    // FILLED SPOT
+    // ============================================
     el.className = "bb-card";
 
-    if (entry.is_vip) {
-      el.classList.add("vip-glow");
-    }
+    if (entry.is_vip) el.classList.add("vip-glow");
 
-    if (highlightUser && entry.username === highlightUser) {
+    if (highlight && highlight === entry.username) {
       el.classList.add("card-update");
       setTimeout(() => el.classList.remove("card-update"), 650);
     }
 
-    const avatar =
-      entry.avatar_url ||
-      "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
+    const avatar = entry.avatar_url || EMPTY_AVATAR;
 
     el.innerHTML = `
       <div class="pos-badge">${entry.position}</div>
 
-      <div class="card-avatar"
-        style="background-image:url('${avatar}')">
-      </div>
+      <div class="card-avatar" style="background-image:url('${avatar}')"></div>
 
-      <div style="margin-top:6px;">
-        <div style="font-weight:700; font-size:14px;">${entry.display_name}</div>
-        <div style="opacity:0.75; font-size:12px;">@${entry.username}</div>
-
-        ${
-          entry.priorityDelta > 0
-            ? `<div style="color:var(--neon-orange); font-size:11px;margin-top:3px;">+${entry.priorityDelta} bonus</div>`
-            : ""
-        }
+      <div class="card-info">
+        <div class="name">${entry.display_name}</div>
+        <div class="user">@${entry.username}</div>
       </div>
     `;
   }
