@@ -1,5 +1,5 @@
 // ============================================================================
-// events.js — FIXED VERSION
+// events.js — FINAL SNAPSHOT SAFE VERSION
 // ============================================================================
 
 import { eventStore } from "/overlays/shared/stores.js";
@@ -10,22 +10,27 @@ initEventRouter();
 
 const root = document.getElementById("events-list");
 
-// Subscribe ONLY to events array
+// Subscribe to events only
 eventStore.subscribe(
-  (state) => state.events,  // <-- select slice
+  (state) => state.events,
   (events) => {
+    if (!Array.isArray(events)) return;
     root.innerHTML = "";
 
     events.forEach((evt) => {
       const el = document.createElement("div");
       el.className = "bb-event-item";
 
+      const name = evt.display_name || "Onbekend";
+      const username = evt.username || "";
+      const type = evt.type || "join";
+
       el.innerHTML = `
-        <div class="event-icon ${evt.type}"></div>
+        <div class="event-icon ${type}"></div>
 
         <div class="event-text">
-          <div class="name">${evt.display_name}</div>
-          <div class="user">@${evt.username}</div>
+          <div class="name">${name}</div>
+          <div class="user">@${username}</div>
         </div>
 
         ${evt.is_vip ? `<div class="event-vip"></div>` : ""}
@@ -33,7 +38,7 @@ eventStore.subscribe(
 
       root.appendChild(el);
 
-      // Trigger fade-out
+      // Fade-out animation
       setTimeout(() => {
         el.classList.add("event-fade");
       }, 4500);
