@@ -2,8 +2,8 @@
 // events.js — BattleBox Events Overlay Renderer
 // ============================================================================
 
-import { initEventRouter } from "../shared/event-router.js";
-import { useEventStore } from "../shared/stores.js";
+import { initEventRouter } from "overlays/shared/event-router.js";
+import { useEventStore } from "overlays/shared/stores.js";
 
 // Initialize event router ONCE
 initEventRouter();
