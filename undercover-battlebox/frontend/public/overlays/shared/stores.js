@@ -1,68 +1,100 @@
 // ============================================================================
-// stores.js — BattleBox Overlay Stores (Zustand, pure JS)
+// stores.js — BattleBox Overlay Stores (Pure JavaScript)
+// Fully standalone — No Zustand, No external dependencies
 // ============================================================================
 
-import { create } from "zustand";
+// ---------------------------------------------------------------------------
+// Helper: create a tiny reactive store
+// ---------------------------------------------------------------------------
+
+function createStore(initialState) {
+  let state = { ...initialState };
+  const listeners = new Set();
+
+  return {
+    // get entire internal state
+    get: () => state,
+
+    // subscribe to changes
+    subscribe(callback) {
+      listeners.add(callback);
+      // call immediately with current state
+      callback(state);
+      return () => listeners.delete(callback);
+    },
+
+    // update state
+    set(partial) {
+      state = { ...state, ...partial };
+      listeners.forEach((cb) => cb(state));
+    },
+  };
+}
 
 // ============================================================================
 // 1. QUEUE STORE (30 cards)
 // ============================================================================
 
-export const useQueueStore = create((set) => ({
+export const queueStore = createStore({
   entries: [],
   lastUpdatedId: null,
+});
 
-  setQueue: (entries) =>
-    set({
-      entries,
-      lastUpdatedId: null,
-    }),
+queueStore.setQueue = (entries) => {
+  queueStore.set({
+    entries,
+    lastUpdatedId: null,
+  });
+};
 
-  highlightCard: (username) =>
-    set({
-      lastUpdatedId: username,
-    }),
+queueStore.highlightCard = (username) => {
+  queueStore.set({ lastUpdatedId: username });
+};
 
-  clearHighlight: () =>
-    set({
-      lastUpdatedId: null,
-    }),
-}));
+queueStore.clearHighlight = () => {
+  queueStore.set({ lastUpdatedId: null });
+};
 
 // ============================================================================
-// 2. EVENTS STORE (max 5 events)
+// 2. EVENTS STORE (max 5 items)
 // ============================================================================
 
-export const useEventStore = create((set, get) => ({
+export const eventStore = createStore({
   events: [],
+});
 
-  pushEvent: (evt) => {
-    const current = get().events;
-    const next = [evt, ...current].slice(0, 5);
-    set({ events: next });
-  },
+eventStore.pushEvent = (evt) => {
+  const list = eventStore.get().events;
+  const next = [evt, ...list].slice(0, 5);
+  eventStore.set({ events: next });
+};
 
-  fadeOutEvent: (timestamp) => {
-    const current = get().events;
-    const filtered = current.filter((e) => e.timestamp !== timestamp);
-    set({ events: filtered });
-  },
-}));
+eventStore.fadeOutEvent = (timestamp) => {
+  const current = eventStore.get().events;
+  const filtered = current.filter((e) => e.timestamp !== timestamp);
+  eventStore.set({ events: filtered });
+};
 
 // ============================================================================
 // 3. TWISTS STORE (3 rotating visible twists)
 // ============================================================================
 
-export const useTwistStore = create((set) => ({
+export const twistStore = createStore({
   visibleTwists: [],
-  setTwists: (tw) => set({ visibleTwists: tw }),
-}));
+});
+
+twistStore.setTwists = (arr) => {
+  twistStore.set({ visibleTwists: arr });
+};
 
 // ============================================================================
 // 4. TICKER STORE
 // ============================================================================
 
-export const useTickerStore = create((set) => ({
+export const tickerStore = createStore({
   text: "BattleBox — The Ultimate Underground Arena",
-  setText: (txt) => set({ text: txt }),
-}));
+});
+
+tickerStore.setText = (txt) => {
+  tickerStore.set({ text: txt });
+};
