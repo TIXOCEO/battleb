@@ -1,6 +1,8 @@
 // ============================================================================
-// socket.js — BattleBox Overlay Socket Client v1.1 (Pure JS)
+// socket.js — BattleBox Overlay Socket Client v1.2 (Pure JS)
 // Stable. Async. OBS-safe.
+// ✔ Overlay authenticatie toegevoegd (auth: { type: "overlay" })
+// ✔ Niets anders gewijzigd
 // ============================================================================
 
 let socketInstance = null;
@@ -39,10 +41,11 @@ export async function getSocket() {
   // load client lib
   await loadSocketIoClient();
 
-  // create socket
+  // create socket — OVERLAY AUTH PATCH
   socketInstance = window.io(SOCKET_URL, {
     transports: ["websocket"],
     path: "/socket.io",
+    auth: { type: "overlay" },      // 🔥 BELANGRIJK
     reconnection: true,
     reconnectionDelay: 500,
     reconnectionAttempts: Infinity,
@@ -56,7 +59,7 @@ export async function getSocket() {
   // Debug
   socketInstance.on("connect", () => {
     console.log(
-      "%c[BattleBox Socket] Connected",
+      "%c[BattleBox Socket] Connected (Overlay)",
       "color:#0fffd7;font-weight:bold;"
     );
   });
