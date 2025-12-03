@@ -2,8 +2,8 @@
 // twists.js — Renders 3 rotating twist-cards
 // ============================================================================
 
-import { initEventRouter } from "../shared/event-router.js";
-import { useTwistStore } from "../shared/stores.js";
+import { initEventRouter } from "overlays/shared/event-router.js";
+import { useTwistStore } from "overlays/shared/stores.js";
 
 // Start the event router (sets up twist rotation automatically)
 initEventRouter();
