@@ -1,8 +1,6 @@
 // ============================================================================
-// event-router.js — BattleBox Overlay Event Brain v1.0 (Pure JS)
-// Converts backend socket events → overlay stores
-// Handles: queue updates, events list, twist rotation, ticker updates
-// Works fully in OBS BrowserSource / Static HTML pages
+// event-router.js — BattleBox Overlay Event Brain v1.1 (Pure JS)
+// Clean, stable, OBS-proof — no race conditions, no double init
 // ============================================================================
 
 import { getSocket } from "/overlays/shared/socket.js";
@@ -23,25 +21,27 @@ const EMPTY_AVATAR =
 const TWIST_ROTATION_MS = 10000;
 const EVENT_LIFETIME_MS = 6000;
 
+// Only run router one time globally
+let routerStarted = false;
+
 // ---------------------------------------------------------------------------
 // MAIN ROUTER
 // ---------------------------------------------------------------------------
 
 export async function initEventRouter() {
+  if (routerStarted) return;
+  routerStarted = true;
+
   const socket = await getSocket();
 
-  // Prevent double registration (OBS reloads iframe sometimes)
-  if (window.__BB_ROUTER_ACTIVE__) return;
-  window.__BB_ROUTER_ACTIVE__ = true;
-
   console.log(
-    "%c[BattleBox] Event Router Active",
+    "%c[BattleBox] Event Router Ready",
     "color:#0fffd7;font-weight:bold;"
   );
 
-  // ---------------------------------------------------------------------------
-  // 1. updateQueue → full refresh 30 cards
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // 1. updateQueue — refresh full 30 slot grid
+  // -------------------------------------------------------------------------
   socket.on("updateQueue", (packet) => {
     if (!packet || !Array.isArray(packet.entries)) return;
 
@@ -52,15 +52,15 @@ export async function initEventRouter() {
       priorityDelta: e.priorityDelta || 0,
       is_vip: !!e.is_vip,
       is_fan: !!e.is_fan,
-      avatar_url: e.avatar_url || EMPTY_AVATAR
+      avatar_url: e.avatar_url || EMPTY_AVATAR,
     }));
 
     queueStore.setQueue(mapped);
   });
 
-  // ---------------------------------------------------------------------------
-  // 2. queueEvent → join / leave / promote / demote
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // 2. queueEvent — join/leave/promote/demote
+  // -------------------------------------------------------------------------
   socket.on("queueEvent", (evt) => {
     if (!evt || !evt.type) return;
 
@@ -74,9 +74,9 @@ export async function initEventRouter() {
     }, EVENT_LIFETIME_MS);
   });
 
-  // ---------------------------------------------------------------------------
-  // 3. Twist rotation (3 active twists rotating)
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // 3. Twist rotation — 3 cards every 10s
+  // -------------------------------------------------------------------------
   let twistIndex = 0;
 
   const twistKeys = Object.entries(TWIST_MAP).map(([key, def]) => ({
@@ -103,58 +103,59 @@ export async function initEventRouter() {
   rotateTwists();
   setInterval(rotateTwists, TWIST_ROTATION_MS);
 
-  // ---------------------------------------------------------------------------
-  // 4. Ticker updates
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // 4. Ticker text update
+  // -------------------------------------------------------------------------
   socket.on("hudTickerUpdate", (text) => {
     tickerStore.setText(text || "");
   });
 }
 
 // ============================================================================
-// LIGHTWEIGHT TWIST MAP (overlay only uses UI fields)
+// LIGHTWEIGHT TWIST MAP (overlay only)
 // ============================================================================
+
 const TWIST_MAP = {
   galaxy: {
     giftName: "Galaxy",
     diamonds: 1000,
     description: "Keert de ranking om.",
-    aliases: ["galaxy", "gxy"]
+    aliases: ["galaxy", "gxy"],
   },
   moneygun: {
     giftName: "Money Gun",
     diamonds: 500,
     description: "Markeert speler voor eliminatie.",
-    aliases: ["moneygun", "mg"]
+    aliases: ["moneygun", "mg"],
   },
   bomb: {
     giftName: "Bomb",
     diamonds: 2500,
     description: "Markeert willekeurig een speler.",
-    aliases: ["bomb"]
+    aliases: ["bomb"],
   },
   immune: {
     giftName: "Immune",
     diamonds: 1599,
     description: "Beschermt tegen eliminaties.",
-    aliases: ["immune", "save"]
+    aliases: ["immune", "save"],
   },
   heal: {
     giftName: "Heal",
     diamonds: 1500,
     description: "Verwijdert eliminatie-mark.",
-    aliases: ["heal"]
+    aliases: ["heal"],
   },
   diamondpistol: {
     giftName: "Diamond Gun",
     diamonds: 5000,
     description: "Alleen gekozen speler overleeft.",
-    aliases: ["dp", "pistol"]
+    aliases: ["dp", "pistol"],
   },
   breaker: {
     giftName: "Breaker",
     diamonds: 899,
     description: "Crackt of verwijdert immune.",
-    aliases: ["breaker"]
-  }
+    aliases: ["breaker"],
+  },
 };
