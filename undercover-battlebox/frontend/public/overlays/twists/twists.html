@@ -16,6 +16,7 @@
       margin: 0;
       background: transparent;
       overflow: hidden;
+      font-family: "Rajdhani", sans-serif;
     }
   </style>
 </head>
@@ -25,8 +26,12 @@
     <div id="twist-stack" class="bb-twists-stack"></div>
   </div>
 
-  <script type="module" src="/overlays/shared/event-router.js"></script>
+  <!-- Shared logic -->
+  <script type="module" src="/overlays/shared/socket.js"></script>
   <script type="module" src="/overlays/shared/stores.js"></script>
+  <script type="module" src="/overlays/shared/event-router.js"></script>
+
+  <!-- Renderer -->
   <script type="module" src="/overlays/twists/twists.js"></script>
 </body>
 </html>
