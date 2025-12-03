@@ -399,7 +399,7 @@ async function demoteQueueByUsername(username: string) {
 }
 
 // ============================================================================
-// SNAPSHOT GENERATOR — USED BY ADMIN & NOW ALSO BY OVERLAY
+// SNAPSHOT GENERATOR
 // ============================================================================
 async function buildInitialSnapshot() {
   const snap: any = {};
@@ -528,23 +528,23 @@ async function buildInitialSnapshot() {
   }
 
   return snap;
-    }
+}
 
 // ============================================================================
-// SOCKET CONNECT HANDLER — INITIAL DATA (PATCHED FOR OVERLAYS)
+// SOCKET CONNECT HANDLER — INITIAL DATA (PATCH APPLIED BELOW)
 // ============================================================================
 io.on("connection", async (socket: AdminSocket) => {
-  // 🔥 PATCH: overlays mogen door, ook zonder admin-token
+  // 🔥 overlays & admins mogen door
   if (!socket.isAdmin && !socket.isOverlay) return socket.disconnect();
 
-  // 📌 Overlays krijgen wél snapshot, maar GEEN admin-data
+  // 📺 OVERLAY: stuur volledige snapshot bij connect
   if (socket.isOverlay) {
     const snap = await buildInitialSnapshot();
-    socket.emit("overlayInitialSnapshot", snap); // <── PATCH
+    socket.emit("overlayInitialSnapshot", snap);
     return;
   }
 
-  // Admin-panel snapshot
+  // 💻 ADMIN: admin-panel snapshot + handlers
   if (socket.isAdmin) {
     socket.emit("initialLogs", logBuffer);
     socket.emit("updateArena", getArena());
@@ -556,6 +556,7 @@ io.on("connection", async (socket: AdminSocket) => {
       host: { username: HARD_HOST_USERNAME, id: HARD_HOST_ID }
     });
 
+    // Hosts lijst
     const hosts = await pool.query(`
       SELECT id, label, username, tiktok_id, active
       FROM hosts ORDER BY id
@@ -579,17 +580,20 @@ io.on("connection", async (socket: AdminSocket) => {
       ack(snap);
     });
   }
+
+  // Overlay clients krijgen GEEN admin-actions → dat gebeurt in de tweede handler
 });
 
 // ============================================================================
 // UNIVERSAL ADMIN ACTION HANDLER
 // ============================================================================
 io.on("connection", async (socket: AdminSocket) => {
-  if (!socket.isAdmin) return; // overlays komen hier niet
+  // 🔒 overlays komen hier niet meer in — alleen admin
+  if (!socket.isAdmin) return;
 
   async function handle(action: string, data: any, ack: Function) {
     try {
-      // HOST MANAGEMENT ========================================================
+      // HOST MANAGEMENT ===================================================================
       if (action === "getHosts") {
         const r = await pool.query(
           `SELECT id, label, username, tiktok_id, active FROM hosts ORDER BY id`
@@ -655,7 +659,7 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // GAME MANAGEMENT ========================================================
+      // GAME MANAGEMENT ===================================================================
       if (action === "startGame") {
         const r = await pool.query(`
           INSERT INTO games (status, started_at)
@@ -723,7 +727,7 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // ROUND CONTROL ==========================================================
+      // ROUND CONTROL =====================================================================
       if (action === "startRound") {
         const type = data?.type === "finale" ? "finale" : "quarter";
 
@@ -752,12 +756,12 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // ARENA MGMT ==============================================================
+      // ARENA MGMT ========================================================================
       if (action === "addToArena") {
         const clean = (data?.username || "").trim().replace(/^@+/, "").toLowerCase();
 
         const r = await pool.query(
-          `SELECT tiktok_id, username, display_name, is_vip
+          `SELECT tiktok_id, username, display_name, is_vip, avatar_url
            FROM users WHERE LOWER(username)=LOWER($1) LIMIT 1`,
           [clean]
         );
@@ -773,17 +777,23 @@ io.on("connection", async (socket: AdminSocket) => {
           [r.rows[0].tiktok_id]
         );
         if (inQueue.rows.length) {
-          emitQueueEvent("leave", r.rows[0]);
+          // user zat nog in queue → stuur leave-event (met avatar)
+          emitQueueEvent("leave", {
+            ...r.rows[0],
+            avatar_url: r.rows[0].avatar_url || null
+          });
         }
 
         await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [
           r.rows[0].tiktok_id
         ]);
 
+        // ✅ PATCH #2 — avatar meegeven aan arenaJoin
         await arenaJoin(
           String(r.rows[0].tiktok_id),
           r.rows[0].display_name,
-          r.rows[0].username
+          r.rows[0].username,
+          r.rows[0].avatar_url || null
         );
 
         await emitArena();
@@ -837,7 +847,7 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // SEARCH USERS ============================================================
+      // SEARCH USERS ======================================================================
       if (action === "searchUsers") {
         const q = (data?.query || "").trim().toLowerCase();
         if (!q || q.length < 2) return ack({ users: [] });
@@ -858,12 +868,12 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ users: r.rows });
       }
 
-      // QUEUE MGMT ==============================================================
+      // QUEUE MGMT ========================================================================
       if (action === "addToQueue") {
         const clean = (data?.username || "").trim().replace(/^@+/, "").toLowerCase();
 
         const u = await pool.query(
-          `SELECT tiktok_id, username, display_name, is_vip
+          `SELECT tiktok_id, username, display_name, is_vip, avatar_url
            FROM users WHERE LOWER(username)=LOWER($1) LIMIT 1`,
           [clean]
         );
@@ -880,7 +890,11 @@ io.on("connection", async (socket: AdminSocket) => {
           return ack({ success: false, message: e?.message || "Kon niet joinen" });
         }
 
-        emitQueueEvent("join", u.rows[0]);
+        // ✅ PATCH #1 — queueEvent met avatar_url
+        emitQueueEvent("join", {
+          ...u.rows[0],
+          avatar_url: u.rows[0].avatar_url || null
+        });
 
         io.emit("updateQueue", { open: true, entries: await getQueue() });
 
@@ -891,7 +905,7 @@ io.on("connection", async (socket: AdminSocket) => {
         const clean = (data?.username || "").trim().replace(/^@+/, "").toLowerCase();
 
         const u = await pool.query(
-          `SELECT tiktok_id, username, display_name, is_vip
+          `SELECT tiktok_id, username, display_name, is_vip, avatar_url
            FROM users WHERE LOWER(username)=LOWER($1) LIMIT 1`,
           [clean]
         );
@@ -899,7 +913,11 @@ io.on("connection", async (socket: AdminSocket) => {
         if (!u.rows.length)
           return ack({ success: false, message: "User niet gevonden" });
 
-        emitQueueEvent("leave", u.rows[0]);
+        // ✅ PATCH #1 — queueEvent met avatar_url
+        emitQueueEvent("leave", {
+          ...u.rows[0],
+          avatar_url: u.rows[0].avatar_url || null
+        });
 
         await removeFromQueue(String(u.rows[0].tiktok_id));
 
@@ -908,7 +926,7 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // PROMOTE / DEMOTE ========================================================
+      // PROMOTE / DEMOTE ==================================================================
       if (action === "promoteUser") {
         const clean = (data?.username || "").trim().replace(/^@+/, "").toLowerCase();
 
@@ -933,7 +951,7 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // VIP SETTINGS ============================================================
+      // VIP SETTINGS ======================================================================
       if (action === "giveVip") {
         const clean = (data?.username || "").trim().replace(/^@+/, "").toLowerCase();
 
@@ -992,7 +1010,7 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // TWISTS =================================================================
+      // TWISTS ============================================================================
       if (action === "giveTwist") {
         await giveTwistAdmin(data.username, data.twist);
         return ack({ success: true });
@@ -1004,13 +1022,16 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
+      // UNKNOWN ===========================================================================
       return ack({ success: false, message: "Onbekend admin commando" });
+
     } catch (err: any) {
       console.error("Admin error:", err);
       return ack({ success: false, message: err?.message || "Serverfout" });
     }
   }
 
+  // Router
   socket.onAny((event, payload, ack) => {
     if (typeof ack !== "function") ack = () => {};
     handle(event, payload, ack);
