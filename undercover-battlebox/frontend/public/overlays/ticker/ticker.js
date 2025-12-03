@@ -2,16 +2,15 @@
 // ticker.js — BattleBox HUD Ticker Renderer
 // ============================================================================
 
-import { initEventRouter } from "overlays/shared/event-router.js";
-import { useTickerStore } from "overlays/shared/stores.js";
+import { initEventRouter } from "/overlays/shared/event-router.js";
+import { tickerStore } from "/overlays/shared/stores.js";
 
-// Start event router (enables hudTickerUpdate)
+// Enable socket listener
 initEventRouter();
 
 const inner = document.getElementById("ticker-inner");
 
-// Subscribe to ticker store updates
-useTickerStore.subscribe((state) => {
-  const text = state.text || "";
-  inner.textContent = text;
+// Subscribe to store updates
+tickerStore.subscribe((text) => {
+  inner.textContent = text || "";
 });
