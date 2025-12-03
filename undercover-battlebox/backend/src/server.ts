@@ -111,18 +111,29 @@ export const io = new Server(server, {
 });
 
 // ============================================================================
-// AUTH
+// AUTH (PATCHED) — ondersteunt admin + overlay
 // ============================================================================
 interface AdminSocket extends Socket {
   isAdmin?: boolean;
+  isOverlay?: boolean;
 }
 
+// 🔥 PATCH APPLIED HERE
 io.use((socket: AdminSocket, next) => {
-  const token = socket.handshake.auth?.token;
-  if (token === ADMIN_TOKEN) {
+  const auth = socket.handshake.auth || {};
+
+  // Desktop/Admin-panel authentication
+  if (auth.token === ADMIN_TOKEN) {
     socket.isAdmin = true;
     return next();
   }
+
+  // Overlay authentication (OBS / HTML overlays)
+  if (auth.type === "overlay") {
+    socket.isOverlay = true;
+    return next();
+  }
+
   return next(new Error("Unauthorized"));
 });
 
@@ -520,53 +531,58 @@ async function buildInitialSnapshot() {
 }
 
 // ============================================================================
-// SOCKET CONNECT HANDLER — INITIAL DATA
+// SOCKET CONNECT HANDLER — INITIAL DATA (PATCH APPLIED BELOW)
 // ============================================================================
 io.on("connection", async (socket: AdminSocket) => {
-  if (!socket.isAdmin) return socket.disconnect();
+  // 🔥 PATCH: overlays mogen door!
+  if (!socket.isAdmin && !socket.isOverlay) return socket.disconnect();
 
-  socket.emit("initialLogs", logBuffer);
-  socket.emit("updateArena", getArena());
-  socket.emit("updateQueue", { open: true, entries: await getQueue() });
-  socket.emit("settings", getArenaSettings());
+  // Only admin receives admin-panel snapshot
+  if (socket.isAdmin) {
+    socket.emit("initialLogs", logBuffer);
+    socket.emit("updateArena", getArena());
+    socket.emit("updateQueue", { open: true, entries: await getQueue() });
+    socket.emit("settings", getArenaSettings());
 
-  socket.emit("connectState", {
-    connected: isStreamLive(),
-    host: { username: HARD_HOST_USERNAME, id: HARD_HOST_ID }
-  });
+    socket.emit("connectState", {
+      connected: isStreamLive(),
+      host: { username: HARD_HOST_USERNAME, id: HARD_HOST_ID }
+    });
 
-  // Hosts lijst
-  const hosts = await pool.query(`
-    SELECT id, label, username, tiktok_id, active
-    FROM hosts ORDER BY id
-  `);
-  socket.emit("hosts", hosts.rows);
+    // Hosts lijst
+    const hosts = await pool.query(`
+      SELECT id, label, username, tiktok_id, active
+      FROM hosts ORDER BY id
+    `);
+    socket.emit("hosts", hosts.rows);
 
-  // Game session
-  socket.emit("gameSession", {
-    active: currentGameId !== null,
-    gameId: currentGameId
-  });
+    socket.emit("gameSession", {
+      active: currentGameId !== null,
+      gameId: currentGameId
+    });
 
-  // Initial LB + stats
-  if (currentGameId) {
-    await broadcastPlayerLeaderboard();
-    await broadcastGifterLeaderboard();
-    await broadcastHostDiamonds();
-    await broadcastStats();
+    if (currentGameId) {
+      await broadcastPlayerLeaderboard();
+      await broadcastGifterLeaderboard();
+      await broadcastHostDiamonds();
+      await broadcastStats();
+    }
+
+    socket.on("getInitialSnapshot", async (_payload, ack) => {
+      const snap = await buildInitialSnapshot();
+      ack(snap);
+    });
   }
 
-  socket.on("getInitialSnapshot", async (_payload, ack) => {
-    const snap = await buildInitialSnapshot();
-    ack(snap);
-  });
+  // Overlay clients krijgen GEEN admin-snapshot → alleen events  
 });
 
 // ============================================================================
 // UNIVERSAL ADMIN ACTION HANDLER
 // ============================================================================
 io.on("connection", async (socket: AdminSocket) => {
-  if (!socket.isAdmin) return socket.disconnect();
+  // 🔥 PATCH: overlays mogen blijven — admin acties NIET toegestaan
+  if (!socket.isAdmin) return; // overlays komen hier niet meer in
 
   async function handle(action: string, data: any, ack: Function) {
     try {
@@ -749,7 +765,6 @@ io.on("connection", async (socket: AdminSocket) => {
         if (String(r.rows[0].tiktok_id) === HARD_HOST_ID)
           return ack({ success: false, message: "Host kan niet in arena staan" });
 
-        // leave event als speler in queue zat
         const inQueue = await pool.query(
           `SELECT 1 FROM queue WHERE user_tiktok_id=$1`,
           [r.rows[0].tiktok_id]
@@ -758,7 +773,9 @@ io.on("connection", async (socket: AdminSocket) => {
           emitQueueEvent("leave", r.rows[0]);
         }
 
-        await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [r.rows[0].tiktok_id]);
+        await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [
+          r.rows[0].tiktok_id
+        ]);
 
         await arenaJoin(
           String(r.rows[0].tiktok_id),
@@ -838,7 +855,7 @@ io.on("connection", async (socket: AdminSocket) => {
         return ack({ users: r.rows });
       }
 
-      // QUEUE MANAGEMENT ==================================================================
+      // QUEUE MGMT ========================================================================
       if (action === "addToQueue") {
         const clean = (data?.username || "").trim().replace(/^@+/, "").toLowerCase();
 
@@ -993,6 +1010,7 @@ io.on("connection", async (socket: AdminSocket) => {
     }
   }
 
+  // Router
   socket.onAny((event, payload, ack) => {
     if (typeof ack !== "function") ack = () => {};
     handle(event, payload, ack);
