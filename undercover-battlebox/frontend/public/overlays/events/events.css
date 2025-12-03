@@ -1,7 +1,7 @@
 @import "/overlays/shared/theme.css";
 
 /* ---------------------------------------------------------
-   PANEL
+   EVENTS PANEL (250 × 700)
 --------------------------------------------------------- */
 .bb-events-panel {
   width: 250px;
@@ -13,16 +13,19 @@
 
   box-shadow:
     0 0 20px rgba(255,77,79,0.45),
-    0 0 30px rgba(255,77,79,0.25) inset;
+    inset 0 0 30px rgba(255,77,79,0.25);
 
-  animation: panelPowerOn 0.6s ease-out forwards;
+  animation: panelIn 0.6s ease-out forwards;
 }
 
-@keyframes panelPowerOn {
-  0% { opacity: 0; transform: translateX(20px) scale(0.95); }
+@keyframes panelIn {
+  0% { opacity: 0; transform: translateX(30px) scale(0.92); }
   100% { opacity: 1; transform: translateX(0) scale(1); }
 }
 
+/* ---------------------------------------------------------
+   LIST
+--------------------------------------------------------- */
 .bb-events-list {
   display: flex;
   flex-direction: column;
@@ -30,7 +33,7 @@
 }
 
 /* ---------------------------------------------------------
-   EVENT ITEM
+   EVENT ITEM — OCTAGON STYLE
 --------------------------------------------------------- */
 .bb-event-item {
   display: flex;
@@ -42,65 +45,66 @@
   border: 2px solid var(--border-light);
 
   clip-path: polygon(
-    12% 0%, 88% 0%,
-    100% 20%, 100% 80%,
-    88% 100%, 12% 100%,
-    0% 80%, 0% 20%
+    10% 0%, 90% 0%,
+    100% 18%, 100% 82%,
+    90% 100%, 10% 100%,
+    0% 82%, 0% 18%
   );
 
   box-shadow:
-    0 0 20px rgba(0,0,0,0.9),
-    inset 0 0 24px rgba(0,0,0,0.6),
-    0 0 12px rgba(255,77,79,0.35) inset;
+    0 0 22px rgba(0,0,0,0.9),
+    inset 0 0 25px rgba(0,0,0,0.6),
+    inset 0 0 12px rgba(255,77,79,0.35);
 
-  animation: eventSlideIn 0.45s cubic-bezier(.17,.67,.4,1.25) both;
+  animation: slideIn 0.45s cubic-bezier(.17,.67,.4,1.25) both;
 }
 
-@keyframes eventSlideIn {
-  0% { opacity: 0; transform: translateX(22px); }
+@keyframes slideIn {
+  0% { opacity: 0; transform: translateX(25px); }
   100% { opacity: 1; transform: translateX(0); }
 }
 
+/* Fade-out (trigger via JS) */
 .event-fade {
-  animation: eventFadeOut 0.6s ease-out forwards !important;
+  animation: fadeOut 0.55s ease-out forwards !important;
 }
 
-@keyframes eventFadeOut {
+@keyframes fadeOut {
   0% { opacity: 1; transform: translateX(0); }
-  100% { opacity: 0; transform: translateX(18px); }
+  100% { opacity: 0; transform: translateX(20px); }
 }
 
 /* ---------------------------------------------------------
    ICONS
 --------------------------------------------------------- */
 .event-icon {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   background-size: cover;
-  background-position: center;
+  filter: drop-shadow(0 0 4px rgba(255,255,255,0.4));
 
-  animation: iconGlow 3s ease-in-out infinite;
+  animation: iconPulse 3s ease-in-out infinite;
 }
 
-@keyframes iconGlow {
+@keyframes iconPulse {
   0%,100% { filter: brightness(1); }
-  50% { filter: brightness(1.4); }
+  50% { filter: brightness(1.25); }
 }
 
 .event-icon.join {
-  background-image: url("data:image/svg+xml;utf8,<svg width='20' height='20' fill='%2300ff99' xmlns='http://www.w3.org/2000/svg'><polygon points='10,0 20,20 0,20'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg fill='%2300ff99' width='20' height='20' xmlns='http://www.w3.org/2000/svg'><polygon points='10,0 20,20 0,20'/></svg>");
 }
 
 .event-icon.leave {
-  background-image: url("data:image/svg+xml;utf8,<svg width='20' height='20' fill='%23ff4d4f' xmlns='http://www.w3.org/2000/svg'><polygon points='10,20 20,0 0,0'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg fill='%23ff4d4f' width='20' height='20' xmlns='http://www.w3.org/2000/svg'><polygon points='10,20 20,0 0,0'/></svg>");
 }
 
 .event-icon.promote {
-  background-image: url("data:image/svg+xml;utf8,<svg width='20' height='20' fill='%2300d9ff' xmlns='http://www.w3.org/2000/svg'><polygon points='10,0 20,20 0,20'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg fill='%2300d9ff' width='20' height='20' xmlns='http://www.w3.org/2000/svg'><polygon points='10,0 20,20 0,20'/></svg>");
 }
 
 .event-icon.demote {
-  background-image: url("data:image/svg+xml;utf8,<svg width='20' height='20' fill='%23ffaa00' xmlns='http://www.w3.org/2000/svg'><polygon points='10,20 20,0 0,0'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg fill='%23ffaa00' width='20' height='20' xmlns='http://www.w3.org/2000/svg'><polygon points='10,20 20,0 0,0'/></svg>");
 }
 
 /* ---------------------------------------------------------
@@ -110,15 +114,16 @@
   font-weight: 700;
   color: white;
   font-size: 13px;
+  letter-spacing: 0.4px;
 }
 
 .event-text .user {
-  opacity: 0.8;
+  opacity: 0.75;
   font-size: 12px;
 }
 
 /* ---------------------------------------------------------
-   VIP
+   VIP PULSE
 --------------------------------------------------------- */
 .event-vip {
   width: 12px;
@@ -127,12 +132,12 @@
   border-radius: 50%;
   margin-left: auto;
 
-  box-shadow: 0 0 12px gold;
+  box-shadow: 0 0 15px gold;
 
   animation: vipPulse 2s ease-in-out infinite;
 }
 
 @keyframes vipPulse {
   0%,100% { transform: scale(1); }
-  50% { transform: scale(1.25); }
+  50% { transform: scale(1.22); }
 }
