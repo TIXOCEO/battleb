@@ -8,7 +8,7 @@
   <!-- GLOBAL THEME -->
   <link rel="stylesheet" href="/overlays/shared/theme.css">
 
-  <!-- PANEL STYLES -->
+  <!-- PANEL CSS -->
   <link rel="stylesheet" href="/overlays/events/events.css" />
 
   <style>
@@ -16,6 +16,7 @@
       margin: 0;
       background: transparent;
       overflow: hidden;
+      font-family: "Rajdhani", sans-serif;
     }
   </style>
 </head>
@@ -25,8 +26,12 @@
     <div id="events-list" class="bb-events-list"></div>
   </div>
 
-  <script type="module" src="/overlays/shared/event-router.js"></script>
+  <!-- Shared engine -->
+  <script type="module" src="/overlays/shared/socket.js"></script>
   <script type="module" src="/overlays/shared/stores.js"></script>
+  <script type="module" src="/overlays/shared/event-router.js"></script>
+
+  <!-- Events renderer -->
   <script type="module" src="/overlays/events/events.js"></script>
 </body>
 </html>
