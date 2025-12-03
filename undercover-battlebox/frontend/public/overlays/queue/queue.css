@@ -1,7 +1,7 @@
-@import "overlays/shared/theme.css";
+@import "/overlays/shared/theme.css";
 
 /* ---------------------------------------------
-   QUEUE PANEL (1200×700)
+   PANEL (1200×700)
 --------------------------------------------- */
 .bb-queue-panel {
   width: 1200px;
@@ -25,7 +25,7 @@
   100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* GRID */
+/* GRID -------------------------------------------------- */
 .bb-queue-grid {
   display: grid;
   grid-template-columns: repeat(10, 1fr);
@@ -33,9 +33,7 @@
   gap: 14px;
 }
 
-/* ---------------------------------------------
-   CARD BASE
---------------------------------------------- */
+/* CARD -------------------------------------------------- */
 .bb-card {
   background: var(--glass-dark);
   border: 2px solid var(--border-light);
@@ -64,7 +62,7 @@
   100% { opacity: 1; transform: scale(1) rotateX(0deg); }
 }
 
-/* NEON RIM */
+/* NEON RIM -------------------------------------------------- */
 .bb-card::after {
   content: "";
   position: absolute;
@@ -74,7 +72,6 @@
   clip-path: inherit;
   box-shadow: var(--neon-orange-glow);
   opacity: 0.35;
-
   animation: rimPulse 2.4s ease-in-out infinite;
 }
 
@@ -83,14 +80,13 @@
   50% { opacity: 0.45; }
 }
 
-/* Empty card */
 .empty-card {
   opacity: 0.18;
   border-color: rgba(255,255,255,0.05);
-  animation: none !important; /* prevent spawn animation */
+  animation: none !important;
 }
 
-/* Card highlight on update */
+/* Highlight for updates */
 .card-update {
   animation: cardFlash 0.6s ease-out !important;
 }
@@ -100,9 +96,7 @@
   100% { box-shadow: none; }
 }
 
-/* ---------------------------------------------
-   POSITION BADGE
---------------------------------------------- */
+/* POSITION BADGE -------------------------------------------------- */
 .pos-badge {
   position: absolute;
   top: 6px;
@@ -115,14 +109,13 @@
     100% 50%, 75% 100%,
     25% 100%, 0% 50%
   );
-  
-  background: var(--neon-orange);
+
+  background: var(--color-orange);
   color: black;
   font-weight: 700;
   font-size: 13px;
   line-height: 26px;
   text-align: center;
-  text-shadow: var(--neon-orange-glow);
 
   animation: posPop 0.35s cubic-bezier(.17,.67,.4,1.35);
 }
@@ -132,9 +125,7 @@
   100% { transform: scale(1); opacity: 1; }
 }
 
-/* ---------------------------------------------
-   AVATAR
---------------------------------------------- */
+/* AVATAR -------------------------------------------------- */
 .card-avatar {
   width: 54px;
   height: 54px;
@@ -166,6 +157,6 @@
 }
 
 @keyframes vipPulse {
-  0%, 100% { box-shadow: var(--vip-glow); }
-  50% { box-shadow: 0 0 45px rgba(255,220,0,0.9); }
+  0%, 100% { box-shadow: 0 0 30px gold; }
+  50% { box-shadow: 0 0 60px gold; }
 }
