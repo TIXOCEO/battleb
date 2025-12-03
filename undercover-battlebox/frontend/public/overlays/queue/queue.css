@@ -36,16 +36,20 @@
 }
 
 /* ---------------------------------------------------------
-   CARD BASE — OCTAGON
+   CARD — OCTAGON BASE
 --------------------------------------------------------- */
 .bb-card {
   background: var(--glass-dark);
   border: 2px solid var(--border-light);
   position: relative;
-
   padding: 10px;
   color: white;
   overflow: hidden;
+
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
 
   clip-path: polygon(
     10% 0%, 90% 0%,
@@ -67,19 +71,16 @@
   100% { opacity: 1; transform: scale(1) rotateX(0deg); }
 }
 
-/* Glowing orange octagon rim */
+/* Neon rim */
 .bb-card::after {
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
-
   border: 2px solid rgba(255,77,79,0.45);
   clip-path: inherit;
-
   box-shadow: var(--neon-orange-glow);
   opacity: 0.32;
-
   animation: rimPulseCard 2.7s ease-in-out infinite;
 }
 
@@ -89,33 +90,20 @@
 }
 
 /* ---------------------------------------------------------
-   EMPTY CARD
+   EMPTY CARD (FREE SPOT)
 --------------------------------------------------------- */
 .empty-card {
-  opacity: 0.18;
-  border-color: rgba(255,255,255,0.05);
+  opacity: 0.35;
   animation: none !important;
 }
 
 /* ---------------------------------------------------------
-   CARD UPDATE — highlight flash
---------------------------------------------------------- */
-.card-update {
-  animation: cardFlash 0.6s ease-out !important;
-}
-
-@keyframes cardFlash {
-  0% { filter: brightness(1.8); }
-  100% { filter: brightness(1); }
-}
-
-/* ---------------------------------------------------------
-   POSITION BADGE (HEX)
+   POSITION BADGE — RIGHT TOP
 --------------------------------------------------------- */
 .pos-badge {
   position: absolute;
   top: 6px;
-  left: 6px;
+  right: 6px;
   width: 26px;
   height: 26px;
 
@@ -131,22 +119,16 @@
   font-size: 13px;
   line-height: 26px;
   text-align: center;
-
   text-shadow: var(--neon-orange-glow);
-  animation: posPulse 0.35s cubic-bezier(.17,.67,.4,1.35);
-}
-
-@keyframes posPulse {
-  0% { transform: scale(0.6); opacity: 0; }
-  100% { transform: scale(1); opacity: 1; }
 }
 
 /* ---------------------------------------------------------
-   AVATAR (Octagon shape)
+   AVATAR — 30% smaller
 --------------------------------------------------------- */
 .card-avatar {
-  width: 54px;
-  height: 54px;
+  width: 38px;  /* was 54px */
+  height: 38px; /* was 54px */
+
   background-size: cover;
   background-position: center;
 
@@ -158,25 +140,43 @@
   );
 
   box-shadow:
-    0 0 15px rgba(0,0,0,0.9),
-    inset 0 0 14px rgba(255,255,255,0.22);
+    0 0 12px rgba(0,0,0,0.8),
+    inset 0 0 12px rgba(255,255,255,0.22);
 
-  animation: avatarPulse 2.6s ease-in-out infinite;
-}
-
-@keyframes avatarPulse {
-  0%,100% { filter: brightness(1); }
-  50% { filter: brightness(1.25); }
+  flex-shrink: 0;
 }
 
 /* ---------------------------------------------------------
-   VIP GLOW
+   TEXT BLOCK (Right of Avatar)
 --------------------------------------------------------- */
-.vip-glow {
-  animation: vipAura 2s ease-in-out infinite !important;
+.card-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  line-height: 1.2;
 }
 
-@keyframes vipAura {
-  0%, 100% { box-shadow: var(--vip-glow); }
-  50% { box-shadow: 0 0 55px rgba(255,220,0,0.95); }
+.card-info .name {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.card-info .user {
+  opacity: 0.75;
+  font-size: 12px;
+}
+
+/* Highlight flash */
+.card-update {
+  animation: cardFlash 0.6s ease-out !important;
+}
+
+@keyframes cardFlash {
+  0% { filter: brightness(1.8); }
+  100% { filter: brightness(1); }
+}
+
+/* VIP glow */
+.vip-glow {
+  animation: vipAura 2s ease-in-out infinite !important;
 }
