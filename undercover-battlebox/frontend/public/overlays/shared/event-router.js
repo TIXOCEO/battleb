@@ -1,5 +1,6 @@
 // ============================================================================
-// event-router.js — BattleBox Overlay Event Brain (ESPORTS v3)
+// event-router.js — BattleBox Overlay Event Brain v1.1 (Pure JS)
+// Clean, stable, OBS-proof — no race conditions, no double init
 // ============================================================================
 
 import { getSocket } from "/overlays/shared/socket.js";
@@ -10,123 +11,82 @@ import {
   tickerStore
 } from "/overlays/shared/stores.js";
 
-// Placeholder avatar
+// ---------------------------------------------------------------------------
+// CONSTANTS
+// ---------------------------------------------------------------------------
+
 const EMPTY_AVATAR =
   "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
 
 const TWIST_ROTATION_MS = 10000;
 const EVENT_LIFETIME_MS = 6000;
 
-// Prevent double-init
-export function initEventRouter() {
-  const socket = getSocket();
-  if (window.__BB_ROUTER_ACTIVE__) return;
-  window.__BB_ROUTER_ACTIVE__ = true;
+// Only run router one time globally
+let routerStarted = false;
 
-  console.log("%c[BattleBox] Event Router Online", "color:#0fffd7;font-weight:bold;");
+// ---------------------------------------------------------------------------
+// MAIN ROUTER
+// ---------------------------------------------------------------------------
 
-  // --------------------------------------------------------------------------
-  // 1. updateQueue
-  // --------------------------------------------------------------------------
+export async function initEventRouter() {
+  if (routerStarted) return;
+  routerStarted = true;
+
+  const socket = await getSocket();
+
+  console.log(
+    "%c[BattleBox] Event Router Ready",
+    "color:#0fffd7;font-weight:bold;"
+  );
+
+  // -------------------------------------------------------------------------
+  // 1. updateQueue — refresh full 30 slot grid
+  // -------------------------------------------------------------------------
   socket.on("updateQueue", (packet) => {
-    if (!packet?.entries) return;
+    if (!packet || !Array.isArray(packet.entries)) return;
 
     const mapped = packet.entries.map((e) => ({
       position: e.position,
       display_name: e.display_name,
       username: e.username,
-      priorityDelta: e.priorityDelta ?? 0,
+      priorityDelta: e.priorityDelta || 0,
       is_vip: !!e.is_vip,
       is_fan: !!e.is_fan,
       avatar_url: e.avatar_url || EMPTY_AVATAR,
     }));
 
-    queueStore.getState().setQueue(mapped);
+    queueStore.setQueue(mapped);
   });
 
-  // --------------------------------------------------------------------------
-  // 2. queueEvent
-  // --------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // 2. queueEvent — join/leave/promote/demote
+  // -------------------------------------------------------------------------
   socket.on("queueEvent", (evt) => {
-    if (!evt?.type) return;
+    if (!evt || !evt.type) return;
 
-    // Add to event history
-    eventStore.getState().pushEvent(evt);
+    eventStore.pushEvent(evt);
 
-    // Highlight queue card
-    queueStore.getState().highlightCard(evt.username);
+    queueStore.highlightCard(evt.username);
+    setTimeout(() => queueStore.clearHighlight(), 900);
 
     setTimeout(() => {
-      queueStore.getState().clearHighlight();
-    }, 900);
-
-    // Auto-remove event from feed
-    setTimeout(() => {
-      eventStore.getState().fadeOutEvent(evt.timestamp);
+      eventStore.fadeOutEvent(evt.timestamp);
     }, EVENT_LIFETIME_MS);
   });
 
-  // --------------------------------------------------------------------------
-  // 3. Twist rotation
-  // --------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // 3. Twist rotation — 3 cards every 10s
+  // -------------------------------------------------------------------------
   let twistIndex = 0;
-
-  const TWIST_MAP = {
-    galaxy: {
-      name: "Galaxy",
-      gift: "Galaxy",
-      diamonds: 1000,
-      description: "Keert de ranking om.",
-      aliases: ["galaxy", "gxy"],
-    },
-    moneygun: {
-      name: "Money Gun",
-      gift: "Money Gun",
-      diamonds: 500,
-      description: "Markeert een speler.",
-      aliases: ["moneygun", "mg"],
-    },
-    bomb: {
-      name: "Bomb",
-      gift: "Bomb",
-      diamonds: 2500,
-      description: "Elimineert willekeurig.",
-      aliases: ["bomb"],
-    },
-    immune: {
-      name: "Immune",
-      gift: "Immune",
-      diamonds: 1599,
-      description: "Beschermt tegen eliminatie.",
-      aliases: ["immune", "save"],
-    },
-    heal: {
-      name: "Heal",
-      gift: "Heal",
-      diamonds: 1500,
-      description: "Verwijdert eliminatie.",
-      aliases: ["heal"],
-    },
-    diamondpistol: {
-      name: "Diamond Gun",
-      gift: "Diamond Gun",
-      diamonds: 5000,
-      description: "1 speler overleeft.",
-      aliases: ["dp", "pistol"],
-    },
-    breaker: {
-      name: "Breaker",
-      gift: "Breaker",
-      diamonds: 899,
-      description: "Verwijdert Immune.",
-      aliases: ["breaker"],
-    },
-  };
 
   const twistKeys = Object.entries(TWIST_MAP).map(([key, def]) => ({
     key,
-    ...def,
-    icon: "/overlays/shared/default-icon.png",
+    name: def.giftName,
+    gift: def.giftName,
+    diamonds: def.diamonds,
+    description: def.description,
+    aliases: [...def.aliases],
+    icon: EMPTY_AVATAR
   }));
 
   function rotateTwists() {
@@ -136,18 +96,66 @@ export function initEventRouter() {
       slice.push(...twistKeys.slice(0, 3 - slice.length));
     }
 
-    twistStore.getState().setTwists(slice);
-
+    twistStore.setTwists(slice);
     twistIndex = (twistIndex + 3) % twistKeys.length;
   }
 
   rotateTwists();
   setInterval(rotateTwists, TWIST_ROTATION_MS);
 
-  // --------------------------------------------------------------------------
-  // 4. Ticker updates
-  // --------------------------------------------------------------------------
-  socket.on("hudTickerUpdate", (txt) => {
-    tickerStore.getState().setText(txt);
+  // -------------------------------------------------------------------------
+  // 4. Ticker text update
+  // -------------------------------------------------------------------------
+  socket.on("hudTickerUpdate", (text) => {
+    tickerStore.setText(text || "");
   });
 }
+
+// ============================================================================
+// LIGHTWEIGHT TWIST MAP (overlay only)
+// ============================================================================
+
+const TWIST_MAP = {
+  galaxy: {
+    giftName: "Galaxy",
+    diamonds: 1000,
+    description: "Keert de ranking om.",
+    aliases: ["galaxy", "gxy"],
+  },
+  moneygun: {
+    giftName: "Money Gun",
+    diamonds: 500,
+    description: "Markeert speler voor eliminatie.",
+    aliases: ["moneygun", "mg"],
+  },
+  bomb: {
+    giftName: "Bomb",
+    diamonds: 2500,
+    description: "Markeert willekeurig een speler.",
+    aliases: ["bomb"],
+  },
+  immune: {
+    giftName: "Immune",
+    diamonds: 1599,
+    description: "Beschermt tegen eliminaties.",
+    aliases: ["immune", "save"],
+  },
+  heal: {
+    giftName: "Heal",
+    diamonds: 1500,
+    description: "Verwijdert eliminatie-mark.",
+    aliases: ["heal"],
+  },
+  diamondpistol: {
+    giftName: "Diamond Gun",
+    diamonds: 5000,
+    description: "Alleen gekozen speler overleeft.",
+    aliases: ["dp", "pistol"],
+  },
+  breaker: {
+    giftName: "Breaker",
+    diamonds: 899,
+    description: "Crackt of verwijdert immune.",
+    aliases: ["breaker"],
+  },
+};
