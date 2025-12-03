@@ -1,11 +1,11 @@
 // ============================================================================
-// twists.js — Rotating twist cards (FIXED)
+// twists.js — Rotating twist cards (SNAPSHOT EDITION)
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
 import { twistStore } from "/overlays/shared/stores.js";
 
-// Enable socket listeners
+// Start router (once)
 initEventRouter();
 
 const stack = document.getElementById("twist-stack");
