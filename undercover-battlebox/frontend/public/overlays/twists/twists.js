@@ -1,34 +1,34 @@
 // ============================================================================
-// twists.js — Renders rotating twist cards
+// twists.js — BattleBox Twist Overlay Renderer (ESPORTS V3)
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
-import { twistStore } from "/overlays/shared/stores.js";
+import { useTwistStore } from "/overlays/shared/stores.js";
 
-// Enable socket listeners
+// Start socket + router only once
 initEventRouter();
 
 const stack = document.getElementById("twist-stack");
 
-// When twist rotation updates:
-twistStore.subscribe((visibleTwists) => {
+// Zustand subscription
+useTwistStore.subscribe((state) => {
+  const visibleTwists = state.visibleTwists || [];
 
-  // Fade out existing cards
+  // Fade out current cards
   Array.from(stack.children).forEach((child) => {
     child.classList.add("twist-fade");
   });
 
-  // After fade, rebuild stack
+  // After fade, repopulate
   setTimeout(() => {
     stack.innerHTML = "";
 
     visibleTwists.forEach((tw) => {
+      const iconUrl =
+        tw.icon || "/overlays/shared/default-icon.png";
+
       const card = document.createElement("div");
       card.className = "bb-twist-card";
-
-      const iconUrl =
-        tw.icon ||
-        "/overlays/shared/default-icon.png";
 
       card.innerHTML = `
         <div class="twist-icon" style="background-image:url('${iconUrl}')"></div>
