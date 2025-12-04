@@ -405,7 +405,7 @@ async function demoteQueueByUsername(username: string) {
 }
 
 // ============================================================================
-// SNAPSHOT GENERATOR (overlay & admin)
+// SNAPSHOT GENERATOR
 // ============================================================================
 async function buildInitialSnapshot() {
   const snap: any = {};
@@ -496,10 +496,8 @@ io.on("connection", async (socket: AdminSocket) => {
   // OVERLAY CONNECT
   if (socket.isOverlay) {
     socket.join("overlays");
-
     const snap = await buildInitialSnapshot();
     socket.emit("overlayInitialSnapshot", snap);
-
     return;
   }
 
@@ -534,7 +532,7 @@ io.on("connection", async (socket: AdminSocket) => {
       await broadcastStats();
     }
 
-    // Admin: request for full state snapshot
+    // admin requests full snapshot
     socket.on("getInitialSnapshot", async (_payload, ack) => {
       const snap = await buildInitialSnapshot();
       ack(snap);
@@ -543,7 +541,7 @@ io.on("connection", async (socket: AdminSocket) => {
 });
 
 // ============================================================================
-// resolveUserIdentifier() — patched lookup logic
+// RESOLVE USER IDENTIFIER
 // ============================================================================
 async function resolveUserIdentifier(input: string) {
   if (!input) return null;
@@ -580,14 +578,13 @@ async function resolveUserIdentifier(input: string) {
 }
 
 // ============================================================================
-// ADMIN ACTION HANDLER (v16.8 patched)
+// ADMIN ACTION HANDLER (v16.8 + PATCH)
 // ============================================================================
 io.on("connection", (socket: AdminSocket) => {
   if (!socket.isAdmin) return;
 
   async function handle(action: string, data: any, ack: Function) {
     try {
-
       // ======================================================================
       // HOST MANAGEMENT
       // ======================================================================
@@ -604,7 +601,10 @@ io.on("connection", (socket: AdminSocket) => {
         const id = data?.tiktok_id ? String(data.tiktok_id) : null;
 
         if (!label || !un || !id)
-          return ack({ success: false, message: "label, username en tiktok_id verplicht" });
+          return ack({
+            success: false,
+            message: "label, username en tiktok_id verplicht"
+          });
 
         await pool.query(
           `INSERT INTO hosts (label, username, tiktok_id, active)
@@ -612,7 +612,11 @@ io.on("connection", (socket: AdminSocket) => {
           [label, un, id]
         );
 
-        emitLog({ type: "system", message: `Host toegevoegd: ${label} (@${un})` });
+        emitLog({
+          type: "system",
+          message: `Host toegevoegd: ${label} (@${un})`
+        });
+
         return ack({ success: true });
       }
 
@@ -621,9 +625,15 @@ io.on("connection", (socket: AdminSocket) => {
 
         if (!id) return ack({ success: false, message: "id verplicht" });
 
-        const check = await pool.query(`SELECT active FROM hosts WHERE id=$1`, [id]);
+        const check = await pool.query(`SELECT active FROM hosts WHERE id=$1`, [
+          id
+        ]);
+
         if (check.rows[0]?.active)
-          return ack({ success: false, message: "Kan actieve host niet verwijderen" });
+          return ack({
+            success: false,
+            message: "Kan actieve host niet verwijderen"
+          });
 
         await pool.query(`DELETE FROM hosts WHERE id=$1`, [id]);
 
@@ -637,6 +647,7 @@ io.on("connection", (socket: AdminSocket) => {
         if (!id) return ack({ success: false, message: "id verplicht" });
 
         const find = await pool.query(`SELECT * FROM hosts WHERE id=$1`, [id]);
+
         if (!find.rows.length)
           return ack({ success: false, message: "Host niet gevonden" });
 
@@ -646,7 +657,10 @@ io.on("connection", (socket: AdminSocket) => {
         HARD_HOST_USERNAME = find.rows[0].username;
         HARD_HOST_ID = String(find.rows[0].tiktok_id);
 
-        emitLog({ type: "system", message: `Actieve host is nu @${HARD_HOST_USERNAME}` });
+        emitLog({
+          type: "system",
+          message: `Actieve host is nu @${HARD_HOST_USERNAME}`
+        });
 
         await restartTikTokConnection();
 
@@ -673,7 +687,10 @@ io.on("connection", (socket: AdminSocket) => {
 
         await arenaClear();
 
-        emitLog({ type: "system", message: `Nieuw spel gestart (#${currentGameId})` });
+        emitLog({
+          type: "system",
+          message: `Nieuw spel gestart (#${currentGameId})`
+        });
 
         io.to("admins").emit("gameSession", {
           active: true,
@@ -723,7 +740,10 @@ io.on("connection", (socket: AdminSocket) => {
         try {
           await startRound(type);
         } catch (e: any) {
-          return ack({ success: false, message: e?.message || "Kon ronde niet starten" });
+          return ack({
+            success: false,
+            message: e?.message || "Kon ronde niet starten"
+          });
         }
 
         await emitArena();
@@ -746,15 +766,19 @@ io.on("connection", (socket: AdminSocket) => {
       }
 
       // ======================================================================
-      // ARENA MANAGEMENT — patched
+      // ARENA MANAGEMENT
       // ======================================================================
       if (action === "addToArena") {
         const user = await resolveUserIdentifier(data?.username);
-        if (!user) return ack({ success: false, message: "User niet gevonden" });
+        if (!user)
+          return ack({ success: false, message: "User niet gevonden" });
 
-        // Host mag niet in arena
+        // Host mag niet
         if (String(user.tiktok_id) === HARD_HOST_ID)
-          return ack({ success: false, message: "Host kan niet in arena staan" });
+          return ack({
+            success: false,
+            message: "Host kan niet in arena staan"
+          });
 
         // remove from queue first
         await removeFromQueue(String(user.tiktok_id));
@@ -786,14 +810,15 @@ io.on("connection", (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
+      // SOFT ELIMINATION (markeren)
       if (action === "eliminate") {
         const user = await resolveUserIdentifier(data?.username);
-        if (!user) return ack({ success: false, message: "User niet gevonden" });
+        if (!user)
+          return ack({ success: false, message: "User niet gevonden" });
 
-        // Mark or remove from arena
-        await arenaLeave(String(user.tiktok_id));
+        // Mark or remove from arena (soft)
+        await arenaLeave(String(user.tiktok_id)); // force = false
 
-        // Remove from queue too
         await removeFromQueue(String(user.tiktok_id));
 
         emitQueueEvent("leave", {
@@ -813,11 +838,40 @@ io.on("connection", (socket: AdminSocket) => {
       }
 
       // ======================================================================
+      // HARD DELETE (NIEUW PATCHED COMMAND)
+      // ======================================================================
+      if (action === "removeFromArenaPermanent") {
+        const user = await resolveUserIdentifier(data?.username);
+        if (!user)
+          return ack({ success: false, message: "User niet gevonden" });
+
+        // HARD REMOVE uit arena
+        await arenaLeave(String(user.tiktok_id), true);
+
+        // Altijd ook uit queue (failsafe)
+        await removeFromQueue(String(user.tiktok_id));
+
+        emitQueueEvent("leave", {
+          username: user.username,
+          display_name: user.display_name,
+          avatar_url: user.avatar_url || null
+        });
+
+        await emitArena();
+
+        emitLog({
+          type: "arena",
+          message: `${user.display_name} permanent uit arena verwijderd`
+        });
+
+        return ack({ success: true });
+      }
+
+      // ======================================================================
       // SEARCH USERS
       // ======================================================================
       if (action === "searchUsers") {
         const q = (data?.query || "").trim().toLowerCase();
-
         if (!q || q.length < 2) return ack({ users: [] });
 
         const like = `%${q}%`;
@@ -845,7 +899,10 @@ io.on("connection", (socket: AdminSocket) => {
           return ack({ success: false, message: "User niet gevonden" });
 
         if (String(user.tiktok_id) === HARD_HOST_ID)
-          return ack({ success: false, message: "Host kan niet in queue staan" });
+          return ack({
+            success: false,
+            message: "Host kan niet in queue staan"
+          });
 
         const exists = await pool.query(
           `SELECT 1 FROM queue WHERE user_tiktok_id=$1`,
@@ -985,7 +1042,10 @@ io.on("connection", (socket: AdminSocket) => {
           [user.tiktok_id]
         );
 
-        emitLog({ type: "vip", message: `${user.display_name} VIP verwijderd` });
+        emitLog({
+          type: "vip",
+          message: `${user.display_name} VIP verwijderd`
+        });
 
         io.to("overlays").emit("updateQueue", {
           open: true,
@@ -1012,11 +1072,16 @@ io.on("connection", (socket: AdminSocket) => {
       // ======================================================================
       // UNKNOWN COMMAND
       // ======================================================================
-      return ack({ success: false, message: "Onbekend admin commando" });
-
+      return ack({
+        success: false,
+        message: "Onbekend admin commando"
+      });
     } catch (err: any) {
       console.error("Admin error:", err);
-      return ack({ success: false, message: err?.message || "Serverfout" });
+      return ack({
+        success: false,
+        message: err?.message || "Serverfout"
+      });
     }
   }
 
