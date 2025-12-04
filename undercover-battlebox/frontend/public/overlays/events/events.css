@@ -6,82 +6,94 @@
 .bb-events-panel {
   width: 250px;
   height: 700px;
-  background: var(--glass-mid);
-  border: 2px solid var(--border-light);
-  padding: 12px;
+
+  background: rgba(5,5,8,0.75);
+  border: 2px solid rgba(255,255,255,0.08);
+
+  padding: 10px;
   overflow: hidden;
 
+  display: flex;
+  flex-direction: column;
+
   box-shadow:
-    0 0 20px rgba(255,77,79,0.45),
-    inset 0 0 30px rgba(255,77,79,0.25);
+    0 0 40px rgba(255,77,79,0.45),
+    inset 0 0 60px rgba(255,77,79,0.25);
 
   animation: panelIn 0.6s ease-out forwards;
 }
 
 @keyframes panelIn {
-  0% { opacity: 0; transform: translateX(30px) scale(0.92); }
+  0% { opacity: 0; transform: translateX(20px) scale(0.94); }
   100% { opacity: 1; transform: translateX(0) scale(1); }
 }
 
 /* ---------------------------------------------------------
-   LIST
+   LIST — full height
 --------------------------------------------------------- */
 .bb-events-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+  height: 100%;
+  overflow: hidden;
 }
 
 /* ---------------------------------------------------------
-   EVENT ITEM — OCTAGON STYLE
+   EVENT CARD — same as queue style (dark, octagon)
 --------------------------------------------------------- */
 .bb-event-item {
+  background: rgba(15, 15, 20, 0.85);
+  border: 2px solid rgba(255,255,255,0.08);
+
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px;
+  gap: 12px;
 
-  background: var(--glass-dark);
-  border: 2px solid var(--border-light);
+  padding: 10px;
+  min-height: 60px;
 
   clip-path: polygon(
     10% 0%, 90% 0%,
-    100% 18%, 100% 82%,
+    100% 15%, 100% 85%,
     90% 100%, 10% 100%,
-    0% 82%, 0% 18%
+    0% 85%, 0% 15%
   );
 
   box-shadow:
-    0 0 22px rgba(0,0,0,0.9),
-    inset 0 0 25px rgba(0,0,0,0.6),
-    inset 0 0 12px rgba(255,77,79,0.35);
+    0 0 20px rgba(0,0,0,0.9),
+    inset 0 0 30px rgba(0,0,0,0.65),
+    inset 0 0 20px rgba(255,77,79,0.22);
 
-  animation: slideIn 0.45s cubic-bezier(.17,.67,.4,1.25) both;
+  animation: eventIn 0.35s cubic-bezier(.17,.67,.4,1.25) both;
 }
 
-@keyframes slideIn {
-  0% { opacity: 0; transform: translateX(25px); }
-  100% { opacity: 1; transform: translateX(0); }
+@keyframes eventIn {
+  0% { opacity: 0; transform: translateX(20px) scale(0.94); }
+  100% { opacity: 1; transform: translateX(0) scale(1); }
 }
 
-/* Fade-out (trigger via JS) */
+/* Fade-out animation */
 .event-fade {
-  animation: fadeOut 0.55s ease-out forwards !important;
+  animation: eventOut 0.45s ease-out forwards !important;
 }
 
-@keyframes fadeOut {
+@keyframes eventOut {
   0% { opacity: 1; transform: translateX(0); }
   100% { opacity: 0; transform: translateX(20px); }
 }
 
 /* ---------------------------------------------------------
-   ICONS
+   ICONS — consistent neon shape
 --------------------------------------------------------- */
 .event-icon {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
+
   background-size: cover;
-  filter: drop-shadow(0 0 4px rgba(255,255,255,0.4));
+  background-position: center;
+
+  filter: drop-shadow(0 0 6px rgba(255,255,255,0.45));
 
   animation: iconPulse 3s ease-in-out infinite;
 }
@@ -92,47 +104,66 @@
 }
 
 .event-icon.join {
-  background-image: url("data:image/svg+xml;utf8,<svg fill='%2300ff99' width='20' height='20' xmlns='http://www.w3.org/2000/svg'><polygon points='10,0 20,20 0,20'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg fill='%2300ff99' width='26' height='26' xmlns='http://www.w3.org/2000/svg'><polygon points='13,0 26,26 0,26'/></svg>");
 }
 
 .event-icon.leave {
-  background-image: url("data:image/svg+xml;utf8,<svg fill='%23ff4d4f' width='20' height='20' xmlns='http://www.w3.org/2000/svg'><polygon points='10,20 20,0 0,0'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg fill='%23ff4d4f' width='26' height='26' xmlns='http://www.w3.org/2000/svg'><polygon points='13,26 26,0 0,0'/></svg>");
 }
 
 .event-icon.promote {
-  background-image: url("data:image/svg+xml;utf8,<svg fill='%2300d9ff' width='20' height='20' xmlns='http://www.w3.org/2000/svg'><polygon points='10,0 20,20 0,20'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg fill='%2300d9ff' width='26' height='26' xmlns='http://www.w3.org/2000/svg'><polygon points='13,0 26,26 0,26'/></svg>");
 }
 
 .event-icon.demote {
-  background-image: url("data:image/svg+xml;utf8,<svg fill='%23ffaa00' width='20' height='20' xmlns='http://www.w3.org/2000/svg'><polygon points='10,20 20,0 0,0'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg fill='%23ffaa00' width='26' height='26' xmlns='http://www.w3.org/2000/svg'><polygon points='13,26 26,0 0,0'/></svg>");
 }
 
 /* ---------------------------------------------------------
-   TEXT
+   TEXT — improved style + truncation
 --------------------------------------------------------- */
+.event-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
 .event-text .name {
   font-weight: 700;
+  font-size: 15px;
   color: white;
-  font-size: 13px;
-  letter-spacing: 0.4px;
+  max-width: 150px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .event-text .user {
-  opacity: 0.75;
   font-size: 12px;
+  opacity: 0.75;
+}
+
+.event-text .reason {
+  margin-top: 3px;
+  font-size: 12px;
+  opacity: 0.85;
+  color: var(--neon-turquoise);
+  max-width: 150px;
+  line-height: 1.2;
 }
 
 /* ---------------------------------------------------------
-   VIP PULSE
+   VIP aura
 --------------------------------------------------------- */
 .event-vip {
+  margin-left: auto;
+
   width: 12px;
   height: 12px;
   background: gold;
   border-radius: 50%;
-  margin-left: auto;
 
-  box-shadow: 0 0 15px gold;
+  box-shadow: 0 0 20px gold;
 
   animation: vipPulse 2s ease-in-out infinite;
 }
