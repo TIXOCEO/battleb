@@ -23,7 +23,6 @@
   backdrop-filter: blur(6px);
 }
 
-/* Scroll mask */
 .events-scroll-mask {
   width: 100%;
   height: 100%;
@@ -31,11 +30,10 @@
   position: relative;
 }
 
-/* Scrolling list container */
 .bb-events-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   transform: translateY(0);
   transition: transform 0.25s cubic-bezier(.16,.78,.35,1.25);
 }
@@ -49,10 +47,10 @@
 
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 
-  padding: 10px;
-  min-height: 62px;
+  padding: 7px 8px;
+  min-height: 50px; /* ⭐ smaller height fits 10 items */
 
   clip-path: polygon(
     10% 0%, 90% 0%,
@@ -69,14 +67,12 @@
   animation: eventFlashIn 0.45s cubic-bezier(.16,.78,.35,1.25) both;
 }
 
-/* FLASHY arrival animation */
 @keyframes eventFlashIn {
-  0% { opacity: 0; transform: translateY(-15px) scale(0.92); filter: brightness(2); }
+  0% { opacity: 0; transform: translateY(-12px) scale(0.92); filter: brightness(2); }
   70% { filter: brightness(1.4); }
   100% { opacity: 1; transform: translateY(0) scale(1); filter: brightness(1); }
 }
 
-/* Fade-out before removal */
 .event-fade {
   animation: eventFadeOut 0.45s ease-out forwards !important;
 }
@@ -87,11 +83,11 @@
 }
 
 /* ---------------------------------------------------------
-   ICON SYSTEM (NO AVATARS)
+   ICON SYSTEM
 --------------------------------------------------------- */
 .event-icon-wrapper {
-  width: 32px;
-  height: 32px;
+  width: 26px;
+  height: 26px;
 
   display: flex;
   justify-content: center;
@@ -112,27 +108,16 @@
 }
 
 .event-type-icon {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 900;
   user-select: none;
   text-shadow: 0 0 14px rgba(255,255,255,0.6);
 }
 
-.event-type-icon.join {
-  color: #00ff99;
-}
-
-.event-type-icon.leave {
-  color: #ff4d4f;
-}
-
-.event-type-icon.promote {
-  color: #00ff99;
-}
-
-.event-type-icon.demote {
-  color: #ff4d4f;
-}
+.event-type-icon.join { color: #00ff99; }
+.event-type-icon.leave { color: #ff4d4f; }
+.event-type-icon.promote { color: #00ff99; }
+.event-type-icon.demote { color: #ff4d4f; }
 
 /* ---------------------------------------------------------
    TEXT
@@ -146,7 +131,7 @@
 
 .event-text .name {
   font-weight: 800;
-  font-size: 16px;
+  font-size: 15px;
   color: white;
   white-space: nowrap;
   overflow: hidden;
@@ -154,13 +139,13 @@
 }
 
 .event-text .reason {
-  font-size: 13px;
+  font-size: 16px; /* ⭐ 20% bigger */
   color: var(--bb-turquoise);
   opacity: 0.9;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-top: 3px;
+  margin-top: 2px;
 }
 
 /* ---------------------------------------------------------
@@ -168,9 +153,9 @@
 --------------------------------------------------------- */
 .event-vip {
   margin-left: auto;
+  width: 10px;
+  height: 10px;
 
-  width: 12px;
-  height: 12px;
   background: gold;
   border-radius: 50%;
   box-shadow: 0 0 20px gold;
