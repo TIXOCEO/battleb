@@ -22,7 +22,6 @@ let routerStarted = false;
 // ============================================================================
 // TWIST MAP — FULL CUSTOM VERSION
 // ============================================================================
-
 const TWIST_MAP = {
   galaxy: {
     giftName: "Galaxy",
@@ -88,7 +87,6 @@ const TWIST_MAP = {
   }
 };
 
-
 const twistKeys = Object.entries(TWIST_MAP).map(([key, def]) => ({
   key,
   giftName: def.giftName,
@@ -98,7 +96,6 @@ const twistKeys = Object.entries(TWIST_MAP).map(([key, def]) => ({
   aliases: [...def.aliases],
   icon: def.icon || EMPTY_AVATAR
 }));
-
 
 // ============================================================================
 // MAIN ROUTER
@@ -112,7 +109,7 @@ export async function initEventRouter() {
   console.log("%c[BattleBox] Event Router Ready", "color:#0fffd7;font-weight:bold;");
 
   // -------------------------------------------------------------------------
-  // SNAPSHOT (NEW!)
+  // SNAPSHOT
   // -------------------------------------------------------------------------
   socket.on("overlayInitialSnapshot", (snap) => {
     console.log("%c[BattleBox] SNAPSHOT ontvangen", "color:#0fffd7;font-weight:bold;");
@@ -120,7 +117,7 @@ export async function initEventRouter() {
   });
 
   // -------------------------------------------------------------------------
-  // updateQueue → only first 15 slots
+  // updateQueue → first 15
   // -------------------------------------------------------------------------
   socket.on("updateQueue", (packet) => {
     if (!packet || !Array.isArray(packet.entries)) return;
@@ -132,30 +129,52 @@ export async function initEventRouter() {
       priorityDelta: e.priorityDelta || 0,
       is_vip: !!e.is_vip,
       is_fan: !!e.is_fan,
-      avatar_url: e.avatar_url || EMPTY_AVATAR,
+      avatar_url: e.avatar_url || EMPTY_AVATAR
     }));
 
     queueStore.setQueue(mapped);
   });
 
   // -------------------------------------------------------------------------
-  // queueEvent
+  // queueEvent — FIXED (was volledig incorrect)
   // -------------------------------------------------------------------------
   socket.on("queueEvent", (evt) => {
-    if (!evt || !evt.type) return;
+    if (!evt || !evt.type || !evt.user) return;
 
-    evt.display_name = evt.display_name || "Onbekend";
-    evt.username = evt.username || "";
-    evt.reason = evt.reason || "";
+    const mapped = {
+      type: evt.type,
+      timestamp: evt.timestamp || Date.now(),
 
-    eventStore.pushEvent(evt);
+      display_name: evt.user.display_name || "Onbekend",
+      username: evt.user.username || "",
+      is_vip: !!evt.user.is_vip,
+      avatar_url: evt.user.avatar_url || EMPTY_AVATAR,
 
-    if (evt.username) {
-      queueStore.highlightCard(evt.username);
+      reason:
+        evt.reason ||
+        (evt.type === "join"
+          ? "stapt de wachtrij binnen."
+          : evt.type === "leave"
+          ? "verlaat de wachtrij."
+          : evt.type === "promote"
+          ? "stijgt in positie."
+          : evt.type === "demote"
+          ? "zakt in positie."
+          : "")
+    };
+
+    eventStore.pushEvent(mapped);
+
+    // highlight card
+    if (mapped.username) {
+      queueStore.highlightCard(mapped.username);
       setTimeout(() => queueStore.clearHighlight(), 900);
     }
 
-    setTimeout(() => eventStore.fadeOutEvent(evt.timestamp), EVENT_LIFETIME_MS);
+    // fade out
+    setTimeout(() => {
+      eventStore.fadeOutEvent(mapped.timestamp);
+    }, EVENT_LIFETIME_MS);
   });
 
   // -------------------------------------------------------------------------
