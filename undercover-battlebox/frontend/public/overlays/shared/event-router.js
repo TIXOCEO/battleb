@@ -83,7 +83,7 @@ const TWIST_MAP = {
     twistName: "Immune Breaker",
     icon: "https://p16-webcast.tiktokcdn.com/img/maliva/webcast-va/4227ed71f2c494b554f9cbe2147d4899~tplv-obj.webp",
     diamonds: 899,
-    description: "Immuniteit breken? Stuur 2 treinen op target af en immuniteit verdwijnd!",
+    description: "Immuniteit breken? Stuur 2 treinen op target af en immuniteit verdwijnt!",
     aliases: ["breaker"]
   }
 };
