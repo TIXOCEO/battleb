@@ -1,8 +1,11 @@
 // ============================================================================
-// server.ts — BATTLEBOX BACKEND v16.7 (Final No-Duplicate-Events Build)
-// Gifts Engine + Round Flags + Realtime Queue Sync
-// Correct Leaderboards + Host Diamonds + Username Autofill
-// Overlay queueEvent FIX (no duplicate emits in server.ts)
+// server.ts — BATTLEBOX BACKEND v16.8 (Full Sync Build)
+// ============================================================================
+// - No duplicate events
+// - Queue ↔ Arena perfect sync
+// - Removal from arena also removes from queue (and vice versa)
+// - Emits exactly like v16.4, but stable
+// - All other logic untouched
 // ============================================================================
 
 import express from "express";
@@ -42,14 +45,11 @@ import {
   addToQueueAdminOverride
 } from "./queue";
 
-// Queue events (ONLY used in addToArena auto-leave)
+// Queue events (patched, single emit per action)
 import { emitQueueEvent } from "./queue-events";
 
 import { giveTwistAdmin, useTwistAdmin } from "./engines/9-admin-twist-engine";
 
-// ============================================================================
-// CONFIG
-// ============================================================================
 dotenv.config();
 
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "supersecret123";
@@ -271,7 +271,9 @@ export async function broadcastHostDiamonds() {
   }
 
   const q = await pool.query(
-    `SELECT COALESCE(SUM(diamonds),0) AS total FROM gifts WHERE game_id=$1 AND is_host_gift=TRUE`,
+    `SELECT COALESCE(SUM(diamonds),0) AS total 
+     FROM gifts 
+     WHERE game_id=$1 AND is_host_gift=TRUE`,
     [currentGameId]
   );
 
@@ -306,7 +308,9 @@ export async function broadcastStats() {
   );
 
   const h = await pool.query(
-    `SELECT COALESCE(SUM(diamonds),0) AS total FROM gifts WHERE game_id=$1 AND is_host_gift=TRUE`,
+    `SELECT COALESCE(SUM(diamonds),0) AS total 
+     FROM gifts 
+     WHERE game_id=$1 AND is_host_gift=TRUE`,
     [currentGameId]
   );
 
@@ -399,7 +403,7 @@ async function demoteQueueByUsername(username: string) {
 }
 
 // ============================================================================
-// SNAPSHOT GENERATOR
+// SNAPSHOT GENERATOR (unchanged)
 // ============================================================================
 async function buildInitialSnapshot() {
   const snap: any = {};
@@ -425,12 +429,10 @@ async function buildInitialSnapshot() {
       `,
       [currentGameId]
     );
-
+    
     const h = await pool.query(
       `SELECT COALESCE(SUM(diamonds),0) AS total 
-       FROM gifts 
-       WHERE game_id=$1 
-         AND is_host_gift=TRUE`,
+       FROM gifts WHERE game_id=$1 AND is_host_gift=TRUE`,
       [currentGameId]
     );
 
@@ -533,22 +535,21 @@ async function buildInitialSnapshot() {
 }
 
 // ============================================================================
-// SOCKET CONNECT HANDLER
+// SOCKET CONNECT (admins + overlays)
 // ============================================================================
 io.on("connection", async (socket: AdminSocket) => {
   if (!socket.isAdmin && !socket.isOverlay) return socket.disconnect();
 
-  // OVERLAY CLIENT
+  // OVERLAY
   if (socket.isOverlay) {
     socket.join("overlays");
 
     const snap = await buildInitialSnapshot();
     socket.emit("overlayInitialSnapshot", snap);
-
     return;
   }
 
-  // ADMIN CLIENT
+  // ADMIN
   if (socket.isAdmin) {
     socket.join("admins");
 
@@ -587,7 +588,11 @@ io.on("connection", async (socket: AdminSocket) => {
 });
 
 // ============================================================================
-// UNIVERSAL ADMIN ACTION HANDLER
+// END PART 1 — NEXT MESSAGE = PART 2 (Admin Action Handler w/ Fixes)
+// ============================================================================
+
+// ============================================================================
+// UNIVERSAL ADMIN ACTION HANDLER (v16.8 — FIXED EVENTS + SYNC)
 // ============================================================================
 io.on("connection", (socket: AdminSocket) => {
   if (!socket.isAdmin) return;
@@ -671,11 +676,11 @@ io.on("connection", (socket: AdminSocket) => {
       // GAME MANAGEMENT
       // ======================================================================
       if (action === "startGame") {
-        const r = await pool.query(
-          `INSERT INTO games (status, started_at)
-           VALUES ('running', NOW())
-           RETURNING id`
-        );
+        const r = await pool.query(`
+          INSERT INTO games (status, started_at)
+          VALUES ('running', NOW())
+          RETURNING id
+        `);
 
         currentGameId = r.rows[0].id;
         (io as any).currentGameId = currentGameId;
@@ -755,7 +760,7 @@ io.on("connection", (socket: AdminSocket) => {
       }
 
       // ======================================================================
-      // ARENA MANAGEMENT
+      // ARENA MANAGEMENT (FULL SYNC WITH QUEUE — FIXED)
       // ======================================================================
       if (action === "addToArena") {
         const clean = (data?.username || "").trim().replace(/^@+/, "").toLowerCase();
@@ -772,21 +777,13 @@ io.on("connection", (socket: AdminSocket) => {
         if (String(r.rows[0].tiktok_id) === HARD_HOST_ID)
           return ack({ success: false, message: "Host kan niet in arena staan" });
 
-        const inQueue = await pool.query(
-          `SELECT 1 FROM queue WHERE user_tiktok_id=$1`,
-          [r.rows[0].tiktok_id]
-        );
+        // ALWAYS remove from queue first (prevents duplicates)
+        await removeFromQueue(String(r.rows[0].tiktok_id));
 
-        if (inQueue.rows.length) {
-          emitQueueEvent("leave", {
-            ...r.rows[0],
-            avatar_url: r.rows[0].avatar_url || null
-          });
-        }
-
-        await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [
-          r.rows[0].tiktok_id
-        ]);
+        emitQueueEvent("leave", {
+          ...r.rows[0],
+          avatar_url: r.rows[0].avatar_url || null
+        });
 
         await arenaJoin(
           String(r.rows[0].tiktok_id),
@@ -822,7 +819,18 @@ io.on("connection", (socket: AdminSocket) => {
         if (!r.rows.length)
           return ack({ success: false, message: "User niet gevonden" });
 
+        // Remove from arena
         await arenaLeave(String(r.rows[0].tiktok_id));
+
+        // Also always remove from queue (sync guarantee)
+        await removeFromQueue(String(r.rows[0].tiktok_id));
+
+        emitQueueEvent("leave", {
+          username: r.rows[0].username,
+          display_name: r.rows[0].display_name,
+          avatar_url: null
+        });
+
         await emitArena();
 
         emitLog({
@@ -858,7 +866,7 @@ io.on("connection", (socket: AdminSocket) => {
       }
 
       // ======================================================================
-      // QUEUE MANAGEMENT (NO DUPLICATE EVENTS PATCHED ABOVE)
+      // QUEUE MANAGEMENT (v16.8 — FIXED DUPLICATE EMITS)
       // ======================================================================
       if (action === "addToQueue") {
         const clean = (data?.username || "").trim().replace(/^@+/, "").toLowerCase();
@@ -875,20 +883,24 @@ io.on("connection", (socket: AdminSocket) => {
         if (String(u.rows[0].tiktok_id) === HARD_HOST_ID)
           return ack({ success: false, message: "Host kan niet in queue staan" });
 
-        try {
+        // PREVENT double joins:
+        const exists = await pool.query(
+          `SELECT 1 FROM queue WHERE user_tiktok_id=$1`,
+          [u.rows[0].tiktok_id]
+        );
+
+        if (!exists.rows.length) {
           await addToQueueAdminOverride(
             String(u.rows[0].tiktok_id),
             u.rows[0].username
           );
-        } catch (e: any) {
-          return ack({ success: false, message: e?.message || "Kon niet joinen" });
-        }
 
-        // PATCHED to avoid duplicates
-        emitQueueEvent("join", {
-          ...u.rows[0],
-          avatar_url: u.rows[0].avatar_url || null
-        });
+          // Emit EXACTLY ONE queue event
+          emitQueueEvent("join", {
+            ...u.rows[0],
+            avatar_url: u.rows[0].avatar_url || null
+          });
+        }
 
         io.to("overlays").emit("updateQueue", {
           open: true,
@@ -910,12 +922,12 @@ io.on("connection", (socket: AdminSocket) => {
         if (!u.rows.length)
           return ack({ success: false, message: "User niet gevonden" });
 
+        await removeFromQueue(String(u.rows[0].tiktok_id));
+
         emitQueueEvent("leave", {
           ...u.rows[0],
           avatar_url: u.rows[0].avatar_url || null
         });
-
-        await removeFromQueue(String(u.rows[0].tiktok_id));
 
         io.to("overlays").emit("updateQueue", {
           open: true,
@@ -1045,7 +1057,7 @@ io.on("connection", (socket: AdminSocket) => {
       }
 
       // ======================================================================
-      // UNKNOWN ACTION
+      // UNKNOWN COMMAND
       // ======================================================================
       return ack({ success: false, message: "Onbekend admin commando" });
 
@@ -1062,13 +1074,20 @@ io.on("connection", (socket: AdminSocket) => {
 });
 
 // ============================================================================
-// START SERVER
+// START SERVER (v16.8)
 // ============================================================================
 (async () => {
-  await loadArenaSettingsFromDB();
-  console.log("✔ Arena settings geladen");
+  try {
+    // Laad arena settings bij opstarten
+    await loadArenaSettingsFromDB();
+    console.log("✔ Arena settings geladen");
 
-  server.listen(PORT, () => {
-    console.log(`🚀 Backend live op poort ${PORT}`);
-  });
+    server.listen(PORT, () => {
+      console.log(`🚀 Backend live op poort ${PORT}`);
+    });
+
+  } catch (err) {
+    console.error("❌ Fout bij server startup:", err);
+    process.exit(1);
+  }
 })();
