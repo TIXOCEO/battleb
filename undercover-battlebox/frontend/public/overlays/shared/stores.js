@@ -1,5 +1,5 @@
 // ============================================================================
-// stores.js — BattleBox Overlay Stores (10-SLOT EVENTS EDITION)
+// stores.js — BattleBox Overlay Stores (10-SLOT EVENTS — NO FADE VERSION)
 // ============================================================================
 
 function createStore(initialState) {
@@ -26,7 +26,7 @@ const EMPTY_AVATAR =
   "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
 
 // ============================================================================
-// QUEUE STORE
+// QUEUE STORE (unchanged)
 // ============================================================================
 export const queueStore = createStore({
   entries: [],
@@ -48,23 +48,19 @@ queueStore.clearHighlight = () => {
 };
 
 // ============================================================================
-// EVENTS STORE — 10 events, fade flag, no deletion
+// EVENTS STORE — 10 items, new on top, NEVER auto-fade
 // ============================================================================
 export const eventStore = createStore({
   events: [],
 });
 
 eventStore.pushEvent = (evt) => {
-  const next = [{ ...evt, _fade: false }, ...eventStore.get().events].slice(0, 10);
+  const next = [evt, ...eventStore.get().events].slice(0, 10);
   eventStore.set({ events: next });
 };
 
-eventStore.fadeOutEvent = (ts) => {
-  const updated = eventStore.get().events.map((e) =>
-    e.timestamp === ts ? { ...e, _fade: true } : e
-  );
-  eventStore.set({ events: updated });
-};
+// fadeOutEvent does NOTHING now
+eventStore.fadeOutEvent = () => {};
 
 // ============================================================================
 // TWISTS STORE
@@ -89,7 +85,7 @@ tickerStore.setText = (txt) => {
 };
 
 // ============================================================================
-// SNAPSHOT LOADER — DO NOT load old logs into events overlay
+// SNAPSHOT LOADER — no event injection, no resetting events
 // ============================================================================
 export function applySnapshot(snap) {
   if (!snap) return;
@@ -97,6 +93,6 @@ export function applySnapshot(snap) {
   if (snap.queue?.entries) queueStore.setQueue(snap.queue.entries);
   if (snap.ticker) tickerStore.setText(snap.ticker);
 
-  // ⭐ EVENTS OVERLAY mag NOOIT oude logs ontvangen
-  eventStore.set({ events: [] });
+  // ✔ DO NOT override eventStore
+  // events blijven zoals ze zijn
 }
