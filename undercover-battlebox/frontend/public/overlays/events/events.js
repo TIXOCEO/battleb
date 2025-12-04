@@ -1,11 +1,11 @@
 // ============================================================================
-// events.js — BattleBox EVENTS OVERLAY v5.0 FINAL
+// events.js — BattleBox EVENTS OVERLAY v6.0 FINAL
 // ============================================================================
 // - Newest events on top
 // - Max 10 visible
 // - Smooth push-down stack animation
 // - Flashy entrance for each event
-// - Fade-out via store (not DOM removal)
+// - Fade-out via store (_fade flag, NOT DOM removal)
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -30,20 +30,20 @@ function getEventIcon(type) {
 
 function truncate(s, max) {
   if (!s) return "";
-  return s.length > max ? s.slice(0, max - 3) + "..." : s;
+  return s.length > max ? s.slice(0, max - 3) + "...";
 }
 
 // ---------------------------------------------------------
-// Stack push animation (smooth downward shift)
+// Stack push animation
 // ---------------------------------------------------------
 let previousCount = 0;
 
 function animateStackIfNewEvent(countNow) {
   if (countNow > previousCount) {
-    root.style.transform = "translateY(-22px)";
+    root.style.transform = "translateY(-18px)";
     setTimeout(() => {
       root.style.transform = "translateY(0)";
-    }, 30);
+    }, 40);
   }
   previousCount = countNow;
 }
@@ -59,6 +59,7 @@ function render(list) {
   events.forEach((evt) => {
     const el = document.createElement("div");
     el.className = "bb-event-item";
+    if (evt._fade) el.classList.add("event-fade");
 
     const icon = getEventIcon(evt.type);
 
@@ -69,13 +70,11 @@ function render(list) {
 
       <div class="event-text">
         <div class="name">${truncate(evt.display_name, 22)}</div>
-        <div class="reason">${truncate(evt.reason, 34)}</div>
+        <div class="reason">${truncate(evt.reason, 40)}</div>
       </div>
 
       ${evt.is_vip ? `<div class="event-vip"></div>` : ""}
     `;
-
-    if (evt._fade) el.classList.add("event-fade");
 
     root.appendChild(el);
   });
@@ -84,7 +83,7 @@ function render(list) {
 }
 
 // ---------------------------------------------------------
-// Subscribe to eventStore
+// Subscribe
 // ---------------------------------------------------------
 eventStore.subscribe((state) => {
   render(state.events);
