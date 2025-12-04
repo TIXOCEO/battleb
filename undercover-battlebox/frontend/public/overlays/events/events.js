@@ -1,11 +1,5 @@
 // ============================================================================
-// events.js — BattleBox EVENTS OVERLAY v6.1 FINAL (Syntax Fix)
-// ============================================================================
-// - Newest events on top
-// - Max 10 visible
-// - Smooth push-down stack animation
-// - Flashy entrance for each event
-// - Fade-out via store (_fade flag, NOT DOM removal)
+// events.js — BattleBox EVENTS OVERLAY v6.1 (NO FADE VERSION)
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -14,10 +8,8 @@ import { eventStore } from "/overlays/shared/stores.js";
 initEventRouter();
 
 const root = document.getElementById("events-list");
-
 const MAX_VISIBLE = 10;
 
-// ICON MAP
 function getEventIcon(type) {
   switch (type) {
     case "join": return "▶";
@@ -29,18 +21,14 @@ function getEventIcon(type) {
 }
 
 function truncate(s, max) {
-  if (!s) return "";
-  return s.length > max ? s.slice(0, max - 3) + "..." : s;
+  return !s ? "" : s.length > max ? s.slice(0, max - 3) + "..." : s;
 }
 
-// ---------------------------------------------------------
-// Stack push animation
-// ---------------------------------------------------------
 let previousCount = 0;
 
 function animateStackIfNewEvent(countNow) {
   if (countNow > previousCount) {
-    root.style.transform = "translateY(-18px)";
+    root.style.transform = "translateY(-16px)";
     setTimeout(() => {
       root.style.transform = "translateY(0)";
     }, 40);
@@ -48,18 +36,14 @@ function animateStackIfNewEvent(countNow) {
   previousCount = countNow;
 }
 
-// ---------------------------------------------------------
-// Render event list
-// ---------------------------------------------------------
 function render(list) {
-  const events = list.slice(0, MAX_VISIBLE);
-
   root.innerHTML = "";
+
+  const events = list.slice(0, MAX_VISIBLE);
 
   events.forEach((evt) => {
     const el = document.createElement("div");
     el.className = "bb-event-item";
-    if (evt._fade) el.classList.add("event-fade");
 
     const icon = getEventIcon(evt.type);
 
@@ -70,7 +54,7 @@ function render(list) {
 
       <div class="event-text">
         <div class="name">${truncate(evt.display_name, 22)}</div>
-        <div class="reason">${truncate(evt.reason, 40)}</div>
+        <div class="reason">${truncate(evt.reason, 42)}</div>
       </div>
 
       ${evt.is_vip ? `<div class="event-vip"></div>` : ""}
@@ -82,9 +66,6 @@ function render(list) {
   animateStackIfNewEvent(events.length);
 }
 
-// ---------------------------------------------------------
-// Subscribe
-// ---------------------------------------------------------
 eventStore.subscribe((state) => {
   render(state.events);
 });
