@@ -1,20 +1,19 @@
 // ============================================================================
-// twists.js — 2-CARD CENTER LAYOUT VERSION
+// twists.js — 2 FULL-HEIGHT CARDS, CENTERED
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
 import { twistStore } from "/overlays/shared/stores.js";
 
-// Start router
 initEventRouter();
 
 const stack = document.getElementById("twist-stack");
 
 twistStore.subscribe((state) => {
   const all = state.visibleTwists || [];
-  const visibleTwists = all.slice(0, 2); // 🔥 ONLY 2 CARDS
+  const visibleTwists = all.slice(0, 2); // EXACT 2 CARDS
 
-  // Fade all existing cards
+  // Fade old cards
   Array.from(stack.children).forEach((child) => {
     child.classList.add("twist-fade");
   });
