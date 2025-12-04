@@ -26,7 +26,7 @@ const EMPTY_AVATAR =
   "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
 
 // ============================================================================
-// QUEUE STORE — unchanged
+// QUEUE STORE
 // ============================================================================
 export const queueStore = createStore({
   entries: [],
@@ -48,20 +48,14 @@ queueStore.clearHighlight = () => {
 };
 
 // ============================================================================
-// EVENTS STORE — FIXED FOR 10 EVENTS + FADE MARKING
+// EVENTS STORE — 10 events, fade flag, no deletion
 // ============================================================================
 export const eventStore = createStore({
   events: [],
 });
 
 eventStore.pushEvent = (evt) => {
-  evt.display_name = evt.display_name || "Onbekend";
-  evt.username = evt.username || "";
-  evt.reason = evt.reason || "";
-  evt._fade = false;
-
-  const list = eventStore.get().events;
-  const next = [evt, ...list].slice(0, 10);   // ⭐ MAX 10 events
+  const next = [{ ...evt, _fade: false }, ...eventStore.get().events].slice(0, 10);
   eventStore.set({ events: next });
 };
 
@@ -95,7 +89,7 @@ tickerStore.setText = (txt) => {
 };
 
 // ============================================================================
-// SNAPSHOT LOADER
+// SNAPSHOT LOADER — DO NOT load old logs into events overlay
 // ============================================================================
 export function applySnapshot(snap) {
   if (!snap) return;
@@ -103,15 +97,6 @@ export function applySnapshot(snap) {
   if (snap.queue?.entries) queueStore.setQueue(snap.queue.entries);
   if (snap.ticker) tickerStore.setText(snap.ticker);
 
-  if (snap.logs) {
-    const items = snap.logs.slice(0, 10).map((log) => ({
-      type: log.type,
-      timestamp: log.timestamp,
-      display_name: log.message || "",
-      username: "",
-      reason: "",
-      _fade: false,
-    }));
-    eventStore.set({ events: items });
-  }
+  // ⭐ EVENTS OVERLAY mag NOOIT oude logs ontvangen
+  eventStore.set({ events: [] });
 }
