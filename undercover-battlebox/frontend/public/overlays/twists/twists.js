@@ -1,5 +1,5 @@
 // ============================================================================
-// twists.js — 2 FULL-HEIGHT CARDS, CENTERED
+// twists.js — 2 FULL-HEIGHT CARDS, CENTERED, BADGE ALIASES (FINAL)
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -11,9 +11,9 @@ const stack = document.getElementById("twist-stack");
 
 twistStore.subscribe((state) => {
   const all = state.visibleTwists || [];
-  const visibleTwists = all.slice(0, 2); // EXACT 2 CARDS
+  const visibleTwists = all.slice(0, 2);
 
-  // Fade old cards
+  // Fade out current cards
   Array.from(stack.children).forEach((child) => {
     child.classList.add("twist-fade");
   });
@@ -27,16 +27,29 @@ twistStore.subscribe((state) => {
 
       const iconUrl = tw.icon || "/overlays/shared/default-icon.png";
 
-      card.innerHTML = `
-        <div class="twist-icon" style="background-image:url('${iconUrl}')"></div>
+      // Build alias badge list
+      const aliasBadges = tw.aliases
+        .map(a => `<span class="alias-badge">!use ${a} @target</span>`)
+        .join("");
 
+      card.innerHTML = `
         <div class="twist-info">
-          <div class="twist-name">${tw.name}</div>
-          <div class="twist-gift">${tw.gift}</div>
+
+          <!-- 1. TWISTNAAM -->
+          <div class="twist-name">${tw.twistName}</div>
+
+          <!-- 2. GIFTNAAM -->
+          <div class="twist-gift">${tw.giftName}</div>
+
+          <!-- 3. ICON -->
+          <div class="twist-icon" style="background-image:url('${iconUrl}')"></div>
+
+          <!-- 4. DESCRIPTION -->
           <div class="twist-desc">${tw.description}</div>
 
+          <!-- 5. BADGE LIST -->
           <div class="twist-commands">
-            <span>!use ${tw.aliases[0]} @target</span>
+            ${aliasBadges}
           </div>
         </div>
       `;
