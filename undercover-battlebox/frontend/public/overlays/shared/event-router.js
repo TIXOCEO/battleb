@@ -1,5 +1,12 @@
 // ============================================================================
-// event-router.js — BattleBox Event Brain v1.7 (NO FADE, NO OLD LOGS)
+// event-router.js — BattleBox Event Brain v1.8 FINAL
+// ============================================================================
+//
+// ✔ NO double listeners
+// ✔ NO fade-out
+// ✔ NO loading old logs
+// ✔ Strict queueEvent filtering
+// ✔ Correct display_name/username fallback
 // ============================================================================
 
 import { getSocket } from "/overlays/shared/socket.js";
@@ -26,31 +33,56 @@ export async function initEventRouter() {
 
   const socket = await getSocket();
 
-  console.log("%c[BattleBox] Event Router Ready", "color:#0fffd7;font-weight:bold;");
+  console.log(
+    "%c[BattleBox] Event Router Ready",
+    "color:#0fffd7;font-weight:bold;"
+  );
 
-  // Initial snapshot (NO EVENTS LOADED)
+  // -------------------------------------------------
+  // INITIAL SNAPSHOT — NO EVENTS LOADED FROM BACKEND
+  // -------------------------------------------------
   socket.on("overlayInitialSnapshot", (snap) => {
     applySnapshot(snap);
   });
 
-  // Queue updates
+  // -------------------------------------------------
+  // LIVE QUEUE UPDATES
+  // -------------------------------------------------
   socket.on("updateQueue", (packet) => {
     if (!packet || !Array.isArray(packet.entries)) return;
     queueStore.setQueue(packet.entries);
   });
 
-  // CLEAN QUEUE EVENTS (flattened)
+  // -------------------------------------------------
+  // REALTIME QUEUE EVENTS (join/leave/promote/demote)
+  // -------------------------------------------------
   socket.on("queueEvent", (evt) => {
     if (!evt || !evt.type) return;
     if (!QUEUE_EVENTS.has(evt.type)) return;
 
+    // DISPLAY NAME + USERNAME FIX
+    const safeDisplay =
+      evt.display_name && evt.display_name.trim().length > 0
+        ? evt.display_name
+        : evt.username && evt.username.trim().length > 0
+        ? evt.username
+        : "Onbekend";
+
+    const safeUsername =
+      evt.username && evt.username.trim().length > 0
+        ? evt.username
+        : evt.display_name
+        ? evt.display_name.toLowerCase().replace(/\s+/g, "")
+        : "";
+
     const mapped = {
       type: evt.type,
       timestamp: evt.timestamp || Date.now(),
-      display_name: evt.display_name || "Onbekend",
-      username: evt.username || "",
+      display_name: safeDisplay,
+      username: safeUsername,
       is_vip: !!evt.is_vip,
       avatar_url: evt.avatar_url || EMPTY_AVATAR,
+
       reason:
         evt.reason ||
         (evt.type === "join"
@@ -64,18 +96,23 @@ export async function initEventRouter() {
 
     eventStore.pushEvent(mapped);
 
+    // Queue card highlight
     if (mapped.username) {
       queueStore.highlightCard(mapped.username);
       setTimeout(() => queueStore.clearHighlight(), 900);
     }
   });
 
-  // Ticker
+  // -------------------------------------------------
+  // TICKER UPDATE
+  // -------------------------------------------------
   socket.on("hudTickerUpdate", (text) => {
     tickerStore.setText(text || "");
   });
 
-  // DEBUG BRIDGE
+  // -------------------------------------------------
+  // DEBUG HELPERS
+  // -------------------------------------------------
   window.bb = window.bb || {};
   window.bb.socket = socket;
   window.bb.eventStore = eventStore;
@@ -91,5 +128,8 @@ export async function initEventRouter() {
     });
   };
 
-  console.log("%c[BB DEBUG] Debug bridge active → window.bb", "color:#0fffd7");
+  console.log(
+    "%c[BB DEBUG] Debug bridge active → window.bb",
+    "color:#0fffd7"
+  );
 }
