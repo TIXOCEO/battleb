@@ -20,27 +20,85 @@ const EVENT_LIFETIME_MS = 6000;
 let routerStarted = false;
 
 // ============================================================================
-// TWIST MAP
+// TWIST MAP — FULL CUSTOM VERSION
 // ============================================================================
+
 const TWIST_MAP = {
-  galaxy: { giftName: "Galaxy", diamonds: 1000, description: "Keert ranking om.", aliases: ["galaxy","gxy"] },
-  moneygun: { giftName: "Money Gun", diamonds: 500, description: "Markeert speler.", aliases: ["moneygun","mg"] },
-  bomb: { giftName: "Bomb", diamonds: 2500, description: "Random markering.", aliases: ["bomb"] },
-  immune: { giftName: "Immune", diamonds: 1599, description: "Beschermt.", aliases: ["immune","save"] },
-  heal: { giftName: "Heal", diamonds: 1500, description: "Verwijdert markering.", aliases: ["heal"] },
-  diamondpistol: { giftName: "Diamond Gun", diamonds: 5000, description: "1 speler overleeft.", aliases: ["dp","pistol"] },
-  breaker: { giftName: "Breaker", diamonds: 899, description: "Crackt immune.", aliases: ["breaker"] },
+  galaxy: {
+    giftName: "Galaxy",
+    twistName: "Galaxy Twist",
+    icon: "https://p16-webcast.tiktokcdn.com/img/maliva/webcast-va/resource/79a02148079526539f7599150da9fd28.png~tplv-obj.webp",
+    diamonds: 1000,
+    description: "Reverse op de ranking! Hoogste staat onderaan. Eindeloos te gebruiken!",
+    aliases: ["galaxy", "gxy"]
+  },
+
+  moneygun: {
+    giftName: "Money Gun",
+    twistName: "Eliminatie",
+    icon: "https://p16-webcast.tiktokcdn.com/img/maliva/webcast-va/e0589e95a2b41970f0f30f6202f5fce6~tplv-obj.webp",
+    diamonds: 500,
+    description: "Elimineert speler aan einde van ronde. Let op: niet te gebruiken als immuun en is te herstellen met HEAL!",
+    aliases: ["moneygun", "mg"]
+  },
+
+  bomb: {
+    giftName: "Space Dog",
+    twistName: "Bomb",
+    icon: "https://p16-webcast.tiktokcdn.com/img/alisg/webcast-sg/resource/9154160eb6726193bc51f5007d5853fa.png~tplv-obj.webp",
+    diamonds: 2500,
+    description: "BOOM! Elimineert willekeurige speler einde van de ronde. Let op: niet te gebruiken als immuun en is te herstellen met HEAL!",
+    aliases: ["bomb"]
+  },
+
+  immune: {
+    giftName: "Blooming Heart",
+    twistName: "Immuniteit",
+    icon: "https://p16-webcast.tiktokcdn.com/img/alisg/webcast-sg/resource/ff5453b7569d482c873163ce4b1fb703.png~tplv-obj.webp",
+    diamonds: 1599,
+    description: "Voorkomt eliminatie in deze ronde (behalve tegen Diamond Gun).",
+    aliases: ["immune", "save"]
+  },
+
+  heal: {
+    giftName: "Galaxy Globe",
+    twistName: "Heal",
+    icon: "https://p16-webcast.tiktokcdn.com/img/alisg/webcast-sg/resource/1379dd334a16615a8731a3a4f97b932f.png~tplv-obj.webp",
+    diamonds: 1500,
+    description: "Herstelt eliminatie door Money Gun of Bomb.",
+    aliases: ["heal"]
+  },
+
+  diamondpistol: {
+    giftName: "Diamond Gun",
+    twistName: "Single Survivor",
+    icon: "https://p16-webcast.tiktokcdn.com/img/alisg/webcast-sg/resource/651e705c26b704d03bc9c06d841808f1.png~tplv-obj.webp",
+    diamonds: 5000,
+    description: "Laat slechts 1 speler over.",
+    aliases: ["dp", "pistol"]
+  },
+
+  breaker: {
+    giftName: "Train",
+    twistName: "Immune Breaker",
+    icon: "https://p16-webcast.tiktokcdn.com/img/maliva/webcast-va/4227ed71f2c494b554f9cbe2147d4899~tplv-obj.webp",
+    diamonds: 899,
+    description: "Immuniteit breken? Stuur 2 treinen op target af en immuniteit verdwijnd!",
+    aliases: ["breaker"]
+  }
 };
+
 
 const twistKeys = Object.entries(TWIST_MAP).map(([key, def]) => ({
   key,
-  name: def.giftName,
+  giftName: def.giftName,
+  twistName: def.twistName,
   gift: def.giftName,
-  diamonds: def.diamonds,
   description: def.description,
   aliases: [...def.aliases],
-  icon: EMPTY_AVATAR
+  icon: def.icon || EMPTY_AVATAR
 }));
+
 
 // ============================================================================
 // MAIN ROUTER
