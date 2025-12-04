@@ -1,7 +1,9 @@
 // ============================================================================
-// event-router.js — BattleBox Overlay Event Brain v1.4
-// - Filters: ONLY join, leave, promote, demote
-// - All admin events & unrelated events blocked
+// event-router.js — BattleBox Event Brain v1.4 FINAL
+// ============================================================================
+// - Filters ONLY join/leave/promote/demote
+// - Sends fade-out triggers
+// - Handles snapshot, queue, twists, ticker
 // ============================================================================
 
 import { getSocket } from "/overlays/shared/socket.js";
@@ -21,11 +23,10 @@ const EVENT_LIFETIME_MS = 6000;
 
 let routerStarted = false;
 
-// Valid event types
-const QUEUE_EVENT_TYPES = new Set(["join", "leave", "promote", "demote"]);
+const QUEUE_EVENTS = new Set(["join", "leave", "promote", "demote"]);
 
 // ============================================================================
-// TWIST CAROUSEL
+// TWIST MAP (unchanged)
 // ============================================================================
 const TWIST_MAP = {
   galaxy: {
@@ -33,8 +34,7 @@ const TWIST_MAP = {
     twistName: "Galaxy Twist",
     icon: "https://p16-webcast.tiktokcdn.com/img/maliva/webcast-va/resource/79a02148079526539f7599150da9fd28.png~tplv-obj.webp",
     diamonds: 1000,
-    description:
-      "Reverse op de ranking! Hoogste staat onderaan. Eindeloos te gebruiken!",
+    description: "Reverse op de ranking! Hoogste staat onderaan. Eindeloos te gebruiken!",
     aliases: ["galaxy", "gxy"]
   },
 
@@ -43,8 +43,7 @@ const TWIST_MAP = {
     twistName: "Eliminatie",
     icon: "https://p16-webcast.tiktokcdn.com/img/maliva/webcast-va/e0589e95a2b41970f0f30f6202f5fce6~tplv-obj.webp",
     diamonds: 500,
-    description:
-      "Elimineert speler aan einde van ronde. Let op: niet te gebruiken als immuun en is te herstellen met HEAL!",
+    description: "Elimineert speler aan einde van ronde.",
     aliases: ["moneygun", "mg"]
   },
 
@@ -53,8 +52,7 @@ const TWIST_MAP = {
     twistName: "Bomb",
     icon: "https://p16-webcast.tiktokcdn.com/img/alisg/webcast-sg/resource/9154160eb6726193bc51f5007d5853fa.png~tplv-obj.webp",
     diamonds: 2500,
-    description:
-      "BOOM! Elimineert willekeurige speler einde van de ronde. Let op: niet te gebruiken als immuun en is te herstellen met HEAL!",
+    description: "BOOM! Random eliminatie.",
     aliases: ["bomb"]
   },
 
@@ -63,8 +61,7 @@ const TWIST_MAP = {
     twistName: "Immuniteit",
     icon: "https://p16-webcast.tiktokcdn.com/img/alisg/webcast-sg/resource/ff5453b7569d482c873163ce4b1fb703.png~tplv-obj.webp",
     diamonds: 1599,
-    description:
-      "Voorkomt eliminatie in deze ronde (behalve tegen Diamond Gun).",
+    description: "Voorkomt eliminatie (behalve Diamond Gun).",
     aliases: ["immune", "save"]
   },
 
@@ -73,7 +70,7 @@ const TWIST_MAP = {
     twistName: "Heal",
     icon: "https://p16-webcast.tiktokcdn.com/img/alisg/webcast-sg/resource/1379dd334a16615a8731a3a4f97b932f.png~tplv-obj.webp",
     diamonds: 1500,
-    description: "Herstelt eliminatie door Money Gun of Bomb.",
+    description: "Herstel van eliminatie.",
     aliases: ["heal"]
   },
 
@@ -82,8 +79,7 @@ const TWIST_MAP = {
     twistName: "Single Survivor",
     icon: "https://p16-webcast.tiktokcdn.com/img/alisg/webcast-sg/resource/651e705c26b704d03bc9c06d841808f1.png~tplv-obj.webp",
     diamonds: 5000,
-    description:
-      "Immuniteit voor @target, MAAR; ELIMINEERT DE REST VAN DE ARENA!",
+    description: "Elimineert iedereen behalve target.",
     aliases: ["dp", "pistol"]
   },
 
@@ -92,20 +88,19 @@ const TWIST_MAP = {
     twistName: "Immune Breaker",
     icon: "https://p16-webcast.tiktokcdn.com/img/maliva/webcast-va/4227ed71f2c494b554f9cbe2147d4899~tplv-obj.webp",
     diamonds: 899,
-    description:
-      "Immuniteit breken? Stuur 2 treinen op target af en immuniteit verdwijnt!",
+    description: "Breekt immuniteit na 2 hits.",
     aliases: ["breaker"]
-  }
+  },
 };
 
-const twistKeys = Object.entries(TWIST_MAP).map(([key, def]) => ({
+const twistKeys = Object.entries(TWIST_MAP).map(([key, t]) => ({
   key,
-  giftName: def.giftName,
-  twistName: def.twistName,
-  gift: def.giftName,
-  description: def.description,
-  aliases: [...def.aliases],
-  icon: def.icon || EMPTY_AVATAR
+  giftName: t.giftName,
+  twistName: t.twistName,
+  gift: t.giftName,
+  description: t.description,
+  aliases: [...t.aliases],
+  icon: t.icon || EMPTY_AVATAR
 }));
 
 // ============================================================================
@@ -117,21 +112,14 @@ export async function initEventRouter() {
 
   const socket = await getSocket();
 
-  console.log(
-    "%c[BattleBox] Event Router Ready",
-    "color:#0fffd7;font-weight:bold;"
-  );
+  console.log("%c[BattleBox] Event Router Ready", "color:#0fffd7;font-weight:bold;");
 
-  // -------------------------------------------------------------------------
-  // SNAPSHOT
-  // -------------------------------------------------------------------------
+  // Snapshot
   socket.on("overlayInitialSnapshot", (snap) => {
     applySnapshot(snap);
   });
 
-  // -------------------------------------------------------------------------
-  // QUEUE UPDATE
-  // -------------------------------------------------------------------------
+  // Queue updates
   socket.on("updateQueue", (packet) => {
     if (!packet || !Array.isArray(packet.entries)) return;
 
@@ -142,30 +130,25 @@ export async function initEventRouter() {
       priorityDelta: e.priorityDelta || 0,
       is_vip: !!e.is_vip,
       is_fan: !!e.is_fan,
-      avatar_url: e.avatar_url || EMPTY_AVATAR
+      avatar_url: e.avatar_url || EMPTY_AVATAR,
     }));
 
     queueStore.setQueue(mapped);
   });
 
-  // -------------------------------------------------------------------------
-  // QUEUE EVENTS (FILTERED)
-  // -------------------------------------------------------------------------
+  // Queue events (ONLY join/leave/promote/demote)
   socket.on("queueEvent", (evt) => {
     if (!evt || !evt.type || !evt.user) return;
 
-    // ❌ Skip non-queue events
-    if (!QUEUE_EVENT_TYPES.has(evt.type)) return;
+    if (!QUEUE_EVENTS.has(evt.type)) return;
 
     const mapped = {
       type: evt.type,
       timestamp: evt.timestamp || Date.now(),
-
       display_name: evt.user.display_name || "Onbekend",
       username: evt.user.username || "",
       is_vip: !!evt.user.is_vip,
       avatar_url: evt.user.avatar_url || EMPTY_AVATAR,
-
       reason:
         evt.reason ||
         (evt.type === "join"
@@ -174,34 +157,29 @@ export async function initEventRouter() {
           ? "verlaat de wachtrij."
           : evt.type === "promote"
           ? "stijgt in positie."
-          : evt.type === "demote"
-          ? "zakt in positie."
-          : "")
+          : "zakt in positie."
+        ),
     };
 
     eventStore.pushEvent(mapped);
 
-    // flash queue card
     if (mapped.username) {
       queueStore.highlightCard(mapped.username);
       setTimeout(() => queueStore.clearHighlight(), 900);
     }
 
-    // fade-out after lifetime
+    // Trigger fade-out later
     setTimeout(() => {
       eventStore.fadeOutEvent(mapped.timestamp);
     }, EVENT_LIFETIME_MS);
   });
 
-  // -------------------------------------------------------------------------
-  // TWIST ROTATION
-  // -------------------------------------------------------------------------
+  // Twist rotation
   let twistIndex = 0;
 
   function rotateTwists() {
     const slice = twistKeys.slice(twistIndex, twistIndex + 3);
-    if (slice.length < 3)
-      slice.push(...twistKeys.slice(0, 3 - slice.length));
+    if (slice.length < 3) slice.push(...twistKeys.slice(0, 3 - slice.length));
 
     twistStore.setTwists(slice);
     twistIndex = (twistIndex + 3) % twistKeys.length;
@@ -210,9 +188,7 @@ export async function initEventRouter() {
   rotateTwists();
   setInterval(rotateTwists, TWIST_ROTATION_MS);
 
-  // -------------------------------------------------------------------------
-  // TICKER TEXT
-  // -------------------------------------------------------------------------
+  // Ticker
   socket.on("hudTickerUpdate", (text) => {
     tickerStore.setText(text || "");
   });
