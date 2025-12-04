@@ -1,9 +1,10 @@
 // ============================================================================
-// event-router.js — BattleBox Event Brain v1.4 FINAL
+// event-router.js — BattleBox Event Brain v1.5 FINAL (with Debug Bridge)
 // ============================================================================
 // - Filters ONLY join/leave/promote/demote
 // - Sends fade-out triggers
 // - Handles snapshot, queue, twists, ticker
+// - Adds DEBUG BRIDGE for OBS console: window.bb.socket, window.bb.eventStore, testEvent()
 // ============================================================================
 
 import { getSocket } from "/overlays/shared/socket.js";
@@ -139,7 +140,6 @@ export async function initEventRouter() {
   // Queue events (ONLY join/leave/promote/demote)
   socket.on("queueEvent", (evt) => {
     if (!evt || !evt.type || !evt.user) return;
-
     if (!QUEUE_EVENTS.has(evt.type)) return;
 
     const mapped = {
@@ -168,7 +168,6 @@ export async function initEventRouter() {
       setTimeout(() => queueStore.clearHighlight(), 900);
     }
 
-    // Trigger fade-out later
     setTimeout(() => {
       eventStore.fadeOutEvent(mapped.timestamp);
     }, EVENT_LIFETIME_MS);
@@ -176,7 +175,6 @@ export async function initEventRouter() {
 
   // Twist rotation
   let twistIndex = 0;
-
   function rotateTwists() {
     const slice = twistKeys.slice(twistIndex, twistIndex + 3);
     if (slice.length < 3) slice.push(...twistKeys.slice(0, 3 - slice.length));
@@ -192,4 +190,28 @@ export async function initEventRouter() {
   socket.on("hudTickerUpdate", (text) => {
     tickerStore.setText(text || "");
   });
+
+  // ========================================================================
+  // 🔥 DEBUG BRIDGE — make socket & stores available in OBS console
+  // ========================================================================
+  window.bb = window.bb || {};
+
+  window.bb.socket = socket;
+  window.bb.eventStore = eventStore;
+
+  window.bb.testEvent = () => {
+    const evt = {
+      type: "join",
+      timestamp: Date.now(),
+      display_name: "DebugUser",
+      username: "debug",
+      is_vip: false,
+      avatar_url: "",
+      reason: "test event (debug bridge)"
+    };
+    eventStore.pushEvent(evt);
+    console.log("%c[BB DEBUG] Test event pushed", "color:#0fffd7", evt);
+  };
+
+  console.log("%c[BB DEBUG] Debug bridge active → window.bb", "color:#0fffd7;font-weight:bold;");
 }
