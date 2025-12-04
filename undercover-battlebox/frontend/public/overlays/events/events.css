@@ -20,6 +20,8 @@
     0 0 40px rgba(255,77,79,0.45),
     inset 0 0 60px rgba(255,77,79,0.25);
 
+  backdrop-filter: blur(6px);
+
   animation: panelIn 0.6s ease-out forwards;
 }
 
@@ -40,10 +42,10 @@
 }
 
 /* ---------------------------------------------------------
-   EVENT CARD — same as queue style (dark, octagon)
+   EVENT CARD — same as queue/twists (dark octagon)
 --------------------------------------------------------- */
 .bb-event-item {
-  background: rgba(15, 15, 20, 0.85);
+  background: rgba(15, 15, 20, 0.88);
   border: 2px solid rgba(255,255,255,0.08);
 
   display: flex;
@@ -51,7 +53,7 @@
   gap: 12px;
 
   padding: 10px;
-  min-height: 60px;
+  min-height: 62px;
 
   clip-path: polygon(
     10% 0%, 90% 0%,
@@ -61,7 +63,7 @@
   );
 
   box-shadow:
-    0 0 20px rgba(0,0,0,0.9),
+    0 0 25px rgba(0,0,0,0.9),
     inset 0 0 30px rgba(0,0,0,0.65),
     inset 0 0 20px rgba(255,77,79,0.22);
 
@@ -84,55 +86,69 @@
 }
 
 /* ---------------------------------------------------------
-   ICONS — consistent neon shape
+   LEFT SIDE: AVATAR + ICON layered
 --------------------------------------------------------- */
-.event-icon {
-  width: 26px;
-  height: 26px;
+.event-icon-wrapper {
+  position: relative;
+  width: 32px;
+  height: 32px;
+}
 
+.event-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  object-fit: cover;
+
+  box-shadow:
+    0 0 6px rgba(0,0,0,0.7),
+    inset 0 0 8px rgba(0,0,0,0.6);
+}
+
+/* ICON ON TOP OF AVATAR (JOIN/LEAVE/PROMOTE/DEMOTE) */
+.event-type-icon {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  bottom: -4px;
+  right: -6px;
   background-size: cover;
   background-position: center;
 
-  filter: drop-shadow(0 0 6px rgba(255,255,255,0.45));
-
-  animation: iconPulse 3s ease-in-out infinite;
+  filter: drop-shadow(0 0 5px rgba(255,255,255,0.45));
 }
 
-@keyframes iconPulse {
-  0%,100% { filter: brightness(1); }
-  50% { filter: brightness(1.25); }
+/* dynamic icons */
+.event-type-icon.join {
+  background-image: url("data:image/svg+xml;utf8,<svg fill='%2300ff99' width='18' height='18' xmlns='http://www.w3.org/2000/svg'><polygon points='9,0 18,18 0,18'/></svg>");
 }
 
-.event-icon.join {
-  background-image: url("data:image/svg+xml;utf8,<svg fill='%2300ff99' width='26' height='26' xmlns='http://www.w3.org/2000/svg'><polygon points='13,0 26,26 0,26'/></svg>");
+.event-type-icon.leave {
+  background-image: url("data:image/svg+xml;utf8,<svg fill='%23ff4d4f' width='18' height='18' xmlns='http://www.w3.org/2000/svg'><polygon points='9,18 18,0 0,0'/></svg>");
 }
 
-.event-icon.leave {
-  background-image: url("data:image/svg+xml;utf8,<svg fill='%23ff4d4f' width='26' height='26' xmlns='http://www.w3.org/2000/svg'><polygon points='13,26 26,0 0,0'/></svg>");
+.event-type-icon.promote {
+  background-image: url("data:image/svg+xml;utf8,<svg fill='%2300d9ff' width='18' height='18' xmlns='http://www.w3.org/2000/svg'><polygon points='9,0 18,18 0,18'/></svg>");
 }
 
-.event-icon.promote {
-  background-image: url("data:image/svg+xml;utf8,<svg fill='%2300d9ff' width='26' height='26' xmlns='http://www.w3.org/2000/svg'><polygon points='13,0 26,26 0,26'/></svg>");
-}
-
-.event-icon.demote {
-  background-image: url("data:image/svg+xml;utf8,<svg fill='%23ffaa00' width='26' height='26' xmlns='http://www.w3.org/2000/svg'><polygon points='13,26 26,0 0,0'/></svg>");
+.event-type-icon.demote {
+  background-image: url("data:image/svg+xml;utf8,<svg fill='%23ffaa00' width='18' height='18' xmlns='http://www.w3.org/2000/svg'><polygon points='9,18 18,0 0,0'/></svg>");
 }
 
 /* ---------------------------------------------------------
-   TEXT — improved style + truncation
+   TEXT BLOCK
 --------------------------------------------------------- */
 .event-text {
   display: flex;
   flex-direction: column;
-  line-height: 1.1;
+  line-height: 1.15;
+  max-width: 150px;
 }
 
 .event-text .name {
   font-weight: 700;
   font-size: 15px;
   color: white;
-  max-width: 150px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -144,16 +160,19 @@
 }
 
 .event-text .reason {
-  margin-top: 3px;
+  margin-top: 4px;
   font-size: 12px;
-  opacity: 0.85;
+
   color: var(--neon-turquoise);
-  max-width: 150px;
-  line-height: 1.2;
+  opacity: 0.9;
+
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ---------------------------------------------------------
-   VIP aura
+   VIP — gold pulse dot
 --------------------------------------------------------- */
 .event-vip {
   margin-left: auto;
