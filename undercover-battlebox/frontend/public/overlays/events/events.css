@@ -1,7 +1,7 @@
 @import "/overlays/shared/theme.css";
 
 /* ---------------------------------------------------------
-   EVENTS PANEL (250 × 700)
+   PANEL
 --------------------------------------------------------- */
 .bb-events-panel {
   width: 250px;
@@ -9,9 +9,9 @@
 
   background: rgba(5,5,8,0.75);
   border: 2px solid rgba(255,255,255,0.08);
+  overflow: hidden;
 
   padding: 10px;
-  overflow: hidden;
 
   display: flex;
   flex-direction: column;
@@ -21,28 +21,28 @@
     inset 0 0 60px rgba(255,77,79,0.25);
 
   backdrop-filter: blur(6px);
-
-  animation: panelIn 0.6s ease-out forwards;
 }
 
-@keyframes panelIn {
-  0% { opacity: 0; transform: translateX(20px) scale(0.94); }
-  100% { opacity: 1; transform: translateX(0) scale(1); }
+/* Mask to hide top/bottom clipping — smooth scroll illusion */
+.events-scroll-mask {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
 }
 
-/* ---------------------------------------------------------
-   LIST AREA
---------------------------------------------------------- */
+/* Container that scrolls smoothly */
 .bb-events-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  height: 100%;
-  overflow: hidden;
+  transform: translateY(0);
+  transition: transform 0.35s ease-out; /* smooth scroll */
 }
 
+
 /* ---------------------------------------------------------
-   EVENT CARD — BattleBox Octagon
+   EVENT CARD — octagon
 --------------------------------------------------------- */
 .bb-event-item {
   background: rgba(15, 15, 20, 0.88);
@@ -67,26 +67,28 @@
     inset 0 0 30px rgba(0,0,0,0.65),
     inset 0 0 20px rgba(255,77,79,0.22);
 
-  animation: eventIn 0.35s cubic-bezier(.17,.67,.4,1.25) both;
+  animation: eventFlashIn 0.45s cubic-bezier(.16,.78,.35,1.25) both;
 }
 
-@keyframes eventIn {
-  0% { opacity: 0; transform: translateX(20px) scale(0.94); }
-  100% { opacity: 1; transform: translateX(0) scale(1); }
+/* FLASHY arrival animation */
+@keyframes eventFlashIn {
+  0% { opacity: 0; transform: translateY(-15px) scale(0.92); filter: brightness(2); }
+  70% { filter: brightness(1.4); }
+  100% { opacity: 1; transform: translateY(0) scale(1); filter: brightness(1); }
 }
 
-/* Fade-out */
+/* Fade-out card before removal */
 .event-fade {
-  animation: eventOut 0.45s ease-out forwards !important;
+  animation: eventFadeOut 0.45s ease-out forwards !important;
 }
 
-@keyframes eventOut {
-  0% { opacity: 1; transform: translateX(0); }
-  100% { opacity: 0; transform: translateX(20px); }
+@keyframes eventFadeOut {
+  0% { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(10px) scale(0.94); }
 }
 
 /* ---------------------------------------------------------
-   ICON LEFT SIDE (NO AVATAR ANYMORE)
+   ICON SYSTEM (NO avatars)
 --------------------------------------------------------- */
 .event-icon-wrapper {
   width: 32px;
@@ -104,48 +106,43 @@
   );
 
   background: rgba(0,0,0,0.55);
+
   box-shadow:
     0 0 10px rgba(0,0,0,0.8),
     inset 0 0 14px rgba(255,255,255,0.2);
 }
 
-/* ICON — rendered via text (OBS-friendly) */
 .event-type-icon {
   font-size: 22px;
   font-weight: 900;
-  line-height: 1;
   user-select: none;
-  text-shadow: 0 0 12px rgba(255,255,255,0.55);
+  text-shadow: 0 0 14px rgba(255,255,255,0.6);
 }
 
-/* JOIN: green arrow ▶ */
 .event-type-icon.join {
   color: #00ff99;
 }
 
-/* LEAVE: red arrow ◀ */
 .event-type-icon.leave {
   color: #ff4d4f;
 }
 
-/* PROMOTE: green plus ＋ */
 .event-type-icon.promote {
   color: #00ff99;
 }
 
-/* DEMOTE: red minus － */
 .event-type-icon.demote {
   color: #ff4d4f;
 }
 
 /* ---------------------------------------------------------
-   TEXT BLOCK — DisplayName + Reason
+   TEXT
 --------------------------------------------------------- */
 .event-text {
   display: flex;
   flex-direction: column;
-  line-height: 1.15;
   max-width: 160px;
+  line-height: 1.15;
 }
 
 .event-text .name {
@@ -158,19 +155,17 @@
 }
 
 .event-text .reason {
-  margin-top: 3px;
   font-size: 13px;
-
   color: var(--bb-turquoise);
   opacity: 0.9;
-
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  margin-top: 3px;
 }
 
 /* ---------------------------------------------------------
-   VIP INDICATOR
+   VIP indicator
 --------------------------------------------------------- */
 .event-vip {
   margin-left: auto;
@@ -179,7 +174,6 @@
   height: 12px;
   background: gold;
   border-radius: 50%;
-
   box-shadow: 0 0 20px gold;
 
   animation: vipPulse 2s ease-in-out infinite;
@@ -187,5 +181,5 @@
 
 @keyframes vipPulse {
   0%,100% { transform: scale(1); }
-  50% { transform: scale(1.22); }
+  50% { transform: scale(1.25); }
 }
