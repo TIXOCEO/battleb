@@ -1,8 +1,8 @@
 // ============================================================================
-// server.ts — BATTLEBOX BACKEND v16.6 (Overlay Events FIX + Autofill Restore)
+// server.ts — BATTLEBOX BACKEND v16.7 (Final No-Duplicate-Events Build)
 // Gifts Engine + Round Flags + Realtime Queue Sync
 // Correct Leaderboards + Host Diamonds + Username Autofill
-// Overlay queueEvent filtering (join/leave/promote/demote only)
+// Overlay queueEvent FIX (no duplicate emits in server.ts)
 // ============================================================================
 
 import express from "express";
@@ -42,7 +42,7 @@ import {
   addToQueueAdminOverride
 } from "./queue";
 
-// Queue events
+// Queue events (ONLY used in addToArena auto-leave)
 import { emitQueueEvent } from "./queue-events";
 
 import { giveTwistAdmin, useTwistAdmin } from "./engines/9-admin-twist-engine";
@@ -93,7 +93,6 @@ export function emitLog(entry: Partial<LogEntry>) {
   logBuffer.unshift(log);
   if (logBuffer.length > LOG_MAX) logBuffer.pop();
 
-  // ONLY admins receive logs!
   io.to("admins").emit("log", log);
 }
 
@@ -428,7 +427,10 @@ async function buildInitialSnapshot() {
     );
 
     const h = await pool.query(
-      `SELECT COALESCE(SUM(diamonds),0) AS total FROM gifts WHERE game_id=$1 AND is_host_gift=TRUE`,
+      `SELECT COALESCE(SUM(diamonds),0) AS total 
+       FROM gifts 
+       WHERE game_id=$1 
+         AND is_host_gift=TRUE`,
       [currentGameId]
     );
 
@@ -512,7 +514,10 @@ async function buildInitialSnapshot() {
 
   if (currentGameId && HARD_HOST_ID) {
     const hx = await pool.query(
-      `SELECT COALESCE(SUM(diamonds),0) AS total FROM gifts WHERE game_id=$1 AND is_host_gift=TRUE`,
+      `SELECT COALESCE(SUM(diamonds),0) AS total 
+       FROM gifts 
+       WHERE game_id=$1 
+         AND is_host_gift=TRUE`,
       [currentGameId]
     );
 
@@ -666,11 +671,11 @@ io.on("connection", (socket: AdminSocket) => {
       // GAME MANAGEMENT
       // ======================================================================
       if (action === "startGame") {
-        const r = await pool.query(`
-          INSERT INTO games (status, started_at)
-          VALUES ('running', NOW())
-          RETURNING id
-        `);
+        const r = await pool.query(
+          `INSERT INTO games (status, started_at)
+           VALUES ('running', NOW())
+           RETURNING id`
+        );
 
         currentGameId = r.rows[0].id;
         (io as any).currentGameId = currentGameId;
@@ -829,7 +834,7 @@ io.on("connection", (socket: AdminSocket) => {
       }
 
       // ======================================================================
-      // SEARCH USERS (AUTOFILL) — RESTORED
+      // SEARCH USERS (AUTOFILL)
       // ======================================================================
       if (action === "searchUsers") {
         const q = (data?.query || "").trim().toLowerCase();
@@ -853,7 +858,7 @@ io.on("connection", (socket: AdminSocket) => {
       }
 
       // ======================================================================
-      // QUEUE MANAGEMENT
+      // QUEUE MANAGEMENT (NO DUPLICATE EVENTS PATCHED ABOVE)
       // ======================================================================
       if (action === "addToQueue") {
         const clean = (data?.username || "").trim().replace(/^@+/, "").toLowerCase();
@@ -879,6 +884,7 @@ io.on("connection", (socket: AdminSocket) => {
           return ack({ success: false, message: e?.message || "Kon niet joinen" });
         }
 
+        // PATCHED to avoid duplicates
         emitQueueEvent("join", {
           ...u.rows[0],
           avatar_url: u.rows[0].avatar_url || null
@@ -960,7 +966,6 @@ io.on("connection", (socket: AdminSocket) => {
       // ======================================================================
       // VIP MGMT
       // ======================================================================
-
       if (action === "giveVip") {
         const clean = (data?.username || "").trim().replace(/^@+/, "").toLowerCase();
 
@@ -1040,7 +1045,7 @@ io.on("connection", (socket: AdminSocket) => {
       }
 
       // ======================================================================
-      // UNKNOWN
+      // UNKNOWN ACTION
       // ======================================================================
       return ack({ success: false, message: "Onbekend admin commando" });
 
