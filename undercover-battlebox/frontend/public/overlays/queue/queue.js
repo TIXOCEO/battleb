@@ -1,5 +1,5 @@
 // ============================================================================
-// queue.js — BattleBox Queue Overlay (ESPORTS MODE 3×5) — FINAL PATCHED EDITION
+// queue.js — BattleBox Queue Overlay (3×5 COLUMN MODE • FIXED POSITIONS)
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -12,23 +12,42 @@ const grid = document.getElementById("queue-grid");
 const EMPTY_AVATAR =
   "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
 
-// 15 cards (3 columns × 5 rows)
 const TOTAL = 15;
 
-// Pre-create cards
-const cards = Array.from({ length: TOTAL }, () => {
+// ------------------------------
+// helper: trim long names
+// ------------------------------
+function trimName(str) {
+  if (!str) return "";
+  return str.length > 30 ? str.substring(0, 30) + "..." : str;
+}
+
+// ------------------------------
+// helper: manually place card in grid
+// ------------------------------
+function applyGridPosition(card, index) {
+  const column = Math.floor(index / 5) + 1;
+  const row = (index % 5) + 1;
+
+  card.style.gridColumn = column;
+  card.style.gridRow = row;
+}
+
+// ------------------------------
+// create cards & place correctly
+// ------------------------------
+const cards = Array.from({ length: TOTAL }, (_, i) => {
   const c = document.createElement("div");
   c.className = "bb-card empty-card";
+  applyGridPosition(c, i);
   return c;
 });
 
 cards.forEach((c) => grid.appendChild(c));
 
-function indexToPosition(i) {
-  // ✔ Mapping is correct with the 3×5 grid
-  return i + 1;
-}
-
+// ------------------------------
+// render loop
+// ------------------------------
 queueStore.subscribe((state) => {
   const entries = state.entries || [];
   const highlightUser = state.lastUpdatedId;
@@ -37,15 +56,14 @@ queueStore.subscribe((state) => {
     const el = cards[i];
     const entry = entries[i];
 
-    const pos = indexToPosition(i);
+    const pos = i + 1;
 
-    // FREE SPOT
     if (!entry) {
       el.className = "bb-card empty-card";
       el.innerHTML = `
         <div class="pos-badge">${pos}</div>
 
-        <div class="card-avatar"
+        <div class="card-avatar" 
              style="background-image:url('${EMPTY_AVATAR}')"></div>
 
         <div class="card-info">
@@ -56,31 +74,26 @@ queueStore.subscribe((state) => {
       continue;
     }
 
-    // FILLED SPOT
     el.className = "bb-card";
 
-    // VIP highlight
     if (entry.is_vip) el.classList.add("vip-glow");
 
-    // Highlight after update
     if (highlightUser && highlightUser === entry.username) {
       el.classList.add("card-update");
       setTimeout(() => el.classList.remove("card-update"), 650);
     }
 
-    // ✔ Avatar fallback
     const avatar = entry.avatar_url || EMPTY_AVATAR;
 
     el.innerHTML = `
       <div class="pos-badge">${pos}</div>
 
-      <div class="card-avatar"
-           style="background-image:url('${avatar}')">
-      </div>
+      <div class="card-avatar" 
+           style="background-image:url('${avatar}')"></div>
 
       <div class="card-info">
-        <div class="name">${entry.display_name || "?"}</div>
-        <div class="user">@${entry.username || ""}</div>
+        <div class="name">${trimName(entry.display_name)}</div>
+        <div class="user">@${entry.username}</div>
       </div>
     `;
   }
