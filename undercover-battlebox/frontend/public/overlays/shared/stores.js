@@ -1,5 +1,5 @@
 // ============================================================================
-// stores.js — BattleBox Overlay Stores (FULL v5.0)
+// stores.js — BattleBox Overlay Stores (10-SLOT EVENTS EDITION)
 // ============================================================================
 
 function createStore(initialState) {
@@ -26,7 +26,7 @@ const EMPTY_AVATAR =
   "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
 
 // ============================================================================
-// QUEUE STORE
+// QUEUE STORE — unchanged
 // ============================================================================
 export const queueStore = createStore({
   entries: [],
@@ -48,13 +48,12 @@ queueStore.clearHighlight = () => {
 };
 
 // ============================================================================
-// EVENTS STORE – MAX 10, fade via router
+// EVENTS STORE — FIXED FOR 10 EVENTS + FADE MARKING
 // ============================================================================
 export const eventStore = createStore({
   events: [],
 });
 
-// Push new event at top
 eventStore.pushEvent = (evt) => {
   evt.display_name = evt.display_name || "Onbekend";
   evt.username = evt.username || "";
@@ -62,24 +61,15 @@ eventStore.pushEvent = (evt) => {
   evt._fade = false;
 
   const list = eventStore.get().events;
-  const next = [evt, ...list].slice(0, 10);
-
+  const next = [evt, ...list].slice(0, 10);   // ⭐ MAX 10 events
   eventStore.set({ events: next });
 };
 
-// Mark event for fade and remove
 eventStore.fadeOutEvent = (ts) => {
-  const list = eventStore.get().events.map((e) =>
+  const updated = eventStore.get().events.map((e) =>
     e.timestamp === ts ? { ...e, _fade: true } : e
   );
-
-  eventStore.set({ events: list });
-
-  // Remove after animation
-  setTimeout(() => {
-    const filtered = eventStore.get().events.filter((e) => e.timestamp !== ts);
-    eventStore.set({ events: filtered });
-  }, 600);
+  eventStore.set({ events: updated });
 };
 
 // ============================================================================
@@ -105,24 +95,16 @@ tickerStore.setText = (txt) => {
 };
 
 // ============================================================================
-// SNAPSHOT
+// SNAPSHOT LOADER
 // ============================================================================
 export function applySnapshot(snap) {
   if (!snap) return;
 
-  // Queue
-  if (snap.queue?.entries) {
-    queueStore.setQueue(snap.queue.entries);
-  }
+  if (snap.queue?.entries) queueStore.setQueue(snap.queue.entries);
+  if (snap.ticker) tickerStore.setText(snap.ticker);
 
-  // Ticker
-  if (snap.ticker) {
-    tickerStore.setText(snap.ticker);
-  }
-
-  // Events from logs (converted → max 5)
   if (snap.logs) {
-    const items = snap.logs.slice(0, 5).map((log) => ({
+    const items = snap.logs.slice(0, 10).map((log) => ({
       type: log.type,
       timestamp: log.timestamp,
       display_name: log.message || "",
