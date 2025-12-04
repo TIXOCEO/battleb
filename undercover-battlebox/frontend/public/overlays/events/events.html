@@ -5,10 +5,7 @@
   <title>BattleBox Events Overlay</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <!-- GLOBAL THEME -->
   <link rel="stylesheet" href="/overlays/shared/theme.css">
-
-  <!-- PANEL CSS -->
   <link rel="stylesheet" href="/overlays/events/events.css" />
 
   <style>
@@ -23,15 +20,14 @@
 
 <body>
   <div class="bb-events-panel holo-scan led-sweep">
-    <div id="events-list" class="bb-events-list"></div>
+    <div class="events-scroll-mask">
+      <div id="events-list" class="bb-events-list"></div>
+    </div>
   </div>
 
-  <!-- Shared engine -->
   <script type="module" src="/overlays/shared/socket.js"></script>
   <script type="module" src="/overlays/shared/stores.js"></script>
   <script type="module" src="/overlays/shared/event-router.js"></script>
-
-  <!-- Events renderer -->
   <script type="module" src="/overlays/events/events.js"></script>
 </body>
 </html>
