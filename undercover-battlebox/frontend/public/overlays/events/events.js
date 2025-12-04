@@ -1,5 +1,5 @@
 // ============================================================================
-// events.js — BattleBox EVENTS OVERLAY v6.0 FINAL
+// events.js — BattleBox EVENTS OVERLAY v6.1 FINAL (Syntax Fix)
 // ============================================================================
 // - Newest events on top
 // - Max 10 visible
@@ -30,7 +30,7 @@ function getEventIcon(type) {
 
 function truncate(s, max) {
   if (!s) return "";
-  return s.length > max ? s.slice(0, max - 3) + "...";
+  return s.length > max ? s.slice(0, max - 3) + "..." : s;
 }
 
 // ---------------------------------------------------------
