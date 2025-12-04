@@ -25,9 +25,11 @@
     </div>
   </div>
 
+  <!-- ONLY THESE SCRIPTS ARE LOADED -->
   <script type="module" src="/overlays/shared/socket.js"></script>
   <script type="module" src="/overlays/shared/stores.js"></script>
-  <script type="module" src="/overlays/shared/event-router.js"></script>
+
+  <!-- ❗ event-router.js NIET LADEN HIER — events.js importeert hem -->
   <script type="module" src="/overlays/events/events.js"></script>
 </body>
 </html>
