@@ -26,7 +26,7 @@
 }
 
 /* ---------------------------------------------------------
-   GRID — 3 kolommen × 5 rijen
+   GRID — 3 columns × 5 rows (COL-FIRST ORDER)
 --------------------------------------------------------- */
 .bb-queue-grid {
   display: grid;
@@ -38,20 +38,20 @@
 }
 
 /* ---------------------------------------------------------
-   CARD BASE — grotere esports style
+   CARD BASE
 --------------------------------------------------------- */
 .bb-card {
   background: rgba(15, 15, 20, 0.85);
   border: 2px solid rgba(255,255,255,0.08);
   position: relative;
 
-  padding: 12px 14px;
+  padding: 14px 16px;
   color: #f7f7f7;
 
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 14px;
+  gap: 16px;
 
   clip-path: polygon(
     10% 0%, 90% 0%,
@@ -73,7 +73,9 @@
   100% { opacity: 1; transform: scale(1) rotateX(0deg); }
 }
 
-/* Neon rim */
+/* ---------------------------------------------------------
+   NEON RIM BORDER
+--------------------------------------------------------- */
 .bb-card::after {
   content: "";
   position: absolute;
@@ -94,7 +96,7 @@
 }
 
 /* ---------------------------------------------------------
-   Empty card (FREE)
+   EMPTY CARD
 --------------------------------------------------------- */
 .empty-card {
   opacity: 0.4;
@@ -102,40 +104,30 @@
 }
 
 /* ---------------------------------------------------------
-   POSITION BADGE — RIGHT TOP (NEON ORANJE)
+   POSITION BADGE — FIXED NEON ORANGE NUMBER ONLY
 --------------------------------------------------------- */
 .pos-badge {
   position: absolute;
   top: 8px;
-  right: 10px;
-  width: 34px;
-  height: 34px;
+  right: 12px;
 
-  clip-path: polygon(
-    25% 0%, 75% 0%,
-    100% 50%, 75% 100%,
-    25% 100%, 0% 50%
-  );
-
-  background: var(--bb-orange); /* NEON ORANGE */
-  color: black;
   font-weight: 900;
-  font-size: 17px;
-  line-height: 34px;
-  text-align: center;
+  font-size: 22px;     /* +40% */
+  color: #ff4d4f !important;  /* 🔥 Works in OBS Chromium */
+  text-shadow:
+    0 0 8px rgba(255,77,79,1),
+    0 0 16px rgba(255,77,79,0.8);
 
-  box-shadow:
-    0 0 12px rgba(255,77,79,0.9),
-    0 0 22px rgba(255,77,79,0.65),
-    inset 0 0 12px rgba(255,77,79,0.6);
+  background: transparent !important;
+  border: none !important;
 }
 
 /* ---------------------------------------------------------
-   AVATAR — compact esport style
+   AVATAR
 --------------------------------------------------------- */
 .card-avatar {
-  width: 42px;
-  height: 42px;
+  width: 52px;   /* bigger for readability */
+  height: 52px;
 
   background-size: cover;
   background-position: center;
@@ -153,7 +145,7 @@
 }
 
 /* ---------------------------------------------------------
-   TEXT BLOCK
+   TEXT (DISPLAY NAME + USERNAME) — 40% BIGGER
 --------------------------------------------------------- */
 .card-info {
   display: flex;
@@ -162,34 +154,40 @@
 }
 
 .card-info .name {
-  font-weight: 700;
-  font-size: 16px;
+  font-weight: 800;
+  font-size: 22px;  /* +40% */
   color: #ffffff;
+  max-width: 200px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .card-info .user {
-  font-size: 13px;
-  opacity: 0.75;
+  font-size: 16px; /* +40% */
+  opacity: 0.8;
 }
 
-/* Highlight effect */
+/* ---------------------------------------------------------
+   HIGHLIGHT EFFECT
+--------------------------------------------------------- */
 .card-update {
   animation: flashCard 0.6s ease-out !important;
 }
 
 @keyframes flashCard {
-  0% { filter: brightness(1.9); }
+  0% { filter: brightness(2.0); }
   100% { filter: brightness(1); }
 }
 
 /* ---------------------------------------------------------
-   VIP AURA (gold pulse)
+   VIP AURA
 --------------------------------------------------------- */
 .vip-glow {
   animation: vipPulse 2s ease-in-out infinite !important;
 }
 
 @keyframes vipPulse {
-  0%, 100% { box-shadow: var(--vip-glow); }
-  50% { box-shadow: 0 0 65px rgba(255,220,0,0.95); }
+  0%, 100% { box-shadow: 0 0 55px rgba(255,220,0,0.8); }
+  50% { box-shadow: 0 0 85px rgba(255,220,0,1); }
 }
