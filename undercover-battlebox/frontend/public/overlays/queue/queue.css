@@ -155,7 +155,7 @@
 
 .card-info .name {
   font-weight: 800;
-  font-size: 22px;  /* +40% */
+  font-size: 28px;  /* +40% */
   color: #ffffff;
   max-width: 200px;
   overflow: hidden;
@@ -164,7 +164,7 @@
 }
 
 .card-info .user {
-  font-size: 16px; /* +40% */
+  font-size: 22px; /* +40% */
   opacity: 0.8;
 }
 
