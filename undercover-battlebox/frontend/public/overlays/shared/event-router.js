@@ -74,7 +74,7 @@ const TWIST_MAP = {
     twistName: "Single Survivor",
     icon: "https://p16-webcast.tiktokcdn.com/img/alisg/webcast-sg/resource/651e705c26b704d03bc9c06d841808f1.png~tplv-obj.webp",
     diamonds: 5000,
-    description: "Laat slechts 1 speler over.",
+    description: "Immuniteit voor @target, MAAR; ELIMINEERT DE REST VAN DE ARENA!",
     aliases: ["dp", "pistol"]
   },
 
