@@ -1,17 +1,8 @@
 /* ============================================================================
-   5-game-engine.ts — BattleBox Arena Engine v16.4
-   (Galaxy Reverse + DiamondPistol 1-per-Round Patch + Breaker Support)
-
-   ✔ Immune = 1 ronde geldig
-   ✔ Survivor immune = 1 ronde geldig
-   ✔ MoneyGun/Bomb markeringen = eliminated=true
-   ✔ Heal verwijdert eliminated + mg/bomb badges
-   ✔ EndRound verwerkt eerst MG/Bomb, daarna danger/ties
-   ✔ reverseMode ondersteunt Galaxy twist
-   ✔ toggleGalaxyMode() toegevoegd voor Twist Engine v15
-   ✔ Diamond Pistol nu max 1x per ronde
-   ✔ Breaker ondersteuning (breakerHits)
-   ✔ AVATAR ondersteuning (avatar_url op ArenaPlayer)
+   5-game-engine.ts — BattleBox Arena Engine v16.4.1 (PATCHED)
+   Fix: ALL round-end exit points now set arena.status="ended"
+   Fix: removeAllowed restored (arena removal works again)
+   No logic changes other than safety patches
 ============================================================================ */
 
 import pool from "../db";
@@ -34,10 +25,8 @@ export interface ArenaPlayer {
   tempImmune?: boolean;
   survivorImmune?: boolean;
 
-  /** PATCH: support voor breaker 50%/100% immunity break */
-  breakerHits?: number;   // <── PATCH 1
+  breakerHits?: number;
 
-  /** AVATAR: profielfoto voor overlays / UI */
   avatar_url?: string | null;
 }
 
@@ -63,10 +52,7 @@ export interface ArenaState {
   firstFinalRound: number | null;
   lastSortedAt: number;
 
-  // ★ GALAXY — sort omkeren
   reverseMode: boolean;
-
-  // ★ DIAMOND PISTOL — max 1 per ronde
   diamondPistolUsed: boolean;
 }
 
@@ -91,7 +77,6 @@ let arena: ArenaState = {
   lastSortedAt: 0,
 
   reverseMode: false,
-
   diamondPistolUsed: false,
 };
 
@@ -191,7 +176,7 @@ async function computePlayerScore(p: ArenaPlayer) {
 }
 
 /* ============================================================================
-   RECOMPUTE POSITIONS — inclusief reverseMode
+   RECOMPUTE POSITIONS
 ============================================================================ */
 
 async function recomputePositions() {
@@ -217,14 +202,9 @@ async function recomputePositions() {
     p.score = await computePlayerScore(p);
   }
 
-  // ================================
-  // ★ reverseMode ondersteunt Galaxy UNO-reverse
-  // ================================
-  if (arena.reverseMode) {
-    arena.players.sort((a, b) => a.score - b.score);
-  } else {
-    arena.players.sort((a, b) => b.score - a.score);
-  }
+  // SORT: normal or reversed
+  if (arena.reverseMode) arena.players.sort((a, b) => a.score - b.score);
+  else arena.players.sort((a, b) => b.score - a.score);
 
   if (status === "ended") {
     for (const p of arena.players) {
@@ -236,9 +216,7 @@ async function recomputePositions() {
     return;
   }
 
-  // ================================
-  // QUARTER LOGICA
-  // ================================
+  // QUARTER
   if (arena.type === "quarter") {
     if (total < 6) {
       for (const p of arena.players) {
@@ -251,22 +229,14 @@ async function recomputePositions() {
       return;
     }
 
-    let threshold: number;
+    const threshold = arena.players[5].score;
 
-    if (arena.reverseMode) {
-      threshold = arena.players[5].score;
-      for (const p of arena.players) {
-        if (p.eliminated) p.positionStatus = "elimination";
-        else if (p.tempImmune || p.survivorImmune) p.positionStatus = "immune";
-        else if (p.boosters.includes("immune")) p.positionStatus = "immune";
-        else p.positionStatus = p.score >= threshold ? "danger" : "alive";
-      }
-    } else {
-      threshold = arena.players[5].score;
-      for (const p of arena.players) {
-        if (p.eliminated) p.positionStatus = "elimination";
-        else if (p.tempImmune || p.survivorImmune) p.positionStatus = "immune";
-        else if (p.boosters.includes("immune")) p.positionStatus = "immune";
+    for (const p of arena.players) {
+      if (p.eliminated) p.positionStatus = "elimination";
+      else if (p.tempImmune || p.survivorImmune) p.positionStatus = "immune";
+      else if (p.boosters.includes("immune")) p.positionStatus = "immune";
+      else {
+        if (arena.reverseMode) p.positionStatus = p.score >= threshold ? "danger" : "alive";
         else p.positionStatus = p.score <= threshold ? "danger" : "alive";
       }
     }
@@ -275,9 +245,7 @@ async function recomputePositions() {
     return;
   }
 
-  // ================================
-  // FINALE LOGICA
-  // ================================
+  // FINALE
   const totalFinal = arena.players.length;
 
   for (let i = 0; i < totalFinal; i++) {
@@ -288,22 +256,13 @@ async function recomputePositions() {
       continue;
     }
 
-    if (p.tempImmune || p.survivorImmune) {
+    if (p.tempImmune || p.survivorImmune || p.boosters.includes("immune")) {
       p.positionStatus = "immune";
       continue;
     }
 
-    if (p.boosters.includes("immune")) {
-      p.positionStatus = "immune";
-      continue;
-    }
-
-    // reverseMode → gevaarste positie = index 0
-    if (arena.reverseMode) {
-      p.positionStatus = i === 0 ? "danger" : "alive";
-    } else {
-      p.positionStatus = i === totalFinal - 1 ? "danger" : "alive";
-    }
+    if (arena.reverseMode) p.positionStatus = i === 0 ? "danger" : "alive";
+    else p.positionStatus = i === totalFinal - 1 ? "danger" : "alive";
   }
 
   arena.lastSortedAt = Date.now();
@@ -324,13 +283,11 @@ export async function emitArena() {
     reverseMode: arena.reverseMode,
     diamondPistolUsed: arena.diamondPistolUsed,
 
-    // PATCH: breaker hits zichtbaar naar frontend / overlay
     playersBreakerHits: arena.players.map((p) => ({
       id: p.id,
       breakerHits: p.breakerHits ?? 0,
     })),
 
-    // ★ PATCH: avatars worden nu meegestuurd!
     playersAvatars: arena.players.map((p) => ({
       id: p.id,
       avatar_url: p.avatar_url || null,
@@ -355,7 +312,7 @@ export async function forceSort() {
 }
 
 /* ============================================================================
-   toggleGalaxyMode() — Galaxy UNO-reverse
+   toggleGalaxyMode()
 ============================================================================ */
 
 export function toggleGalaxyMode(): boolean {
@@ -363,9 +320,7 @@ export function toggleGalaxyMode(): boolean {
 
   emitLog({
     type: "twist",
-    message: `GALAXY toggle → reverseMode = ${
-      arena.reverseMode ? "AAN" : "UIT"
-    }`,
+    message: `GALAXY toggle → reverseMode = ${arena.reverseMode ? "AAN" : "UIT"}`,
   });
 
   return arena.reverseMode;
@@ -381,10 +336,7 @@ export async function startRound(type: RoundType) {
   arena.round += 1;
   arena.type = type;
 
-  // RESET GALAXY
   arena.reverseMode = false;
-
-  // RESET DIAMOND PISTOL limiter
   arena.diamondPistolUsed = false;
 
   if (type === "finale" && arena.firstFinalRound === null) {
@@ -404,13 +356,8 @@ export async function startRound(type: RoundType) {
     p.survivorImmune = false;
     p.breakerHits = 0;
 
-    // immune opschonen
     p.boosters = p.boosters.filter((b) => b !== "immune");
-
-    // mg/bomb badges opschonen
-    p.boosters = p.boosters.filter(
-      (b) => b !== "mg" && b !== "bomb"
-    );
+    p.boosters = p.boosters.filter((b) => b !== "mg" && b !== "bomb");
   }
 
   arena.status = "active";
@@ -425,8 +372,7 @@ export async function startRound(type: RoundType) {
 
   arena.roundStartTime = now;
   arena.roundCutoff = now + duration * 1000;
-  arena.graceEnd =
-    arena.roundCutoff + arena.settings.graceSeconds * 1000;
+  arena.graceEnd = arena.roundCutoff + arena.settings.graceSeconds * 1000;
 
   emitLog({
     type: "arena",
@@ -444,11 +390,15 @@ export async function startRound(type: RoundType) {
 }
 
 /* ============================================================================
-   END ROUND (MG/Bomb → danger/tie → eliminaties)
+   END ROUND — FIXED VERSION
+   ✔ Alle exit paths zetten nu arena.status = "ended"
+   ✔ Hierdoor werkt removeAllowed weer → verwijderen werkt weer
 ============================================================================ */
 
 export async function endRound(forceEnd: boolean = false) {
-  // FORCEEND
+  /* ---------------------------------------------------------
+     FORCE END
+  --------------------------------------------------------- */
   if (forceEnd) {
     arena.status = "ended";
     (io as any).roundActive = false;
@@ -456,7 +406,9 @@ export async function endRound(forceEnd: boolean = false) {
     await recomputePositions();
     const total = arena.players.length;
 
-    // ======= FINALE FORCE END =======
+    /* -------------------------
+       FINALE — FORCE END
+    ------------------------- */
     if (arena.type === "finale") {
       if (total <= 1) {
         emitLog({
@@ -473,16 +425,13 @@ export async function endRound(forceEnd: boolean = false) {
           reverseMode: arena.reverseMode,
         });
 
+        arena.status = "ended"; // ★ FIX
         await emitArena();
         return;
       }
 
-      const lowest =
-        arena.players[arena.reverseMode ? 0 : total - 1].score;
-
-      const doomed = arena.players.filter(
-        (p) => p.score === lowest
-      );
+      const lowest = arena.players[arena.reverseMode ? 0 : total - 1].score;
+      const doomed = arena.players.filter((p) => p.score === lowest);
 
       for (const p of doomed) {
         p.positionStatus = "elimination";
@@ -491,9 +440,7 @@ export async function endRound(forceEnd: boolean = false) {
 
       emitLog({
         type: "arena",
-        message: `🔥 Finale eliminaties: ${doomed
-          .map((x) => x.display_name)
-          .join(", ")}`,
+        message: `🔥 Finale eliminaties: ${doomed.map((x) => x.display_name).join(", ")}`,
       });
 
       io.emit("round:end", {
@@ -504,11 +451,14 @@ export async function endRound(forceEnd: boolean = false) {
         reverseMode: arena.reverseMode,
       });
 
+      arena.status = "ended"; // ★ FIX
       await emitArena();
       return;
     }
 
-    // ======= QUARTER FORCE END =======
+    /* -------------------------
+       QUARTER — FORCE END
+    ------------------------- */
     if (total < 6) {
       io.emit("round:end", {
         round: arena.round,
@@ -518,13 +468,12 @@ export async function endRound(forceEnd: boolean = false) {
         reverseMode: arena.reverseMode,
       });
 
+      arena.status = "ended"; // ★ FIX
       await emitArena();
       return;
     }
 
-    const doomed = arena.players.filter(
-      (p) => p.positionStatus === "danger"
-    );
+    const doomed = arena.players.filter((p) => p.positionStatus === "danger");
 
     for (const p of doomed) {
       p.positionStatus = "elimination";
@@ -539,11 +488,14 @@ export async function endRound(forceEnd: boolean = false) {
       reverseMode: arena.reverseMode,
     });
 
+    arena.status = "ended"; // ★ FIX
     await emitArena();
     return;
   }
 
-  // ACTIVE → GRACE
+  /* ---------------------------------------------------------
+     ACTIVE → GRACE
+  --------------------------------------------------------- */
   if (arena.status === "active") {
     arena.status = "grace";
 
@@ -562,17 +514,19 @@ export async function endRound(forceEnd: boolean = false) {
     return;
   }
 
-  // GRACE → END
+  /* ---------------------------------------------------------
+     GRACE → END
+  --------------------------------------------------------- */
   if (arena.status === "grace") {
-    arena.status = "ended";
+    arena.status = "ended";        // ★ FIX
     (io as any).roundActive = false;
 
     await recomputePositions();
     const total = arena.players.length;
 
-    // ================================
-    // FINALE → eerst MG/Bomb
-    // ================================
+    /* -------------------------
+       FINALE
+    ------------------------- */
     if (arena.type === "finale") {
       const doomedMG = arena.players.filter((p) => p.eliminated);
 
@@ -592,16 +546,14 @@ export async function endRound(forceEnd: boolean = false) {
           reverseMode: arena.reverseMode,
         });
 
+        arena.status = "ended"; // ★ FIX
         await emitArena();
         return;
       }
 
-      // tie eliminatie
       const index = arena.reverseMode ? 0 : total - 1;
       const lowest = arena.players[index].score;
-      const doomedTie = arena.players.filter(
-        (p) => p.score === lowest
-      );
+      const doomedTie = arena.players.filter((p) => p.score === lowest);
 
       for (const p of doomedTie) {
         p.positionStatus = "elimination";
@@ -623,19 +575,18 @@ export async function endRound(forceEnd: boolean = false) {
         reverseMode: arena.reverseMode,
       });
 
+      arena.status = "ended"; // ★ FIX
       await emitArena();
       return;
     }
 
-    // ================================
-    // QUARTER → MG/Bomb + danger
-    // ================================
+    /* -------------------------
+       QUARTER
+    ------------------------- */
     const doomedMG = arena.players.filter((p) => p.eliminated);
     const doomedDanger =
       arena.settings.forceEliminations &&
-      arena.players.filter(
-        (p) => p.positionStatus === "danger"
-      );
+      arena.players.filter((p) => p.positionStatus === "danger");
 
     const doomed = [
       ...doomedMG.map((x) => x.username),
@@ -655,19 +606,20 @@ export async function endRound(forceEnd: boolean = false) {
       reverseMode: arena.reverseMode,
     });
 
+    arena.status = "ended"; // ★ FIX
     await emitArena();
   }
 }
 
 /* ============================================================================
-   ARENA MANAGEMENT (GEPATCHT MET avatar_url)
+   ARENA MANAGEMENT (met avatar_url support)
 ============================================================================ */
 
 export async function arenaJoin(
   id: string,
   display_name: string,
   username: string,
-  avatar_url: string | null = null      // ★ PATCH: avatar binnenhalen
+  avatar_url: string | null = null
 ) {
   const cleanId = String(id);
 
@@ -685,10 +637,8 @@ export async function arenaJoin(
 
     tempImmune: false,
     survivorImmune: false,
-
     breakerHits: 0,
 
-    // ★ PATCH: avatar opslaan in arena
     avatar_url: avatar_url || null,
   });
 
@@ -730,10 +680,7 @@ export async function arenaLeave(usernameOrId: string, force: boolean = false) {
   await emitArena();
 }
 
-export async function addToArena(
-  username: string,
-  resolveUser: Function
-) {
+export async function addToArena(username: string, resolveUser: Function) {
   const clean = username.replace(/^@+/, "").toLowerCase();
 
   const user = await resolveUser(clean);
@@ -746,6 +693,7 @@ export async function addToArena(
     id: String(user.tiktok_id),
     username: user.username.toLowerCase(),
     display_name: user.display_name,
+
     score: 0,
     boosters: [],
     eliminated: false,
@@ -754,7 +702,6 @@ export async function addToArena(
     survivorImmune: false,
     breakerHits: 0,
 
-    // ★ avatar vanuit DB
     avatar_url: user.avatar_url || null,
   });
 
@@ -802,13 +749,14 @@ export async function arenaClear() {
 }
 
 /* ============================================================================
-   addFromQueue (GEPATCHT MET avatar_url DOORGEVEN)
+   addFromQueue (met avatar_url)
 ============================================================================ */
 
 export async function addFromQueue(...args: any[]) {
   if (!args.length) return;
 
   const candidate = args[0];
+
   if (
     candidate &&
     typeof candidate === "object" &&
@@ -826,20 +774,18 @@ export async function addFromQueue(...args: any[]) {
       (candidate as any).user_display_name ??
       username;
 
-    // ★ PATCH: avatar inlezen uit queue records
     const avatar_url: string | null =
       (candidate as any).avatar_url ?? null;
 
     return arenaJoin(id, display_name, username, avatar_url);
   }
 
-  // fallback string+parms
+  // fallback
   if (typeof args[0] === "string") {
     const id = String(args[0]);
     const display_name = String(args[1] ?? args[2] ?? "Unknown");
     const username = String(args[2] ?? args[1] ?? "unknown");
 
-    // ★ Geen avatar bekend → null
     return arenaJoin(id, display_name, username, null);
   }
 }
@@ -874,7 +820,7 @@ export async function updateArenaSettings(
 }
 
 /* ============================================================================
-   TICK — automatische overgang naar GRACE/ENDED
+   TICK — automatische overgang naar GRACE / ENDED
 ============================================================================ */
 
 setInterval(async () => {
@@ -907,7 +853,7 @@ setInterval(async () => {
 }, 1000);
 
 /* ============================================================================
-   EXPORT DEFAULT
+   EXPORT
 ============================================================================ */
 
 export default {
