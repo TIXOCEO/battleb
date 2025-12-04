@@ -30,7 +30,7 @@ function getEventIcon(type) {
 
 function truncate(s, max) {
   if (!s) return "";
-  return s.length > max ? s.slice(0, max - 3) + "...";
+  return s.length > max ? s.slice(0, max - 3) + "..." : s;
 }
 
 // ---------------------------------------------------------
