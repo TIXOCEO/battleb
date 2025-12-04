@@ -1,10 +1,11 @@
 // ============================================================================
-// event-router.js — BattleBox Event Brain v1.5 FINAL (with Debug Bridge)
+// event-router.js — BattleBox Event Brain v1.6 FIXED + Debug Bridge
 // ============================================================================
+// - Accepts flattened backend payload (backend sends: display_name, username…)
 // - Filters ONLY join/leave/promote/demote
 // - Sends fade-out triggers
 // - Handles snapshot, queue, twists, ticker
-// - Adds DEBUG BRIDGE for OBS console: window.bb.socket, window.bb.eventStore, testEvent()
+// - Debug bridge for OBS console
 // ============================================================================
 
 import { getSocket } from "/overlays/shared/socket.js";
@@ -137,18 +138,20 @@ export async function initEventRouter() {
     queueStore.setQueue(mapped);
   });
 
-  // Queue events (ONLY join/leave/promote/demote)
+  // ========================================================================
+  // QUEUE EVENTS — FIXED (backend does NOT send evt.user)
+  // ========================================================================
   socket.on("queueEvent", (evt) => {
-    if (!evt || !evt.type || !evt.user) return;
+    if (!evt || !evt.type) return;
     if (!QUEUE_EVENTS.has(evt.type)) return;
 
     const mapped = {
       type: evt.type,
       timestamp: evt.timestamp || Date.now(),
-      display_name: evt.user.display_name || "Onbekend",
-      username: evt.user.username || "",
-      is_vip: !!evt.user.is_vip,
-      avatar_url: evt.user.avatar_url || EMPTY_AVATAR,
+      display_name: evt.display_name || "Onbekend",
+      username: evt.username || "",
+      is_vip: !!evt.is_vip,
+      avatar_url: evt.avatar_url || EMPTY_AVATAR,
       reason:
         evt.reason ||
         (evt.type === "join"
@@ -157,8 +160,7 @@ export async function initEventRouter() {
           ? "verlaat de wachtrij."
           : evt.type === "promote"
           ? "stijgt in positie."
-          : "zakt in positie."
-        ),
+          : "zakt in positie.")
     };
 
     eventStore.pushEvent(mapped);
@@ -192,7 +194,7 @@ export async function initEventRouter() {
   });
 
   // ========================================================================
-  // 🔥 DEBUG BRIDGE — make socket & stores available in OBS console
+  // DEBUG BRIDGE
   // ========================================================================
   window.bb = window.bb || {};
 
