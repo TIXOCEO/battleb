@@ -1,5 +1,7 @@
 // ============================================================================
-// event-router.js — BattleBox Overlay Event Brain v1.3 (SNAPSHOT EDITION)
+// event-router.js — BattleBox Overlay Event Brain v1.4
+// - Filters: ONLY join, leave, promote, demote
+// - All admin events & unrelated events blocked
 // ============================================================================
 
 import { getSocket } from "/overlays/shared/socket.js";
@@ -19,8 +21,11 @@ const EVENT_LIFETIME_MS = 6000;
 
 let routerStarted = false;
 
+// Valid event types
+const QUEUE_EVENT_TYPES = new Set(["join", "leave", "promote", "demote"]);
+
 // ============================================================================
-// TWIST MAP — FULL CUSTOM VERSION
+// TWIST CAROUSEL
 // ============================================================================
 const TWIST_MAP = {
   galaxy: {
@@ -28,7 +33,8 @@ const TWIST_MAP = {
     twistName: "Galaxy Twist",
     icon: "https://p16-webcast.tiktokcdn.com/img/maliva/webcast-va/resource/79a02148079526539f7599150da9fd28.png~tplv-obj.webp",
     diamonds: 1000,
-    description: "Reverse op de ranking! Hoogste staat onderaan. Eindeloos te gebruiken!",
+    description:
+      "Reverse op de ranking! Hoogste staat onderaan. Eindeloos te gebruiken!",
     aliases: ["galaxy", "gxy"]
   },
 
@@ -37,7 +43,8 @@ const TWIST_MAP = {
     twistName: "Eliminatie",
     icon: "https://p16-webcast.tiktokcdn.com/img/maliva/webcast-va/e0589e95a2b41970f0f30f6202f5fce6~tplv-obj.webp",
     diamonds: 500,
-    description: "Elimineert speler aan einde van ronde. Let op: niet te gebruiken als immuun en is te herstellen met HEAL!",
+    description:
+      "Elimineert speler aan einde van ronde. Let op: niet te gebruiken als immuun en is te herstellen met HEAL!",
     aliases: ["moneygun", "mg"]
   },
 
@@ -46,7 +53,8 @@ const TWIST_MAP = {
     twistName: "Bomb",
     icon: "https://p16-webcast.tiktokcdn.com/img/alisg/webcast-sg/resource/9154160eb6726193bc51f5007d5853fa.png~tplv-obj.webp",
     diamonds: 2500,
-    description: "BOOM! Elimineert willekeurige speler einde van de ronde. Let op: niet te gebruiken als immuun en is te herstellen met HEAL!",
+    description:
+      "BOOM! Elimineert willekeurige speler einde van de ronde. Let op: niet te gebruiken als immuun en is te herstellen met HEAL!",
     aliases: ["bomb"]
   },
 
@@ -55,7 +63,8 @@ const TWIST_MAP = {
     twistName: "Immuniteit",
     icon: "https://p16-webcast.tiktokcdn.com/img/alisg/webcast-sg/resource/ff5453b7569d482c873163ce4b1fb703.png~tplv-obj.webp",
     diamonds: 1599,
-    description: "Voorkomt eliminatie in deze ronde (behalve tegen Diamond Gun).",
+    description:
+      "Voorkomt eliminatie in deze ronde (behalve tegen Diamond Gun).",
     aliases: ["immune", "save"]
   },
 
@@ -73,7 +82,8 @@ const TWIST_MAP = {
     twistName: "Single Survivor",
     icon: "https://p16-webcast.tiktokcdn.com/img/alisg/webcast-sg/resource/651e705c26b704d03bc9c06d841808f1.png~tplv-obj.webp",
     diamonds: 5000,
-    description: "Immuniteit voor @target, MAAR; ELIMINEERT DE REST VAN DE ARENA!",
+    description:
+      "Immuniteit voor @target, MAAR; ELIMINEERT DE REST VAN DE ARENA!",
     aliases: ["dp", "pistol"]
   },
 
@@ -82,7 +92,8 @@ const TWIST_MAP = {
     twistName: "Immune Breaker",
     icon: "https://p16-webcast.tiktokcdn.com/img/maliva/webcast-va/4227ed71f2c494b554f9cbe2147d4899~tplv-obj.webp",
     diamonds: 899,
-    description: "Immuniteit breken? Stuur 2 treinen op target af en immuniteit verdwijnt!",
+    description:
+      "Immuniteit breken? Stuur 2 treinen op target af en immuniteit verdwijnt!",
     aliases: ["breaker"]
   }
 };
@@ -106,18 +117,20 @@ export async function initEventRouter() {
 
   const socket = await getSocket();
 
-  console.log("%c[BattleBox] Event Router Ready", "color:#0fffd7;font-weight:bold;");
+  console.log(
+    "%c[BattleBox] Event Router Ready",
+    "color:#0fffd7;font-weight:bold;"
+  );
 
   // -------------------------------------------------------------------------
   // SNAPSHOT
   // -------------------------------------------------------------------------
   socket.on("overlayInitialSnapshot", (snap) => {
-    console.log("%c[BattleBox] SNAPSHOT ontvangen", "color:#0fffd7;font-weight:bold;");
     applySnapshot(snap);
   });
 
   // -------------------------------------------------------------------------
-  // updateQueue → first 15
+  // QUEUE UPDATE
   // -------------------------------------------------------------------------
   socket.on("updateQueue", (packet) => {
     if (!packet || !Array.isArray(packet.entries)) return;
@@ -136,10 +149,13 @@ export async function initEventRouter() {
   });
 
   // -------------------------------------------------------------------------
-  // queueEvent — FIXED (was volledig incorrect)
+  // QUEUE EVENTS (FILTERED)
   // -------------------------------------------------------------------------
   socket.on("queueEvent", (evt) => {
     if (!evt || !evt.type || !evt.user) return;
+
+    // ❌ Skip non-queue events
+    if (!QUEUE_EVENT_TYPES.has(evt.type)) return;
 
     const mapped = {
       type: evt.type,
@@ -165,26 +181,27 @@ export async function initEventRouter() {
 
     eventStore.pushEvent(mapped);
 
-    // highlight card
+    // flash queue card
     if (mapped.username) {
       queueStore.highlightCard(mapped.username);
       setTimeout(() => queueStore.clearHighlight(), 900);
     }
 
-    // fade out
+    // fade-out after lifetime
     setTimeout(() => {
       eventStore.fadeOutEvent(mapped.timestamp);
     }, EVENT_LIFETIME_MS);
   });
 
   // -------------------------------------------------------------------------
-  // Twist rotation
+  // TWIST ROTATION
   // -------------------------------------------------------------------------
   let twistIndex = 0;
 
   function rotateTwists() {
     const slice = twistKeys.slice(twistIndex, twistIndex + 3);
-    if (slice.length < 3) slice.push(...twistKeys.slice(0, 3 - slice.length));
+    if (slice.length < 3)
+      slice.push(...twistKeys.slice(0, 3 - slice.length));
 
     twistStore.setTwists(slice);
     twistIndex = (twistIndex + 3) % twistKeys.length;
@@ -194,7 +211,7 @@ export async function initEventRouter() {
   setInterval(rotateTwists, TWIST_ROTATION_MS);
 
   // -------------------------------------------------------------------------
-  // Ticker
+  // TICKER TEXT
   // -------------------------------------------------------------------------
   socket.on("hudTickerUpdate", (text) => {
     tickerStore.setText(text || "");
