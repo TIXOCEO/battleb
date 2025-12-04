@@ -1,7 +1,10 @@
 // ============================================================================
-// src/queue.ts — QUEUE ENGINE v16.5 (Overlay Upgrade Edition)
-// Position-based queue system (VIP/FAN aware)
-// Compatibel met server.ts v16+ en admin dashboard acties
+// src/queue.ts — QUEUE ENGINE v16.8 (Full Sync Build)
+// - Volledige compatibiliteit met server.ts v16.8
+// - Fix: leave events bevatten correcte user data
+// - Fix: geen dubbele leave events meer
+// - Fix: addToArenaFromQueue consistent & future-proof
+// - Fix: avatar_url overal doorgegeven
 // ============================================================================
 
 import pool from "./db";
@@ -47,7 +50,7 @@ export async function getQueue() {
       u.vip_expires_at,
       u.is_fan,
       u.fan_expires_at,
-      u.avatar_url   -- 🔥 PATCH: avatar ophalen
+      u.avatar_url
     FROM queue q
     JOIN users u ON u.tiktok_id = q.user_tiktok_id
     ORDER BY q.position ASC, q.id ASC
@@ -58,7 +61,6 @@ export async function getQueue() {
 
   return result.rows.map((row: any) => {
     const isVip = !!row.is_vip;
-
     const fanActive =
       row.is_fan &&
       row.fan_expires_at &&
@@ -82,15 +84,13 @@ export async function getQueue() {
       is_vip: isVip,
       is_fan: isFan,
       reason,
-
-      // 🔥 PATCH: avatars doorgeven aan frontend & overlay
       avatar_url: row.avatar_url || null
     };
   });
 }
 
 /**
- * Emit queue naar alle admins
+ * Emit queue naar alle admins & overlays
  */
 export async function pushQueueUpdate() {
   await normalizePositions();
@@ -131,7 +131,6 @@ export async function addToQueue(
   const userTid = BigInt(tiktok_id);
   const cleanUsername = username.replace(/^@+/, "").toLowerCase();
 
-  // verwijder oude entries
   await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [userTid]);
 
   const ur = await pool.query(
@@ -142,18 +141,16 @@ export async function addToQueue(
     `,
     [userTid]
   );
-
   if (!ur.rows.length) throw new Error("Gebruiker niet gevonden.");
-
   const user = ur.rows[0];
-  const now = Date.now();
 
+  const now = Date.now();
   const fanActive =
     user.is_fan &&
     user.fan_expires_at &&
     new Date(user.fan_expires_at).getTime() > now;
 
-  if (!fanActive) throw new Error("Gebruiker is geen FAN (kan niet joinen).");
+  if (!fanActive) throw new Error("Gebruiker is geen FAN.");
 
   const isVip = !!user.is_vip;
 
@@ -168,7 +165,6 @@ export async function addToQueue(
     `,
     [userTid, startPos]
   );
-
   const newId = ir.rows[0].id;
   const newPos = ir.rows[0].position;
 
@@ -198,17 +194,17 @@ export async function addToQueue(
         [finalTarget, newPos]
       );
 
-      await pool.query(`UPDATE queue SET position=$1 WHERE id=$2`, [
-        finalTarget,
-        newId
-      ]);
+      await pool.query(
+        `UPDATE queue SET position=$1 WHERE id=$2`,
+        [finalTarget, newId]
+      );
     }
   }
 
   await normalizePositions();
   await pushQueueUpdate();
 
-  // 🔥 overlay event
+  // 🔥 Enkelvoudige correcte join event
   emitQueueEvent("join", {
     tiktok_id,
     username: cleanUsername,
@@ -237,9 +233,9 @@ export async function addToQueueAdminOverride(
     `,
     [userTid]
   );
-
   if (!ur.rows.length) throw new Error("Gebruiker niet gevonden.");
   const user = ur.rows[0];
+
   const isVip = !!user.is_vip;
 
   const qr = await pool.query(`SELECT COALESCE(MAX(position),0) AS maxpos FROM queue`);
@@ -263,10 +259,10 @@ export async function addToQueueAdminOverride(
 
     const earlierVIPs = await pool.query(
       `
-        SELECT position 
-        FROM queue q 
-        JOIN users u ON u.tiktok_id = q.user_tiktok_id
-        WHERE u.is_vip = TRUE AND q.position < $1
+      SELECT position
+      FROM queue q
+      JOIN users u ON u.tiktok_id = q.user_tiktok_id
+      WHERE u.is_vip = TRUE AND q.position < $1
       `,
       [newPos]
     );
@@ -282,6 +278,7 @@ export async function addToQueueAdminOverride(
         `UPDATE queue SET position = position + 1 WHERE position >= $1 AND position < $2`,
         [finalTarget, newPos]
       );
+
       await pool.query(`UPDATE queue SET position=$1 WHERE id=$2`, [
         finalTarget,
         newId
@@ -302,25 +299,22 @@ export async function addToQueueAdminOverride(
 }
 
 /**
- * removeFromQueue — admin
+ * removeFromQueue — volledig gepatcht (geen dubbele leave events!)
  */
 export async function removeFromQueue(tiktok_id: string): Promise<void> {
-  const userTid = BigInt(tiktok_id);
+  const tid = BigInt(tiktok_id);
 
   const r = await pool.query(
     `SELECT id, position FROM queue WHERE user_tiktok_id=$1`,
-    [userTid]
+    [tid]
   );
   if (!r.rows.length) return;
 
-  // overlay event
-  emitQueueEvent("leave", {
-    tiktok_id,
-    username: "",
-    display_name: "",
-    is_vip: false,
-    avatar_url: null
-  });
+  const userData = await pool.query(
+    `SELECT username, display_name, is_vip, avatar_url FROM users WHERE tiktok_id=$1`,
+    [tid]
+  );
+  const user = userData.rows[0] ?? null;
 
   const pos = Number(r.rows[0].position);
 
@@ -333,42 +327,8 @@ export async function removeFromQueue(tiktok_id: string): Promise<void> {
 
   await normalizePositions();
   await pushQueueUpdate();
-}
 
-/**
- * leaveQueue — !leave
- */
-export async function leaveQueue(tiktok_id: string): Promise<number> {
-  const userTid = BigInt(tiktok_id);
-
-  const r = await pool.query(
-    `SELECT id, position, boost_spots FROM queue WHERE user_tiktok_id=$1`,
-    [userTid]
-  );
-  if (!r.rows.length) return 0;
-
-  const entry = r.rows[0];
-  const boost = Number(entry.boost_spots);
-  const pos = Number(entry.position);
-
-  const refund = Math.floor(boost * 200 * 0.5);
-
-  await pool.query(
-    `
-      UPDATE users 
-      SET bp_total = bp_total + $1,
-          bp_daily = bp_daily + $1
-      WHERE tiktok_id=$2
-    `,
-    [refund, userTid]
-  );
-
-  const userData = await pool.query(
-    `SELECT display_name, username, is_vip, avatar_url FROM users WHERE tiktok_id=$1`,
-    [userTid]
-  );
-  const user = userData.rows[0];
-
+  // 🔥 leave-event NA verwijdering, met correcte user info
   emitQueueEvent("leave", {
     tiktok_id,
     username: user?.username?.replace(/^@+/, "").toLowerCase() ?? "",
@@ -376,6 +336,41 @@ export async function leaveQueue(tiktok_id: string): Promise<number> {
     is_vip: !!user?.is_vip,
     avatar_url: user?.avatar_url || null
   });
+                                    }
+/**
+ * leaveQueue — FAN/CHAT command: !leave
+ */
+export async function leaveQueue(tiktok_id: string): Promise<number> {
+  const tid = BigInt(tiktok_id);
+
+  const r = await pool.query(
+    `SELECT id, position, boost_spots FROM queue WHERE user_tiktok_id=$1`,
+    [tid]
+  );
+  if (!r.rows.length) return 0;
+
+  const entry = r.rows[0];
+  const pos = Number(entry.position);
+  const boost = Number(entry.boost_spots);
+
+  // Refund 50% van gebruikte BP
+  const refund = Math.floor(boost * 200 * 0.5);
+
+  await pool.query(
+    `
+      UPDATE users
+      SET bp_total = bp_total + $1,
+          bp_daily = bp_daily + $1
+      WHERE tiktok_id=$2
+    `,
+    [refund, tid]
+  );
+
+  const userData = await pool.query(
+    `SELECT username, display_name, is_vip, avatar_url FROM users WHERE tiktok_id=$1`,
+    [tid]
+  );
+  const user = userData.rows[0] ?? null;
 
   await pool.query(`DELETE FROM queue WHERE id=$1`, [entry.id]);
 
@@ -386,6 +381,15 @@ export async function leaveQueue(tiktok_id: string): Promise<number> {
 
   await normalizePositions();
   await pushQueueUpdate();
+
+  // 🔥 leave event mét correcte gegevens
+  emitQueueEvent("leave", {
+    tiktok_id,
+    username: user?.username?.replace(/^@+/, "").toLowerCase() ?? "",
+    display_name: user?.display_name ?? "",
+    is_vip: !!user?.is_vip,
+    avatar_url: user?.avatar_url || null
+  });
 
   return refund;
 }
@@ -405,14 +409,13 @@ export async function promoteQueue(tiktok_id: string): Promise<void> {
   const pos = Number(r.rows[0].position);
   if (pos <= 1) return;
 
-  const prev = await pool.query(`SELECT id FROM queue WHERE position=$1`, [
-    pos - 1
-  ]);
+  const prev = await pool.query(
+    `SELECT id FROM queue WHERE position=$1`,
+    [pos - 1]
+  );
   if (!prev.rows.length) return;
 
-  const aboveId = prev.rows[0].id;
-
-  await swapPositions(r.rows[0].id, aboveId);
+  await swapPositions(r.rows[0].id, prev.rows[0].id);
 }
 
 /**
@@ -433,18 +436,18 @@ export async function demoteQueue(tiktok_id: string): Promise<void> {
 
   if (pos >= maxPos) return;
 
-  const nxt = await pool.query(`SELECT id FROM queue WHERE position=$1`, [
-    pos + 1
-  ]);
+  const nxt = await pool.query(
+    `SELECT id FROM queue WHERE position=$1`,
+    [pos + 1]
+  );
   if (!nxt.rows.length) return;
 
-  const belowId = nxt.rows[0].id;
-
-  await swapPositions(r.rows[0].id, belowId);
+  await swapPositions(r.rows[0].id, nxt.rows[0].id);
 }
 
 /**
- * addToArenaFromQueue — interne helper
+ * addToArenaFromQueue — gebruikt door server.ts of admin-actions
+ * Correcte leave-event + consistent gedrag
  */
 export async function addToArenaFromQueue(tiktok_id: string): Promise<void> {
   const tid = BigInt(tiktok_id);
@@ -455,21 +458,13 @@ export async function addToArenaFromQueue(tiktok_id: string): Promise<void> {
   );
   if (!r.rows.length) return;
 
+  const pos = Number(r.rows[0].position);
+
   const userData = await pool.query(
-    `SELECT display_name, username, is_vip, avatar_url FROM users WHERE tiktok_id=$1`,
+    `SELECT username, display_name, is_vip, avatar_url FROM users WHERE tiktok_id=$1`,
     [tid]
   );
-  const user = userData.rows[0];
-
-  emitQueueEvent("leave", {
-    tiktok_id,
-    username: user?.username?.replace(/^@+/, "").toLowerCase() ?? "",
-    display_name: user?.display_name ?? "",
-    is_vip: !!user?.is_vip,
-    avatar_url: user?.avatar_url || null
-  });
-
-  const pos = Number(r.rows[0].position);
+  const user = userData.rows[0] ?? null;
 
   await pool.query(`DELETE FROM queue WHERE user_tiktok_id=$1`, [tid]);
 
@@ -480,12 +475,23 @@ export async function addToArenaFromQueue(tiktok_id: string): Promise<void> {
 
   await normalizePositions();
   await pushQueueUpdate();
+
+  // 🔥 juiste leave-event
+  emitQueueEvent("leave", {
+    tiktok_id,
+    username: user?.username?.replace(/^@+/, "").toLowerCase() ?? "",
+    display_name: user?.display_name ?? "",
+    is_vip: !!user?.is_vip,
+    avatar_url: user?.avatar_url || null
+  });
+
+  // ⚠️ Arena-join wordt NIET hier gedaan (server.ts doet dat)
+  // Dit voorkomt dubbele joins & dubbele events.
 }
 
 // ============================================================================
 // EXPORT DEFAULT
 // ============================================================================
-
 export default {
   getQueue,
   pushQueueUpdate,
