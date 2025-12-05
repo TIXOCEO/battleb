@@ -1,81 +1,91 @@
 // ============================================================================
-// arena-store.js — Shared Arena Store (OBS Overlays)
-// Standalone store (geen React, geen Zustand)
+// arena-store.js — BattleBox Arena Overlay Store (FINAL v5.0)
 // ============================================================================
 
-export const arenaStore = {
-  state: {
-    hud: {
-      roundNumber: 0,
-      roundType: "quarter",
-      roundStatus: "idle",
-      remainingMs: 0,
-      totalMs: 0,
-    },
+import { createStore } from "/overlays/shared/stores.js";
 
-    players: Array.from({ length: 8 }, () => ({
-      id: null,
-      display_name: "",
-      username: "",
-      avatar_url: null,
-      score: 0,
-      positionStatus: "alive",
-      breakerHits: 0,
-    })),
+// ARENA STATE
+export const arenaStore = createStore({
+  round: 0,
+  type: "quarter",
+  status: "idle",
 
-    lastUpdateAt: 0,
+  players: [],
+
+  settings: {
+    roundDurationPre: 30,
+    roundDurationFinal: 300,
   },
 
-  subscribers: new Set(),
+  roundCutoff: 0,
+  graceEnd: 0,
+});
 
-  // -----------------------------------------------------
-  // Subscribe to changes
-  // -----------------------------------------------------
-  subscribe(fn) {
-    this.subscribers.add(fn);
-    fn(this.state); // immediately call with current state
+// Full snapshot
+export function setArenaSnapshot(snap) {
+  if (!snap) return;
 
-    return () => {
-      this.subscribers.delete(fn);
-    };
-  },
+  arenaStore.set({
+    round: snap.round,
+    type: snap.type,
+    status: snap.status,
+    players: snap.players,
+    settings: snap.settings || arenaStore.get().settings,
+    roundCutoff: snap.roundCutoff,
+    graceEnd: snap.graceEnd,
+  });
+}
 
-  // -----------------------------------------------------
-  // Set HUD section
-  // -----------------------------------------------------
-  setHUD(hud) {
-    this.state.hud = { ...this.state.hud, ...hud };
-    this.state.lastUpdateAt = Date.now();
-    this.emit();
-  },
+// Only players change
+export function updatePlayers(players) {
+  arenaStore.set({ players });
+}
 
-  // -----------------------------------------------------
-  // Replace full players array (8 spots)
-  // -----------------------------------------------------
-  setPlayers(playersArray) {
-    const filled = [...playersArray];
+// HUD Ring
+export function renderHudProgress(state, ringEl) {
+  if (!ringEl) return;
 
-    while (filled.length < 8) {
-      filled.push({
-        id: null,
-        display_name: "",
-        username: "",
-        avatar_url: null,
-        score: 0,
-        positionStatus: "empty",
-        breakerHits: 0,
-      });
-    }
+  const radius = 170;
+  const circumference = 2 * Math.PI * radius;
+  ringEl.style.strokeDasharray = `${circumference}`;
 
-    this.state.players = filled.slice(0, 8);
-    this.state.lastUpdateAt = Date.now();
-    this.emit();
-  },
+  const now = Date.now();
+  let total = 1;
+  let remaining = 0;
 
-  // -----------------------------------------------------
-  // Emit update to all subscribers
-  // -----------------------------------------------------
-  emit() {
-    for (const fn of this.subscribers) fn(this.state);
-  },
+  if (state.status === "active") {
+    total = state.settings.roundDurationPre;
+    remaining = Math.max(0, ((state.roundCutoff - now) / 1000) | 0);
+  }
+
+  if (state.status === "grace") {
+    total = 5;
+    remaining = Math.max(0, ((state.graceEnd - now) / 1000) | 0);
+  }
+
+  const progress = 1 - remaining / total;
+  ringEl.style.strokeDashoffset = circumference * progress;
+}
+
+// Twist takeover
+export const arenaTwistStore = createStore({
+  active: false,
+  type: null,
+  title: "",
+});
+
+arenaTwistStore.activate = (type, title) => {
+  arenaTwistStore.set({ active: true, type, title });
+};
+
+arenaTwistStore.clear = () => {
+  arenaTwistStore.set({ active: false, type: null, title: "" });
+};
+
+export default {
+  arenaStore,
+  arenaTwistStore,
+  setArenaSnapshot,
+  updatePlayers,
+  renderHudProgress,
 };
