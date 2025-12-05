@@ -1,24 +1,22 @@
 // ============================================================================
-// twistAnim.js — BattleBox Arena Twist Animation Engine v7.0 FINAL
+// twistAnim.js — BattleBox Arena Twist Animation Engine v7.2 FINAL
 // ============================================================================
 //
-// Upgrades v7.0:
+// Upgrades v7.2:
 // ------------------------------------------------------------
-// ✔ Ondersteuning voor nieuwe payload (target/victims/survivor)
-// ✔ BOMB countdown 3 → 2 → 1 animatie
-// ✔ Nieuwe functie: playCountdown(root, step)
-// ✔ Nieuwe functies voor target/victim/survivor highlight
-// ✔ Volledig backward compatible met v1.5 gedrag
-// ✔ TwistQueue ready
+// ✔ BOMB countdown: playCountdown(root, 3 → 2 → 1)
+// ✔ Nieuwe highlight animaties: target / victims / survivor
+// ✔ Nieuwe payload-verwerking vanuit backend (type, title, targetName…)
+// ✔ Backward compatible met v1.5 (oude twists werken zonder problemen)
+// ✔ TwistQueue safe: animaties worden geforceerd gereset en opnieuw gestart
+// ✔ Force-reflow opnieuw verbeterd tegen "stuck animations"
+// ✔ Geen afhankelijkheden buiten arena.js
 //
 // ============================================================================
 
+
 /**
- * Speelt een volledige twist animatie.
- * @param {HTMLElement} root 
- * @param {string} type 
- * @param {string} title 
- * @param {object} payload - volledige twist payload (optioneel)
+ * SPEELT DE VOLLEDIGE TWIST-ANIMATIE
  */
 export function playTwistAnimation(root, type, title = "", payload = {}) {
   if (!root) return;
@@ -30,13 +28,13 @@ export function playTwistAnimation(root, type, title = "", payload = {}) {
   root.innerHTML = html;
 
   queueMicrotask(() => {
-    void root.offsetWidth;
+    void root.offsetWidth; // force reflow
     root.classList.add("show");
   });
 }
 
 /**
- * Cleart twist animatie.
+ * CLEART DE OVERLAY
  */
 export function clearTwistAnimation(root) {
   if (!root) return;
@@ -49,16 +47,14 @@ export function clearTwistAnimation(root) {
 }
 
 // ============================================================================
-// COUNTDOWN ANIMATIE (3 → 2 → 1)
+// COUNTDOWN ANIMATIE 3 → 2 → 1
 // ============================================================================
+
 export function playCountdown(root, step = 3) {
   if (!root) return;
 
   root.classList.remove("show");
-  root.innerHTML = "";
-
-  const html = renderCountdownHTML(step);
-  root.innerHTML = html;
+  root.innerHTML = renderCountdownHTML(step);
 
   queueMicrotask(() => {
     void root.offsetWidth;
@@ -69,15 +65,13 @@ export function playCountdown(root, step = 3) {
 function renderCountdownHTML(step) {
   return `
     <div class="twist-anim bomb-countdown">
-      <div class="count-number step-${step}">
-        ${step}
-      </div>
+      <div class="count-number">${step}</div>
     </div>
   `;
 }
 
 // ============================================================================
-// TARGET / VICTIM / SURVIVOR ANIMATIONS (gebruikt in arena.js)
+// TARGET / VICTIMS / SURVIVOR (NEW VISUALS)
 // ============================================================================
 
 export function playTargetAnimation(root, payload) {
@@ -87,6 +81,7 @@ export function playTargetAnimation(root, payload) {
   root.innerHTML = `
     <div class="twist-anim target-hit">
       <div class="twist-title">${payload.targetName}</div>
+      <div class="target-flash"></div>
     </div>
   `;
 
@@ -104,6 +99,7 @@ export function playVictimAnimations(root, payload) {
       (v) => `
         <div class="twist-anim victim-blast">
           <div class="victim-name">${v}</div>
+          <div class="victim-blast"></div>
         </div>
       `
     )
@@ -125,6 +121,7 @@ export function playSurvivorAnimation(root, payload) {
   root.innerHTML = `
     <div class="twist-anim survivor-shield">
       <div class="survivor-name">${payload.survivorName}</div>
+      <div class="survivor-glow"></div>
     </div>
   `;
 
@@ -135,7 +132,7 @@ export function playSurvivorAnimation(root, payload) {
 }
 
 // ============================================================================
-// HTML BUILDERS — originele animaties blijven bestaan
+// HTML GENERATORS (ORIGINEEL + COUNTDOWN EXTENSIE)
 // ============================================================================
 
 function buildTwistHTML(type, title, payload = {}) {
@@ -183,7 +180,7 @@ function diamondPistolHTML(title) {
 }
 
 /* ============================================================================
-   MONEY GUN
+   MONEY GUN — bill spray
 ============================================================================ */
 function moneyGunHTML(title) {
   const bills = [...Array(32)]
@@ -199,7 +196,7 @@ function moneyGunHTML(title) {
 }
 
 /* ============================================================================
-   BOMB SHOCKWAVE
+   BOMB — shockwave
 ============================================================================ */
 function bombHTML(title) {
   return `
@@ -212,7 +209,7 @@ function bombHTML(title) {
 }
 
 /* ============================================================================
-   IMMUNE — green aura
+   IMMUNE — aura
 ============================================================================ */
 function immuneHTML(title) {
   return `
@@ -224,7 +221,7 @@ function immuneHTML(title) {
 }
 
 /* ============================================================================
-   HEAL
+   HEAL — green cross
 ============================================================================ */
 function healHTML(title) {
   return `
@@ -242,9 +239,7 @@ function galaxyHTML(title) {
   return `
     <div class="twist-anim galaxy-vortex">
       <div class="twist-title">${title}</div>
-
       <div class="galaxy-stars"></div>
-
       <div class="galaxy-ring"></div>
       <div class="galaxy-ring2"></div>
       <div class="galaxy-flare"></div>
@@ -253,7 +248,7 @@ function galaxyHTML(title) {
 }
 
 /* ============================================================================
-   GENERIC FALLBACK
+   GENERIC
 ============================================================================ */
 function genericHTML(title) {
   return `
