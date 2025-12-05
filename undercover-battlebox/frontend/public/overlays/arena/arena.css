@@ -1,247 +1,3 @@
-@import "/overlays/shared/theme.css";
-
-/* ========================================================================== */
-/* ROOT WRAPPER — fixed 1200 × 800                                            */
-/* ========================================================================== */
-.bb-arena-root {
-  width: 1200px;
-  height: 800px;
-  position: relative;
-  overflow: hidden;
-  background: rgba(5,5,8,0.75);
-  border: 2px solid rgba(255,255,255,0.08);
-  backdrop-filter: blur(10px);
-  box-shadow:
-    0 0 40px rgba(255,77,79,0.35),
-    inset 0 0 50px rgba(0,0,0,0.75);
-}
-
-/* ========================================================================== */
-/* TWIST TAKEOVER (fullscreen overlay)                                        */
-/* ========================================================================== */
-.bb-twist-takeover {
-  position: absolute;
-  inset: 0;
-  z-index: 80; /* ABOVE EVERYTHING */
-  background: rgba(15,15,20,0.92);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  backdrop-filter: blur(12px);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.35s ease-out;
-}
-
-.bb-twist-takeover.show {
-  opacity: 1;
-  pointer-events: all;
-  animation: twist-flash 0.55s ease-out,
-             crt-pulse 2s infinite ease-in-out;
-}
-
-@keyframes twist-flash {
-  0%   { opacity: 0;   filter: brightness(0.3); }
-  50%  { opacity: 1;   filter: brightness(3);   }
-  100% { opacity: 1;   filter: brightness(1.2); }
-}
-
-@keyframes crt-pulse {
-  0%   { opacity: 1; }
-  50%  { opacity: 0.85; }
-  100% { opacity: 1; }
-}
-
-/* ========================================================================== */
-/* CENTRAL HUD (octagon)                                                      */
-/* ========================================================================== */
-.bb-hud {
-  width: 350px;
-  height: 350px;
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  clip-path: polygon(
-    10% 0%, 90% 0%,
-    100% 15%, 100% 85%,
-    90% 100%, 10% 100%,
-    0% 85%, 0% 15%
-  );
-  background: rgba(20,20,24,0.76);
-  border: 2px solid rgba(255,255,255,0.14);
-  box-shadow:
-    0 0 25px rgba(0,0,0,0.8),
-    inset 0 0 32px rgba(0,0,0,0.55),
-    inset 0 0 22px rgba(255,77,79,0.25);
-  transition: box-shadow 0.35s ease-out;
-}
-
-.hud-inner {
-  width: 100%;
-  height: 100%;
-  position: relative;
-  z-index: 4;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-}
-
-/* HUD TEXT */
-.hud-round-text {
-  font-size: 38px;
-  font-weight: 900;
-  margin-bottom: 6px;
-  color: var(--bb-orange);
-  text-shadow: var(--glow-hard-orange);
-}
-
-.hud-type-text {
-  font-size: 26px;
-  opacity: 0.85;
-  margin-bottom: 12px;
-}
-
-.hud-timer {
-  font-size: 52px;
-  font-weight: 900;
-  color: #fff;
-  text-shadow: var(--glow-mid-turq);
-  transition: transform 0.2s ease-out;
-}
-
-/* HUD ROUND START SHOCKWAVE */
-.bb-round-start-shockwave {
-  animation: hud-shockwave 0.6s cubic-bezier(.18,.85,.28,1);
-}
-
-@keyframes hud-shockwave {
-  0%   { opacity: .65; transform: scale(.78); filter: blur(4px); }
-  60%  { opacity: 1;    transform: scale(1.1); filter: blur(0);   }
-  100% { opacity: 1;    transform: scale(1); }
-}
-
-/* HUD TIMER TICK */
-.bb-timer-tick {
-  animation: hud-timer-tick 0.4s ease-out;
-}
-
-@keyframes hud-timer-tick {
-  0%   { color: white; }
-  50%  { color: var(--bb-orange); text-shadow: 0 0 14px var(--bb-orange); }
-  100% { color: white; }
-}
-
-/* ========================================================================== */
-/* HUD PROGRESS RING                                                          */
-/* ========================================================================== */
-.hud-ring {
-  position: absolute;
-  top: 0;
-  left: 0;
-}
-
-.hud-ring-bg {
-  fill: none;
-  stroke: rgba(255,255,255,0.12);
-}
-
-.hud-ring-progress {
-  fill: none;
-  stroke: var(--bb-orange);
-  stroke-linecap: round;
-  transform-origin: 50% 50%;
-  transform: rotate(-90deg);
-  transition: stroke-dashoffset 0.25s linear;
-  filter: drop-shadow(0 0 6px rgba(255,77,79,0.9));
-}
-
-/* ========================================================================== */
-/* SECTION COMPLETE                                                            */
-/* ========================================================================== */
-
-/* ========================================================================== */
-/* PLAYER CARDS — around the HUD                                              */
-/* ========================================================================== */
-#arena-players {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.bb-player-card {
-  width: 160px;
-  height: 160px;
-  position: absolute;
-
-  clip-path: polygon(
-    12% 0%, 88% 0%,
-    100% 18%, 100% 82%,
-    88% 100%, 12% 100%,
-    0% 82%, 0% 18%
-  );
-
-  background: rgba(12,12,18,0.72);
-  border: 2px solid rgba(255,255,255,0.12);
-  box-shadow:
-    0 0 20px rgba(0,0,0,0.65),
-    inset 0 0 22px rgba(0,0,0,0.65),
-    inset 0 0 14px rgba(255,77,79,0.18);
-
-  overflow: hidden;
-  display: flex;
-  justify-content: center;
-  align-items: flex-end;
-  padding-bottom: 12px;
-
-  transition:
-    left .35s cubic-bezier(.2,.7,.3,1),
-    top .35s cubic-bezier(.2,.7,.3,1),
-    transform .35s cubic-bezier(.2,.7,.3,1),
-    border-color .25s ease-out,
-    box-shadow .25s ease-out;
-}
-
-/* ========================================================================== */
-/* BACKGROUND AVATAR                                                          */
-/* ========================================================================== */
-.bb-player-bgavatar {
-  position: absolute;
-  inset: 0;
-  background-size: cover;
-  background-position: center;
-  opacity: 0.18;
-  filter: blur(1px);
-}
-
-/* ========================================================================== */
-/* LABELS                                                                     */
-/* ========================================================================== */
-.bb-player-labels {
-  position: relative;
-  z-index: 2;
-  text-align: center;
-}
-
-.bb-player-name {
-  font-size: 18px;
-  font-weight: 800;
-  color: white;
-  margin-bottom: 4px;
-  text-shadow: 0 0 8px black;
-  max-width: 140px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.bb-player-score {
-  font-size: 16px;
-  opacity: 0.85;
-  transition: transform .25s, color .25s;
-}
-
 /* ========================================================================== */
 /* POSITION BADGE                                                             */
 /* ========================================================================== */
@@ -275,13 +31,11 @@
 
 /* ALIVE */
 .status-alive {
-  border-color: rgba(255,255,255,0.75);
-  box-shadow:
-    0 0 18px rgba(255,255,255,0.35),
-    inset 0 0 18px rgba(255,255,255,0.22);
+  border: none;
+  box-shadow: none;
 }
 
-/* alive pulse (subtle) */
+/* alive pulse */
 .bb-alive-pulse {
   animation: alive-pulse 1.4s ease-in-out;
 }
@@ -294,28 +48,29 @@
 /* ========================================================================== */
 /* IMMUNE                                                                     */
 /* ========================================================================== */
+
 .status-immune {
-  border-color: #00ff99;
-  box-shadow:
-    0 0 22px rgba(0,255,145,1),
-    inset 0 0 22px rgba(0,255,145,0.55);
+  border: none;
+  box-shadow: 0 0 22px rgba(0,255,145,0.65);
 }
 
 .bb-immune-glow {
   animation: immune-glow 1.3s infinite ease-in-out;
 }
+
 @keyframes immune-glow {
-  0%   { box-shadow: 0 0 12px rgba(0,255,150,0.7); }
+  0%   { box-shadow: 0 0 12px rgba(0,255,150,0.6); }
   50%  { box-shadow: 0 0 26px rgba(0,255,170,1); }
-  100% { box-shadow: 0 0 12px rgba(0,255,150,0.7); }
+  100% { box-shadow: 0 0 12px rgba(0,255,150,0.6); }
 }
 
 /* ========================================================================== */
-/* IMMUNE BROKEN (white strobe)                                               */
+/* IMMUNE BROKEN                                                              */
 /* ========================================================================== */
+
 .status-immune-broken {
-  border-color: #fff;
-  box-shadow: 0 0 20px white;
+  border: none;
+  box-shadow: 0 0 22px white;
 }
 
 .bb-immune-broken-blink {
@@ -328,39 +83,39 @@
 }
 
 /* ========================================================================== */
-/* DANGER (orange pulsing)                                                    */
+/* DANGER                                                                     */
 /* ========================================================================== */
+
 .status-danger {
-  border-color: #ff8800;
-  box-shadow:
-    0 0 26px rgba(255,136,0,1),
-    inset 0 0 26px rgba(255,136,0,0.55);
+  border: none;
+  box-shadow: 0 0 26px rgba(255,140,40,0.85);
 }
 
 .bb-danger-pulse {
   animation: danger-pulse 1s ease-in-out infinite;
 }
+
 @keyframes danger-pulse {
-  0%   { box-shadow: 0 0 14px rgba(255,140,40,0.7); }
+  0%   { box-shadow: 0 0 14px rgba(255,160,40,0.6); }
   50%  { box-shadow: 0 0 30px rgba(255,160,40,1); }
-  100% { box-shadow: 0 0 14px rgba(255,140,40,0.7); }
+  100% { box-shadow: 0 0 14px rgba(255,160,40,0.6); }
 }
 
 /* ========================================================================== */
-/* ELIMINATION (explosion collapse)                                           */
+/* ELIMINATION                                                                */
 /* ========================================================================== */
+
 .status-elimination {
-  border-color: #ff0033;
-  box-shadow:
-    0 0 32px rgba(255,0,51,0.9),
-    inset 0 0 32px rgba(255,0,51,0.55);
+  border: none;
+  box-shadow: 0 0 32px rgba(255,0,51,1);
 }
 
 .bb-elim-flash {
   animation: elim-flash 0.6s forwards;
 }
+
 @keyframes elim-flash {
-  0%   { transform: scale(1); opacity: 1;   filter: brightness(1); }
+  0%   { transform: scale(1); opacity: 1; filter: brightness(1); }
   30%  { transform: scale(1.25); opacity: 1; filter: brightness(2); }
   100% { transform: scale(0.35); opacity: 0.2; filter: brightness(0.6); }
 }
@@ -368,9 +123,11 @@
 /* ========================================================================== */
 /* JOIN POP                                                                    */
 /* ========================================================================== */
+
 .bb-join-pop {
   animation: join-pop 0.45s cubic-bezier(.25,1.15,.3,1.1);
 }
+
 @keyframes join-pop {
   0%   { transform: scale(0); opacity: 0; }
   60%  { transform: scale(1.25); opacity: 1; }
@@ -380,21 +137,19 @@
 /* ========================================================================== */
 /* SCORE FLASH                                                                 */
 /* ========================================================================== */
+
 .bb-score-anim {
   animation: score-flash .35s ease-out;
 }
+
 @keyframes score-flash {
   0%   { color: white; transform: scale(1); }
-  50%  { color: gold;  transform: scale(1.32); }
+  50%  { color: gold; transform: scale(1.32); }
   100% { color: white; transform: scale(1); }
 }
 
 /* ========================================================================== */
-/* END PART 2                                                                  */
-/* ========================================================================== */
-
-/* ========================================================================== */
-/* TWIST TAKEOVER BASE WRAPPER (fullscreen)                                   */
+/* TWIST BASE WRAPPER                                                          */
 /* ========================================================================== */
 
 .twist-anim {
@@ -458,12 +213,13 @@
 }
 
 /* ========================================================================== */
-/* BOMB — shockwave                                                           */
+/* BOMB BLAST (shockwave)                                                     */
 /* ========================================================================== */
 
 .bomb-blast .bomb-core {
   position: absolute;
-  width: 40px; height: 40px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   background: #ff0033;
   z-index: 5;
@@ -478,18 +234,19 @@
 .bomb-blast .bomb-wave {
   position: absolute;
   border: 6px solid rgba(255,0,60,0.6);
-  width: 20px; height: 20px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   animation: bomb-wave-expand 0.7s ease-out forwards;
 }
 
 @keyframes bomb-wave-expand {
   0%   { opacity: 0.9; transform: scale(1); }
-  100% { opacity: 0;   transform: scale(15); }
+  100% { opacity: 0; transform: scale(15); }
 }
 
 /* ========================================================================== */
-/* IMMUNE — AURA                                                              */
+/* IMMUNE AURA                                                                */
 /* ========================================================================== */
 
 .immune-aura .aura-ring {
@@ -508,12 +265,303 @@
 }
 
 /* ========================================================================== */
-/* HEAL — CROSS                                                               */
+/* HEAL CROSS                                                                  */
 /* ========================================================================== */
 
 .heal-cross .heal-plus {
   position: absolute;
-  width: 80px; height: 80px;
+  width: 80px;
+  height: 80px;
+  background:
+    linear-gradient(#0f0,#0f0),
+    linear-gradient(#0f0,#0f0);
+  background-size: 20px 80px, 80px 20px;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: drop-shadow(0 0 12px #0f0);
+  animation: heal-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes heal-pulse {
+  0%   { transform: scale(0.7); opacity: 0.6; }
+  50%  { transform: scale(1.0); opacity: 1; }
+  100% { transform: scale(0.7); opacity: 0.6; }
+}
+
+/* ========================================================================== */
+/* POSITION BADGE                                                             */
+/* ========================================================================== */
+.bb-player-pos {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 32px;
+  text-align: center;
+
+  background: var(--bb-orange);
+  color: black;
+
+  clip-path: polygon(
+    25% 0%, 75% 0%,
+    100% 50%, 75% 100%,
+    25% 100%, 0% 50%
+  );
+
+  text-shadow: var(--glow-soft-orange);
+  z-index: 4;
+}
+
+/* ========================================================================== */
+/* STATUS EFFECTS (alive, danger, immune, broken, elimination)                */
+/* ========================================================================== */
+
+/* ALIVE */
+.status-alive {
+  border: none;
+  box-shadow: none;
+}
+
+/* alive pulse */
+.bb-alive-pulse {
+  animation: alive-pulse 1.4s ease-in-out;
+}
+@keyframes alive-pulse {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.03); }
+  100% { transform: scale(1); }
+}
+
+/* ========================================================================== */
+/* IMMUNE                                                                     */
+/* ========================================================================== */
+
+.status-immune {
+  border: none;
+  box-shadow: 0 0 22px rgba(0,255,145,0.65);
+}
+
+.bb-immune-glow {
+  animation: immune-glow 1.3s infinite ease-in-out;
+}
+
+@keyframes immune-glow {
+  0%   { box-shadow: 0 0 12px rgba(0,255,150,0.6); }
+  50%  { box-shadow: 0 0 26px rgba(0,255,170,1); }
+  100% { box-shadow: 0 0 12px rgba(0,255,150,0.6); }
+}
+
+/* ========================================================================== */
+/* IMMUNE BROKEN                                                              */
+/* ========================================================================== */
+
+.status-immune-broken {
+  border: none;
+  box-shadow: 0 0 22px white;
+}
+
+.bb-immune-broken-blink {
+  animation: immune-broken-blink 0.55s linear infinite;
+}
+@keyframes immune-broken-blink {
+  0%   { filter: brightness(1); }
+  50%  { filter: brightness(2); }
+  100% { filter: brightness(1); }
+}
+
+/* ========================================================================== */
+/* DANGER                                                                     */
+/* ========================================================================== */
+
+.status-danger {
+  border: none;
+  box-shadow: 0 0 26px rgba(255,140,40,0.85);
+}
+
+.bb-danger-pulse {
+  animation: danger-pulse 1s ease-in-out infinite;
+}
+
+@keyframes danger-pulse {
+  0%   { box-shadow: 0 0 14px rgba(255,160,40,0.6); }
+  50%  { box-shadow: 0 0 30px rgba(255,160,40,1); }
+  100% { box-shadow: 0 0 14px rgba(255,160,40,0.6); }
+}
+
+/* ========================================================================== */
+/* ELIMINATION                                                                */
+/* ========================================================================== */
+
+.status-elimination {
+  border: none;
+  box-shadow: 0 0 32px rgba(255,0,51,1);
+}
+
+.bb-elim-flash {
+  animation: elim-flash 0.6s forwards;
+}
+
+@keyframes elim-flash {
+  0%   { transform: scale(1); opacity: 1; filter: brightness(1); }
+  30%  { transform: scale(1.25); opacity: 1; filter: brightness(2); }
+  100% { transform: scale(0.35); opacity: 0.2; filter: brightness(0.6); }
+}
+
+/* ========================================================================== */
+/* JOIN POP                                                                    */
+/* ========================================================================== */
+
+.bb-join-pop {
+  animation: join-pop 0.45s cubic-bezier(.25,1.15,.3,1.1);
+}
+
+@keyframes join-pop {
+  0%   { transform: scale(0); opacity: 0; }
+  60%  { transform: scale(1.25); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+/* ========================================================================== */
+/* SCORE FLASH                                                                 */
+/* ========================================================================== */
+
+.bb-score-anim {
+  animation: score-flash .35s ease-out;
+}
+
+@keyframes score-flash {
+  0%   { color: white; transform: scale(1); }
+  50%  { color: gold; transform: scale(1.32); }
+  100% { color: white; transform: scale(1); }
+}
+
+/* ========================================================================== */
+/* TWIST BASE WRAPPER                                                          */
+/* ========================================================================== */
+
+.twist-anim {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.twist-title {
+  font-size: 72px;
+  font-weight: 900;
+  margin-bottom: 20px;
+  color: var(--bb-orange);
+  text-shadow: var(--glow-hard-orange);
+  z-index: 10;
+}
+
+/* ========================================================================== */
+/* DIAMOND PISTOL — SHARDS                                                    */
+/* ========================================================================== */
+
+.diamond-blast .diamond-shard {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  background: linear-gradient(135deg, #8df, #fff);
+  border-radius: 4px;
+  opacity: 0;
+  animation: diamond-shard-fly 0.75s forwards;
+}
+
+@keyframes diamond-shard-fly {
+  0%   { opacity: 0; transform: translate(0,0) scale(0.4); }
+  20%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(1.4) rotate(220deg); }
+}
+
+/* ========================================================================== */
+/* MONEY GUN — BILLS                                                          */
+/* ========================================================================== */
+
+.money-spray .money-bill {
+  position: absolute;
+  width: 120px;
+  height: 50px;
+  background: linear-gradient(90deg, #0f0, #080);
+  opacity: 0;
+  transform-origin: left center;
+  animation: bill-shoot 0.9s ease-out forwards;
+}
+
+@keyframes bill-shoot {
+  0%   { opacity: 0; transform: translateX(0) rotate(-12deg); }
+  20%  { opacity: 1; }
+  100% { opacity: 0; transform: translateX(900px) rotate(22deg); }
+}
+
+/* ========================================================================== */
+/* BOMB BLAST (shockwave)                                                     */
+/* ========================================================================== */
+
+.bomb-blast .bomb-core {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #ff0033;
+  z-index: 5;
+  animation: bomb-core-flash 0.4s forwards;
+}
+
+@keyframes bomb-core-flash {
+  0%   { transform: scale(0.4); opacity: 1; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+
+.bomb-blast .bomb-wave {
+  position: absolute;
+  border: 6px solid rgba(255,0,60,0.6);
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  animation: bomb-wave-expand 0.7s ease-out forwards;
+}
+
+@keyframes bomb-wave-expand {
+  0%   { opacity: 0.9; transform: scale(1); }
+  100% { opacity: 0; transform: scale(15); }
+}
+
+/* ========================================================================== */
+/* IMMUNE AURA                                                                */
+/* ========================================================================== */
+
+.immune-aura .aura-ring {
+  position: absolute;
+  width: 260px;
+  height: 260px;
+  border: 4px solid rgba(0,255,150,0.8);
+  border-radius: 50%;
+  animation: aura-grow 1.3s ease-in-out infinite;
+}
+
+@keyframes aura-grow {
+  0%   { transform: scale(0.85); opacity: 0.6; }
+  50%  { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(0.85); opacity: 0.6; }
+}
+
+/* ========================================================================== */
+/* HEAL CROSS                                                                  */
+/* ========================================================================== */
+
+.heal-cross .heal-plus {
+  position: absolute;
+  width: 80px;
+  height: 80px;
   background:
     linear-gradient(#0f0,#0f0),
     linear-gradient(#0f0,#0f0);
@@ -540,7 +588,7 @@
   overflow: hidden;
 }
 
-/* starfield drifting */
+/* Starfield drifting */
 .galaxy-stars {
   position: absolute;
   inset: 0;
@@ -550,43 +598,49 @@
 }
 
 @keyframes galaxy-stars-float {
-  0%   { transform: translate(0,0); }
+  0%   { transform: translate(0, 0); }
   100% { transform: translate(-3%, -6%); }
 }
 
-/* FIRST RING */
+/* First rotating ring */
 .galaxy-ring {
   position: absolute;
-  top: 50%; left: 50%;
-  width: 600px; height: 600px;
+  top: 50%;
+  left: 50%;
+  width: 600px;
+  height: 600px;
   border-radius: 50%;
   border: 4px solid rgba(255,255,255,0.15);
-  transform: translate(-50%,-50%);
+  transform: translate(-50%, -50%);
   animation: galaxy-spin 2.5s linear infinite;
 }
 
-/* SECOND RING */
+/* Second rotating ring (reverse direction) */
 .galaxy-ring2 {
   position: absolute;
-  top: 50%; left: 50%;
-  width: 780px; height: 780px;
+  top: 50%;
+  left: 50%;
+  width: 780px;
+  height: 780px;
   border-radius: 50%;
   border: 3px solid rgba(255,255,255,0.10);
-  transform: translate(-50%,-50%);
+  transform: translate(-50%, -50%);
   animation: galaxy-spin 4.5s linear infinite reverse;
 }
 
 @keyframes galaxy-spin {
-  from { transform: translate(-50%, -50%) rotate(0deg); }
-  to   { transform: translate(-50%, -50%) rotate(360deg); }
+  0%   { transform: translate(-50%, -50%) rotate(0deg); }
+  100% { transform: translate(-50%, -50%) rotate(360deg); }
 }
 
-/* central glow */
+/* Central galaxy flare */
 .galaxy-flare {
   position: absolute;
-  top: 50%; left: 50%;
-  width: 320px; height: 320px;
-  transform: translate(-50%,-50%);
+  top: 50%;
+  left: 50%;
+  width: 320px;
+  height: 320px;
+  transform: translate(-50%, -50%);
   background: radial-gradient(circle, rgba(255,80,200,0.38), transparent 70%);
   animation: galaxy-flare-pulse 2.2s ease-in-out infinite;
 }
@@ -598,7 +652,7 @@
 }
 
 /* ========================================================================== */
-/* GALAXY MODE — SPIN ALL 8 CARDS                                             */
+/* GALAXY MODE — Spin all 8 cards                                             */
 /* ========================================================================== */
 
 .bb-galaxy-spin-card {
@@ -612,7 +666,10 @@
   100% { transform: rotate(calc(var(--rot) + 360deg)) scale(1); }
 }
 
-/* Used when galaxy twist ends (return to normal snap positions) */
+/* ========================================================================== */
+/* GALAXY RESET — Snap back after twist ends                                  */
+/* ========================================================================== */
+
 .bb-galaxy-reset {
   animation: galaxy-reset 0.8s cubic-bezier(.2,.7,.3,1) forwards;
 }
@@ -623,5 +680,5 @@
 }
 
 /* ========================================================================== */
-/* END arena.css                                                              */
+/* END arena.css                                                               */
 /* ========================================================================== */
