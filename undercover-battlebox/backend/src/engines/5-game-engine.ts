@@ -795,7 +795,7 @@ export async function addToArena(username: string, resolveUser: Function) {
 ============================================================================ */
 
 export async function eliminate(username: string) {
-  const clean = username.replace(/^@+/, "")toLowerCase();
+  const clean = username.replace(/^@+/, "").toLowerCase();
 
   const idx = arena.players.findIndex(
     (p) => p.username.toLowerCase() === clean
