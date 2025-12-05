@@ -1,14 +1,11 @@
 // ============================================================================
-// event-router.js — BattleBox Event Brain v2.0 (TIMER-STABLE + SNAPSHOT-SAFE)
+// event-router.js — BattleBox Event Brain v2.1 (HUD-COMPAT FIXED)
 // ============================================================================
 //
-// ✔ NO duplicate listeners
-// ✔ Clean queue event handling
-// ✔ Arena snapshot loads new timer model (totalMs + endsAt)
-// ✔ Round:start, round:grace, round:end fully patched
-// ✔ Twist takeover stable
-// ✔ Uses new avatar_url consistently (fallbacks intact)
-// ✔ Fully backward-compatible with older engines
+// ✔ HUD wordt nu juist uitgepakt uit arena.hud
+// ✔ arenaStore ontvangt totalMs / endsAt / remainingMs correct
+// ✔ updateArena payload werkt opnieuw met arena.js
+// ✔ Backwards compatible met oude payloads
 //
 // ============================================================================
 
@@ -42,7 +39,7 @@ export async function initEventRouter() {
   const socket = await getSocket();
 
   console.log(
-    "%c[BattleBox] Event Router Ready (TIMER-STABLE ARENA VERSION)",
+    "%c[BattleBox] Event Router Ready (HUD-COMPAT v2.1)",
     "color:#0fffd7;font-weight:bold;"
   );
 
@@ -52,31 +49,35 @@ export async function initEventRouter() {
   socket.on("overlayInitialSnapshot", (snap) => {
     applySnapshot(snap);
 
-    // NEW: arena snapshot supports new timer model
     if (snap.arena) {
+      const hud = snap.arena.hud ?? snap.arena;
+
       arenaStore.set({
         ...snap.arena,
-        // ensure missing timer keys don't break overlay
-        totalMs: snap.arena.totalMs ?? 0,
-        endsAt: snap.arena.endsAt ?? 0,
+        totalMs: hud.totalMs ?? 0,
+        endsAt: hud.endsAt ?? 0,
+        remainingMs: hud.remainingMs ?? 0
       });
     }
   });
 
   // ==========================================================================
-  // 2) LIVE ARENA UPDATES
+  // 2) LIVE ARENA UPDATES  (★ PATCHED FOR HUD MODEL ★)
   // ==========================================================================
-  socket.on("updateArena", (arena) => {
-    if (!arena) return;
+  socket.on("updateArena", (pkt) => {
+    if (!pkt) return;
+
+    const hud = pkt.hud ?? {};
 
     arenaStore.set({
-      ...arena,
-      totalMs: arena.totalMs ?? 0,
-      endsAt: arena.endsAt ?? 0,
+      ...pkt,
+      totalMs: hud.totalMs ?? 0,
+      endsAt: hud.endsAt ?? 0,
+      remainingMs: hud.remainingMs ?? 0
     });
 
     document.dispatchEvent(
-      new CustomEvent("arena:update", { detail: arena })
+      new CustomEvent("arena:update", { detail: pkt })
     );
   });
 
@@ -84,7 +85,6 @@ export async function initEventRouter() {
   // 3) ROUND START — NEW TIMER MODEL
   // ==========================================================================
   socket.on("round:start", (payload) => {
-    // duration is ALWAYS in seconds from backend
     const total = (payload.duration ?? 0) * 1000;
     const endsAt = Date.now() + total;
 
@@ -94,15 +94,11 @@ export async function initEventRouter() {
       type: payload.type || "quarter",
       totalMs: total,
       endsAt,
+      remainingMs: total
     });
 
-    document.dispatchEvent(
-      new CustomEvent("arena:roundStart", { detail: payload })
-    );
-
-    window.dispatchEvent(
-      new CustomEvent("round:start", { detail: payload })
-    );
+    document.dispatchEvent(new CustomEvent("arena:roundStart", { detail: payload }));
+    window.dispatchEvent(new CustomEvent("round:start", { detail: payload }));
   });
 
   // ==========================================================================
@@ -118,15 +114,11 @@ export async function initEventRouter() {
       type: payload.type || "quarter",
       totalMs: total,
       endsAt,
+      remainingMs: total
     });
 
-    document.dispatchEvent(
-      new CustomEvent("arena:graceStart", { detail: payload })
-    );
-
-    window.dispatchEvent(
-      new CustomEvent("round:grace", { detail: payload })
-    );
+    document.dispatchEvent(new CustomEvent("arena:graceStart", { detail: payload }));
+    window.dispatchEvent(new CustomEvent("round:grace", { detail: payload }));
   });
 
   // ==========================================================================
@@ -137,34 +129,24 @@ export async function initEventRouter() {
       status: "ended",
       totalMs: 0,
       endsAt: 0,
+      remainingMs: 0
     });
 
-    document.dispatchEvent(
-      new CustomEvent("arena:roundEnd", { detail: payload })
-    );
-
-    window.dispatchEvent(
-      new CustomEvent("round:end", { detail: payload })
-    );
+    document.dispatchEvent(new CustomEvent("arena:roundEnd", { detail: payload }));
+    window.dispatchEvent(new CustomEvent("round:end", { detail: payload }));
   });
 
   // ==========================================================================
-  // 6) TWIST TAKEOVER + CLEAR
+  // 6) TWISTS
   // ==========================================================================
   socket.on("twist:takeover", (p) => {
     arenaTwistStore.activate(p);
-
-    document.dispatchEvent(
-      new CustomEvent("arena:twistTakeover", { detail: p })
-    );
+    document.dispatchEvent(new CustomEvent("arena:twistTakeover", { detail: p }));
   });
 
   socket.on("twist:clear", () => {
     arenaTwistStore.clear();
-
-    document.dispatchEvent(
-      new CustomEvent("arena:twistClear")
-    );
+    document.dispatchEvent(new CustomEvent("arena:twistClear"));
   });
 
   // ==========================================================================
@@ -176,22 +158,15 @@ export async function initEventRouter() {
   });
 
   // ==========================================================================
-  // 8) QUEUE EVENTS (join/leave/promote/demote)
+  // 8) QUEUE EVENTS
   // ==========================================================================
   socket.on("queueEvent", (evt) => {
-    if (!evt || !evt.type) return;
-    if (!QUEUE_EVENTS.has(evt.type)) return;
+    if (!evt || !QUEUE_EVENTS.has(evt.type)) return;
 
-    const safeDisplay =
-      evt.display_name?.trim() ||
-      evt.username?.trim() ||
-      "Onbekend";
+    const safeDisplay = evt.display_name?.trim() || evt.username?.trim() || "Onbekend";
+    const safeUsername = evt.username?.trim() || safeDisplay.toLowerCase().replace(/\s+/g, "");
 
-    const safeUsername =
-      evt.username?.trim() ||
-      safeDisplay.toLowerCase().replace(/\s+/g, "");
-
-    const mapped = {
+    eventStore.pushEvent({
       type: evt.type,
       timestamp: evt.timestamp || Date.now(),
       display_name: safeDisplay,
@@ -207,19 +182,14 @@ export async function initEventRouter() {
           : evt.type === "promote"
           ? "stijgt in positie."
           : "zakt in positie.")
-    };
+    });
 
-    eventStore.pushEvent(mapped);
-
-    // highlight behavior
-    if (mapped.username) {
-      queueStore.highlightCard(mapped.username);
-      setTimeout(() => queueStore.clearHighlight(), 900);
-    }
+    queueStore.highlightCard(safeUsername);
+    setTimeout(() => queueStore.clearHighlight(), 900);
   });
 
   // ==========================================================================
-  // 9) TICKER UPDATE
+  // 9) TICKER
   // ==========================================================================
   socket.on("hudTickerUpdate", (text) => {
     tickerStore.setText(text || "");
@@ -228,15 +198,6 @@ export async function initEventRouter() {
   // ==========================================================================
   // 10) DEBUG BRIDGE
   // ==========================================================================
-  window.bb = {
-    socket,
-    eventStore,
-    arenaStore,
-    twistStore,
-  };
-
-  console.log(
-    "%c[BB DEBUG] Debug bridge active → window.bb",
-    "color:#0fffd7"
-  );
+  window.bb = { socket, eventStore, arenaStore, twistStore };
+  console.log("%c[BB DEBUG] Debug bridge active → window.bb", "color:#0fffd7");
 }
