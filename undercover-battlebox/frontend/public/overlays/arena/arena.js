@@ -1,12 +1,15 @@
 // ============================================================================
-// arena.js — BattleBox Arena Overlay (FINAL BUILD v5.1 — TIMER & ROTATION PATCH)
+// arena.js — BattleBox Arena Overlay (FINAL BUILD v6.0 — TIMER, AVATAR, POSITIONS)
 // ============================================================================
 //
-// NECESSARY UPGRADES:
-// • Cards no longer rotated (everyone upright)
-// • Timer now uses endsAt + totalMs (mm:ss)
-// • Fallback to old cutoff values preserved
-// • Progress ring synced with new timer model
+// INCLUDED FIXES:
+// ✔ New circle positions: #1 at TOP, clockwise
+// ✔ Cards upright (no rotation)
+// ✔ Timer always runs (100ms loop)
+// ✔ True mm:ss timer (endsAt + totalMs model)
+// ✔ Fully compatible with legacy roundCutoff/graceEnd
+// ✔ Avatars always load (avatar || avatar_url)
+// ✔ Progress bar synced to live timer
 //
 // ============================================================================
 
@@ -39,17 +42,17 @@ const twistOverlay = document.getElementById("twist-takeover");
 const galaxyLayer = document.getElementById("twist-galaxy");
 
 /* ============================================================
-   CONSTANTS — positions around HUD (rotation removed!)
+   NEW POSITIONS — #1 ON TOP, CLOCKWISE
 ============================================================ */
 const POSITIONS = [
-  { idx: 1, x: 0.7071, y: -0.7071 },
-  { idx: 2, x: 1.0,    y: 0.0 },
-  { idx: 3, x: 0.7071, y: 0.7071 },
-  { idx: 4, x: 0.0,    y: 1.0 },
-  { idx: 5, x: -0.7071, y: 0.7071 },
-  { idx: 6, x: -1.0,     y: 0.0 },
-  { idx: 7, x: -0.7071, y: -0.7071 },
-  { idx: 8, x: 0.0,     y: -1.0 },
+  { idx: 1, x: 0.0,    y: -1.0 },      // TOP
+  { idx: 2, x: 0.7071, y: -0.7071 },   // TOP RIGHT
+  { idx: 3, x: 1.0,    y: 0.0 },       // RIGHT
+  { idx: 4, x: 0.7071, y: 0.7071 },    // BOTTOM RIGHT
+  { idx: 5, x: 0.0,    y: 1.0 },       // BOTTOM
+  { idx: 6, x: -0.7071,y: 0.7071 },    // BOTTOM LEFT
+  { idx: 7, x: -1.0,   y: 0.0 },       // LEFT
+  { idx: 8, x: -0.7071,y: -0.7071 },   // TOP LEFT
 ];
 
 const CENTER_X = 600;
@@ -139,14 +142,17 @@ arenaStore.subscribe((state) => {
 
     card.name.textContent = p.display_name ?? "Onbekend";
 
-    const previous = lastScoreMap.get(p.id) ?? 0;
-    if (p.score !== previous) {
+    const prevScore = lastScoreMap.get(p.id) ?? 0;
+    if (p.score !== prevScore) {
       animateOnce(card.score, "bb-score-anim");
       lastScoreMap.set(p.id, p.score);
     }
 
     card.score.textContent = p.score ?? 0;
-    card.bg.style.backgroundImage = `url(${p.avatar_url || EMPTY_AVATAR})`;
+
+    // FIX: avatar || avatar_url
+    const avatar = p.avatar_url || p.avatar || EMPTY_AVATAR;
+    card.bg.style.backgroundImage = `url(${avatar})`;
 
     if (!lastCardOccupied[i]) {
       animateOnce(card.el, "bb-join-pop");
@@ -174,30 +180,23 @@ function resetStatus(el) {
 function applyStatus(el, p) {
   resetStatus(el);
 
-  if (p.eliminated) {
-    el.classList.add("status-elimination");
-    return;
-  }
+  if (p.eliminated) return el.classList.add("status-elimination");
 
-  if (p.positionStatus === "danger") {
-    el.classList.add("status-danger");
-    return;
-  }
+  if (p.positionStatus === "danger") return el.classList.add("status-danger");
 
   if (p.positionStatus === "immune") {
-    if ((p.breakerHits ?? 0) > 0) {
-      el.classList.add("status-immune-broken");
-    } else {
-      el.classList.add("status-immune");
-    }
-    return;
+    return el.classList.add(
+      (p.breakerHits ?? 0) > 0
+        ? "status-immune-broken"
+        : "status-immune"
+    );
   }
 
   el.classList.add("status-alive");
 }
 
 /* ============================================================
-   POSITIONING — ROTATION REMOVED
+   POSITIONING — CARDS ALWAYS UPRIGHT
 ============================================================ */
 function positionCard(el, pos) {
   const dx = pos.x * RADIUS;
@@ -206,24 +205,21 @@ function positionCard(el, pos) {
   el.style.left = `${CENTER_X + dx - 80}px`;
   el.style.top = `${CENTER_Y + dy - 80}px`;
 
-  // Remove rotation (cards must be upright)
-  el.style.transform = `rotate(0deg)`;
+  el.style.transform = `rotate(0deg)`; // FIX: cards upright
 }
 
 /* ============================================================
-   HUD TIMER + RING — NEW MODEL (mm:ss)
+   LIVE TIMER LOOP — ALWAYS RUNNING
 ============================================================ */
-arenaStore.subscribe((state) => {
-  hudRound.textContent = `RONDE ${state.round ?? 0}`;
-  hudType.textContent = state.type === "finale" ? "FINALE" : "KWARTFINALE";
-
+setInterval(() => {
+  const state = arenaStore.get();
   const now = Date.now();
 
   let remainingMs = state.endsAt - now;
   let totalMs = state.totalMs;
 
-  // Fallback for old backend
-  if (!state.totalMs || state.totalMs <= 0) {
+  // Fallback for old engine
+  if (!totalMs || totalMs <= 0) {
     if (state.status === "active") {
       totalMs = state.settings.roundDurationPre * 1000;
       remainingMs = Math.max(0, state.roundCutoff - now);
@@ -241,12 +237,11 @@ arenaStore.subscribe((state) => {
 
   hudTimer.textContent = `${mm}:${ss}`;
 
-  // Progress ring
   renderHudProgress(state, hudRing);
-});
+}, 100);
 
 /* ============================================================
-   TWIST — TAKEOVER + GALAXY
+   TWISTS
 ============================================================ */
 arenaTwistStore.subscribe((state) => {
   if (state.active) {
@@ -256,10 +251,8 @@ arenaTwistStore.subscribe((state) => {
     }
 
     playTwistAnimation(twistOverlay, state.type, state.title);
-
   } else {
     clearTwistAnimation(twistOverlay);
-
     galaxyLayer.classList.add("hidden");
     galaxyLayer.classList.remove("galaxy-active");
   }
