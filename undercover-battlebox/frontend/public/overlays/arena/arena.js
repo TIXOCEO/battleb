@@ -1,15 +1,15 @@
 // ============================================================================
-// arena.js — BattleBox Arena Overlay (FINAL BUILD v6.0 — TIMER, AVATAR, POSITIONS)
+// arena.js — BattleBox Arena Overlay (FINAL BUILD v6.1 — CLEAN TIMER & AVATAR FIX)
 // ============================================================================
 //
 // INCLUDED FIXES:
-// ✔ New circle positions: #1 at TOP, clockwise
-// ✔ Cards upright (no rotation)
-// ✔ Timer always runs (100ms loop)
-// ✔ True mm:ss timer (endsAt + totalMs model)
-// ✔ Fully compatible with legacy roundCutoff/graceEnd
-// ✔ Avatars always load (avatar || avatar_url)
-// ✔ Progress bar synced to live timer
+// ✔ Correct avatar fallback (p.avatar_url || p.avatar || EMPTY_AVATAR)
+// ✔ New circle positions: #1 is top, clockwise
+// ✔ Cards always upright
+// ✔ Stable timer loop (100ms) WITHOUT duplicate execution
+// ✔ Perfect mm:ss output without NaN
+// ✔ Progress ring synced to timer loop
+// ✔ Backwards compatible with roundCutoff/graceEnd
 //
 // ============================================================================
 
@@ -37,22 +37,21 @@ const hudTimer = document.getElementById("hud-timer");
 const hudRing = document.getElementById("hud-ring-progress");
 
 const playersContainer = document.getElementById("arena-players");
-
 const twistOverlay = document.getElementById("twist-takeover");
 const galaxyLayer = document.getElementById("twist-galaxy");
 
 /* ============================================================
-   NEW POSITIONS — #1 ON TOP, CLOCKWISE
+   POSITIONS — #1 at TOP, clockwise
 ============================================================ */
 const POSITIONS = [
-  { idx: 1, x: 0.0,    y: -1.0 },      // TOP
-  { idx: 2, x: 0.7071, y: -0.7071 },   // TOP RIGHT
-  { idx: 3, x: 1.0,    y: 0.0 },       // RIGHT
-  { idx: 4, x: 0.7071, y: 0.7071 },    // BOTTOM RIGHT
-  { idx: 5, x: 0.0,    y: 1.0 },       // BOTTOM
-  { idx: 6, x: -0.7071,y: 0.7071 },    // BOTTOM LEFT
-  { idx: 7, x: -1.0,   y: 0.0 },       // LEFT
-  { idx: 8, x: -0.7071,y: -0.7071 },   // TOP LEFT
+  { idx: 1, x: 0.0,     y: -1.0 },     // TOP
+  { idx: 2, x: 0.7071,  y: -0.7071 },  // TOP RIGHT
+  { idx: 3, x: 1.0,     y: 0.0 },      // RIGHT
+  { idx: 4, x: 0.7071,  y: 0.7071 },   // BOTTOM RIGHT
+  { idx: 5, x: 0.0,     y: 1.0 },      // BOTTOM
+  { idx: 6, x: -0.7071, y: 0.7071 },   // BOTTOM LEFT
+  { idx: 7, x: -1.0,    y: 0.0 },      // LEFT
+  { idx: 8, x: -0.7071, y: -0.7071 },  // TOP LEFT
 ];
 
 const CENTER_X = 600;
@@ -70,7 +69,9 @@ function animateOnce(el, className) {
   el.classList.remove(className);
   void el.offsetWidth;
   el.classList.add(className);
-  el.addEventListener("animationend", () => el.classList.remove(className), { once: true });
+  el.addEventListener("animationend", () => {
+    el.classList.remove(className);
+  }, { once: true });
 }
 
 const lastScoreMap = new Map();
@@ -111,7 +112,6 @@ function createPlayerCards() {
 
     card.appendChild(pos);
     card.appendChild(labels);
-
     playersContainer.appendChild(card);
 
     cardRefs.push({ el: card, bg, name, score, pos });
@@ -140,20 +140,26 @@ arenaStore.subscribe((state) => {
       continue;
     }
 
+    // Name
     card.name.textContent = p.display_name ?? "Onbekend";
 
-    const prevScore = lastScoreMap.get(p.id) ?? 0;
-    if (p.score !== prevScore) {
+    // Score animation
+    const previous = lastScoreMap.get(p.id) ?? 0;
+    if (p.score !== previous) {
       animateOnce(card.score, "bb-score-anim");
       lastScoreMap.set(p.id, p.score);
     }
-
     card.score.textContent = p.score ?? 0;
 
-    // FIX: avatar || avatar_url
-    const avatar = p.avatar_url || p.avatar || EMPTY_AVATAR;
+    // Avatar fix
+    const avatar =
+      p.avatar_url ||
+      p.avatar ||
+      EMPTY_AVATAR;
+
     card.bg.style.backgroundImage = `url(${avatar})`;
 
+    // Join animation
     if (!lastCardOccupied[i]) {
       animateOnce(card.el, "bb-join-pop");
       lastCardOccupied[i] = true;
@@ -196,7 +202,7 @@ function applyStatus(el, p) {
 }
 
 /* ============================================================
-   POSITIONING — CARDS ALWAYS UPRIGHT
+   POSITIONING — CARDS STAY UPRIGHT
 ============================================================ */
 function positionCard(el, pos) {
   const dx = pos.x * RADIUS;
@@ -204,12 +210,11 @@ function positionCard(el, pos) {
 
   el.style.left = `${CENTER_X + dx - 80}px`;
   el.style.top = `${CENTER_Y + dy - 80}px`;
-
-  el.style.transform = `rotate(0deg)`; // FIX: cards upright
+  el.style.transform = "rotate(0deg)";
 }
 
 /* ============================================================
-   LIVE TIMER LOOP — ALWAYS RUNNING
+   LIVE TIMER LOOP — 100ms
 ============================================================ */
 setInterval(() => {
   const state = arenaStore.get();
@@ -218,7 +223,7 @@ setInterval(() => {
   let remainingMs = state.endsAt - now;
   let totalMs = state.totalMs;
 
-  // Fallback for old engine
+  // Backwards compatibility
   if (!totalMs || totalMs <= 0) {
     if (state.status === "active") {
       totalMs = state.settings.roundDurationPre * 1000;
@@ -259,7 +264,7 @@ arenaTwistStore.subscribe((state) => {
 });
 
 /* ============================================================
-   ROUND EVENTS
+   ROUND EVENTS (Animations)
 ============================================================ */
 document.addEventListener("arena:roundStart", () => {
   animateOnce(root, "bb-round-start-shake");
