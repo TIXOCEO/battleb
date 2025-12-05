@@ -841,6 +841,7 @@ export async function addFromQueue(...args: any[]) {
   if (!args.length) return;
 
   const candidate = args[0];
+
   if (
     candidate &&
     typeof candidate === "object" &&
@@ -853,14 +854,16 @@ export async function addFromQueue(...args: any[]) {
       (candidate as any).username ??
       (candidate as any).user_username ??
       "";
+
     const display_name: string =
-      (candidate asAny)?.display_name ??
-      (candidate.asAny)?.user_display_name ??
+      (candidate as any).display_name ??
+      (candidate as any).user_display_name ??
       username;
 
     return arenaJoin(id, display_name, username);
   }
 
+  // fallback
   if (typeof args[0] === "string") {
     const id = String(args[0]);
     const display_name = String(args[1] ?? args[2] ?? "Unknown");
