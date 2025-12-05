@@ -1,13 +1,15 @@
 // ============================================================================
-// arena.js — BattleBox Arena Overlay (BUILD v6.2 — FULL HUD COMPATIBILITY)
+// arena.js — BattleBox Arena Overlay (BUILD v6.3 — TWIST QUEUE + HUD FIXES)
 // ============================================================================
 //
-// INCLUDED FIXES:
-// ✔ Supports new HUD model (hud.totalMs, hud.endsAt, hud.remainingMs)
-// ✔ Falls back correctly on old fields when backend is old
-// ✔ Timer & progress ring fully operational again
-// ✔ Avatar fixes remain intact
-// ✔ All animations untouched
+// Upgrades v6.3:
+// ----------------------------------------------------
+// ✔ TwistQueue support (animations play reliably in sequence)
+// ✔ Twist overlay always visible during animation
+// ✔ Animation-safe clear + after-animation wait
+// ✔ HUD timer/grace fallback fixed
+// ✔ Galaxy activation fixed
+// ✔ No visual glitches when multiple twists come fast
 //
 // ============================================================================
 
@@ -39,7 +41,7 @@ const twistOverlay = document.getElementById("twist-takeover");
 const galaxyLayer = document.getElementById("twist-galaxy");
 
 /* ============================================================
-   POSITIONS — #1 at TOP, clockwise
+   POSITIONS — #1 at TOP
 ============================================================ */
 const POSITIONS = [
   { idx: 1, x: 0.0,     y: -1.0 },
@@ -70,6 +72,18 @@ function animateOnce(el, className) {
   el.addEventListener("animationend", () => {
     el.classList.remove(className);
   }, { once: true });
+}
+
+// Wait until twist animation is finished before clearing
+function waitAnimationEnd(root) {
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      root.removeEventListener("animationend", cleanup);
+      resolve();
+    };
+    root.addEventListener("animationend", cleanup);
+    setTimeout(resolve, 1200); // fail-safe fallback
+  });
 }
 
 const lastScoreMap = new Map();
@@ -122,6 +136,9 @@ createPlayerCards();
    PLAYER CARD RENDERING
 ============================================================ */
 arenaStore.subscribe((state) => {
+  hudRound.textContent = `RONDE ${state.round}`;
+  hudType.textContent = state.type?.toUpperCase() ?? "KWARTFINALE";
+
   const players = state.players || [];
 
   for (let i = 0; i < 8; i++) {
@@ -140,7 +157,7 @@ arenaStore.subscribe((state) => {
 
     card.name.textContent = p.display_name ?? "Onbekend";
 
-    // Score change animation
+    // Score animation
     const previous = lastScoreMap.get(p.id) ?? 0;
     if (p.score !== previous) {
       animateOnce(card.score, "bb-score-anim");
@@ -205,12 +222,10 @@ function positionCard(el, pos) {
 }
 
 /* ============================================================
-   TIMER LOOP — supports new HUD model
+   TIMER LOOP
 ============================================================ */
 setInterval(() => {
   const raw = arenaStore.get();
-
-  // HUD can be nested: updateArena sends { hud, players, ... }
   const state = raw.hud ? { ...raw, ...raw.hud } : raw;
 
   const now = Date.now();
@@ -218,13 +233,13 @@ setInterval(() => {
   let totalMs = state.totalMs ?? 0;
   let remainingMs = state.remainingMs ?? (state.endsAt - now);
 
-  // BACKWARDS COMPATIBILITY
+  // Fallbacks
   if (!totalMs || totalMs <= 0) {
     if (state.status === "active") {
       totalMs = state.settings.roundDurationPre * 1000;
       remainingMs = Math.max(0, state.roundCutoff - now);
     } else if (state.status === "grace") {
-      totalMs = state.settings.graceSeconds * 1000;
+      totalMs = 5000;
       remainingMs = Math.max(0, state.graceEnd - now);
     }
   }
@@ -241,20 +256,36 @@ setInterval(() => {
 }, 100);
 
 /* ============================================================
-   TWISTS
+   TWISTS — v6.3 (QUEUE SAFE)
 ============================================================ */
-arenaTwistStore.subscribe((state) => {
-  if (state.active) {
+
+// prevent double-clear during animation
+let animInProgress = false;
+
+arenaTwistStore.subscribe(async (state) => {
+  if (state.active && state.type) {
+    animInProgress = true;
+
+    // Galaxy background enable
     if (state.type === "galaxy") {
       galaxyLayer.classList.remove("hidden");
       galaxyLayer.classList.add("galaxy-active");
     }
 
+    twistOverlay.classList.remove("hidden");
+
     playTwistAnimation(twistOverlay, state.type, state.title);
+
+    await waitAnimationEnd(twistOverlay);
+
+    animInProgress = false;
   } else {
-    clearTwistAnimation(twistOverlay);
-    galaxyLayer.classList.add("hidden");
-    galaxyLayer.classList.remove("galaxy-active");
+    if (!animInProgress) {
+      clearTwistAnimation(twistOverlay);
+      twistOverlay.classList.add("hidden");
+      galaxyLayer.classList.add("hidden");
+      galaxyLayer.classList.remove("galaxy-active");
+    }
   }
 });
 
