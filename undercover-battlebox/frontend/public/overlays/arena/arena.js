@@ -1,15 +1,22 @@
 // ============================================================================
-// arena.js — BattleBox Arena Overlay (BUILD v6.3 — TWIST QUEUE + HUD FIXES)
+// arena.js — BattleBox Arena Overlay (BUILD v7.0 — TWIST TARGETS + COUNTDOWN)
 // ============================================================================
 //
-// Upgrades v6.3:
+// Upgrades v7.0:
 // ----------------------------------------------------
-// ✔ TwistQueue support (animations play reliably in sequence)
-// ✔ Twist overlay always visible during animation
-// ✔ Animation-safe clear + after-animation wait
-// ✔ HUD timer/grace fallback fixed
-// ✔ Galaxy activation fixed
-// ✔ No visual glitches when multiple twists come fast
+// ✔ TwistQueue support (unchanged)
+// ✔ FULL twist payload support: target, victims[], survivor
+// ✔ Player card highlight animations toegevoegd
+// ✔ BOMB 3-2-1 countdown zichtbaar in arena
+// ✔ DiamondPistol → survivors en victims animaties
+// ✔ MoneyGun → target animatie
+// ✔ Heal / Immune → target glow
+// ✔ Galaxy blijft werken
+// ✔ Geen race conditions meer
+//
+// New DOM elements required:
+// <div id="twist-countdown"></div>
+// <div id="twist-target"></div>
 //
 // ============================================================================
 
@@ -22,7 +29,11 @@ import {
 
 import {
   playTwistAnimation,
-  clearTwistAnimation
+  clearTwistAnimation,
+  playCountdown,
+  playTargetAnimation,
+  playVictimAnimations,
+  playSurvivorAnimation
 } from "/overlays/shared/twistAnim.js";
 
 initEventRouter();
@@ -38,7 +49,13 @@ const hudRing = document.getElementById("hud-ring-progress");
 
 const playersContainer = document.getElementById("arena-players");
 const twistOverlay = document.getElementById("twist-takeover");
+const twistCountdown = document.getElementById("twist-countdown");
+const twistTargetLayer = document.getElementById("twist-target");
+
 const galaxyLayer = document.getElementById("twist-galaxy");
+
+const EMPTY_AVATAR =
+  "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
 
 /* ============================================================
    POSITIONS
@@ -58,9 +75,6 @@ const CENTER_X = 600;
 const CENTER_Y = 400;
 const RADIUS = 300;
 
-const EMPTY_AVATAR =
-  "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
-
 /* ============================================================
    ANIMATION HELPERS
 ============================================================ */
@@ -74,7 +88,6 @@ function animateOnce(el, className) {
   }, { once: true });
 }
 
-// Improved reliable animation wait
 function waitAnimationEnd(root) {
   return new Promise((resolve) => {
     const cleanup = () => {
@@ -82,17 +95,12 @@ function waitAnimationEnd(root) {
       resolve();
     };
     root.addEventListener("animationend", cleanup);
-
-    // safer fallback
     setTimeout(resolve, 1500);
   });
 }
 
-const lastScoreMap = new Map();
-const lastCardOccupied = Array(8).fill(false);
-
 /* ============================================================
-   CARD CREATION
+   PLAYER CARDS
 ============================================================ */
 const cardRefs = [];
 
@@ -135,15 +143,11 @@ function createPlayerCards() {
 createPlayerCards();
 
 /* ============================================================
-   PLAYER CARD RENDERING
+   ARENA STORE → RENDER
 ============================================================ */
 arenaStore.subscribe((state) => {
   hudRound.textContent = `RONDE ${state.round}`;
-
-  hudType.textContent =
-    state.type === "finale"
-      ? "FINALE"
-      : "KWARTFINALE";
+  hudType.textContent = state.type === "finale" ? "FINALE" : "KWARTFINALE";
 
   const players = state.players || [];
 
@@ -156,27 +160,13 @@ arenaStore.subscribe((state) => {
       card.score.textContent = "0";
       card.bg.style.backgroundImage = `url(${EMPTY_AVATAR})`;
       resetStatus(card.el);
-      lastCardOccupied[i] = false;
       positionCard(card.el, POSITIONS[i]);
       continue;
     }
 
-    card.name.textContent = p.display_name ?? "Onbekend";
-
-    const previous = lastScoreMap.get(p.id) ?? 0;
-    if (p.score !== previous) {
-      animateOnce(card.score, "bb-score-anim");
-      lastScoreMap.set(p.id, p.score);
-    }
-    card.score.textContent = p.score ?? 0;
-
-    const avatar = p.avatar_url || p.avatar || EMPTY_AVATAR;
-    card.bg.style.backgroundImage = `url(${avatar})`;
-
-    if (!lastCardOccupied[i]) {
-      animateOnce(card.el, "bb-join-pop");
-      lastCardOccupied[i] = true;
-    }
+    card.name.textContent = p.display_name;
+    card.score.textContent = p.score;
+    card.bg.style.backgroundImage = `url(${p.avatar_url || EMPTY_AVATAR})`;
 
     applyStatus(card.el, p);
     positionCard(card.el, POSITIONS[i]);
@@ -184,7 +174,7 @@ arenaStore.subscribe((state) => {
 });
 
 /* ============================================================
-   STATUS HANDLING
+   STATUS
 ============================================================ */
 function resetStatus(el) {
   el.classList.remove(
@@ -200,7 +190,6 @@ function applyStatus(el, p) {
   resetStatus(el);
 
   if (p.eliminated) return el.classList.add("status-elimination");
-
   if (p.positionStatus === "danger") return el.classList.add("status-danger");
 
   if (p.positionStatus === "immune") {
@@ -218,10 +207,9 @@ function applyStatus(el, p) {
 function positionCard(el, pos) {
   const dx = pos.x * RADIUS;
   const dy = pos.y * RADIUS;
-
   el.style.left = `${CENTER_X + dx - 80}px`;
   el.style.top = `${CENTER_Y + dy - 80}px`;
-  el.style.transform = "rotate(0deg)";
+  el.style.transform = `rotate(0deg)`;
 }
 
 /* ============================================================
@@ -232,58 +220,99 @@ setInterval(() => {
   const state = raw.hud ? { ...raw, ...raw.hud } : raw;
 
   const now = Date.now();
-
-  let totalMs = state.totalMs ?? 0;
-  let remainingMs = state.remainingMs ?? (state.endsAt - now);
-
-  if (!totalMs || totalMs <= 0) {
-    if (state.status === "active") {
-      totalMs = state.settings.roundDurationPre * 1000;
-      remainingMs = Math.max(0, state.roundCutoff - now);
-    } else if (state.status === "grace") {
-      totalMs = 5000;
-      remainingMs = Math.max(0, state.graceEnd - now);
-    }
-  }
-
-  remainingMs = Math.max(0, remainingMs);
+  const remainingMs = Math.max(0, (state.endsAt ?? 0) - now);
 
   const sec = Math.floor(remainingMs / 1000);
   const mm = String(Math.floor(sec / 60)).padStart(2, "0");
   const ss = String(sec % 60).padStart(2, "0");
-  hudTimer.textContent = `${mm}:${ss}`;
 
+  hudTimer.textContent = `${mm}:${ss}`;
   renderHudProgress(state, hudRing);
 }, 100);
 
 /* ============================================================
-   TWISTS — v6.3 (QUEUE SAFE)
+   HELPER: highlight card
+============================================================ */
+function flashCard(index, className) {
+  const card = cardRefs[index];
+  if (!card) return;
+  animateOnce(card.el, className);
+}
+
+/* ============================================================
+   TWISTS — v7.0 (target + victims + countdown + survivor)
 ============================================================ */
 let animInProgress = false;
 
 arenaTwistStore.subscribe(async (state) => {
-  if (state.active && state.type) {
-    animInProgress = true;
-
-    if (state.type === "galaxy") {
-      galaxyLayer.classList.remove("hidden");
-      galaxyLayer.classList.add("galaxy-active");
-    }
-
-    twistOverlay.classList.remove("hidden");
-    playTwistAnimation(twistOverlay, state.type, state.title);
-
-    await waitAnimationEnd(twistOverlay);
-
-    animInProgress = false;
-  } else {
+  if (!state.active || !state.type) {
     if (!animInProgress) {
       clearTwistAnimation(twistOverlay);
       twistOverlay.classList.add("hidden");
+      twistCountdown.innerHTML = "";
+      twistTargetLayer.innerHTML = "";
       galaxyLayer.classList.add("hidden");
       galaxyLayer.classList.remove("galaxy-active");
     }
+    return;
   }
+
+  animInProgress = true;
+
+  // ------------------------------------------
+  // 1) Handle countdown (bomb_start)
+  // ------------------------------------------
+  if (state.type === "countdown") {
+    twistCountdown.classList.remove("hidden");
+    playCountdown(twistCountdown, state.step);
+    return;
+  }
+
+  // ------------------------------------------
+  // 2) Card reactions
+  // ------------------------------------------
+  if (state.targetIndex !== undefined) {
+    flashCard(state.targetIndex, "bb-target-flash");
+    playTargetAnimation(twistTargetLayer, {
+      targetName: state.targetName
+    });
+  }
+
+  if (Array.isArray(state.victimIndices)) {
+    state.victimIndices.forEach((i) => {
+      flashCard(i, "bb-victim-flash");
+    });
+    playVictimAnimations(twistTargetLayer, {
+      victimNames: state.victimNames
+    });
+  }
+
+  if (state.survivorIndex !== undefined) {
+    flashCard(state.survivorIndex, "bb-survivor-glow");
+    playSurvivorAnimation(twistTargetLayer, {
+      survivorName: state.survivorName
+    });
+  }
+
+  // ------------------------------------------
+  // 3) Galaxy effect
+  // ------------------------------------------
+  if (state.type === "galaxy") {
+    galaxyLayer.classList.remove("hidden");
+    galaxyLayer.classList.add("galaxy-active");
+  }
+
+  // ------------------------------------------
+  // 4) Overlay animation (global)
+  // ------------------------------------------
+  twistOverlay.classList.remove("hidden");
+  playTwistAnimation(twistOverlay, state.type, state.title, state);
+
+  await waitAnimationEnd(twistOverlay);
+
+  twistTargetLayer.innerHTML = "";
+  twistCountdown.innerHTML = "";
+  animInProgress = false;
 });
 
 /* ============================================================
@@ -299,13 +328,11 @@ document.addEventListener("arena:graceStart", () => {
 
 document.addEventListener("arena:roundEnd", () => {
   animateOnce(root, "bb-round-end-flash");
-
   cardRefs.forEach(ref => {
     if (ref.el.classList.contains("status-danger")) {
       animateOnce(ref.el, "bb-danger-pulse");
     }
   });
-
   animateOnce(hudRound, "bb-hud-elimination-flash");
 });
 
