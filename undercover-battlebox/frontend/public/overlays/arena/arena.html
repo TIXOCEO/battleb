@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>BattleBox Arena Overlay</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- GLOBAL THEME -->
+  <link rel="stylesheet" href="/overlays/shared/theme.css" />
+
+  <!-- ARENA CSS (komt in deel 2) -->
+  <link rel="stylesheet" href="/overlays/arena/arena.css" />
+
+  <style>
+    body {
+      margin: 0;
+      background: transparent;
+      overflow: hidden;
+      font-family: "Rajdhani", sans-serif;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- MAIN WRAPPER (fixed size) -->
+  <div id="arena-root" class="arena-root">
+    
+    <!-- ========================= -->
+    <!-- 1. TWIST TAKEOVER LAYER  -->
+    <!-- ========================= -->
+    <div id="arena-takeover-layer" class="arena-takeover-layer"></div>
+
+    <!-- ========================= -->
+    <!-- 2. CENTRAL HUD OCTAGON   -->
+    <!-- ========================= -->
+    <div id="arena-hud" class="arena-hud">
+
+      <!-- Progress ring container -->
+      <svg id="hud-progress" class="hud-progress" width="360" height="360">
+        <circle id="hud-progress-bg"
+                cx="180" cy="180" r="160"
+                stroke-width="20" fill="none" />
+
+        <circle id="hud-progress-fg"
+                cx="180" cy="180" r="160"
+                stroke-width="20" fill="none"
+                stroke-linecap="round" />
+      </svg>
+
+      <!-- HUD CONTENT -->
+      <div class="hud-content">
+        <div id="hud-round" class="hud-round">ROUND 1 — Quarter</div>
+        <div id="hud-timer" class="hud-timer">30</div>
+        <div id="hud-status" class="hud-status">ACTIVE</div>
+      </div>
+
+    </div>
+
+    <!-- ========================= -->
+    <!-- 3. PLAYER CARDS (1–8)    -->
+    <!-- ========================= -->
+
+    <!-- CLOCKWISE POSITIONING -->
+    <div id="player-pos-1" class="player-card"></div>
+    <div id="player-pos-2" class="player-card"></div>
+    <div id="player-pos-3" class="player-card"></div>
+    <div id="player-pos-4" class="player-card"></div>
+    <div id="player-pos-5" class="player-card"></div>
+    <div id="player-pos-6" class="player-card"></div>
+    <div id="player-pos-7" class="player-card"></div>
+    <div id="player-pos-8" class="player-card"></div>
+
+  </div>
+
+  <!-- Shared logic -->
+  <script type="module" src="/overlays/shared/socket.js"></script>
+  <script type="module" src="/overlays/shared/stores.js"></script>
+  <script type="module" src="/overlays/shared/event-router.js"></script>
+
+  <!-- Arena logic (komt in deel 3) -->
+  <script type="module" src="/overlays/arena/arena.js"></script>
+  <script type="module" src="/overlays/arena/arena-hud.js"></script>
+  <script type="module" src="/overlays/arena/arena-cards.js"></script>
+  <script type="module" src="/overlays/arena/arena-takeover.js"></script>
+
+</body>
+</html>
