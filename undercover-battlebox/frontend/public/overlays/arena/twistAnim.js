@@ -1,5 +1,5 @@
 // ============================================================================
-// twistAnim.js — BattleBox Arena Twist Animation Engine v1.1 (with GALAXY)
+// twistAnim.js — BattleBox Arena Twist Animation Engine v1.2 FINAL
 // ============================================================================
 //
 // Supported animations:
@@ -8,15 +8,15 @@
 //  • bomb      → red shockwave detonation
 //  • immune    → soft green healing aura
 //  • heal      → cross-symbol pulse
-//  • galaxy    → full vortex spin animation (engine flips ranking)
+//  • galaxy    → full vortex spin + starfield (overlay only)
 //
-// Called by arena.js via arenaTwistStore.subscribe()
-// Renders into #twist-takeover
-//
+// This engine ONLY renders animations.
+// Game engine handles all state, scoring, ranking, flipping, immunity, etc.
 // ============================================================================
 
 export function playTwistAnimation(root, type, title = "") {
   root.innerHTML = buildTwistHTML(type, title);
+
   requestAnimationFrame(() => {
     root.classList.add("show");
   });
@@ -32,6 +32,7 @@ export function clearTwistAnimation(root) {
 // ============================================================================
 function buildTwistHTML(type, title) {
   switch (type) {
+
     case "diamond":
       return diamondPistolHTML(title);
 
@@ -59,7 +60,7 @@ function buildTwistHTML(type, title) {
    DIAMOND PISTOL — exploding diamond shards
 ============================================================================ */
 function diamondPistolHTML(title) {
-  const shards = Array.from({ length: 32 })
+  const shards = [...Array(36)]
     .map(() => `<div class="diamond-shard"></div>`)
     .join("");
 
@@ -75,7 +76,7 @@ function diamondPistolHTML(title) {
    MONEY GUN — bill spray sideways
 ============================================================================ */
 function moneyGunHTML(title) {
-  const bills = Array.from({ length: 28 })
+  const bills = [...Array(32)]
     .map(() => `<div class="money-bill"></div>`)
     .join("");
 
@@ -125,17 +126,16 @@ function healHTML(title) {
 }
 
 /* ============================================================================
-   GALAXY — vortex + starfield (engine flips ranks)
+   GALAXY — vortex + starfield (overlay only)
+//  Game engine flips players; overlay just animates
 ============================================================================ */
 function galaxyHTML(title) {
   return `
     <div class="twist-anim galaxy-vortex">
       <div class="twist-title">${title}</div>
 
-      <!-- starfield layer -->
       <div class="galaxy-stars"></div>
 
-      <!-- swirling vortex -->
       <div class="galaxy-ring"></div>
       <div class="galaxy-ring2"></div>
       <div class="galaxy-flare"></div>
