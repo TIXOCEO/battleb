@@ -1,0 +1,347 @@
+/* ============================================================================
+   BATTLEBOX ARENA OVERLAY (1200×800)
+   HUD + 8 PLAYER CARDS + TWIST TAKEOVER
+   ============================================================================ */
+
+@import "/overlays/shared/theme.css";
+
+/* ============================================================================
+   ROOT WRAPPER
+   ============================================================================ */
+
+.arena-root {
+  width: 1200px;
+  height: 800px;
+  position: relative;
+  background: rgba(5, 5, 8, 0.75);
+  border: 2px solid rgba(255,255,255,0.08);
+  overflow: hidden;
+  backdrop-filter: blur(7px);
+  box-shadow:
+    0 0 40px rgba(255,77,79,0.45),
+    inset 0 0 40px rgba(255,77,79,0.25);
+}
+
+/* ============================================================================
+   TWIST TAKEOVER LAYER (FULLSCREEN)
+   ============================================================================ */
+
+.arena-takeover-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  opacity: 0;
+  transition: opacity 0.3s ease-out;
+}
+
+.arena-takeover-active {
+  opacity: 1 !important;
+}
+
+/* When active, the HUD dims */
+.arena-root.takeover-active #arena-hud {
+  opacity: 0.15;
+  transform: scale(0.92);
+}
+
+/* ============================================================================
+   CENTRAL HUD (OCTAGON)
+   ============================================================================ */
+
+#arena-hud {
+  width: 360px;
+  height: 360px;
+
+  position: absolute;
+  left: 420px;
+  top: 220px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background: var(--glass-3);
+  border: 3px solid rgba(255,255,255,0.12);
+
+  clip-path: polygon(
+    15% 0%, 85% 0%,
+    100% 25%, 100% 75%,
+    85% 100%, 15% 100%,
+    0% 75%, 0% 25%
+  );
+
+  box-shadow:
+    0 0 24px rgba(0,0,0,0.6),
+    inset 0 0 40px rgba(0,0,0,0.55);
+
+  transition: opacity 0.25s ease-out, transform 0.25s ease-out;
+}
+
+/* ============================================================================
+   HUD – PROGRESS RING (SVG)
+   ============================================================================ */
+
+.hud-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: rotate(90deg); /* CLOCKWISE progress */
+  pointer-events: none;
+}
+
+#hud-progress-bg {
+  stroke: rgba(255,255,255,0.12);
+}
+
+#hud-progress-fg {
+  stroke: var(--bb-turquoise);
+  transition: stroke 0.25s linear;
+}
+
+/* Danger (<10s) */
+.hud-danger #hud-progress-fg {
+  stroke: #ff4d4f !important;
+}
+
+/* Grace timer */
+.hud-grace #hud-progress-fg {
+  stroke: #4ea8ff !important;
+}
+
+/* ============================================================================
+   HUD – CONTENT
+   ============================================================================ */
+
+.hud-content {
+  position: relative;
+  z-index: 10;
+  text-align: center;
+  user-select: none;
+}
+
+.hud-round {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  margin-bottom: 10px;
+  color: white;
+  text-shadow: var(--glow-soft-turq);
+}
+
+.hud-timer {
+  font-size: 98px;
+  font-weight: 900;
+  color: var(--bb-orange);
+  text-shadow: var(--glow-hard-orange);
+}
+
+.hud-status {
+  font-size: 22px;
+  margin-top: 8px;
+  opacity: 0.85;
+  color: #f2f2f2;
+}
+
+/* ============================================================================
+   PLAYER CARD BASE
+   ============================================================================ */
+
+.player-card {
+  width: 190px;
+  height: 120px;
+
+  position: absolute;
+
+  background: rgba(15,15,20,0.85);
+  border: 2px solid rgba(255,255,255,0.08);
+
+  padding: 12px;
+  overflow: hidden;
+
+  clip-path: polygon(
+    12% 0%, 88% 0%,
+    100% 20%, 100% 80%,
+    88% 100%, 12% 100%,
+    0% 80%, 0% 20%
+  );
+
+  box-shadow:
+    0 0 22px rgba(0,0,0,0.8),
+    inset 0 0 20px rgba(0,0,0,0.7),
+    inset 0 0 16px rgba(255,77,79,0.18);
+
+  transition: all 0.2s ease-out;
+}
+
+/* Background avatar with low opacity */
+.player-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+
+  background-size: cover;
+  background-position: center;
+  opacity: 0.18;
+  filter: grayscale(20%) blur(1px);
+}
+
+/* CONTENT WRAPPER */
+.player-inner {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+}
+
+/* POSITION NUMBER */
+.player-pos {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+
+  font-weight: 900;
+  font-size: 22px;
+  color: #ff4d4f;
+
+  text-shadow:
+    0 0 8px rgba(255,77,79,1),
+    0 0 16px rgba(255,77,79,0.8);
+}
+
+/* DISPLAY NAME */
+.player-name {
+  font-size: 24px;
+  font-weight: 700;
+  color: #ffffff;
+  max-width: 150px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* DIAMOND SCORE */
+.player-score {
+  margin-top: 4px;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--bb-turquoise);
+  text-shadow: var(--glow-soft-turq);
+}
+
+/* ============================================================================
+   PLAYER STATUS COLORS
+   ============================================================================ */
+
+/* ACTIVE — white border */
+.player-active {
+  border-color: rgba(255,255,255,0.55) !important;
+  box-shadow: 0 0 16px rgba(255,255,255,0.35);
+}
+
+/* DANGER — orange */
+.player-danger {
+  border-color: #ff4d4f !important;
+  box-shadow: 0 0 22px rgba(255,77,79,0.75);
+  animation: dangerPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes dangerPulse {
+  0%, 100% { box-shadow: 0 0 24px rgba(255,77,79,0.85); }
+  50% { box-shadow: 0 0 12px rgba(255,77,79,0.45); }
+}
+
+/* IMMUNE — green */
+.player-immune {
+  border-color: #00ff88 !important;
+  box-shadow: 0 0 22px rgba(0,255,136,0.75);
+}
+
+/* IMMUNE BROKEN (50%) — alternating white/green */
+.player-immune-break {
+  animation: immuneSwap 0.65s linear infinite;
+}
+
+@keyframes immuneSwap {
+  0%, 50% { border-color: #00ff88; }
+  50.1%, 100% { border-color: #ffffff; }
+}
+
+/* ELIMINATED — red */
+.player-eliminated {
+  border-color: #b30000 !important;
+  opacity: 0.65;
+  box-shadow: 0 0 26px rgba(255,0,0,0.55);
+  filter: grayscale(60%);
+}
+
+/* ELIMINATED ENTRY ANIMATION */
+.player-eliminated-anim {
+  animation: elimFlash 0.6s ease-out;
+}
+
+@keyframes elimFlash {
+  0% { filter: brightness(2); }
+  100% { filter: brightness(0.6); }
+}
+
+/* ============================================================================
+   PLAYER POSITIONS AROUND THE HUD (CLOCKWISE)
+   ============================================================================ */
+
+#player-pos-1 { top:  40px; left: 690px; }
+#player-pos-2 { top:  40px; left: 460px; }
+#player-pos-3 { top: 120px; left: 220px; }
+#player-pos-4 { top: 310px; left: 120px; }
+#player-pos-5 { top: 520px; left: 220px; }
+#player-pos-6 { top: 620px; left: 460px; }
+#player-pos-7 { top: 620px; left: 690px; }
+#player-pos-8 { top: 520px; left: 920px; }
+
+/* Adjustments ensure perfect symmetry */
+
+/* ============================================================================
+   TAKEOVER CARD STYLE (TWIST EFFECT)
+   ============================================================================ */
+
+.takeover-card {
+  width: 500px;
+  padding: 30px;
+  background: rgba(15,15,20,0.9);
+  border: 3px solid var(--bb-orange);
+
+  clip-path: polygon(
+    12% 0%, 88% 0%,
+    100% 20%, 100% 80%,
+    88% 100%, 12% 100%,
+    0% 80%, 0% 20%
+  );
+
+  text-align: center;
+  box-shadow:
+    0 0 40px rgba(255,77,79,0.75),
+    inset 0 0 30px rgba(255,77,79,0.45);
+}
+
+.takeover-title {
+  font-size: 40px;
+  font-weight: 900;
+  color: var(--bb-orange);
+  text-shadow: var(--glow-hard-orange);
+  margin-bottom: 10px;
+}
+
+.takeover-description {
+  font-size: 22px;
+  color: white;
+  opacity: 0.9;
+}
+
+/* ============================================================================
+   END OF FILE
+   ============================================================================ */
