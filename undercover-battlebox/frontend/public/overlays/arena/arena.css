@@ -13,6 +13,9 @@
   border: none !important;
   backdrop-filter: none !important;
   box-shadow: none !important;
+
+  /* UPGRADE: zorgt dat twist animaties nooit achter HUD of players blijven hangen */
+  isolation: isolate;
 }
 
 /* ========================================================================== */
@@ -21,7 +24,7 @@
 .bb-twist-takeover {
   position: absolute;
   inset: 0;
-  z-index: 80;
+  z-index: 300; /* UPGRADE: boven alles */
 
   background: transparent !important;
 
@@ -34,6 +37,9 @@
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.35s ease-out;
+
+  /* UPGRADE: zorgt dat animaties opnieuw starten op DOM-refresh */
+  will-change: opacity, transform, filter;
 }
 
 .bb-twist-takeover.show {
@@ -63,6 +69,7 @@
   width: 350px;
   height: 350px;
   position: absolute;
+  z-index: 120; /* UPGRADE: boven players, onder twist */
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
@@ -175,6 +182,7 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
+  z-index: 100; /* UPGRADE: boven galaxy */
 }
 
 .bb-player-card {
@@ -205,6 +213,9 @@
     transform .35s cubic-bezier(.2,.7,.3,1),
     border-color .25s ease-out,
     box-shadow .25s ease-out;
+
+  /* UPGRADE: voorkomt animatie-caching */
+  will-change: transform, border-color, box-shadow;
 }
 
 /* ========================================================================== */
@@ -240,7 +251,6 @@
   text-overflow: ellipsis;
 }
 
-/* 🔥 SCORE FONT +60% → 28px */
 .bb-player-score {
   font-size: 28px !important;
   opacity: 0.90;
@@ -278,8 +288,6 @@
 /* ========================================================================== */
 /* STATUS EFFECTS — retained                                                  */
 /* ========================================================================== */
-
-/* ALIVE */
 .status-alive {
   border-color: rgba(255,255,255,0.75);
   box-shadow:
@@ -296,7 +304,6 @@
   100% { transform: scale(1); }
 }
 
-/* IMMUNE */
 .status-immune {
   border-color: #00ff99;
   box-shadow:
@@ -307,13 +314,13 @@
 .bb-immune-glow {
   animation: immune-glow 1.3s infinite ease-in-out;
 }
+
 @keyframes immune-glow {
   0%   { box-shadow: 0 0 12px rgba(0,255,150,0.7); }
   50%  { box-shadow: 0 0 26px rgba(0,255,170,1); }
   100% { box-shadow: 0 0 12px rgba(0,255,150,0.7); }
 }
 
-/* IMMUNE BROKEN */
 .status-immune-broken {
   border-color: #fff;
   box-shadow: 0 0 20px white;
@@ -322,13 +329,13 @@
 .bb-immune-broken-blink {
   animation: immune-broken-blink 0.55s linear infinite;
 }
+
 @keyframes immune-broken-blink {
   0%   { filter: brightness(1); }
   50%  { filter: brightness(2); }
   100% { filter: brightness(1); }
 }
 
-/* DANGER */
 .status-danger {
   border-color: #ff8800;
   box-shadow:
@@ -339,13 +346,13 @@
 .bb-danger-pulse {
   animation: danger-pulse 1s ease-in-out infinite;
 }
+
 @keyframes danger-pulse {
   0%   { box-shadow: 0 0 14px rgba(255,140,40,0.7); }
   50%  { box-shadow: 0 0 30px rgba(255,160,40,1); }
   100% { box-shadow: 0 0 14px rgba(255,140,40,0.7); }
 }
 
-/* ELIMINATION */
 .status-elimination {
   border-color: #ff0033;
   box-shadow:
@@ -356,6 +363,7 @@
 .bb-elim-flash {
   animation: elim-flash 0.6s forwards;
 }
+
 @keyframes elim-flash {
   0%   { transform: scale(1); opacity: 1;   filter: brightness(1); }
   30%  { transform: scale(1.25); opacity: 1; filter: brightness(2); }
@@ -366,6 +374,7 @@
 .bb-join-pop {
   animation: join-pop 0.45s cubic-bezier(.25,1.15,.3,1.1);
 }
+
 @keyframes join-pop {
   0%   { transform: scale(0); opacity: 0; }
   60%  { transform: scale(1.25); opacity: 1; }
@@ -376,6 +385,7 @@
 .bb-score-anim {
   animation: score-flash .35s ease-out;
 }
+
 @keyframes score-flash {
   0%   { color: white; transform: scale(1); }
   50%  { color: gold;  transform: scale(1.32); }
@@ -383,17 +393,22 @@
 }
 
 /* ========================================================================== */
-/* TWIST ANIMATIONS (unchanged)                                               */
+/* TWIST ANIMATIONS                                                           */
 /* ========================================================================== */
 .twist-anim {
   position: absolute;
   inset: 0;
+  z-index: 301; /* UPGRADE */
   display: flex;
   justify-content: center;
   align-items: center;
   flex-direction: column;
   pointer-events: none;
   overflow: hidden;
+
+  /* UPGRADE: voorkomt animatie-caching */
+  will-change: opacity, transform;
+  animation-fill-mode: both !important;
 }
 
 .twist-title {
@@ -509,6 +524,7 @@
 .galaxy-vortex {
   position: absolute;
   inset: 0;
+  z-index: 20; /* UPGRADE: onder players */
   overflow: hidden;
 }
 
