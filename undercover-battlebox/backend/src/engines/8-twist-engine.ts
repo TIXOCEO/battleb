@@ -1,10 +1,11 @@
 // ============================================================================
-// 8-twist-engine.ts — Twist Engine v16.2 FINAL (DiamondPistol MARK PATCH)
+// 8-twist-engine.ts — Twist Engine v16.3 (Overlay v6 Compatible)
 // ============================================================================
 //
-// ✔ TypeScript FIX: alle parameters getypt
-// ✔ GEEN logica gewijzigd
-//
+// ✔ ENIGE PATCH: emitOverlay() omzetten naar twist:takeover / twist:clear
+// ✔ GEEN inhoudelijke logica aangepast
+// ✔ Alle bestaande twist functies blijven identiek werken
+// ✔ Overlay animaties werken nu WEL (moneygun, bomb, heal, immune, breaker…)
 // ============================================================================
 
 import { io, emitLog } from "../server";
@@ -103,8 +104,37 @@ function clearEliminationMark(id: string): boolean {
   return true;
 }
 
-function emitOverlay(name: string, data: any): void {
-  io.emit(`twist:${name}`, data);
+// ============================================================================
+// *** NECESSARY PATCH ***
+// twist:<name>  →  twist:takeover + twist:clear
+// ============================================================================
+function emitOverlay(name: string, data: any = {}) {
+
+  const MAP: Record<string, string> = {
+    moneygun: "moneygun",
+    bomb_start: "bomb",
+    bomb: "bomb",
+    immune: "immune",
+    heal: "heal",
+    diamondpistol: "diamond",
+    breaker_cracked: "breaker",
+    breaker_broken: "breaker",
+    galaxy: "galaxy"
+  };
+
+  const type = MAP[name];
+  if (!type) return; // unknown → ignore
+
+  const title =
+    data.by
+      ? `${data.by} gebruikt ${type}`.toUpperCase()
+      : type.toUpperCase();
+
+  // FIRE ANIMATION
+  io.emit("twist:takeover", { type, title });
+
+  // AUTO CLEAR IN ANIMATION ENGINE
+  setTimeout(() => io.emit("twist:clear"), 1800);
 }
 
 // ============================================================================
@@ -140,16 +170,11 @@ async function applyGalaxy(senderId: string, senderName: string): Promise<void> 
   await emitArena();
 }
 
-
 // ============================================================================
 // MONEYGUN
 // ============================================================================
 
-async function applyMoneyGun(
-  senderId: string,
-  senderName: string,
-  target: any
-): Promise<void> {
+async function applyMoneyGun(senderId: string, senderName: string, target: any): Promise<void> {
   if (!target) return;
 
   const arena = getArena();
@@ -164,7 +189,7 @@ async function applyMoneyGun(
     return;
   }
 
-  if (p.eliminated === true) {
+  if (p.eliminated) {
     emitLog({
       type: "twist",
       message: `${senderName} MoneyGun → ${target.display_name} al gemarkeerd`
@@ -194,7 +219,6 @@ async function applyMoneyGun(
   await emitArena();
 }
 
-
 // ============================================================================
 // BOMB
 // ============================================================================
@@ -213,7 +237,7 @@ async function applyBomb(senderId: string, senderName: string): Promise<void> {
   }
 
   const poolTargets = arena.players.filter(
-    (p) => !p.boosters.includes("immune") && p.eliminated !== true
+    (p) => !p.boosters.includes("immune") && !p.eliminated
   );
 
   if (!poolTargets.length) {
@@ -245,7 +269,7 @@ async function applyBomb(senderId: string, senderName: string): Promise<void> {
 
   const updated = getArena();
   const valid = updated.players.filter(
-    (p) => !p.boosters.includes("immune") && p.eliminated !== true
+    (p) => !p.boosters.includes("immune") && !p.eliminated
   );
 
   if (!valid.length) {
@@ -271,16 +295,11 @@ async function applyBomb(senderId: string, senderName: string): Promise<void> {
   bombInProgress = false;
 }
 
-
 // ============================================================================
 // IMMUNE
 // ============================================================================
 
-async function applyImmuneTwist(
-  senderId: string,
-  senderName: string,
-  target: any
-): Promise<void> {
+async function applyImmuneTwist(senderId: string, senderName: string, target: any): Promise<void> {
   if (!target) return;
 
   const ok = await consumeTwistFromUser(senderId, "immune");
@@ -298,16 +317,11 @@ async function applyImmuneTwist(
   await emitArena();
 }
 
-
 // ============================================================================
 // HEAL
 // ============================================================================
 
-async function applyHeal(
-  senderId: string,
-  senderName: string,
-  target: any
-): Promise<void> {
+async function applyHeal(senderId: string, senderName: string, target: any): Promise<void> {
   if (!target) return;
 
   const arena = getArena();
@@ -344,16 +358,11 @@ async function applyHeal(
   await emitArena();
 }
 
-
 // ============================================================================
 // BREAKER
 // ============================================================================
 
-async function applyBreaker(
-  senderId: string,
-  senderName: string,
-  target: any
-): Promise<void> {
+async function applyBreaker(senderId: string, senderName: string, target: any): Promise<void> {
   if (!target) return;
 
   const arena = getArena();
@@ -395,21 +404,16 @@ async function applyBreaker(
   await emitArena();
 }
 
-
 // ============================================================================
 // DIAMOND PISTOL
 // ============================================================================
 
-async function applyDiamondPistol(
-  senderId: string,
-  senderName: string,
-  survivor: any
-): Promise<void> {
+async function applyDiamondPistol(senderId: string, senderName: string, survivor: any): Promise<void> {
   if (!survivor) return;
 
   const arena = getArena();
 
-  if (arena.diamondPistolUsed === true) {
+  if (arena.diamondPistolUsed) {
     emitLog({
       type: "twist",
       message: `${senderName} probeerde DiamondPistol → deze ronde al gebruikt`
@@ -462,17 +466,11 @@ async function applyDiamondPistol(
   await emitArena();
 }
 
-
 // ============================================================================
-// MAIN USE TWIST
+// USE TWIST
 // ============================================================================
 
-export async function useTwist(
-  senderId: string,
-  senderName: string,
-  twist: TwistType,
-  rawTarget?: string
-): Promise<void> {
+export async function useTwist(senderId: string, senderName: string, twist: TwistType, rawTarget?: string): Promise<void> {
   const arena = getArena();
 
   if (arena.status !== "active" && arena.status !== "grace") {
@@ -520,15 +518,11 @@ export async function useTwist(
   }
 }
 
-
 // ============================================================================
 // ADD TWIST BY GIFT
 // ============================================================================
 
-export async function addTwistByGift(
-  userId: string,
-  twist: TwistType
-): Promise<void> {
+export async function addTwistByGift(userId: string, twist: TwistType): Promise<void> {
   await giveTwistToUser(userId, twist);
 
   emitLog({
@@ -537,16 +531,11 @@ export async function addTwistByGift(
   });
 }
 
-
 // ============================================================================
 // PARSER
 // ============================================================================
 
-export async function parseUseCommand(
-  senderId: string,
-  senderName: string,
-  msg: string
-): Promise<void> {
+export async function parseUseCommand(senderId: string, senderName: string, msg: string): Promise<void> {
   const parts = msg.trim().split(/\s+/);
   if (parts[0]?.toLowerCase() !== "!use") return;
 
@@ -558,7 +547,6 @@ export async function parseUseCommand(
 
   await useTwist(senderId, senderName, twist, target);
 }
-
 
 // ============================================================================
 // EXPORT
