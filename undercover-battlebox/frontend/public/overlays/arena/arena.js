@@ -1,15 +1,13 @@
 // ============================================================================
-// arena.js — BattleBox Arena Overlay (FINAL BUILD v6.1 — CLEAN TIMER & AVATAR FIX)
+// arena.js — BattleBox Arena Overlay (BUILD v6.2 — FULL HUD COMPATIBILITY)
 // ============================================================================
 //
 // INCLUDED FIXES:
-// ✔ Correct avatar fallback (p.avatar_url || p.avatar || EMPTY_AVATAR)
-// ✔ New circle positions: #1 is top, clockwise
-// ✔ Cards always upright
-// ✔ Stable timer loop (100ms) WITHOUT duplicate execution
-// ✔ Perfect mm:ss output without NaN
-// ✔ Progress ring synced to timer loop
-// ✔ Backwards compatible with roundCutoff/graceEnd
+// ✔ Supports new HUD model (hud.totalMs, hud.endsAt, hud.remainingMs)
+// ✔ Falls back correctly on old fields when backend is old
+// ✔ Timer & progress ring fully operational again
+// ✔ Avatar fixes remain intact
+// ✔ All animations untouched
 //
 // ============================================================================
 
@@ -44,14 +42,14 @@ const galaxyLayer = document.getElementById("twist-galaxy");
    POSITIONS — #1 at TOP, clockwise
 ============================================================ */
 const POSITIONS = [
-  { idx: 1, x: 0.0,     y: -1.0 },     // TOP
-  { idx: 2, x: 0.7071,  y: -0.7071 },  // TOP RIGHT
-  { idx: 3, x: 1.0,     y: 0.0 },      // RIGHT
-  { idx: 4, x: 0.7071,  y: 0.7071 },   // BOTTOM RIGHT
-  { idx: 5, x: 0.0,     y: 1.0 },      // BOTTOM
-  { idx: 6, x: -0.7071, y: 0.7071 },   // BOTTOM LEFT
-  { idx: 7, x: -1.0,    y: 0.0 },      // LEFT
-  { idx: 8, x: -0.7071, y: -0.7071 },  // TOP LEFT
+  { idx: 1, x: 0.0,     y: -1.0 },
+  { idx: 2, x: 0.7071,  y: -0.7071 },
+  { idx: 3, x: 1.0,     y: 0.0 },
+  { idx: 4, x: 0.7071,  y: 0.7071 },
+  { idx: 5, x: 0.0,     y: 1.0 },
+  { idx: 6, x: -0.7071, y: 0.7071 },
+  { idx: 7, x: -1.0,    y: 0.0 },
+  { idx: 8, x: -0.7071, y: -0.7071 },
 ];
 
 const CENTER_X = 600;
@@ -140,10 +138,9 @@ arenaStore.subscribe((state) => {
       continue;
     }
 
-    // Name
     card.name.textContent = p.display_name ?? "Onbekend";
 
-    // Score animation
+    // Score change animation
     const previous = lastScoreMap.get(p.id) ?? 0;
     if (p.score !== previous) {
       animateOnce(card.score, "bb-score-anim");
@@ -151,12 +148,8 @@ arenaStore.subscribe((state) => {
     }
     card.score.textContent = p.score ?? 0;
 
-    // Avatar fix
-    const avatar =
-      p.avatar_url ||
-      p.avatar ||
-      EMPTY_AVATAR;
-
+    // Avatar
+    const avatar = p.avatar_url || p.avatar || EMPTY_AVATAR;
     card.bg.style.backgroundImage = `url(${avatar})`;
 
     // Join animation
@@ -192,9 +185,7 @@ function applyStatus(el, p) {
 
   if (p.positionStatus === "immune") {
     return el.classList.add(
-      (p.breakerHits ?? 0) > 0
-        ? "status-immune-broken"
-        : "status-immune"
+      (p.breakerHits ?? 0) > 0 ? "status-immune-broken" : "status-immune"
     );
   }
 
@@ -202,7 +193,7 @@ function applyStatus(el, p) {
 }
 
 /* ============================================================
-   POSITIONING — CARDS STAY UPRIGHT
+   POSITIONING
 ============================================================ */
 function positionCard(el, pos) {
   const dx = pos.x * RADIUS;
@@ -214,32 +205,36 @@ function positionCard(el, pos) {
 }
 
 /* ============================================================
-   LIVE TIMER LOOP — 100ms
+   TIMER LOOP — supports new HUD model
 ============================================================ */
 setInterval(() => {
-  const state = arenaStore.get();
+  const raw = arenaStore.get();
+
+  // HUD can be nested: updateArena sends { hud, players, ... }
+  const state = raw.hud ? { ...raw, ...raw.hud } : raw;
+
   const now = Date.now();
 
-  let remainingMs = state.endsAt - now;
-  let totalMs = state.totalMs;
+  let totalMs = state.totalMs ?? 0;
+  let remainingMs = state.remainingMs ?? (state.endsAt - now);
 
-  // Backwards compatibility
+  // BACKWARDS COMPATIBILITY
   if (!totalMs || totalMs <= 0) {
     if (state.status === "active") {
       totalMs = state.settings.roundDurationPre * 1000;
       remainingMs = Math.max(0, state.roundCutoff - now);
     } else if (state.status === "grace") {
-      totalMs = 5000;
+      totalMs = state.settings.graceSeconds * 1000;
       remainingMs = Math.max(0, state.graceEnd - now);
     }
   }
 
   remainingMs = Math.max(0, remainingMs);
 
+  // Timer text
   const sec = Math.floor(remainingMs / 1000);
   const mm = String(Math.floor(sec / 60)).padStart(2, "0");
   const ss = String(sec % 60).padStart(2, "0");
-
   hudTimer.textContent = `${mm}:${ss}`;
 
   renderHudProgress(state, hudRing);
@@ -264,7 +259,7 @@ arenaTwistStore.subscribe((state) => {
 });
 
 /* ============================================================
-   ROUND EVENTS (Animations)
+   ROUND EVENTS
 ============================================================ */
 document.addEventListener("arena:roundStart", () => {
   animateOnce(root, "bb-round-start-shake");
