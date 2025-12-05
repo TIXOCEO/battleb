@@ -8,7 +8,7 @@
   <!-- GLOBAL THEME -->
   <link rel="stylesheet" href="/overlays/shared/theme.css" />
 
-  <!-- ARENA CSS -->
+  <!-- ARENA CSS (v1.9) -->
   <link rel="stylesheet" href="/overlays/arena/arena.css" />
 
   <style>
@@ -23,53 +23,71 @@
 
 <body>
 
-  <!-- MAIN ARENA CANVAS (fixed 1200×800) -->
+  <!-- ========================================================= -->
+  <!--        MAIN ARENA CANVAS (fixed 1200 × 800)                -->
+  <!-- ========================================================= -->
   <div id="arena-root" class="bb-arena-root">
 
-    <!-- =============================== -->
-    <!--         1) TWIST TAKEOVER       -->
-    <!-- =============================== -->
+    <!-- ===================================================== -->
+    <!-- 1) GALAXY TWIST BACKGROUND (behind everything)        -->
+    <!-- ===================================================== -->
+    <div id="twist-galaxy" class="twist-anim galaxy-vortex hidden">
+      <div class="galaxy-stars"></div>
+      <div class="galaxy-ring"></div>
+      <div class="galaxy-ring2"></div>
+      <div class="galaxy-flare"></div>
+    </div>
+
+    <!-- ===================================================== -->
+    <!-- 2) TWIST TAKEOVER (over everything)                  -->
+    <!-- ===================================================== -->
     <div id="twist-takeover" class="bb-twist-takeover hidden"></div>
 
-    <!-- =============================== -->
-    <!--         2) CENTRAL HUD          -->
-    <!-- =============================== -->
-    <div id="arena-hud" class="bb-hud bb-octagon holo-scan led-sweep">
+    <!-- ===================================================== -->
+    <!-- 3) CENTRAL HUD (round, type, timer, ring)            -->
+    <!-- ===================================================== -->
+    <div id="arena-hud" class="bb-hud">
       <div class="hud-inner">
 
-        <div id="hud-round" class="hud-round-text">Round 0</div>
-        <div id="hud-type" class="hud-type-text">quarter</div>
+        <div id="hud-round" class="hud-round-text">RONDE 0</div>
+        <div id="hud-type" class="hud-type-text">KWARTFINALE</div>
 
         <!-- TIMER -->
-        <div id="hud-timer" class="hud-timer">00:00</div>
+        <div id="hud-timer" class="hud-timer">00</div>
 
         <!-- Progress Ring -->
         <svg class="hud-ring" width="360" height="360">
           <circle cx="180" cy="180" r="170" stroke-width="12"
                   class="hud-ring-bg" />
           <circle cx="180" cy="180" r="170" stroke-width="12"
-                  class="hud-ring-progress" />
+                  class="hud-ring-progress" id="hud-ring-progress" />
         </svg>
 
       </div>
     </div>
 
-    <!-- =============================== -->
-    <!--         3) PLAYER CARDS         -->
-    <!-- =============================== -->
-    <div id="arena-players">
-      <!-- cards worden via JS gegenereerd -->
-    </div>
+    <!-- ===================================================== -->
+    <!-- 4) PLAYER CARDS (generated via arena.js)             -->
+    <!-- ===================================================== -->
+    <div id="arena-players"></div>
 
   </div>
 
-  <!-- Shared logic -->
+  <!-- ========================================================= -->
+  <!--                SCRIPT ORDER (IMPORTANT)                   -->
+  <!-- ========================================================= -->
+  <!-- Core socket & utilities -->
   <script type="module" src="/overlays/shared/socket.js"></script>
   <script type="module" src="/overlays/shared/event-router.js"></script>
+
+  <!-- Global stores -->
   <script type="module" src="/overlays/shared/stores.js"></script>
   <script type="module" src="/overlays/shared/arena-store.js"></script>
 
-  <!-- Arena renderer -->
+  <!-- Twist animation engine -->
+  <script type="module" src="/overlays/shared/twistAnim.js"></script>
+
+  <!-- Arena renderer (FINAL v4.x) -->
   <script type="module" src="/overlays/arena/arena.js"></script>
 
 </body>
