@@ -218,9 +218,7 @@ async function recomputePositions() {
     p.score = await computePlayerScore(p);
   }
 
-  // ================================
-  // ★ reverseMode ondersteunt Galaxy UNO-reverse
-  // ================================
+  // reverse sorting
   if (arena.reverseMode) {
     arena.players.sort((a, b) => a.score - b.score);
   } else {
@@ -237,9 +235,7 @@ async function recomputePositions() {
     return;
   }
 
-  // ================================
   // QUARTER LOGICA
-  // ================================
   if (arena.type === "quarter") {
     if (total < 6) {
       for (const p of arena.players) {
@@ -276,9 +272,7 @@ async function recomputePositions() {
     return;
   }
 
-  // ================================
   // FINALE LOGICA
-  // ================================
   const totalFinal = arena.players.length;
 
   for (let i = 0; i < totalFinal; i++) {
@@ -310,37 +304,86 @@ async function recomputePositions() {
 }
 
 /* ============================================================================
-   EMIT SNAPSHOT
+   EMIT SNAPSHOT — NIEUW HUD + PLAYER PAYLOAD (overlay v2)
 ============================================================================ */
 
 export async function emitArena() {
   await recomputePositions();
 
+  // -------------------------------------------------------------
+  // 1) HUD BOUWEN
+  // -------------------------------------------------------------
+  const now = Date.now();
+  let totalMs = 0;
+  let remainingMs = 0;
+
+  if (arena.status === "active") {
+    totalMs =
+      (arena.type === "finale"
+        ? arena.settings.roundDurationFinal
+        : arena.settings.roundDurationPre) * 1000;
+
+    remainingMs = Math.max(0, arena.roundCutoff - now);
+  }
+
+  if (arena.status === "grace") {
+    totalMs = arena.settings.graceSeconds * 1000;
+    remainingMs = Math.max(0, arena.graceEnd - now);
+  }
+
+  const hud = {
+    roundNumber: arena.round,
+    roundType: arena.type,
+    roundStatus: arena.status,
+    reverseMode: arena.reverseMode,
+
+    remainingMs,
+    totalMs,
+
+    // eventueel later handig voor animaties
+    roundStartTime: arena.roundStartTime,
+    roundCutoff: arena.roundCutoff,
+    graceEnd: arena.graceEnd,
+  };
+
+  // -------------------------------------------------------------
+  // 2) PLAYERS MAPPEN → overlay structuur
+  // -------------------------------------------------------------
+  const players = arena.players.map((p) => ({
+    id: p.id,
+    username: p.username,
+    display_name: p.display_name,
+    score: p.score,
+
+    positionStatus: p.positionStatus,
+    eliminated: !!p.eliminated,
+
+    // booster info
+    tempImmune: !!p.tempImmune,
+    survivorImmune: !!p.survivorImmune,
+    breakerHits: p.breakerHits ?? 0,
+
+    // we sturen geen boosters-array meer, alleen flags
+    boosters: p.boosters,
+  }));
+
+  // -------------------------------------------------------------
+  // 3) BROADCAST NAAR ALLE OVERLAYS
+  // -------------------------------------------------------------
   io.emit("updateArena", {
-    players: arena.players,
+    hud,
+    players,
+
+    // overige bestaande properties blijven voor admin-dashboard
     round: arena.round,
     type: arena.type,
     status: arena.status,
     reverseMode: arena.reverseMode,
     diamondPistolUsed: arena.diamondPistolUsed,
 
-    // PATCH: breaker hits zichtbaar naar frontend / overlay
-    playersBreakerHits: arena.players.map((p) => ({
-      id: p.id,
-      breakerHits: p.breakerHits ?? 0,
-    })),
-
-    isRunning: arena.status === "active",
-
-    roundStartTime: arena.roundStartTime,
-    roundCutoff: arena.roundCutoff,
-    graceEnd: arena.graceEnd,
-
-    settings: arena.settings,
     firstFinalRound: arena.firstFinalRound,
     lastSortedAt: arena.lastSortedAt,
 
-    // PATCH B: verwijderen ALTIJD toestaan
     removeAllowed: true,
   });
 }
@@ -567,9 +610,6 @@ export async function endRound(forceEnd: boolean = false) {
     await recomputePositions();
     const total = arena.players.length;
 
-    // ================================
-    // FINALE EERST MG/BOMB
-    // ================================
     const doomedMG = arena.players.filter((p) => p.eliminated);
 
     if (arena.type === "finale") {
@@ -593,7 +633,6 @@ export async function endRound(forceEnd: boolean = false) {
         return;
       }
 
-      // tie eliminatie
       const index = arena.reverseMode ? 0 : total - 1;
       const lowest = arena.players[index].score;
       const doomedTie = arena.players.filter((p) => p.score === lowest);
@@ -622,9 +661,6 @@ export async function endRound(forceEnd: boolean = false) {
       return;
     }
 
-    // ================================
-    // QUARTER MG/BOMB + danger
-    // ================================
     const doomedDanger =
       arena.settings.forceEliminations &&
       arena.players.filter((p) => p.positionStatus === "danger");
@@ -684,7 +720,6 @@ export async function arenaLeave(identifier: string, force: boolean = false) {
   const raw = String(identifier).replace(/^@+/, "").trim();
   const lower = raw.toLowerCase();
 
-  // Brede matching op id, username, display_name
   const idx = arena.players.findIndex((p) => {
     return (
       p.id === raw ||
@@ -698,7 +733,6 @@ export async function arenaLeave(identifier: string, force: boolean = false) {
 
   const p = arena.players[idx];
 
-  // FORCE = direct verwijderen uit array
   if (force) {
     arena.players.splice(idx, 1);
 
@@ -711,7 +745,6 @@ export async function arenaLeave(identifier: string, force: boolean = false) {
     return;
   }
 
-  // Normale verwijdering = markeren
   p.positionStatus = "elimination";
   p.eliminated = true;
 
@@ -762,7 +795,7 @@ export async function addToArena(username: string, resolveUser: Function) {
 ============================================================================ */
 
 export async function eliminate(username: string) {
-  const clean = username.replace(/^@+/, "").toLowerCase();
+  const clean = username.replace(/^@+/, "").lowerCase();
 
   const idx = arena.players.findIndex(
     (p) => p.username.toLowerCase() === clean
@@ -821,7 +854,7 @@ export async function addFromQueue(...args: any[]) {
       (candidate as any).user_username ??
       "";
     const display_name: string =
-      (candidate.asAny)?.display_name ??
+      (candidate asAny)?.display_name ??
       (candidate.asAny)?.user_display_name ??
       username;
 
