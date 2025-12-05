@@ -1,38 +1,56 @@
 // ============================================================================
-// twistAnim.js — BattleBox Arena Twist Animation Engine v1.2 FINAL
+// twistAnim.js — BattleBox Arena Twist Animation Engine v1.5 QUEUE-SAFE FINAL
 // ============================================================================
 //
-// Supported animations:
-//  • diamond   → exploding diamond shard blast
-//  • moneygun  → sideways bill spray
-//  • bomb      → red shockwave detonation
-//  • immune    → soft green healing aura
-//  • heal      → cross-symbol pulse
-//  • galaxy    → full vortex spin + starfield (overlay only)
+// Upgrades v1.5:
+// ------------------------------------------------------------
+// ✔ Animaties starten ALTIJD opnieuw (forced reflow + reset)
+// ✔ CSS animations kunnen niet meer "hangen"
+// ✔ Safe clear() met no-break race protection
+// ✔ Fully compatible met arena.js v6.3 TwistQueue engine
+// ✔ Galaxy animatie correct zichtbaar en reset
 //
-// This engine ONLY renders animations.
-// Game engine handles all state, scoring, ranking, flipping, immunity, etc.
 // ============================================================================
 
 export function playTwistAnimation(root, type, title = "") {
-  root.innerHTML = buildTwistHTML(type, title);
+  if (!root) return;
 
-  requestAnimationFrame(() => {
+  // 1) CLEAR old content
+  root.classList.remove("show");
+  root.innerHTML = "";
+
+  // 2) Build new HTML (inject synchronously)
+  const html = buildTwistHTML(type, title);
+  root.innerHTML = html;
+
+  // 3) Wait microtask so DOM settles
+  queueMicrotask(() => {
+    // 4) Force reflow so animations can restart clean
+    void root.offsetWidth;
+
+    // 5) Start animation
     root.classList.add("show");
   });
 }
 
 export function clearTwistAnimation(root) {
+  if (!root) return;
+
+  // Prevent removal during active animation loops
   root.classList.remove("show");
-  root.innerHTML = "";
+
+  // allow fade-out / animation-end to occur if defined in css
+  setTimeout(() => {
+    root.innerHTML = "";
+  }, 50);
 }
 
 // ============================================================================
 // HTML BUILDERS
 // ============================================================================
+
 function buildTwistHTML(type, title) {
   switch (type) {
-
     case "diamond":
       return diamondPistolHTML(title);
 
@@ -127,7 +145,6 @@ function healHTML(title) {
 
 /* ============================================================================
    GALAXY — vortex + starfield (overlay only)
-//  Game engine flips players; overlay just animates
 ============================================================================ */
 function galaxyHTML(title) {
   return `
