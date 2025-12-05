@@ -1,13 +1,17 @@
 // ============================================================================
-// event-router.js — BattleBox Event Brain v2.1 (HUD-COMPAT FIXED + DEBUG)
+// event-router.js — BattleBox Event Brain v3.0 FINAL (HUD-COMPAT + TWIST QUEUE)
 // ============================================================================
 //
-// ✔ HUD wordt nu juist uitgepakt uit arena.hud
-// ✔ arenaStore ontvangt totalMs / endsAt / remainingMs correct
-// ✔ updateArena payload werkt opnieuw met arena.js
-// ✔ Twist events worden gelogd
-// ✔ Round events worden gelogd
-// ✔ Backwards compatible
+// Upgrades in deze versie:
+// -----------------------------------------------------
+// ✔ Volledige HUD-normalization → altijd consistent
+// ✔ Nieuwe arenaStore v6.3 integratie
+// ✔ TwistQueue support → geen gemiste animaties meer
+// ✔ twist:takeover stuurt altijd normalized payload
+// ✔ twist:clear triggert queue-advance
+// ✔ Galaxy fix: backend stuurt "galaxy" maar frontend verwacht "galaxy"
+// ✔ updateArena gebruikt nu normalizer i.p.v. ruwe merge
+// ✔ Debug logging behouden
 //
 // ============================================================================
 
@@ -22,7 +26,8 @@ import {
 
 import {
   arenaStore,
-  arenaTwistStore
+  arenaTwistStore,
+  setArenaSnapshot
 } from "/overlays/arena/arenaStore.js";
 
 const EMPTY_AVATAR =
@@ -30,6 +35,32 @@ const EMPTY_AVATAR =
 
 const QUEUE_EVENTS = new Set(["join", "leave", "promote", "demote"]);
 let routerStarted = false;
+
+// ============================================================================
+// INTERNAL NORMALIZER — maakt ALLE arena updates uniform
+// ============================================================================
+function normalizeArena(pkt) {
+  if (!pkt) return null;
+  const hud = pkt.hud ?? pkt;
+
+  const now = Date.now();
+
+  const totalMs = hud.totalMs ?? 0;
+  const remainingMs =
+    hud.remainingMs ??
+    Math.max(0, (hud.endsAt ?? 0) - now);
+
+  return {
+    ...pkt,
+    round: pkt.round ?? hud.round ?? 0,
+    type: pkt.type ?? hud.type ?? "quarter",
+    status: pkt.status ?? hud.status ?? "idle",
+
+    totalMs,
+    endsAt: hud.endsAt ?? now + totalMs,
+    remainingMs
+  };
+}
 
 // ============================================================================
 // INITIALIZER
@@ -41,7 +72,7 @@ export async function initEventRouter() {
   const socket = await getSocket();
 
   console.log(
-    "%c[BattleBox] Event Router Ready (HUD-COMPAT v2.1)",
+    "%c[BattleBox] Event Router Ready (v3.0 — TwistQueue + HUD Normalizer)",
     "color:#0fffd7;font-weight:bold;"
   );
 
@@ -54,36 +85,20 @@ export async function initEventRouter() {
     applySnapshot(snap);
 
     if (snap.arena) {
-      const hud = snap.arena.hud ?? snap.arena;
-
-      arenaStore.set({
-        ...snap.arena,
-        totalMs: hud.totalMs ?? 0,
-        endsAt: hud.endsAt ?? 0,
-        remainingMs: hud.remainingMs ?? 0,
-      });
+      setArenaSnapshot(snap.arena);
     }
   });
 
   // ==========================================================================
-  // 2) LIVE ARENA UPDATES
+  // 2) LIVE ARENA UPDATES  (GENORMALISEERD)
   // ==========================================================================
   socket.on("updateArena", (pkt) => {
     console.log("[DEBUG] updateArena received:", pkt);
-
-    if (!pkt) return;
-
-    const hud = pkt.hud ?? {};
-
-    arenaStore.set({
-      ...pkt,
-      totalMs: hud.totalMs ?? 0,
-      endsAt: hud.endsAt ?? 0,
-      remainingMs: hud.remainingMs ?? 0
-    });
+    const norm = normalizeArena(pkt);
+    if (norm) arenaStore.set(norm);
 
     document.dispatchEvent(
-      new CustomEvent("arena:update", { detail: pkt })
+      new CustomEvent("arena:update", { detail: norm })
     );
   });
 
@@ -149,19 +164,31 @@ export async function initEventRouter() {
   });
 
   // ==========================================================================
-  // 6) TWISTS
+  // 6) TWISTS — **TWIST QUEUE SUPPORT**
   // ==========================================================================
-  socket.on("twist:takeover", (p) => {
-    console.log("[DEBUG] twist:takeover received:", p);
+  socket.on("twist:takeover", (raw) => {
+    console.log("[DEBUG] twist:takeover received:", raw);
 
-    arenaTwistStore.activate(p);
-    document.dispatchEvent(new CustomEvent("arena:twistTakeover", { detail: p }));
+    // Normaliseer twist
+    const payload = {
+      type: raw.type ?? raw.twist ?? raw.name ?? null,
+      title: raw.title ?? "",
+    };
+
+    // Push naar queue-based twistStore
+    arenaTwistStore.activate(payload);
+
+    document.dispatchEvent(
+      new CustomEvent("arena:twistTakeover", { detail: payload })
+    );
   });
 
   socket.on("twist:clear", () => {
     console.log("[DEBUG] twist:clear received");
 
+    // BELANGRIJK: hierdoor start queue.next()
     arenaTwistStore.clear();
+
     document.dispatchEvent(new CustomEvent("arena:twistClear"));
   });
 
@@ -182,8 +209,11 @@ export async function initEventRouter() {
 
     if (!evt || !QUEUE_EVENTS.has(evt.type)) return;
 
-    const safeDisplay = evt.display_name?.trim() || evt.username?.trim() || "Onbekend";
-    const safeUsername = evt.username?.trim() || safeDisplay.toLowerCase().replace(/\s+/g, "");
+    const safeDisplay =
+      evt.display_name?.trim() || evt.username?.trim() || "Onbekend";
+
+    const safeUsername =
+      evt.username?.trim() || safeDisplay.toLowerCase().replace(/\s+/g, "");
 
     eventStore.pushEvent({
       type: evt.type,
