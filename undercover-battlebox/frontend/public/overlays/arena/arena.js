@@ -40,7 +40,7 @@ const hudRing = document.getElementById("hud-ring-progress");
 const playersContainer = document.getElementById("arena-players");
 
 const twistOverlay = document.getElementById("twist-takeover");
-const galaxyLayer = document.getElementById("twist-galaxy');
+const galaxyLayer = document.getElementById("twist-galaxy");
 
 /* ============================================================
    CONSTANTS — circular positions
