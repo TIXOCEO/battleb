@@ -1,11 +1,13 @@
 // ============================================================================
-// event-router.js — BattleBox Event Brain v2.1 (HUD-COMPAT FIXED)
+// event-router.js — BattleBox Event Brain v2.1 (HUD-COMPAT FIXED + DEBUG)
 // ============================================================================
 //
 // ✔ HUD wordt nu juist uitgepakt uit arena.hud
 // ✔ arenaStore ontvangt totalMs / endsAt / remainingMs correct
 // ✔ updateArena payload werkt opnieuw met arena.js
-// ✔ Backwards compatible met oude payloads
+// ✔ Twist events worden gelogd
+// ✔ Round events worden gelogd
+// ✔ Backwards compatible
 //
 // ============================================================================
 
@@ -47,6 +49,8 @@ export async function initEventRouter() {
   // 1) INITIAL SNAPSHOT
   // ==========================================================================
   socket.on("overlayInitialSnapshot", (snap) => {
+    console.log("[DEBUG] Initial snapshot received:", snap);
+
     applySnapshot(snap);
 
     if (snap.arena) {
@@ -56,15 +60,17 @@ export async function initEventRouter() {
         ...snap.arena,
         totalMs: hud.totalMs ?? 0,
         endsAt: hud.endsAt ?? 0,
-        remainingMs: hud.remainingMs ?? 0
+        remainingMs: hud.remainingMs ?? 0,
       });
     }
   });
 
   // ==========================================================================
-  // 2) LIVE ARENA UPDATES  (★ PATCHED FOR HUD MODEL ★)
+  // 2) LIVE ARENA UPDATES
   // ==========================================================================
   socket.on("updateArena", (pkt) => {
+    console.log("[DEBUG] updateArena received:", pkt);
+
     if (!pkt) return;
 
     const hud = pkt.hud ?? {};
@@ -82,9 +88,11 @@ export async function initEventRouter() {
   });
 
   // ==========================================================================
-  // 3) ROUND START — NEW TIMER MODEL
+  // 3) ROUND START
   // ==========================================================================
   socket.on("round:start", (payload) => {
+    console.log("[DEBUG] round:start received:", payload);
+
     const total = (payload.duration ?? 0) * 1000;
     const endsAt = Date.now() + total;
 
@@ -102,9 +110,11 @@ export async function initEventRouter() {
   });
 
   // ==========================================================================
-  // 4) GRACE START — NEW TIMER MODEL
+  // 4) GRACE START
   // ==========================================================================
   socket.on("round:grace", (payload) => {
+    console.log("[DEBUG] round:grace received:", payload);
+
     const total = (payload.grace ?? 5) * 1000;
     const endsAt = Date.now() + total;
 
@@ -122,9 +132,11 @@ export async function initEventRouter() {
   });
 
   // ==========================================================================
-  // 5) ROUND END — CLEAN RESET
+  // 5) ROUND END
   // ==========================================================================
   socket.on("round:end", (payload) => {
+    console.log("[DEBUG] round:end received:", payload);
+
     arenaStore.set({
       status: "ended",
       totalMs: 0,
@@ -140,20 +152,25 @@ export async function initEventRouter() {
   // 6) TWISTS
   // ==========================================================================
   socket.on("twist:takeover", (p) => {
+    console.log("[DEBUG] twist:takeover received:", p);
+
     arenaTwistStore.activate(p);
     document.dispatchEvent(new CustomEvent("arena:twistTakeover", { detail: p }));
   });
 
   socket.on("twist:clear", () => {
+    console.log("[DEBUG] twist:clear received");
+
     arenaTwistStore.clear();
     document.dispatchEvent(new CustomEvent("arena:twistClear"));
   });
 
   // ==========================================================================
-  // 7) LIVE QUEUE UPDATE
+  // 7) QUEUE UPDATE
   // ==========================================================================
   socket.on("updateQueue", (packet) => {
     if (!packet || !Array.isArray(packet.entries)) return;
+    console.log("[DEBUG] updateQueue:", packet);
     queueStore.setQueue(packet.entries);
   });
 
@@ -161,6 +178,8 @@ export async function initEventRouter() {
   // 8) QUEUE EVENTS
   // ==========================================================================
   socket.on("queueEvent", (evt) => {
+    console.log("[DEBUG] queueEvent:", evt);
+
     if (!evt || !QUEUE_EVENTS.has(evt.type)) return;
 
     const safeDisplay = evt.display_name?.trim() || evt.username?.trim() || "Onbekend";
@@ -192,6 +211,7 @@ export async function initEventRouter() {
   // 9) TICKER
   // ==========================================================================
   socket.on("hudTickerUpdate", (text) => {
+    console.log("[DEBUG] ticker received:", text);
     tickerStore.setText(text || "");
   });
 
