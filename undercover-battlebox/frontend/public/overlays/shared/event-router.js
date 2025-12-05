@@ -1,19 +1,15 @@
 // ============================================================================
-// event-router.js — BattleBox Event Brain v1.8 FINAL + ARENA EXTENSIONS
+// event-router.js — BattleBox Event Brain v2.0 (TIMER-STABLE + SNAPSHOT-SAFE)
 // ============================================================================
 //
-// ✔ NO double listeners
-// ✔ NO fade-out
-// ✔ NO loading old logs
-// ✔ Strict queueEvent filtering
-// ✔ Correct display_name/username fallback
+// ✔ NO duplicate listeners
+// ✔ Clean queue event handling
+// ✔ Arena snapshot loads new timer model (totalMs + endsAt)
+// ✔ Round:start, round:grace, round:end fully patched
+// ✔ Twist takeover stable
+// ✔ Uses new avatar_url consistently (fallbacks intact)
+// ✔ Fully backward-compatible with older engines
 //
-// ★ ADDITIONS:
-//   + updateArena listener
-//   + round lifecycle listeners  (PATCHED FOR TIMER)
-//   + twist overlay listeners
-//   + DOM event dispatch for arena.js animations
-//   + load arena snapshot into arenaStore
 // ============================================================================
 
 import { getSocket } from "/overlays/shared/socket.js";
@@ -25,7 +21,6 @@ import {
   applySnapshot
 } from "/overlays/shared/stores.js";
 
-// ★ NEW — arena stores
 import {
   arenaStore,
   arenaTwistStore
@@ -38,7 +33,7 @@ const QUEUE_EVENTS = new Set(["join", "leave", "promote", "demote"]);
 let routerStarted = false;
 
 // ============================================================================
-// MAIN ROUTER
+// INITIALIZER
 // ============================================================================
 export async function initEventRouter() {
   if (routerStarted) return;
@@ -47,45 +42,56 @@ export async function initEventRouter() {
   const socket = await getSocket();
 
   console.log(
-    "%c[BattleBox] Event Router Ready (ARENA EXTENDED)",
+    "%c[BattleBox] Event Router Ready (TIMER-STABLE ARENA VERSION)",
     "color:#0fffd7;font-weight:bold;"
   );
 
-  // -------------------------------------------------
-  // INITIAL SNAPSHOT — includes arena
-  // -------------------------------------------------
+  // ==========================================================================
+  // 1) INITIAL SNAPSHOT
+  // ==========================================================================
   socket.on("overlayInitialSnapshot", (snap) => {
     applySnapshot(snap);
 
+    // NEW: arena snapshot supports new timer model
     if (snap.arena) {
-      arenaStore.set(snap.arena);
+      arenaStore.set({
+        ...snap.arena,
+        // ensure missing timer keys don't break overlay
+        totalMs: snap.arena.totalMs ?? 0,
+        endsAt: snap.arena.endsAt ?? 0,
+      });
     }
   });
 
-  // -------------------------------------------------
-  // ARENA — realtime update
-  // -------------------------------------------------
+  // ==========================================================================
+  // 2) LIVE ARENA UPDATES
+  // ==========================================================================
   socket.on("updateArena", (arena) => {
     if (!arena) return;
 
-    arenaStore.set(arena);
+    arenaStore.set({
+      ...arena,
+      totalMs: arena.totalMs ?? 0,
+      endsAt: arena.endsAt ?? 0,
+    });
 
     document.dispatchEvent(
       new CustomEvent("arena:update", { detail: arena })
     );
   });
 
-  // -------------------------------------------------
-  // ROUND START — TIMER PATCH (totalMs + endsAt)
-  // -------------------------------------------------
+  // ==========================================================================
+  // 3) ROUND START — NEW TIMER MODEL
+  // ==========================================================================
   socket.on("round:start", (payload) => {
-    const total = payload.duration * 1000;
+    // duration is ALWAYS in seconds from backend
+    const total = (payload.duration ?? 0) * 1000;
     const endsAt = Date.now() + total;
 
     arenaStore.set({
       status: "active",
       round: payload.round,
-      type: payload.type,
+      type: payload.type || "quarter",
       totalMs: total,
       endsAt,
     });
@@ -99,17 +105,17 @@ export async function initEventRouter() {
     );
   });
 
-  // -------------------------------------------------
-  // GRACE START — TIMER PATCH (totalMs + endsAt)
-  // -------------------------------------------------
+  // ==========================================================================
+  // 4) GRACE START — NEW TIMER MODEL
+  // ==========================================================================
   socket.on("round:grace", (payload) => {
-    const total = payload.grace * 1000;
+    const total = (payload.grace ?? 5) * 1000;
     const endsAt = Date.now() + total;
 
     arenaStore.set({
       status: "grace",
       round: payload.round,
-      type: "quarter",
+      type: payload.type || "quarter",
       totalMs: total,
       endsAt,
     });
@@ -123,9 +129,9 @@ export async function initEventRouter() {
     );
   });
 
-  // -------------------------------------------------
-  // ROUND END — NEW CLEAN ENDING MODEL
-  // -------------------------------------------------
+  // ==========================================================================
+  // 5) ROUND END — CLEAN RESET
+  // ==========================================================================
   socket.on("round:end", (payload) => {
     arenaStore.set({
       status: "ended",
@@ -142,9 +148,9 @@ export async function initEventRouter() {
     );
   });
 
-  // -------------------------------------------------
-  // TWIST TAKEOVER
-  // -------------------------------------------------
+  // ==========================================================================
+  // 6) TWIST TAKEOVER + CLEAR
+  // ==========================================================================
   socket.on("twist:takeover", (p) => {
     arenaTwistStore.activate(p);
 
@@ -161,34 +167,29 @@ export async function initEventRouter() {
     );
   });
 
-  // -------------------------------------------------
-  // LIVE QUEUE UPDATES
-  // -------------------------------------------------
+  // ==========================================================================
+  // 7) LIVE QUEUE UPDATE
+  // ==========================================================================
   socket.on("updateQueue", (packet) => {
     if (!packet || !Array.isArray(packet.entries)) return;
     queueStore.setQueue(packet.entries);
   });
 
-  // -------------------------------------------------
-  // REALTIME QUEUE EVENTS (join/leave/promote/demote)
-  // -------------------------------------------------
+  // ==========================================================================
+  // 8) QUEUE EVENTS (join/leave/promote/demote)
+  // ==========================================================================
   socket.on("queueEvent", (evt) => {
     if (!evt || !evt.type) return;
     if (!QUEUE_EVENTS.has(evt.type)) return;
 
     const safeDisplay =
-      evt.display_name && evt.display_name.trim().length > 0
-        ? evt.display_name
-        : evt.username && evt.username.trim().length > 0
-        ? evt.username
-        : "Onbekend";
+      evt.display_name?.trim() ||
+      evt.username?.trim() ||
+      "Onbekend";
 
     const safeUsername =
-      evt.username && evt.username.trim().length > 0
-        ? evt.username
-        : evt.display_name
-        ? evt.display_name.toLowerCase().replace(/\s+/g, "")
-        : "";
+      evt.username?.trim() ||
+      safeDisplay.toLowerCase().replace(/\s+/g, "");
 
     const mapped = {
       type: evt.type,
@@ -198,7 +199,7 @@ export async function initEventRouter() {
       is_vip: !!evt.is_vip,
       avatar_url: evt.avatar_url || EMPTY_AVATAR,
       reason:
-        evt.reason ||
+        evt.reason ??
         (evt.type === "join"
           ? "stapt de wachtrij binnen."
           : evt.type === "leave"
@@ -210,30 +211,32 @@ export async function initEventRouter() {
 
     eventStore.pushEvent(mapped);
 
+    // highlight behavior
     if (mapped.username) {
       queueStore.highlightCard(mapped.username);
       setTimeout(() => queueStore.clearHighlight(), 900);
     }
   });
 
-  // -------------------------------------------------
-  // TICKER UPDATE
-  // -------------------------------------------------
+  // ==========================================================================
+  // 9) TICKER UPDATE
+  // ==========================================================================
   socket.on("hudTickerUpdate", (text) => {
     tickerStore.setText(text || "");
   });
 
-  // -------------------------------------------------
-  // DEBUG HELPERS
-  // -------------------------------------------------
-  window.bb = window.bb || {};
-  window.bb.socket = socket;
-  window.bb.eventStore = eventStore;
-  window.bb.arenaStore = arenaStore;
-  window.bb.twistStore = twistStore;
+  // ==========================================================================
+  // 10) DEBUG BRIDGE
+  // ==========================================================================
+  window.bb = {
+    socket,
+    eventStore,
+    arenaStore,
+    twistStore,
+  };
 
   console.log(
-    "%c[BB DEBUG] Debug bridge active → window.bb (ARENA ENABLED)",
+    "%c[BB DEBUG] Debug bridge active → window.bb",
     "color:#0fffd7"
   );
 }
