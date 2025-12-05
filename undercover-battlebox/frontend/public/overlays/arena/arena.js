@@ -17,7 +17,7 @@ import {
   setArenaSnapshot,
   updatePlayers,
   renderHudProgress
-} from "/overlays/shared/arenaStore.js";
+} from "/overlays/shared/arena-store.js";
 
 import {
   playTwistAnimation,
