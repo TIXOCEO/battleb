@@ -17,7 +17,7 @@
 }
 
 /* ========================================================================== */
-/* TWIST TAKEOVER                                                             */
+/* TWIST TAKEOVER (fullscreen)                                                 */
 /* ========================================================================== */
 .bb-twist-takeover {
   position: absolute;
@@ -28,17 +28,29 @@
   justify-content: center;
   align-items: center;
   backdrop-filter: blur(12px);
-  transition: opacity 0.25s ease-out;
   opacity: 0;
   pointer-events: none;
+  transition: opacity 0.3s ease-out;
 }
+
 .bb-twist-takeover.show {
   opacity: 1;
   pointer-events: all;
-  animation: bb-twist-flash 0.5s ease-out,
+  animation: bb-twist-flash 0.55s ease-out,
              bb-crt-pulse 2s infinite ease-in-out;
 }
-.hidden { display:none; }
+
+@keyframes bb-twist-flash {
+  0%   { opacity: 0;   filter: brightness(0.2); }
+  50%  { opacity: 1;   filter: brightness(3); }
+  100% { opacity: 1;   filter: brightness(1.2); }
+}
+
+@keyframes bb-crt-pulse {
+  0%   { opacity: 1; }
+  50%  { opacity: 0.85; }
+  100% { opacity: 1; }
+}
 
 /* ========================================================================== */
 /* HUD — CENTER OCTAGON                                                       */
@@ -76,21 +88,17 @@
   align-items: center;
 }
 
-/* ------------------------------------------------------ */
-/* HUD TEXTS                                              */
-/* ------------------------------------------------------ */
+/* HUD TEXT */
 .hud-round-text {
   font-size: 38px;
   font-weight: 800;
   color: var(--bb-orange);
   text-shadow: var(--glow-hard-orange);
-  margin-bottom: 4px;
 }
 
 .hud-type-text {
   font-size: 26px;
   opacity: 0.85;
-  margin-bottom: 12px;
 }
 
 .hud-timer {
@@ -101,368 +109,285 @@
   transition: transform 0.2s ease-out;
 }
 
-/* ======================================================= */
-/* HUD SHOCKWAVE — ROUND START                             */
-/* ======================================================= */
-.bb-hud-start {
-  animation: bb-hud-shockwave 0.6s cubic-bezier(0.2, 0.9, 0.3, 1);
-}
-
+/* HUD ROUND START SHOCKWAVE */
 @keyframes bb-hud-shockwave {
-  0% { opacity: 0.7; transform: scale(0.85); filter: blur(4px); }
-  60% { opacity: 1; transform: scale(1.08); filter: blur(0); }
-  100% { opacity: 1; transform: scale(1); }
+  0%   { opacity: .6; transform: scale(.78); filter: blur(4px); }
+  60%  { opacity: 1;  transform: scale(1.1); filter: blur(0);   }
+  100% { opacity: 1;  transform: scale(1);   }
 }
 
-/* ======================================================= */
-/* HUD TIMER TICK                                          */
-/* ======================================================= */
+.bb-hud-start {
+  animation: bb-hud-shockwave 0.6s cubic-bezier(.2,.9,.3,1);
+}
+
+/* HUD TIMER TICK ANIMATION */
+@keyframes bb-timer-tick {
+  0%   { color:white; }
+  50%  { color:var(--bb-orange); text-shadow:0 0 12px var(--bb-orange); }
+  100% { color:white; }
+}
+
 .bb-timer-tick {
   animation: bb-timer-tick 0.4s ease-out;
 }
 
-@keyframes bb-timer-tick {
-  0% { color: white; }
-  50% {
-    color: var(--bb-orange);
-    text-shadow: 0 0 12px var(--bb-orange);
-  }
-  100% { color: white; }
-}
-
 /* ========================================================================== */
-/* HUD PROGRESS RING (clockwise)                                              */
+/* HUD PROGRESS RING                                                          */
 /* ========================================================================== */
-.hud-ring {
-  position: absolute;
-  top: 0;
-  left: 0;
-}
-
-.hud-ring-bg {
-  fill: none;
-  stroke: rgba(255,255,255,0.12);
-}
+.hud-ring { position:absolute; top:0; left:0; }
+.hud-ring-bg { fill:none; stroke:rgba(255,255,255,0.12); }
 
 .hud-ring-progress {
-  fill: none;
-  stroke: var(--bb-orange);
-  stroke-linecap: round;
-  transform-origin: 50% 50%;
-  transform: rotate(-90deg);
-  transition: stroke-dashoffset 0.2s linear;
-  filter: drop-shadow(0 0 6px rgba(255,77,79,0.9));
+  fill:none;
+  stroke:var(--bb-orange);
+  stroke-linecap:round;
+  transform-origin:50% 50%;
+  transform:rotate(-90deg);
+  transition: stroke-dashoffset .2s linear;
+  filter:drop-shadow(0 0 6px rgba(255,77,79,0.9));
 }
 
 /* ========================================================================== */
-/* PLAYER CARDS — 8 octagons around the center                                */
+/* PLAYER CARDS                                                               */
 /* ========================================================================== */
 #arena-players {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
+  position:absolute;
+  inset:0;
+  pointer-events:none;
 }
 
-/* BASE CARD */
 .bb-player-card {
-  width: 160px;
-  height: 160px;
-  position: absolute;
-  clip-path: polygon(
+  width:160px;
+  height:160px;
+  position:absolute;
+  clip-path:polygon(
     12% 0%, 88% 0%,
     100% 18%, 100% 82%,
     88% 100%, 12% 100%,
     0% 82%, 0% 18%
   );
-  background: rgba(12,12,18,0.72);
-  border: 2px solid rgba(255,255,255,0.12);
+  background:rgba(12,12,18,0.72);
+  border:2px solid rgba(255,255,255,0.12);
   box-shadow:
     0 0 20px rgba(0,0,0,0.65),
     inset 0 0 22px rgba(0,0,0,0.65),
     inset 0 0 14px rgba(255,77,79,0.18);
-  overflow: hidden;
+  overflow:hidden;
+  display:flex;
+  justify-content:center;
+  align-items:flex-end;
+  padding-bottom:12px;
 
-  display: flex;
-  justify-content: center;
-  align-items: flex-end;
-
-  padding-bottom: 12px;
-
-  /* Smooth transitions */
   transition:
-    left 0.35s cubic-bezier(0.2, 0.7, 0.3, 1),
-    top 0.35s cubic-bezier(0.2, 0.7, 0.3, 1),
-    transform 0.35s cubic-bezier(0.2, 0.7, 0.3, 1),
-    border-color 0.25s ease-out,
-    box-shadow 0.25s ease-out;
+    left .35s cubic-bezier(.2,.7,.3,1),
+    top .35s cubic-bezier(.2,.7,.3,1),
+    transform .35s cubic-bezier(.2,.7,.3,1),
+    border-color .25s ease-out,
+    box-shadow .25s ease-out;
 }
 
-/* BACKGROUND AVATAR (low opacity) */
+/* BACKGROUND AVATAR */
 .bb-player-bgavatar {
-  position: absolute;
-  inset: 0;
-  background-size: cover;
-  background-position: center;
-  opacity: 0.18;
-  filter: blur(1px);
+  position:absolute;
+  inset:0;
+  background-size:cover;
+  background-position:center;
+  opacity:.18;
+  filter:blur(1px);
 }
 
-/* FOREGROUND TEXT */
+/* LABELS */
 .bb-player-labels {
-  position: relative;
-  z-index: 2;
-  text-align: center;
+  position:relative;
+  z-index:2;
+  text-align:center;
 }
 
 .bb-player-name {
-  font-size: 18px;
-  font-weight: 800;
-  color: white;
-  margin-bottom: 4px;
-  text-shadow: 0 0 8px black;
-  max-width: 140px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  font-size:18px;
+  font-weight:800;
+  color:white;
+  margin-bottom:4px;
+  text-shadow:0 0 8px black;
+  max-width:140px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 
 .bb-player-score {
-  font-size: 16px;
-  opacity: 0.85;
-  transition: transform 0.25s ease-out, color 0.25s;
+  font-size:16px;
+  opacity:.85;
+  transition:transform .25s, color .25s;
 }
 
 /* POSITION BADGE */
 .bb-player-pos {
-  position: absolute;
-  top: 4px;
-  left: 4px;
-  width: 32px;
-  height: 32px;
-  font-size: 18px;
-  font-weight: 900;
-  line-height: 32px;
-  text-align: center;
-  background: var(--bb-orange);
-  color: black;
-  clip-path: polygon(
+  position:absolute;
+  top:4px; left:4px;
+  width:32px; height:32px;
+  line-height:32px;
+  font-size:18px;
+  font-weight:900;
+  background:var(--bb-orange);
+  color:black;
+  clip-path:polygon(
     25% 0%, 75% 0%,
     100% 50%, 75% 100%,
     25% 100%, 0% 50%
   );
-  text-shadow: var(--glow-soft-orange);
-  z-index: 5;
+  text-shadow:var(--glow-soft-orange);
+  z-index:4;
 }
 
 /* ========================================================================== */
-/* STATUS COLORS & EFFECTS — improved consistency                              */
+/* STATUS EFFECTS                                                             */
 /* ========================================================================== */
 
-/* RESET helpers used in JS */
-.status-alive,
-.status-danger,
-.status-immune,
-.status-immune-broken,
-.status-elimination {}
-
-/* ACTIVE (WHITE) */
+/* ALIVE */
 .status-alive {
-  border-color: rgba(255,255,255,0.75);
+  border-color:rgba(255,255,255,0.75);
   box-shadow:
     0 0 18px rgba(255,255,255,0.35),
     inset 0 0 18px rgba(255,255,255,0.22);
 }
 
-/* IMMUNE (GREEN) – pulsing glow */
+/* IMMUNE */
 .status-immune {
-  border-color: #00ff99;
-  box-shadow:
-    0 0 22px rgba(0,255,145,0.9),
-    inset 0 0 22px rgba(0,255,145,0.5);
-  animation: bb-immune-glow 1.3s infinite ease-in-out;
+  border-color:#00ff99;
+  box-shadow:0 0 22px rgba(0,255,145,1),
+             inset 0 0 22px rgba(0,255,145,.55);
+  animation:bb-immune-glow 1.3s infinite ease-in-out;
 }
-
 @keyframes bb-immune-glow {
-  0% { box-shadow: 0 0 12px rgba(0,255,150,0.7); }
-  50% { box-shadow: 0 0 28px rgba(0,255,170,1); }
-  100% { box-shadow: 0 0 12px rgba(0,255,150,0.7); }
+  0% { box-shadow:0 0 12px rgba(0,255,150,.7); }
+  50%{ box-shadow:0 0 28px rgba(0,255,170,1); }
+  100%{ box-shadow:0 0 12px rgba(0,255,150,.7); }
 }
 
-/* IMMUNE-BROKEN — white flash alternating */
+/* IMMUNE BROKEN */
 .status-immune-broken {
-  animation: bb-immune-broken 0.7s infinite ease-in-out;
+  animation:bb-immune-broken .7s infinite;
 }
-
 @keyframes bb-immune-broken {
-  0%   { box-shadow: 0 0 14px white; border-color: white; }
-  100% { box-shadow: 0 0 24px white; border-color: white; }
+  0% { border-color:white; box-shadow:0 0 12px white; }
+  100%{ border-color:white; box-shadow:0 0 26px white; }
 }
 
-/* DANGER (ORANGE) — heartbeat pulse */
+/* DANGER */
 .status-danger {
-  border-color: #ff8800;
+  border-color:#ff8800;
   box-shadow:
     0 0 26px rgba(255,136,0,1),
-    inset 0 0 26px rgba(255,136,0,0.55);
-  animation: bb-danger-pulse 1.2s infinite ease-in-out;
+    inset 0 0 26px rgba(255,136,0,.55);
+  animation:bb-danger-pulse 1.2s infinite;
 }
 
 @keyframes bb-danger-pulse {
-  0%   { box-shadow: 0 0 16px rgba(255,140,40,0.7); }
-  50%  { box-shadow: 0 0 30px rgba(255,160,40,1); }
-  100% { box-shadow: 0 0 16px rgba(255,140,40,0.7); }
+  0% { box-shadow:0 0 14px rgba(255,140,40,.7); }
+  50%{ box-shadow:0 0 30px rgba(255,160,40,1); }
+  100%{ box-shadow:0 0 14px rgba(255,140,40,.7); }
 }
 
-/* ELIMINATION (RED) — explosion collapse */
+/* ELIMINATION */
 .status-elimination {
-  border-color: #ff0033;
+  border-color:#ff0033;
   box-shadow:
-    0 0 32px rgba(255,0,51,0.9),
-    inset 0 0 32px rgba(255,0,51,0.55);
-  animation: bb-elim-explode 0.55s forwards cubic-bezier(0.4, 0, 0.2, 1);
+    0 0 32px rgba(255,0,51,.9),
+    inset 0 0 32px rgba(255,0,51,.55);
+  animation:bb-elim-explode .55s forwards;
 }
-
 @keyframes bb-elim-explode {
-  0%   { transform: scale(1); filter: brightness(1); opacity: 1; }
-  30%  { transform: scale(1.25); filter: brightness(2); opacity: 1; }
-  100% { transform: scale(0.35); filter: brightness(0.6); opacity: 0.2; }
+  0% { transform:scale(1); opacity:1; }
+  30%{ transform:scale(1.25); opacity:1; filter:brightness(2); }
+  100%{ transform:scale(.35); opacity:.2; filter:brightness(.6); }
 }
 
-/* ========================================================================== */
-/* PLAYER JOIN ANIMATION                                                      */
-/* ========================================================================== */
+/* JOIN ANIMATION */
 .bb-player-card.join-anim {
-  animation: bb-join-pop 0.45s cubic-bezier(0.25, 1.15, 0.3, 1.1);
+  animation:bb-join-pop .45s cubic-bezier(.25,1.15,.3,1.1);
 }
-
 @keyframes bb-join-pop {
-  0%   { transform: scale(0) rotate(var(--rot)); opacity: 0; }
-  60%  { transform: scale(1.2) rotate(var(--rot)); opacity: 1; }
-  100% { transform: scale(1)   rotate(var(--rot)); }
+  0%{ transform:scale(0) rotate(var(--rot)); opacity:0; }
+  60%{ transform:scale(1.25) rotate(var(--rot)); opacity:1; }
+  100%{ transform:scale(1) rotate(var(--rot)); }
 }
 
-/* ========================================================================== */
-/* SCORE FLASH (gift received)                                                */
-/* ========================================================================== */
+/* SCORE FLASH */
 .bb-score-anim {
-  animation: bb-score-flash 0.35s ease-out;
+  animation:bb-score-flash .35s ease-out;
 }
-
 @keyframes bb-score-flash {
-  0%   { color: white; transform: scale(1); }
-  50%  { color: gold;  transform: scale(1.32); }
-  100% { color: white; transform: scale(1); }
+  0%{ color:white; transform:scale(1); }
+  50%{ color:gold;  transform:scale(1.32); }
+  100%{ color:white; transform:scale(1); }
 }
 
 /* ========================================================================== */
-/* PLAYER POSITIONS — radiaal rond de HUD                                      */
+/* GALAXY TWIST ANIMATIONS (vortex, rings, flares, stars)                     */
 /* ========================================================================== */
 
-:root {
-  --cx: 600px;       /* center X van 1200px */
-  --cy: 400px;       /* center Y van 800px */
-  --radius: 300px;   /* afstand van het centrum */
+.twist-anim.galaxy-vortex {
+  position:absolute;
+  inset:0;
+  overflow:hidden;
 }
 
-/*
-  Let op:
-  - Rotatie wordt in JS toegepast (CSS calc combineert niet met rotate)
-  - Daarom alleen translate hier
-*/
-
-.bb-p1 { transform: translate(calc(var(--cx) + var(--radius) * 0.7071 - 80px), calc(var(--cy) - var(--radius) * 0.7071 - 80px)); }
-.bb-p2 { transform: translate(calc(var(--cx) + var(--radius) - 80px),       calc(var(--cy) - 80px)); }
-.bb-p3 { transform: translate(calc(var(--cx) + var(--radius) * 0.7071 - 80px), calc(var(--cy) + var(--radius) * 0.7071 - 80px)); }
-.bb-p4 { transform: translate(calc(var(--cx) - 80px),                         calc(var(--cy) + var(--radius) - 80px)); }
-.bb-p5 { transform: translate(calc(var(--cx) - var(--radius) * 0.7071 - 80px), calc(var(--cy) + var(--radius) * 0.7071 - 80px)); }
-.bb-p6 { transform: translate(calc(var(--cx) - var(--radius) - 80px),         calc(var(--cy) - 80px)); }
-.bb-p7 { transform: translate(calc(var(--cx) - var(--radius) * 0.7071 - 80px), calc(var(--cy) - var(--radius) * 0.7071 - 80px)); }
-.bb-p8 { transform: translate(calc(var(--cx) - 80px),                         calc(var(--cy) - var(--radius) - 80px)); }
-
-/* ========================================================================== */
-/* HUD — ROUND START SHOCKWAVE                                                */
-/* ========================================================================== */
-@keyframes bb-hud-shockwave {
-  0%   { opacity: 0.6; transform: scale(0.8); filter: blur(4px); }
-  60%  { opacity: 1;   transform: scale(1.1); filter: blur(0); }
-  100% { opacity: 1;   transform: scale(1);   }
+/* starfield */
+.galaxy-stars {
+  position:absolute;
+  inset:0;
+  background: radial-gradient(circle at 50% 50%, rgba(255,255,255,.35), transparent 70%);
+  opacity:.25;
+  animation: galaxy-stars-float 6s linear infinite;
 }
 
-.bb-hud-start {
-  animation: bb-hud-shockwave 0.6s cubic-bezier(0.2, 0.9, 0.3, 1);
+@keyframes galaxy-stars-float {
+  0%{ transform: translate(0,0); }
+  100%{ transform: translate(-4%, -2%); }
 }
 
-/* ========================================================================== */
-/* HUD TIMER TICK (elke seconde)                                              */
-/* ========================================================================== */
-@keyframes bb-timer-tick {
-  0%   { color: white; }
-  50%  { color: var(--bb-orange); text-shadow: 0 0 12px var(--bb-orange); }
-  100% { color: white; }
+/* main vortex ring */
+.galaxy-ring,
+.galaxy-ring2 {
+  position:absolute;
+  top:50%;
+  left:50%;
+  width:600px;
+  height:600px;
+  transform: translate(-50%, -50%);
+  border:4px solid rgba(255,255,255,0.15);
+  border-radius:50%;
+  animation: galaxy-spin 2.5s linear infinite;
 }
 
-.bb-timer-tick {
-  animation: bb-timer-tick 0.4s ease-out;
+.galaxy-ring2 {
+  width:750px;
+  height:750px;
+  opacity:.12;
+  animation-duration:4.5s;
 }
 
-/* ========================================================================== */
-/* TWIST TAKEOVER — full-screen neon flash                                     */
-/* ========================================================================== */
-
-.bb-twist-takeover {
-  position: absolute;
-  inset: 0;
-  z-index: 50;
-  background: rgba(15,15,20,0.92);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-
-  backdrop-filter: blur(12px);
-
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.3s ease-out;
+@keyframes galaxy-spin {
+  from { transform:translate(-50%, -50%) rotate(0deg); }
+  to   { transform:translate(-50%, -50%) rotate(360deg); }
 }
 
-.bb-twist-takeover.show {
-  opacity: 1;
-  pointer-events: all;
-  animation: bb-twist-flash 0.55s ease-out;
+.galaxy-flare {
+  position:absolute;
+  top:50%; left:50%;
+  width:320px; height:320px;
+  transform:translate(-50%,-50%);
+  background:radial-gradient(circle, rgba(255,77,200,0.4), transparent 70%);
+  animation: galaxy-flare-pulse 2s ease-in-out infinite;
 }
 
-@keyframes bb-twist-flash {
-  0%   { opacity: 0;   filter: brightness(0.3); }
-  50%  { opacity: 1;   filter: brightness(3); }
-  100% { opacity: 1;   filter: brightness(1.2); }
-}
-
-/* Continuous CRT pulse while active */
-@keyframes bb-crt-pulse {
-  0%   { opacity: 1; }
-  50%  { opacity: 0.87; }
-  100% { opacity: 1; }
-}
-
-.bb-twist-takeover.show {
-  animation: bb-twist-flash 0.55s ease-out, bb-crt-pulse 2s infinite ease-in-out;
+@keyframes galaxy-flare-pulse {
+  0%  { opacity:.3; transform:translate(-50%,-50%) scale(0.85); }
+  50% { opacity:.7; transform:translate(-50%,-50%) scale(1.1); }
+  100%{ opacity:.3; transform:translate(-50%,-50%) scale(0.85); }
 }
 
 /* ========================================================================== */
-/* SMOOTH TRANSITIONS FOR CARD POSITIONING                                     */
+/* END OF FILE                                                                 */
 /* ========================================================================== */
-.bb-player-card {
-  transition:
-    left 0.35s cubic-bezier(0.2, 0.7, 0.3, 1),
-    top 0.35s cubic-bezier(0.2, 0.7, 0.3, 1),
-    transform 0.35s cubic-bezier(0.2, 0.7, 0.3, 1),
-    border-color 0.25s ease-out,
-    box-shadow 0.25s ease-out;
-}
-
-/* ========================================================================== */
-/* OPTIONAL: card hover (disabled in OBS but useful for debugging)            */
-/* ========================================================================== */
-.bb-player-card:hover {
-  filter: brightness(1.15);
-}
