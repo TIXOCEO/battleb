@@ -1,21 +1,22 @@
 // ============================================================================
-// arenaStore.js — BattleBox Arena Overlay Store (HUD-COMPAT v6.2 FINAL)
+// arenaStore.js — BattleBox Arena Overlay Store (HUD-COMPAT v6.3 FINAL)
 // ============================================================================
 //
-// Upgrades in deze versie:
+// Upgrades in v6.3:
 // ---------------------------------------
-// ✔ FIX #1 — snapshot verwerkt nu round/type uit HUD-model
-// ✔ FIX #2 — remainingMs wordt actief ondersteund in HUD
-// ✔ FIX #3 — twistStore verwerkt title + fallback correct
-// ✔ FIX #4 — renderHudProgress gebruikt nieuwe HUD-model + fallback
-// ✔ Backwards compatible met oude roundCutoff/graceEnd
+// ✔ Twist QUEUE toegevoegd (geen verloren animaties meer)
+// ✔ HUD-normalizer voor alle updateArena payloads
+// ✔ Fallbacks versterkt voor oude engines (<16.7)
+// ✔ remainingMs + endsAt altijd correct gesynchroniseerd
+// ✔ Snapshot verwerkt round/type/status consistenter
+// ✔ title-fallback in twistStore (garanteert animatiestart)
 //
 // ============================================================================
 
 import { createStore } from "/overlays/shared/stores.js";
 
 // ============================================================================
-// ARENA STATE (nieuw HUD-model)
+// ARENA STATE (HUD-MODEL v2)
 // ============================================================================
 export const arenaStore = createStore({
   round: 0,
@@ -24,7 +25,7 @@ export const arenaStore = createStore({
 
   players: [],
 
-  // NEW HUD MODEL
+  // HUD fields
   totalMs: 0,
   endsAt: 0,
   remainingMs: 0,
@@ -34,49 +35,58 @@ export const arenaStore = createStore({
     roundDurationFinal: 300,
   },
 
-  // OLD fallback fields (server < v16.7)
+  // legacy fallback
   roundCutoff: 0,
   graceEnd: 0,
 });
 
 // ============================================================================
-// SNAPSHOT — ondersteunt HUD en oude veldnamen
+// INTERNAL NORMALIZER — zorgt dat ALLE payloads dezelfde vorm krijgen
 // ============================================================================
-export function setArenaSnapshot(snap) {
-  if (!snap) return;
+function normalizeArenaPayload(snap) {
+  if (!snap) return {};
 
   const hud = snap.hud ?? snap;
+  const now = Date.now();
 
-  arenaStore.set({
-    // FIX #1 — round & type moeten uit zowel snap als hud komen
+  const totalMs = hud.totalMs ?? 0;
+  const remainingMs = hud.remainingMs ?? Math.max(0, (hud.endsAt ?? 0) - now);
+
+  return {
     round: snap.round ?? hud.round ?? 0,
     type: snap.type ?? hud.type ?? "quarter",
-    status: snap.status ?? "idle",
+    status: snap.status ?? hud.status ?? "idle",
 
     players: snap.players ?? [],
 
     settings: snap.settings || arenaStore.get().settings,
 
-    // NEW HUD fields
-    totalMs: hud.totalMs ?? 0,
-    endsAt: hud.endsAt ?? 0,
-    remainingMs: hud.remainingMs ?? 0,
+    totalMs,
+    endsAt: hud.endsAt ?? (now + totalMs),
+    remainingMs,
 
-    // fallback voor oude engine
     roundCutoff: snap.roundCutoff ?? 0,
     graceEnd: snap.graceEnd ?? 0,
-  });
+  };
 }
 
 // ============================================================================
-// ONLY PLAYERS CHANGE
+// SNAPSHOT LOADER
+// ============================================================================
+export function setArenaSnapshot(snap) {
+  const updated = normalizeArenaPayload(snap);
+  arenaStore.set(updated);
+}
+
+// ============================================================================
+// ONLY PLAYER ARRAY CHANGES
 // ============================================================================
 export function updatePlayers(players) {
   arenaStore.set({ players });
 }
 
 // ============================================================================
-// HUD RING — gebruikt nieuwe HUD-model + fallback
+// HUD PROGRESS RING (new HUD model + legacy fallback)
 // ============================================================================
 export function renderHudProgress(state, ringEl) {
   if (!ringEl) return;
@@ -87,27 +97,20 @@ export function renderHudProgress(state, ringEl) {
 
   const now = Date.now();
 
-  // -------------------------
-  // NEW HUD METHOD
-  // -------------------------
   let total = (state.totalMs || 0) / 1000;
   let remaining = (state.remainingMs || 0) / 1000;
 
-  // als remainingMs niet bestaat → bereken vanuit endsAt
+  // als remainingMs leeg is → bereken via endsAt
   if (!remaining || remaining <= 0) {
     remaining = Math.max(0, (state.endsAt - now) / 1000);
   }
 
-  // -------------------------
-  // FALLBACK VOOR OUDE ENGINES
-  // -------------------------
+  // fallback voor oude engine
   if (!total || total <= 0) {
     if (state.status === "active") {
       total = state.settings.roundDurationPre;
       remaining = Math.max(0, (state.roundCutoff - now) / 1000);
-    }
-
-    if (state.status === "grace") {
+    } else if (state.status === "grace") {
       total = 5;
       remaining = Math.max(0, (state.graceEnd - now) / 1000);
     }
@@ -118,16 +121,35 @@ export function renderHudProgress(state, ringEl) {
 }
 
 // ============================================================================
-// TWIST STORE — ondersteunt zowel payload als losse type-string
+// TWIST STORE — **NIEUW: TWIST QUEUE SYSTEM**
 // ============================================================================
+
 export const arenaTwistStore = createStore({
   active: false,
   type: null,
   title: "",
+  queue: [],     // <—— nieuw
 });
 
+// Helper: start next twist from queue
+function processNextTwist() {
+  const st = arenaTwistStore.get();
+
+  if (st.active) return;
+  if (st.queue.length === 0) return;
+
+  const next = st.queue.shift();
+
+  arenaTwistStore.set({
+    active: true,
+    type: next.type,
+    title: next.title,
+    queue: st.queue,
+  });
+}
+
+// ACTIVATE (queue-aware)
 arenaTwistStore.activate = (payload) => {
-  // FIX #3 — title fallback zodat animaties WEL starten
   const type =
     typeof payload === "string"
       ? payload
@@ -138,19 +160,40 @@ arenaTwistStore.activate = (payload) => {
       ? ""
       : payload?.title ?? "";
 
+  const current = arenaTwistStore.get();
+
+  // als er al een animatie actief is → queue
+  if (current.active) {
+    arenaTwistStore.set({
+      ...current,
+      queue: [...current.queue, { type, title }],
+    });
+    return;
+  }
+
+  // direct starten
   arenaTwistStore.set({
     active: true,
     type,
     title,
+    queue: current.queue,
   });
 };
 
+// CLEAR → active stoppen + volgende starten
 arenaTwistStore.clear = () => {
-  arenaTwistStore.set({ active: false, type: null, title: "" });
+  arenaTwistStore.set({
+    active: false,
+    type: null,
+    title: "",
+  });
+
+  // start volgende als die bestaat
+  setTimeout(processNextTwist, 50);
 };
 
 // ============================================================================
-// EXPORTS
+// EXPORT
 // ============================================================================
 export default {
   arenaStore,
