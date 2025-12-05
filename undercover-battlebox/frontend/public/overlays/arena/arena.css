@@ -616,6 +616,74 @@
   100% { transform: scale(1); opacity: .85; }
 }
 
+/* ========================================================================== */
+/* TWIST TARGET / VICTIM / SURVIVOR — NEW                                     */
+/* ========================================================================== */
+
+.bb-twist-target {
+  position: absolute;
+  inset: 0;
+  z-index: 325;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .15s ease-out;
+}
+
+.bb-twist-target.show {
+  opacity: 1;
+}
+
+/* TARGET FLASH (Moneygun / Heal / Immune) */
+.target-flash {
+  position: absolute;
+  width: 420px;
+  height: 420px;
+  border-radius: 50%;
+  border: 6px solid var(--bb-orange);
+  box-shadow: 0 0 45px var(--bb-orange);
+  animation: target-flash-anim .85s ease-out forwards;
+}
+
+@keyframes target-flash-anim {
+  0%   { transform: scale(.4); opacity: 1; }
+  50%  { transform: scale(1.15); opacity: .8; }
+  100% { transform: scale(1.45); opacity: 0; }
+}
+
+/* VICTIM BLAST — used by Bomb or Moneygun target */
+.victim-blast {
+  position: absolute;
+  width: 320px;
+  height: 320px;
+  border-radius: 50%;
+  background: radial-gradient(rgba(255,0,60,0.55), transparent 70%);
+  animation: victim-blast-anim .9s ease-out forwards;
+}
+
+@keyframes victim-blast-anim {
+  0%   { transform: scale(.5); opacity: 1; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+/* SURVIVOR GLOW — DiamondPistol */
+.survivor-glow {
+  position: absolute;
+  width: 420px;
+  height: 420px;
+  border-radius: 50%;
+  border: 6px solid #00ffaa;
+  box-shadow: 0 0 45px #00ffaa;
+  animation: survivor-glow-anim 1.2s ease-out forwards;
+}
+
+@keyframes survivor-glow-anim {
+  0%   { transform: scale(.5); opacity: 1; }
+  50%  { transform: scale(1.2); opacity: 1; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
 
 /* ========================================================================== */
 /* END arena.css                                                               */
