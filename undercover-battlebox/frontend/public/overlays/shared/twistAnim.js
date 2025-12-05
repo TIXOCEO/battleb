@@ -1,55 +1,144 @@
 // ============================================================================
-// twistAnim.js — BattleBox Arena Twist Animation Engine v1.5 QUEUE-SAFE FINAL
+// twistAnim.js — BattleBox Arena Twist Animation Engine v7.0 FINAL
 // ============================================================================
 //
-// Upgrades v1.5:
+// Upgrades v7.0:
 // ------------------------------------------------------------
-// ✔ Animaties starten ALTIJD opnieuw (forced reflow + reset)
-// ✔ CSS animations kunnen niet meer "hangen"
-// ✔ Safe clear() met no-break race protection
-// ✔ Fully compatible met arena.js v6.3 TwistQueue engine
-// ✔ Galaxy animatie correct zichtbaar en reset
+// ✔ Ondersteuning voor nieuwe payload (target/victims/survivor)
+// ✔ BOMB countdown 3 → 2 → 1 animatie
+// ✔ Nieuwe functie: playCountdown(root, step)
+// ✔ Nieuwe functies voor target/victim/survivor highlight
+// ✔ Volledig backward compatible met v1.5 gedrag
+// ✔ TwistQueue ready
 //
 // ============================================================================
 
-export function playTwistAnimation(root, type, title = "") {
+/**
+ * Speelt een volledige twist animatie.
+ * @param {HTMLElement} root 
+ * @param {string} type 
+ * @param {string} title 
+ * @param {object} payload - volledige twist payload (optioneel)
+ */
+export function playTwistAnimation(root, type, title = "", payload = {}) {
   if (!root) return;
 
-  // 1) CLEAR old content
   root.classList.remove("show");
   root.innerHTML = "";
 
-  // 2) Build new HTML (inject synchronously)
-  const html = buildTwistHTML(type, title);
+  const html = buildTwistHTML(type, title, payload);
   root.innerHTML = html;
 
-  // 3) Wait microtask so DOM settles
   queueMicrotask(() => {
-    // 4) Force reflow so animations can restart clean
     void root.offsetWidth;
-
-    // 5) Start animation
     root.classList.add("show");
   });
 }
 
+/**
+ * Cleart twist animatie.
+ */
 export function clearTwistAnimation(root) {
   if (!root) return;
 
-  // Prevent removal during active animation loops
   root.classList.remove("show");
 
-  // allow fade-out / animation-end to occur if defined in css
   setTimeout(() => {
     root.innerHTML = "";
-  }, 50);
+  }, 80);
 }
 
 // ============================================================================
-// HTML BUILDERS
+// COUNTDOWN ANIMATIE (3 → 2 → 1)
+// ============================================================================
+export function playCountdown(root, step = 3) {
+  if (!root) return;
+
+  root.classList.remove("show");
+  root.innerHTML = "";
+
+  const html = renderCountdownHTML(step);
+  root.innerHTML = html;
+
+  queueMicrotask(() => {
+    void root.offsetWidth;
+    root.classList.add("show");
+  });
+}
+
+function renderCountdownHTML(step) {
+  return `
+    <div class="twist-anim bomb-countdown">
+      <div class="count-number step-${step}">
+        ${step}
+      </div>
+    </div>
+  `;
+}
+
+// ============================================================================
+// TARGET / VICTIM / SURVIVOR ANIMATIONS (gebruikt in arena.js)
 // ============================================================================
 
-function buildTwistHTML(type, title) {
+export function playTargetAnimation(root, payload) {
+  if (!root || !payload?.targetName) return;
+
+  root.classList.remove("show");
+  root.innerHTML = `
+    <div class="twist-anim target-hit">
+      <div class="twist-title">${payload.targetName}</div>
+    </div>
+  `;
+
+  queueMicrotask(() => {
+    void root.offsetWidth;
+    root.classList.add("show");
+  });
+}
+
+export function playVictimAnimations(root, payload) {
+  if (!root || !payload?.victimNames?.length) return;
+
+  const html = payload.victimNames
+    .map(
+      (v) => `
+        <div class="twist-anim victim-blast">
+          <div class="victim-name">${v}</div>
+        </div>
+      `
+    )
+    .join("");
+
+  root.classList.remove("show");
+  root.innerHTML = html;
+
+  queueMicrotask(() => {
+    void root.offsetWidth;
+    root.classList.add("show");
+  });
+}
+
+export function playSurvivorAnimation(root, payload) {
+  if (!root || !payload?.survivorName) return;
+
+  root.classList.remove("show");
+  root.innerHTML = `
+    <div class="twist-anim survivor-shield">
+      <div class="survivor-name">${payload.survivorName}</div>
+    </div>
+  `;
+
+  queueMicrotask(() => {
+    void root.offsetWidth;
+    root.classList.add("show");
+  });
+}
+
+// ============================================================================
+// HTML BUILDERS — originele animaties blijven bestaan
+// ============================================================================
+
+function buildTwistHTML(type, title, payload = {}) {
   switch (type) {
     case "diamond":
       return diamondPistolHTML(title);
@@ -68,6 +157,9 @@ function buildTwistHTML(type, title) {
 
     case "galaxy":
       return galaxyHTML(title);
+
+    case "countdown":
+      return renderCountdownHTML(payload.step || 3);
 
     default:
       return genericHTML(title);
@@ -91,7 +183,7 @@ function diamondPistolHTML(title) {
 }
 
 /* ============================================================================
-   MONEY GUN — bill spray sideways
+   MONEY GUN
 ============================================================================ */
 function moneyGunHTML(title) {
   const bills = [...Array(32)]
@@ -107,7 +199,7 @@ function moneyGunHTML(title) {
 }
 
 /* ============================================================================
-   BOMB — red shockwave
+   BOMB SHOCKWAVE
 ============================================================================ */
 function bombHTML(title) {
   return `
@@ -132,7 +224,7 @@ function immuneHTML(title) {
 }
 
 /* ============================================================================
-   HEAL — cross pulse
+   HEAL
 ============================================================================ */
 function healHTML(title) {
   return `
@@ -144,7 +236,7 @@ function healHTML(title) {
 }
 
 /* ============================================================================
-   GALAXY — vortex + starfield (overlay only)
+   GALAXY
 ============================================================================ */
 function galaxyHTML(title) {
   return `
