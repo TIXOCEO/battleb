@@ -1,18 +1,15 @@
 // ============================================================================
-// event-router.js — BattleBox Event Brain v3.0 FINAL (HUD-COMPAT + TWIST QUEUE)
+// event-router.js — BattleBox Event Brain v4.0 FINAL
+// TARGET-ANIMATION PATCH + TWIST COUNTDOWN + FULL PAYLOAD
 // ============================================================================
 //
-// Upgrades in deze versie:
+// Nieuwe upgrades:
 // -----------------------------------------------------
-// ✔ Volledige HUD-normalization → altijd consistent
-// ✔ Nieuwe arenaStore v6.3 integratie
-// ✔ TwistQueue support → geen gemiste animaties meer
-// ✔ twist:takeover stuurt altijd normalized payload
-// ✔ twist:clear triggert queue-advance
-// ✔ Galaxy fix: backend stuurt "galaxy" maar frontend verwacht "galaxy"
-// ✔ updateArena gebruikt nu normalizer i.p.v. ruwe merge
-// ✔ Debug logging behouden
-//
+// ✔ twist:takeover stuurt volledige payload door
+// ✔ twist:countdown listener toegevoegd (bomb 3 → 2 → 1)
+// ✔ overlay krijgt nu targetIndex, victimIndices, survivorIndex
+// ✔ HUD remains normalized & stable
+// ✔ TwistQueue blijft perfect functioneren
 // ============================================================================
 
 import { getSocket } from "/overlays/shared/socket.js";
@@ -37,7 +34,7 @@ const QUEUE_EVENTS = new Set(["join", "leave", "promote", "demote"]);
 let routerStarted = false;
 
 // ============================================================================
-// INTERNAL NORMALIZER — maakt ALLE arena updates uniform
+// NORMALIZER — maakt ALLE arena updates uniform
 // ============================================================================
 function normalizeArena(pkt) {
   if (!pkt) return null;
@@ -72,7 +69,7 @@ export async function initEventRouter() {
   const socket = await getSocket();
 
   console.log(
-    "%c[BattleBox] Event Router Ready (v3.0 — TwistQueue + HUD Normalizer)",
+    "%c[BattleBox] Event Router Ready (v4.0 — Target Anim + Countdown)",
     "color:#0fffd7;font-weight:bold;"
   );
 
@@ -164,18 +161,33 @@ export async function initEventRouter() {
   });
 
   // ==========================================================================
-  // 6) TWISTS — **TWIST QUEUE SUPPORT**
+  // 6) TWISTS — TWISTQUEUE + FULL PAYLOAD + TARGET INDEXES
   // ==========================================================================
   socket.on("twist:takeover", (raw) => {
-    console.log("[DEBUG] twist:takeover received:", raw);
+    console.log("[DEBUG] twist:takeover received (raw):", raw);
 
-    // Normaliseer twist
+    // We sturen de volledige payload door → overlay kan targets highlighten
     const payload = {
       type: raw.type ?? raw.twist ?? raw.name ?? null,
       title: raw.title ?? "",
+
+      // Nieuw → target rich info:
+      targetId: raw.targetId ?? null,
+      targetName: raw.targetName ?? null,
+      targetIndex: raw.targetIndex ?? null,
+
+      victimIds: raw.victimIds ?? [],
+      victimNames: raw.victimNames ?? [],
+      victimIndices: raw.victimIndices ?? [],
+
+      survivorId: raw.survivorId ?? null,
+      survivorName: raw.survivorName ?? null,
+      survivorIndex: raw.survivorIndex ?? null,
+
+      reverse: raw.reverse ?? false
     };
 
-    // Push naar queue-based twistStore
+    // TwistQueue → overlay altijd in juiste volgorde
     arenaTwistStore.activate(payload);
 
     document.dispatchEvent(
@@ -186,10 +198,23 @@ export async function initEventRouter() {
   socket.on("twist:clear", () => {
     console.log("[DEBUG] twist:clear received");
 
-    // BELANGRIJK: hierdoor start queue.next()
     arenaTwistStore.clear();
 
     document.dispatchEvent(new CustomEvent("arena:twistClear"));
+  });
+
+  // ==========================================================================
+  // 6B) BOMB COUNTDOWN (3 → 2 → 1)
+  // ==========================================================================
+  socket.on("twist:countdown", (payload) => {
+    console.log("[DEBUG] twist:countdown", payload);
+
+    // Countdown doorgeven aan dedicated store
+    arenaTwistStore.countdown(payload);
+
+    document.dispatchEvent(
+      new CustomEvent("arena:twistCountdown", { detail: payload })
+    );
   });
 
   // ==========================================================================
@@ -202,18 +227,18 @@ export async function initEventRouter() {
   });
 
   // ==========================================================================
-  // 8) QUEUE EVENTS
+  // 8) QUEUE EVENTS VISUALS
   // ==========================================================================
   socket.on("queueEvent", (evt) => {
     console.log("[DEBUG] queueEvent:", evt);
-
     if (!evt || !QUEUE_EVENTS.has(evt.type)) return;
 
     const safeDisplay =
       evt.display_name?.trim() || evt.username?.trim() || "Onbekend";
 
     const safeUsername =
-      evt.username?.trim() || safeDisplay.toLowerCase().replace(/\s+/g, "");
+      evt.username?.trim() ||
+      safeDisplay.toLowerCase().replace(/\s+/g, "");
 
     eventStore.pushEvent({
       type: evt.type,
