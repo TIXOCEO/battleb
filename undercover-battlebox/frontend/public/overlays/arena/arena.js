@@ -41,7 +41,7 @@ const twistOverlay = document.getElementById("twist-takeover");
 const galaxyLayer = document.getElementById("twist-galaxy");
 
 /* ============================================================
-   POSITIONS — #1 at TOP
+   POSITIONS
 ============================================================ */
 const POSITIONS = [
   { idx: 1, x: 0.0,     y: -1.0 },
@@ -74,7 +74,7 @@ function animateOnce(el, className) {
   }, { once: true });
 }
 
-// Wait until twist animation is finished before clearing
+// Improved reliable animation wait
 function waitAnimationEnd(root) {
   return new Promise((resolve) => {
     const cleanup = () => {
@@ -82,7 +82,9 @@ function waitAnimationEnd(root) {
       resolve();
     };
     root.addEventListener("animationend", cleanup);
-    setTimeout(resolve, 1200); // fail-safe fallback
+
+    // safer fallback
+    setTimeout(resolve, 1500);
   });
 }
 
@@ -137,7 +139,11 @@ createPlayerCards();
 ============================================================ */
 arenaStore.subscribe((state) => {
   hudRound.textContent = `RONDE ${state.round}`;
-  hudType.textContent = state.type?.toUpperCase() ?? "KWARTFINALE";
+
+  hudType.textContent =
+    state.type === "finale"
+      ? "FINALE"
+      : "KWARTFINALE";
 
   const players = state.players || [];
 
@@ -157,7 +163,6 @@ arenaStore.subscribe((state) => {
 
     card.name.textContent = p.display_name ?? "Onbekend";
 
-    // Score animation
     const previous = lastScoreMap.get(p.id) ?? 0;
     if (p.score !== previous) {
       animateOnce(card.score, "bb-score-anim");
@@ -165,11 +170,9 @@ arenaStore.subscribe((state) => {
     }
     card.score.textContent = p.score ?? 0;
 
-    // Avatar
     const avatar = p.avatar_url || p.avatar || EMPTY_AVATAR;
     card.bg.style.backgroundImage = `url(${avatar})`;
 
-    // Join animation
     if (!lastCardOccupied[i]) {
       animateOnce(card.el, "bb-join-pop");
       lastCardOccupied[i] = true;
@@ -233,7 +236,6 @@ setInterval(() => {
   let totalMs = state.totalMs ?? 0;
   let remainingMs = state.remainingMs ?? (state.endsAt - now);
 
-  // Fallbacks
   if (!totalMs || totalMs <= 0) {
     if (state.status === "active") {
       totalMs = state.settings.roundDurationPre * 1000;
@@ -246,7 +248,6 @@ setInterval(() => {
 
   remainingMs = Math.max(0, remainingMs);
 
-  // Timer text
   const sec = Math.floor(remainingMs / 1000);
   const mm = String(Math.floor(sec / 60)).padStart(2, "0");
   const ss = String(sec % 60).padStart(2, "0");
@@ -258,22 +259,18 @@ setInterval(() => {
 /* ============================================================
    TWISTS — v6.3 (QUEUE SAFE)
 ============================================================ */
-
-// prevent double-clear during animation
 let animInProgress = false;
 
 arenaTwistStore.subscribe(async (state) => {
   if (state.active && state.type) {
     animInProgress = true;
 
-    // Galaxy background enable
     if (state.type === "galaxy") {
       galaxyLayer.classList.remove("hidden");
       galaxyLayer.classList.add("galaxy-active");
     }
 
     twistOverlay.classList.remove("hidden");
-
     playTwistAnimation(twistOverlay, state.type, state.title);
 
     await waitAnimationEnd(twistOverlay);
