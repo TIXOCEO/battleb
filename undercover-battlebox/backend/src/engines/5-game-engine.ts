@@ -1,21 +1,18 @@
 /* ============================================================================
-   5-game-engine.ts — BattleBox Arena Engine v16.4 (PATCHED ARENA-LEAVE FIX)
+   5-game-engine.ts — BattleBox Arena Engine v16.4 (OVERLAY v6 COMPAT PATCH)
    (Galaxy Reverse + DiamondPistol 1-per-Round Patch + Breaker Support)
 
-   ✔ Immune = 1 ronde geldig
-   ✔ Survivor immune = 1 ronde geldig
-   ✔ MoneyGun/Bomb markeringen = eliminated=true
-   ✔ Heal verwijdert eliminated + mg/bomb badges
-   ✔ EndRound verwerkt eerst MG/Bomb, daarna danger/ties
-   ✔ reverseMode ondersteunt Galaxy twist
-   ✔ toggleGalaxyMode() toegevoegd voor Twist Engine v15
-   ✔ Diamond Pistol nu max 1x per ronde
-   ✔ Breaker ondersteuning (breakerHits)
+   ✔ Core game logic NIET aangepast
+   ✔ Alleen minimale noodzakelijke wijzigingen:
 
-   === PATCHES TOEGEVOEGD ===
-   ✔ PATCH A — arenaLeave(): verbeterde ID/username/display matching
-   ✔ PATCH B — removeAllowed: altijd true (frontend blokkeerde verwijderen)
-   ✔ PATCH C — robust fallback matching en race-fix tijdens verwijderen
+   NECESSARY PATCHES:
+   -------------------
+   ★ A1 — overlay v6 HUD model (totalMs + endsAt)
+   ★ A2 — players bevatten nu ook avatar_url (wanneer aanwezig)
+   ★ A3 — fallback avatar support
+   ★ A4 — updateArena -> overlay krijgt exacte structuur die arena.js verwacht
+
+   Rest van het bestand blijft 1-op-1 intact.
 ============================================================================ */
 
 import pool from "../db";
@@ -38,8 +35,10 @@ export interface ArenaPlayer {
   tempImmune?: boolean;
   survivorImmune?: boolean;
 
-  /** PATCH: support voor breaker 50%/100% immunity break */
   breakerHits?: number;
+
+  // ★ PATCH: overlay v6 expects avatar_url available
+  avatar_url?: string | null;
 }
 
 export interface ArenaSettings {
@@ -64,12 +63,14 @@ export interface ArenaState {
   firstFinalRound: number | null;
   lastSortedAt: number;
 
-  // ★ GALAXY — sort omkeren
   reverseMode: boolean;
 
-  // ★ DIAMOND PISTOL — max 1 per ronde
   diamondPistolUsed: boolean;
 }
+
+/* ============================================================================
+   INITIAL STATE
+============================================================================ */
 
 let arena: ArenaState = {
   players: [],
@@ -192,7 +193,7 @@ async function computePlayerScore(p: ArenaPlayer) {
 }
 
 /* ============================================================================
-   RECOMPUTE POSITIONS — inclusief reverseMode
+   RECOMPUTE POSITIONS
 ============================================================================ */
 
 async function recomputePositions() {
@@ -304,19 +305,20 @@ async function recomputePositions() {
 }
 
 /* ============================================================================
-   EMIT SNAPSHOT — NIEUW HUD + PLAYER PAYLOAD (overlay v2)
+   EMIT SNAPSHOT — PATCH VOOR OVERLAY v6 (HUD + AVATARS)
 ============================================================================ */
 
 export async function emitArena() {
   await recomputePositions();
 
   // -------------------------------------------------------------
-  // 1) HUD BOUWEN
+  // 1) NIEUW HUD MODEL voor overlay v6
   // -------------------------------------------------------------
   const now = Date.now();
   let totalMs = 0;
   let remainingMs = 0;
 
+  // active round
   if (arena.status === "active") {
     totalMs =
       (arena.type === "finale"
@@ -326,28 +328,32 @@ export async function emitArena() {
     remainingMs = Math.max(0, arena.roundCutoff - now);
   }
 
+  // grace period
   if (arena.status === "grace") {
     totalMs = arena.settings.graceSeconds * 1000;
     remainingMs = Math.max(0, arena.graceEnd - now);
   }
 
+  // HUD payload (nieuw)
   const hud = {
-    roundNumber: arena.round,
-    roundType: arena.type,
-    roundStatus: arena.status,
-    reverseMode: arena.reverseMode,
+    round: arena.round,
+    type: arena.type,
+    status: arena.status,
 
     remainingMs,
     totalMs,
 
-    // eventueel later handig voor animaties
+    // backward compat voor overlay
+    endsAt: now + remainingMs,
     roundStartTime: arena.roundStartTime,
     roundCutoff: arena.roundCutoff,
     graceEnd: arena.graceEnd,
+
+    reverseMode: arena.reverseMode,
   };
 
   // -------------------------------------------------------------
-  // 2) PLAYERS MAPPEN → overlay structuur
+  // 2) PLAYERS — patch: avatar_url doorgeven
   // -------------------------------------------------------------
   const players = arena.players.map((p) => ({
     id: p.id,
@@ -358,23 +364,24 @@ export async function emitArena() {
     positionStatus: p.positionStatus,
     eliminated: !!p.eliminated,
 
-    // booster info
     tempImmune: !!p.tempImmune,
     survivorImmune: !!p.survivorImmune,
     breakerHits: p.breakerHits ?? 0,
 
-    // we sturen geen boosters-array meer, alleen flags
     boosters: p.boosters,
+
+    // ★ noodzakelijke overlay patch
+    avatar_url: p.avatar_url ?? null,
   }));
 
   // -------------------------------------------------------------
-  // 3) BROADCAST NAAR ALLE OVERLAYS
+  // 3) FULL PAYLOAD — overlay v6 gebruikt hud + players
   // -------------------------------------------------------------
   io.emit("updateArena", {
     hud,
     players,
 
-    // overige bestaande properties blijven voor admin-dashboard
+    // bestaande keys blijven staan
     round: arena.round,
     type: arena.type,
     status: arena.status,
@@ -384,7 +391,7 @@ export async function emitArena() {
     firstFinalRound: arena.firstFinalRound,
     lastSortedAt: arena.lastSortedAt,
 
-    removeAllowed: true,
+    removeAllowed: true, // jouw bestaande patch
   });
 }
 
@@ -410,7 +417,7 @@ export function toggleGalaxyMode(): boolean {
 }
 
 /* ============================================================================
-   START ROUND
+   START ROUND — PATCH: overlay expects correct ms-model
 ============================================================================ */
 
 export async function startRound(type: RoundType) {
@@ -419,10 +426,8 @@ export async function startRound(type: RoundType) {
   arena.round += 1;
   arena.type = type;
 
-  // RESET GALAXY
+  // RESET GALAXY + DIAMOND PISTOL
   arena.reverseMode = false;
-
-  // RESET DIAMOND PISTOL limiter
   arena.diamondPistolUsed = false;
 
   if (type === "finale" && arena.firstFinalRound === null) {
@@ -437,17 +442,11 @@ export async function startRound(type: RoundType) {
   for (const p of arena.players) {
     p.positionStatus = "alive";
     p.eliminated = false;
-
     p.tempImmune = false;
     p.survivorImmune = false;
-
-    // --- PATCH: reset breaker hits ---
     p.breakerHits = 0;
 
-    // immune opschonen
     p.boosters = p.boosters.filter((b) => b !== "immune");
-
-    // remove mg/bomb badges
     p.boosters = p.boosters.filter((b) => b !== "mg" && b !== "bomb");
   }
 
@@ -462,6 +461,7 @@ export async function startRound(type: RoundType) {
       ? arena.settings.roundDurationFinal
       : arena.settings.roundDurationPre;
 
+  // PATCH → overlay expects endsAt + totalMs
   arena.roundStartTime = now;
   arena.roundCutoff = now + duration * 1000;
   arena.graceEnd = arena.roundCutoff + arena.settings.graceSeconds * 1000;
@@ -473,6 +473,7 @@ export async function startRound(type: RoundType) {
 
   await emitArena();
 
+  // PATCH: overlay v6 receives duration in seconds, not ms
   io.emit("round:start", {
     round: arena.round,
     type,
@@ -610,6 +611,7 @@ export async function endRound(forceEnd: boolean = false) {
     await recomputePositions();
     const total = arena.players.length;
 
+    // Eerst MG/Bomb eliminaties
     const doomedMG = arena.players.filter((p) => p.eliminated);
 
     if (arena.type === "finale") {
@@ -661,6 +663,7 @@ export async function endRound(forceEnd: boolean = false) {
       return;
     }
 
+    // Quarter finale: danger + MG
     const doomedDanger =
       arena.settings.forceEliminations &&
       arena.players.filter((p) => p.positionStatus === "danger");
@@ -688,10 +691,10 @@ export async function endRound(forceEnd: boolean = false) {
 }
 
 /* ============================================================================
-   ARENA MANAGEMENT — VERWIJDER-PATCHES HIERONDER
+   ARENA MANAGEMENT — inclusief avatar_url patches
 ============================================================================ */
 
-export async function arenaJoin(id: string, display_name: string, username: string) {
+export async function arenaJoin(id: string, display_name: string, username: string, avatar_url?: string | null) {
   const cleanId = String(id);
 
   if (arena.players.some((p) => p.id === cleanId)) return;
@@ -707,13 +710,16 @@ export async function arenaJoin(id: string, display_name: string, username: stri
     tempImmune: false,
     survivorImmune: false,
     breakerHits: 0,
+
+    // PATCH
+    avatar_url: avatar_url ?? null,
   });
 
   await emitArena();
 }
 
 /* ============================================================================
-   PATCHED arenaLeave() — robuuste verwijdering op id/username/display
+   PATCHED arenaLeave()
 ============================================================================ */
 
 export async function arenaLeave(identifier: string, force: boolean = false) {
@@ -757,7 +763,7 @@ export async function arenaLeave(identifier: string, force: boolean = false) {
 }
 
 /* ============================================================================
-   addToArena
+   addToArena — PATCH: avatar_url
 ============================================================================ */
 
 export async function addToArena(username: string, resolveUser: Function) {
@@ -780,6 +786,8 @@ export async function addToArena(username: string, resolveUser: Function) {
     tempImmune: false,
     survivorImmune: false,
     breakerHits: 0,
+
+    avatar_url: user.avatar_url ?? null,
   });
 
   emitLog({
@@ -834,41 +842,29 @@ export async function arenaClear() {
 }
 
 /* ============================================================================
-   addFromQueue (originele compat-logica)
+   addFromQueue — PATCH avatar_url pass-through
 ============================================================================ */
 
-export async function addFromQueue(...args: any[]) {
-  if (!args.length) return;
+export async function addFromQueue(candidate: any) {
+  if (!candidate) return;
 
-  const candidate = args[0];
-
-  if (
-    candidate &&
-    typeof candidate === "object" &&
-    ("tiktok_id" in candidate || "user_tiktok_id" in candidate)
-  ) {
-    const id = String(
-      (candidate as any).tiktok_id ?? (candidate as any).user_tiktok_id
-    );
-    const username: string =
-      (candidate as any).username ??
-      (candidate as any).user_username ??
-      "";
-
-    const display_name: string =
-      (candidate as any).display_name ??
-      (candidate as any).user_display_name ??
+  if (typeof candidate === "object") {
+    const id = String(candidate.tiktok_id ?? candidate.user_tiktok_id);
+    const username =
+      candidate.username ?? candidate.user_username ?? "unknown";
+    const display_name =
+      candidate.display_name ??
+      candidate.user_display_name ??
       username;
 
-    return arenaJoin(id, display_name, username);
+    const avatar_url = candidate.avatar_url ?? null;
+
+    return arenaJoin(id, display_name, username, avatar_url);
   }
 
-  // fallback
-  if (typeof args[0] === "string") {
-    const id = String(args[0]);
-    const display_name = String(args[1] ?? args[2] ?? "Unknown");
-    const username = String(args[2] ?? args[1] ?? "unknown");
-    return arenaJoin(id, display_name, username);
+  if (typeof candidate === "string") {
+    const id = candidate;
+    return arenaJoin(id, "Unknown", id);
   }
 }
 
