@@ -1,22 +1,23 @@
 // ============================================================================
-// event-router.js — BattleBox Event Brain v4.0 FINAL
-// TARGET-ANIMATION PATCH + TWIST COUNTDOWN + FULL PAYLOAD
+// event-router.js — BattleBox Event Brain v4.3 FINAL
+// TARGET-ANIMATION PATCH + TWIST COUNTDOWN + FULL PAYLOAD NORMALIZATION
 // ============================================================================
 //
-// Nieuwe upgrades:
+// Upgrades v4.3:
 // -----------------------------------------------------
-// ✔ twist:takeover stuurt volledige payload door
-// ✔ twist:countdown listener toegevoegd (bomb 3 → 2 → 1)
-// ✔ overlay krijgt nu targetIndex, victimIndices, survivorIndex
-// ✔ HUD remains normalized & stable
-// ✔ TwistQueue blijft perfect functioneren
+// ✔ Volledige normalisatie van twist payloads
+// ✔ Betere bescherming tegen undefined target/victim names
+// ✔ twist:countdown altijd type = "countdown"
+// ✔ TwistQueue compatibel met v7.3 engine
+// ✔ Overlay receives perfect payload: targetIndex, victimIndices, survivorIndex
+// ✔ Geen functionaliteit verwijderd, alleen versterkt
+//
 // ============================================================================
 
 import { getSocket } from "/overlays/shared/socket.js";
 import {
   queueStore,
   eventStore,
-  twistStore,
   tickerStore,
   applySnapshot
 } from "/overlays/shared/stores.js";
@@ -41,7 +42,6 @@ function normalizeArena(pkt) {
   const hud = pkt.hud ?? pkt;
 
   const now = Date.now();
-
   const totalMs = hud.totalMs ?? 0;
   const remainingMs =
     hud.remainingMs ??
@@ -69,7 +69,7 @@ export async function initEventRouter() {
   const socket = await getSocket();
 
   console.log(
-    "%c[BattleBox] Event Router Ready (v4.0 — Target Anim + Countdown)",
+    "%c[BattleBox] Event Router Ready (v4.3 — Full Twist Payload + Countdown)",
     "color:#0fffd7;font-weight:bold;"
   );
 
@@ -87,10 +87,11 @@ export async function initEventRouter() {
   });
 
   // ==========================================================================
-  // 2) LIVE ARENA UPDATES  (GENORMALISEERD)
+  // 2) LIVE ARENA UPDATES
   // ==========================================================================
   socket.on("updateArena", (pkt) => {
     console.log("[DEBUG] updateArena received:", pkt);
+
     const norm = normalizeArena(pkt);
     if (norm) arenaStore.set(norm);
 
@@ -103,7 +104,7 @@ export async function initEventRouter() {
   // 3) ROUND START
   // ==========================================================================
   socket.on("round:start", (payload) => {
-    console.log("[DEBUG] round:start received:", payload);
+    console.log("[DEBUG] round:start:", payload);
 
     const total = (payload.duration ?? 0) * 1000;
     const endsAt = Date.now() + total;
@@ -125,7 +126,7 @@ export async function initEventRouter() {
   // 4) GRACE START
   // ==========================================================================
   socket.on("round:grace", (payload) => {
-    console.log("[DEBUG] round:grace received:", payload);
+    console.log("[DEBUG] round:grace:", payload);
 
     const total = (payload.grace ?? 5) * 1000;
     const endsAt = Date.now() + total;
@@ -147,7 +148,7 @@ export async function initEventRouter() {
   // 5) ROUND END
   // ==========================================================================
   socket.on("round:end", (payload) => {
-    console.log("[DEBUG] round:end received:", payload);
+    console.log("[DEBUG] round:end:", payload);
 
     arenaStore.set({
       status: "ended",
@@ -161,33 +162,37 @@ export async function initEventRouter() {
   });
 
   // ==========================================================================
-  // 6) TWISTS — TWISTQUEUE + FULL PAYLOAD + TARGET INDEXES
+  // 6) TWISTS — TAKEOVER + FULL PAYLOAD
   // ==========================================================================
   socket.on("twist:takeover", (raw) => {
-    console.log("[DEBUG] twist:takeover received (raw):", raw);
+    console.log("[DEBUG] twist:takeover received:", raw);
 
-    // We sturen de volledige payload door → overlay kan targets highlighten
     const payload = {
-      type: raw.type ?? raw.twist ?? raw.name ?? null,
-      title: raw.title ?? "",
+      type: raw.type,
 
-      // Nieuw → target rich info:
+      title: raw.title || "",
+
+      // target
       targetId: raw.targetId ?? null,
-      targetName: raw.targetName ?? null,
-      targetIndex: raw.targetIndex ?? null,
+      targetName: raw.targetName || null,
+      targetIndex: Number.isFinite(raw.targetIndex) ? raw.targetIndex : null,
 
-      victimIds: raw.victimIds ?? [],
-      victimNames: raw.victimNames ?? [],
-      victimIndices: raw.victimIndices ?? [],
+      // victims
+      victimIds: Array.isArray(raw.victimIds) ? raw.victimIds : [],
+      victimNames: Array.isArray(raw.victimNames) ? raw.victimNames : [],
+      victimIndices: Array.isArray(raw.victimIndices) ? raw.victimIndices : [],
 
+      // survivor
       survivorId: raw.survivorId ?? null,
-      survivorName: raw.survivorName ?? null,
-      survivorIndex: raw.survivorIndex ?? null,
+      survivorName: raw.survivorName || null,
+      survivorIndex: Number.isFinite(raw.survivorIndex)
+        ? raw.survivorIndex
+        : null,
 
+      // galaxy
       reverse: raw.reverse ?? false
     };
 
-    // TwistQueue → overlay altijd in juiste volgorde
     arenaTwistStore.activate(payload);
 
     document.dispatchEvent(
@@ -196,7 +201,7 @@ export async function initEventRouter() {
   });
 
   socket.on("twist:clear", () => {
-    console.log("[DEBUG] twist:clear received");
+    console.log("[DEBUG] twist:clear");
 
     arenaTwistStore.clear();
 
@@ -204,12 +209,17 @@ export async function initEventRouter() {
   });
 
   // ==========================================================================
-  // 6B) BOMB COUNTDOWN (3 → 2 → 1)
+  // 6B) TWIST COUNTDOWN (3 → 2 → 1)
   // ==========================================================================
-  socket.on("twist:countdown", (payload) => {
-    console.log("[DEBUG] twist:countdown", payload);
+  socket.on("twist:countdown", (raw) => {
+    console.log("[DEBUG] twist:countdown:", raw);
 
-    // Countdown doorgeven aan dedicated store
+    const payload = {
+      type: "countdown",
+      step: raw.step ?? 3,
+      by: raw.by || ""
+    };
+
     arenaTwistStore.countdown(payload);
 
     document.dispatchEvent(
@@ -222,15 +232,17 @@ export async function initEventRouter() {
   // ==========================================================================
   socket.on("updateQueue", (packet) => {
     if (!packet || !Array.isArray(packet.entries)) return;
+
     console.log("[DEBUG] updateQueue:", packet);
     queueStore.setQueue(packet.entries);
   });
 
   // ==========================================================================
-  // 8) QUEUE EVENTS VISUALS
+  // 8) QUEUE EVENTS (JOIN / LEAVE / PROMOTE / DEMOTE)
   // ==========================================================================
   socket.on("queueEvent", (evt) => {
     console.log("[DEBUG] queueEvent:", evt);
+
     if (!evt || !QUEUE_EVENTS.has(evt.type)) return;
 
     const safeDisplay =
@@ -263,16 +275,16 @@ export async function initEventRouter() {
   });
 
   // ==========================================================================
-  // 9) TICKER
+  // 9) HUD TICKER
   // ==========================================================================
   socket.on("hudTickerUpdate", (text) => {
-    console.log("[DEBUG] ticker received:", text);
+    console.log("[DEBUG] ticker:", text);
     tickerStore.setText(text || "");
   });
 
   // ==========================================================================
   // 10) DEBUG BRIDGE
   // ==========================================================================
-  window.bb = { socket, eventStore, arenaStore, twistStore };
+  window.bb = { socket, eventStore, arenaStore, arenaTwistStore };
   console.log("%c[BB DEBUG] Debug bridge active → window.bb", "color:#0fffd7");
 }
