@@ -1,20 +1,13 @@
 /* ============================================================================
-   arena-store.js — FINAL UPGRADED TIMER + PROGRESS VERSION
-   Backwards-compatible (roundCutoff/graceEnd preserved)
-   ============================================================================
-*/
+   arena-store.js — FINAL UPGRADED TIMER + PROGRESS VERSION (v6.1)
+   Backwards-compatible with all older BattleBox engines
+============================================================================ */
 
 import { createStore } from "/overlays/shared/stores.js";
 
 /* ============================================================================
-   ARENA STORE — NEW TIMER STRUCTURE
-   ============================================================================
-   New:
-     totalMs → totale duur van huidige fase
-     endsAt  → timestamp (ms) wanneer timer eindigt
-
-   Old keys kept:
-     roundCutoff, graceEnd  → blijven bestaan voor safety fallback
+   ARENA STORE — NEW TIMER MODEL (endsAt + totalMs)
+   + Fully backwards compatible with old roundCutoff / graceEnd
 ============================================================================ */
 
 export const arenaStore = createStore({
@@ -23,27 +16,25 @@ export const arenaStore = createStore({
   status: "idle",
   players: [],
 
-  // global settings for fallback
+  // PREEXISTING GLOBAL SETTINGS (fallback for old engine)
   settings: {
-    roundDurationPre: 30,
-    roundDurationFinal: 300,
+    roundDurationPre: 30,   // seconds
+    roundDurationFinal: 300 // seconds
   },
 
-  // NEW timer model
-  totalMs: 0,
-  endsAt: 0,
+  // NEW TIMER MODEL
+  totalMs: 0,   // full duration of current phase in milliseconds
+  endsAt: 0,    // absolute timestamp "when this phase ends"
 
-  // OLD model kept for backwards safety
+  // OLD TIMER KEYS (kept for legacy fallback)
   roundCutoff: 0,
   graceEnd: 0,
 });
 
 /* ============================================================================
-   HUD PROGRESS — NEW VERSION
-   ============================================================================
-   Uses:
-     state.endsAt  → timestamp in ms
-     state.totalMs → full duration in ms
+   HUD PROGRESS (NEW LOGIC)
+   - Uses endsAt + totalMs when present
+   - Falls back safely to roundCutoff / graceEnd for older backends
 ============================================================================ */
 
 export function renderHudProgress(state, ringEl) {
@@ -51,25 +42,33 @@ export function renderHudProgress(state, ringEl) {
 
   const radius = 170;
   const circumference = 2 * Math.PI * radius;
-
   ringEl.style.strokeDasharray = `${circumference}`;
 
   const now = Date.now();
 
-  // Fallback: if endsAt not available, fallback to old system
   let totalMs = state.totalMs;
   let remainingMs = Math.max(0, state.endsAt - now);
 
-  if (!state.totalMs || state.totalMs <= 0) {
-    // OLD METHOD — keep as fallback
+  /* -------------------------------------------------------
+     FALLBACK MODE: OLD ENGINE (no totalMs provided)
+  -------------------------------------------------------- */
+  if (!totalMs || totalMs <= 0) {
     if (state.status === "active") {
       totalMs = state.settings.roundDurationPre * 1000;
+      remainingMs = Math.max(0, state.roundCutoff - now);
+    } else if (state.status === "finale") {
+      totalMs = state.settings.roundDurationFinal * 1000;
       remainingMs = Math.max(0, state.roundCutoff - now);
     } else if (state.status === "grace") {
       totalMs = 5000;
       remainingMs = Math.max(0, state.graceEnd - now);
     }
   }
+
+  /* -------------------------------------------------------
+     SAFETY: prevent division by zero
+  -------------------------------------------------------- */
+  if (totalMs <= 0) totalMs = 1;
 
   const progress = 1 - (remainingMs / totalMs);
   const offset = circumference * progress;
@@ -78,7 +77,7 @@ export function renderHudProgress(state, ringEl) {
 }
 
 /* ============================================================================
-   TWISTS STORE — unchanged logic
+   TWIST STORE (overlay-only)
 ============================================================================ */
 
 export const arenaTwistStore = createStore({
@@ -98,6 +97,7 @@ arenaTwistStore.clear = () => {
 /* ============================================================================
    EXPORT
 ============================================================================ */
+
 export default {
   arenaStore,
   arenaTwistStore,
