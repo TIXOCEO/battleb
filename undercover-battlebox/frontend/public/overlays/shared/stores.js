@@ -2,7 +2,8 @@
 // stores.js — BattleBox Overlay Stores (10-SLOT EVENTS — NO FADE VERSION)
 // ============================================================================
 
-function createStore(initialState) {
+// ✔ createStore is nu een NAMED EXPORT
+export function createStore(initialState) {
   let state = { ...initialState };
   const listeners = new Set();
 
