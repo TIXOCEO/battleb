@@ -1,347 +1,310 @@
-/* ============================================================================
-   BATTLEBOX ARENA OVERLAY (1200×800)
-   HUD + 8 PLAYER CARDS + TWIST TAKEOVER
-   ============================================================================ */
-
 @import "/overlays/shared/theme.css";
 
-/* ============================================================================
-   ROOT WRAPPER
-   ============================================================================ */
-
-.arena-root {
+/* ============================================================
+   ROOT WRAPPER — fixed 1200 × 800
+============================================================ */
+.bb-arena-root {
   width: 1200px;
   height: 800px;
   position: relative;
+  overflow: hidden;
   background: rgba(5, 5, 8, 0.75);
   border: 2px solid rgba(255,255,255,0.08);
-  overflow: hidden;
-  backdrop-filter: blur(7px);
+  backdrop-filter: blur(10px);
   box-shadow:
-    0 0 40px rgba(255,77,79,0.45),
-    inset 0 0 40px rgba(255,77,79,0.25);
+    0 0 40px rgba(255,77,79,0.35),
+    inset 0 0 50px rgba(0,0,0,0.75);
 }
 
-/* ============================================================================
-   TWIST TAKEOVER LAYER (FULLSCREEN)
-   ============================================================================ */
-
-.arena-takeover-layer {
+/* ============================================================
+   TWIST TAKEOVER — fullscreen animated effect
+============================================================ */
+.bb-twist-takeover {
   position: absolute;
   inset: 0;
-  pointer-events: none;
+  z-index: 50;
+  background: rgba(15,15,20,0.92);
   display: flex;
-  align-items: center;
   justify-content: center;
-
-  opacity: 0;
+  align-items: center;
+  backdrop-filter: blur(12px);
   transition: opacity 0.3s ease-out;
-}
-
-.arena-takeover-active {
-  opacity: 1 !important;
-}
-
-/* When active, the HUD dims */
-.arena-root.takeover-active #arena-hud {
-  opacity: 0.15;
-  transform: scale(0.92);
-}
-
-/* ============================================================================
-   CENTRAL HUD (OCTAGON)
-   ============================================================================ */
-
-#arena-hud {
-  width: 360px;
-  height: 360px;
-
-  position: absolute;
-  left: 420px;
-  top: 220px;
-
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  background: var(--glass-3);
-  border: 3px solid rgba(255,255,255,0.12);
-
-  clip-path: polygon(
-    15% 0%, 85% 0%,
-    100% 25%, 100% 75%,
-    85% 100%, 15% 100%,
-    0% 75%, 0% 25%
-  );
-
-  box-shadow:
-    0 0 24px rgba(0,0,0,0.6),
-    inset 0 0 40px rgba(0,0,0,0.55);
-
-  transition: opacity 0.25s ease-out, transform 0.25s ease-out;
-}
-
-/* ============================================================================
-   HUD – PROGRESS RING (SVG)
-   ============================================================================ */
-
-.hud-progress {
-  position: absolute;
-  top: 0;
-  left: 0;
-  transform: rotate(90deg); /* CLOCKWISE progress */
+  opacity: 0;
   pointer-events: none;
 }
-
-#hud-progress-bg {
-  stroke: rgba(255,255,255,0.12);
+.bb-twist-takeover.show {
+  opacity: 1;
+  pointer-events: all;
+}
+.hidden {
+  display: none;
 }
 
-#hud-progress-fg {
-  stroke: var(--bb-turquoise);
-  transition: stroke 0.25s linear;
-}
-
-/* Danger (<10s) */
-.hud-danger #hud-progress-fg {
-  stroke: #ff4d4f !important;
-}
-
-/* Grace timer */
-.hud-grace #hud-progress-fg {
-  stroke: #4ea8ff !important;
-}
-
-/* ============================================================================
-   HUD – CONTENT
-   ============================================================================ */
-
-.hud-content {
-  position: relative;
-  z-index: 10;
-  text-align: center;
-  user-select: none;
-}
-
-.hud-round {
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  margin-bottom: 10px;
-  color: white;
-  text-shadow: var(--glow-soft-turq);
-}
-
-.hud-timer {
-  font-size: 98px;
-  font-weight: 900;
-  color: var(--bb-orange);
-  text-shadow: var(--glow-hard-orange);
-}
-
-.hud-status {
-  font-size: 22px;
-  margin-top: 8px;
-  opacity: 0.85;
-  color: #f2f2f2;
-}
-
-/* ============================================================================
-   PLAYER CARD BASE
-   ============================================================================ */
-
-.player-card {
-  width: 190px;
-  height: 120px;
-
+/* ============================================================
+   HUD — center octagon (350×350)
+============================================================ */
+.bb-hud {
+  width: 350px;
+  height: 350px;
   position: absolute;
-
-  background: rgba(15,15,20,0.85);
-  border: 2px solid rgba(255,255,255,0.08);
-
-  padding: 12px;
-  overflow: hidden;
-
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   clip-path: polygon(
-    12% 0%, 88% 0%,
-    100% 20%, 100% 80%,
-    88% 100%, 12% 100%,
-    0% 80%, 0% 20%
+    10% 0%, 90% 0%,
+    100% 15%, 100% 85%,
+    90% 100%, 10% 100%,
+    0% 85%, 0% 15%
   );
-
+  background: rgba(20,20,24,0.75);
+  border: 2px solid rgba(255,255,255,0.12);
   box-shadow:
-    0 0 22px rgba(0,0,0,0.8),
-    inset 0 0 20px rgba(0,0,0,0.7),
-    inset 0 0 16px rgba(255,77,79,0.18);
-
-  transition: all 0.2s ease-out;
+    0 0 25px rgba(0,0,0,0.8),
+    inset 0 0 30px rgba(0,0,0,0.55),
+    inset 0 0 22px rgba(255,77,79,0.22);
 }
 
-/* Background avatar with low opacity */
-.player-card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-
-  background-size: cover;
-  background-position: center;
-  opacity: 0.18;
-  filter: grayscale(20%) blur(1px);
-}
-
-/* CONTENT WRAPPER */
-.player-inner {
+.hud-inner {
   position: relative;
-  z-index: 10;
+  width: 100%;
+  height: 100%;
+  z-index: 5;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  height: 100%;
+  align-items: center;
 }
 
-/* POSITION NUMBER */
-.player-pos {
-  position: absolute;
-  top: 6px;
-  right: 10px;
+/* ROUND LABEL */
+.hud-round-text {
+  font-size: 38px;
+  font-weight: 800;
+  color: var(--bb-orange);
+  text-shadow: var(--glow-hard-orange);
+  margin-bottom: 4px;
+}
 
+/* TYPE LABEL */
+.hud-type-text {
+  font-size: 26px;
+  opacity: 0.85;
+  margin-bottom: 12px;
+}
+
+/* TIMER */
+.hud-timer {
+  font-size: 52px;
   font-weight: 900;
-  font-size: 22px;
-  color: #ff4d4f;
-
-  text-shadow:
-    0 0 8px rgba(255,77,79,1),
-    0 0 16px rgba(255,77,79,0.8);
+  color: white;
+  text-shadow: var(--glow-mid-turq);
 }
 
-/* DISPLAY NAME */
-.player-name {
-  font-size: 24px;
-  font-weight: 700;
-  color: #ffffff;
-  max-width: 150px;
-  white-space: nowrap;
+/* ============================================================
+   HUD RING (progress bar wall-clock)
+============================================================ */
+.hud-ring {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+.hud-ring-bg {
+  fill: none;
+  stroke: rgba(255,255,255,0.12);
+}
+.hud-ring-progress {
+  fill: none;
+  stroke: var(--bb-orange);
+  stroke-linecap: round;
+  transform-origin: 50% 50%;
+  transform: rotate(-90deg); /* progress clockwise */
+  transition: stroke-dashoffset 0.2s linear;
+  filter: drop-shadow(0 0 6px rgba(255,77,79,0.85));
+}
+
+/* ============================================================
+   PLAYER CARDS — 8 octagons around the center
+============================================================ */
+#arena-players {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* BASE CARD */
+.bb-player-card {
+  width: 160px;   /* medium size */
+  height: 160px;
+  position: absolute;
+  clip-path: polygon(
+    12% 0%, 88% 0%,
+    100% 18%, 100% 82%,
+    88% 100%, 12% 100%,
+    0% 82%, 0% 18%
+  );
+  background: rgba(12,12,18,0.72);
+  border: 2px solid rgba(255,255,255,0.12);
+  box-shadow:
+    0 0 20px rgba(0,0,0,0.65),
+    inset 0 0 22px rgba(0,0,0,0.65),
+    inset 0 0 14px rgba(255,77,79,0.18);
   overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  padding-bottom: 12px;
+
+  transition:
+    transform 0.25s cubic-bezier(.17,.67,.4,1.35),
+    border-color 0.25s,
+    box-shadow 0.25s;
+}
+
+/* BACKGROUND AVATAR (15–20% opacity) */
+.bb-player-bgavatar {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  opacity: 0.18;
+  filter: blur(1px);
+}
+
+/* FOREGROUND TEXT */
+.bb-player-labels {
+  position: relative;
+  z-index: 2;
+  text-align: center;
+}
+
+.bb-player-name {
+  font-size: 18px;
+  font-weight: 800;
+  color: white;
+  margin-bottom: 4px;
+  text-shadow: 0 0 8px black;
+  max-width: 140px;
+  overflow: hidden;
+  white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-/* DIAMOND SCORE */
-.player-score {
-  margin-top: 4px;
-  font-size: 20px;
-  font-weight: 800;
-  color: var(--bb-turquoise);
-  text-shadow: var(--glow-soft-turq);
+.bb-player-score {
+  font-size: 16px;
+  opacity: 0.85;
 }
 
-/* ============================================================================
-   PLAYER STATUS COLORS
-   ============================================================================ */
-
-/* ACTIVE — white border */
-.player-active {
-  border-color: rgba(255,255,255,0.55) !important;
-  box-shadow: 0 0 16px rgba(255,255,255,0.35);
-}
-
-/* DANGER — orange */
-.player-danger {
-  border-color: #ff4d4f !important;
-  box-shadow: 0 0 22px rgba(255,77,79,0.75);
-  animation: dangerPulse 1.2s ease-in-out infinite;
-}
-
-@keyframes dangerPulse {
-  0%, 100% { box-shadow: 0 0 24px rgba(255,77,79,0.85); }
-  50% { box-shadow: 0 0 12px rgba(255,77,79,0.45); }
-}
-
-/* IMMUNE — green */
-.player-immune {
-  border-color: #00ff88 !important;
-  box-shadow: 0 0 22px rgba(0,255,136,0.75);
-}
-
-/* IMMUNE BROKEN (50%) — alternating white/green */
-.player-immune-break {
-  animation: immuneSwap 0.65s linear infinite;
-}
-
-@keyframes immuneSwap {
-  0%, 50% { border-color: #00ff88; }
-  50.1%, 100% { border-color: #ffffff; }
-}
-
-/* ELIMINATED — red */
-.player-eliminated {
-  border-color: #b30000 !important;
-  opacity: 0.65;
-  box-shadow: 0 0 26px rgba(255,0,0,0.55);
-  filter: grayscale(60%);
-}
-
-/* ELIMINATED ENTRY ANIMATION */
-.player-eliminated-anim {
-  animation: elimFlash 0.6s ease-out;
-}
-
-@keyframes elimFlash {
-  0% { filter: brightness(2); }
-  100% { filter: brightness(0.6); }
-}
-
-/* ============================================================================
-   PLAYER POSITIONS AROUND THE HUD (CLOCKWISE)
-   ============================================================================ */
-
-#player-pos-1 { top:  40px; left: 690px; }
-#player-pos-2 { top:  40px; left: 460px; }
-#player-pos-3 { top: 120px; left: 220px; }
-#player-pos-4 { top: 310px; left: 120px; }
-#player-pos-5 { top: 520px; left: 220px; }
-#player-pos-6 { top: 620px; left: 460px; }
-#player-pos-7 { top: 620px; left: 690px; }
-#player-pos-8 { top: 520px; left: 920px; }
-
-/* Adjustments ensure perfect symmetry */
-
-/* ============================================================================
-   TAKEOVER CARD STYLE (TWIST EFFECT)
-   ============================================================================ */
-
-.takeover-card {
-  width: 500px;
-  padding: 30px;
-  background: rgba(15,15,20,0.9);
-  border: 3px solid var(--bb-orange);
-
-  clip-path: polygon(
-    12% 0%, 88% 0%,
-    100% 20%, 100% 80%,
-    88% 100%, 12% 100%,
-    0% 80%, 0% 20%
-  );
-
-  text-align: center;
-  box-shadow:
-    0 0 40px rgba(255,77,79,0.75),
-    inset 0 0 30px rgba(255,77,79,0.45);
-}
-
-.takeover-title {
-  font-size: 40px;
+/* POSITION BADGE */
+.bb-player-pos {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
   font-weight: 900;
-  color: var(--bb-orange);
-  text-shadow: var(--glow-hard-orange);
-  margin-bottom: 10px;
+  line-height: 32px;
+  text-align: center;
+  background: var(--bb-orange);
+  color: black;
+  clip-path: polygon(
+    25% 0%, 75% 0%,
+    100% 50%, 75% 100%,
+    25% 100%, 0% 50%
+  );
+  text-shadow: var(--glow-soft-orange);
+  z-index: 5;
 }
 
-.takeover-description {
-  font-size: 22px;
-  color: white;
-  opacity: 0.9;
+/* ============================================================
+   STATUS COLORS — immune, broken-immune, danger, active, elimination
+============================================================ */
+
+/* ACTIVE (WHITE) */
+.status-alive {
+  border-color: rgba(255,255,255,0.75);
+  box-shadow:
+    0 0 18px rgba(255,255,255,0.35),
+    inset 0 0 18px rgba(255,255,255,0.22);
 }
 
-/* ============================================================================
-   END OF FILE
-   ============================================================================ */
+/* IMMUNE (GREEN) */
+.status-immune {
+  border-color: #00ff99;
+  box-shadow:
+    0 0 22px rgba(0,255,145,0.75),
+    inset 0 0 22px rgba(0,255,145,0.45);
+}
+
+/* IMMUNE-BROKEN (white <-> green alternating) */
+.status-immune-broken {
+  animation: immuneBrokenPulse 1s infinite alternate;
+}
+@keyframes immuneBrokenPulse {
+  0% {
+    border-color: #00ff99;
+    box-shadow:
+      0 0 22px rgba(0,255,145,0.75),
+      inset 0 0 22px rgba(0,255,145,0.45);
+  }
+  100% {
+    border-color: rgba(255,255,255,0.75);
+    box-shadow:
+      0 0 18px rgba(255,255,255,0.35),
+      inset 0 0 18px rgba(255,255,255,0.22);
+  }
+}
+
+/* DANGER (ORANGE) */
+.status-danger {
+  border-color: #ff8800;
+  box-shadow:
+    0 0 24px rgba(255,136,0,0.85),
+    inset 0 0 22px rgba(255,136,0,0.55);
+}
+
+/* ELIMINATION (RED + glitch) */
+.status-elimination {
+  border-color: #ff0033;
+  box-shadow:
+    0 0 28px rgba(255,0,51,0.85),
+    inset 0 0 26px rgba(255,0,51,0.55);
+  animation: elimGlitch 0.6s infinite;
+}
+
+@keyframes elimGlitch {
+  0% { transform: translate(0); }
+  20% { transform: translate(-2px, 1px); }
+  40% { transform: translate(2px, -1px); }
+  60% { transform: translate(-1px, -2px); }
+  80% { transform: translate(1px, 1px); }
+  100% { transform: translate(0); }
+}
+
+/* ============================================================
+   PLAYER POSITIONS — perfect circle around HUD
+   (8 positions equally distributed)
+============================================================ */
+:root {
+  --cx: 600px; /* center x of 1200px */
+  --cy: 400px; /* center y of 800px */
+  --radius: 300px; /* distance from center */
+}
+
+.bb-p1 { transform: translate(calc(var(--cx) + var(--radius) * 0.7071 - 80px), calc(var(--cy) - var(--radius) * 0.7071 - 80px)); }
+.bb-p2 { transform: translate(calc(var(--cx) + var(--radius) - 80px), calc(var(--cy) - 80px)); }
+.bb-p3 { transform: translate(calc(var(--cx) + var(--radius) * 0.7071 - 80px), calc(var(--cy) + var(--radius) * 0.7071 - 80px)); }
+.bb-p4 { transform: translate(calc(var(--cx) - 80px), calc(var(--cy) + var(--radius) - 80px)); }
+.bb-p5 { transform: translate(calc(var(--cx) - var(--radius) * 0.7071 - 80px), calc(var(--cy) + var(--radius) * 0.7071 - 80px)); }
+.bb-p6 { transform: translate(calc(var(--cx) - var(--radius) - 80px), calc(var(--cy) - 80px)); }
+.bb-p7 { transform: translate(calc(var(--cx) - var(--radius) * 0.7071 - 80px), calc(var(--cy) - var(--radius) * 0.7071 - 80px)); }
+.bb-p8 { transform: translate(calc(var(--cx) - 80px), calc(var(--cy) - var(--radius) - 80px)); }
+
+/* rotate each card towards center */
+.bb-player-card {
+  transform-origin: center center;
+}
+.bb-p1 { transform: rotate(-45deg) translate(...); }
+bb-p2 { transform: rotate(0deg) translate(...); }
+/* Rotaties worden automatisch in JS toegepast omdat CSS calc() niet combineerbaar is met rotate().
+   Daarom laten we alleen de translate hierboven staan.
+*/
