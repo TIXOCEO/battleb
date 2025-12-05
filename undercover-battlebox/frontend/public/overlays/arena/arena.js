@@ -1,14 +1,17 @@
 // ============================================================================
-// arena.js — BattleBox Arena Overlay (FINAL PATCHED BUILD)
-// Implements:
-// • Pop-in join animation
-// • Score flash
-// • Status glow states (alive, immune, immune-broken, danger, elimination)
-// • Round-start shockwave
+// arena.js — BattleBox Arena Overlay (FINAL BUILD v5.0)
+// ============================================================================
+//
+// • Pop-in new players
+// • Animated score flashes
+// • Full status system (alive, danger, immune, broken immune, eliminated)
+// • Round-start shockwave + shake
 // • Grace pulse
-// • Round-end flash + danger highlight + HUD ELIMINATIONS mode
+// • Round-end elimination mode
 // • Twist takeover fullscreen
+// • Galaxy twist: vortex + card spin mode
 // • Wall-clock HUD ring progress
+//
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -18,28 +21,35 @@ import {
   renderHudProgress,
 } from "/overlays/arena/arenaStore.js";
 
+import {
+  playTwistAnimation,
+  clearTwistAnimation
+} from "/overlays/shared/twistAnim.js";
+
 initEventRouter();
 
 /* ============================================================
    DOM REFERENCES
 ============================================================ */
-const container = document.getElementById("arena-root");
+const root = document.getElementById("arena-root");
 const hudRound = document.getElementById("hud-round");
 const hudType = document.getElementById("hud-type");
 const hudTimer = document.getElementById("hud-timer");
 const hudRing = document.getElementById("hud-ring-progress");
 
 const playersContainer = document.getElementById("arena-players");
+
 const twistOverlay = document.getElementById("twist-takeover");
+const galaxyLayer = document.getElementById("twist-galaxy');
 
 /* ============================================================
-   CONSTANTS — circular 8-card positioning
+   CONSTANTS — circular positions
 ============================================================ */
 const POSITIONS = [
   { idx: 1, x: 0.7071, y: -0.7071, rot: -45 },
-  { idx: 2, x: 1.0,    y: 0.0,     rot: 0   },
-  { idx: 3, x: 0.7071, y: 0.7071,  rot: 45  },
-  { idx: 4, x: 0.0,    y: 1.0,     rot: 90  },
+  { idx: 2, x: 1.0,    y: 0.0,     rot:   0 },
+  { idx: 3, x: 0.7071, y: 0.7071,  rot:  45 },
+  { idx: 4, x: 0.0,    y: 1.0,     rot:  90 },
   { idx: 5, x: -0.7071,y: 0.7071,  rot: 135 },
   { idx: 6, x: -1.0,   y: 0.0,     rot: 180 },
   { idx: 7, x: -0.7071,y: -0.7071, rot: -135},
@@ -59,7 +69,7 @@ const EMPTY_AVATAR =
 function animateOnce(el, className) {
   if (!el) return;
   el.classList.remove(className);
-  void el.offsetWidth; // force reflow
+  void el.offsetWidth;
   el.classList.add(className);
   el.addEventListener("animationend", () => el.classList.remove(className), { once: true });
 }
@@ -68,7 +78,7 @@ const lastScoreMap = new Map();
 const lastCardOccupied = Array(8).fill(false);
 
 /* ============================================================
-   CREATE 8 PLAYER CARDS
+   CARD CREATION
 ============================================================ */
 const cardRefs = [];
 
@@ -93,11 +103,9 @@ function createPlayerCards() {
 
     const name = document.createElement("div");
     name.className = "bb-player-name";
-    name.textContent = "—";
 
     const score = document.createElement("div");
     score.className = "bb-player-score";
-    score.textContent = "0";
 
     labels.appendChild(name);
     labels.appendChild(score);
@@ -107,29 +115,23 @@ function createPlayerCards() {
 
     playersContainer.appendChild(card);
 
-    cardRefs.push({
-      el: card,
-      bg,
-      name,
-      score,
-      pos,
-    });
+    cardRefs.push({ el: card, bg, name, score, pos });
   }
 }
 
 createPlayerCards();
 
 /* ============================================================
-   UPDATE PLAYER CARDS BASED ON STORE
+   PLAYER CARD RENDERING
 ============================================================ */
 arenaStore.subscribe((state) => {
   const players = state.players || [];
 
   for (let i = 0; i < 8; i++) {
     const card = cardRefs[i];
-    const data = players[i];
+    const p = players[i];
 
-    if (!data) {
+    if (!p) {
       card.name.textContent = "LEEG";
       card.score.textContent = "0";
       card.bg.style.backgroundImage = `url(${EMPTY_AVATAR})`;
@@ -139,30 +141,29 @@ arenaStore.subscribe((state) => {
       continue;
     }
 
-    card.name.textContent = data.display_name || "Onbekend";
+    card.name.textContent = p.display_name ?? "Onbekend";
 
-    const lastScore = lastScoreMap.get(data.id) ?? 0;
-    if (data.score !== lastScore) {
+    const previous = lastScoreMap.get(p.id) ?? 0;
+    if (p.score !== previous) {
       animateOnce(card.score, "bb-score-anim");
-      lastScoreMap.set(data.id, data.score);
+      lastScoreMap.set(p.id, p.score);
     }
 
-    card.score.textContent = data.score ?? 0;
-    card.bg.style.backgroundImage = `url(${data.avatar_url || EMPTY_AVATAR})`;
+    card.score.textContent = p.score ?? 0;
+    card.bg.style.backgroundImage = `url(${p.avatar_url || EMPTY_AVATAR})`;
 
     if (!lastCardOccupied[i]) {
       animateOnce(card.el, "bb-join-pop");
       lastCardOccupied[i] = true;
     }
 
-    applyStatus(card.el, data);
-
+    applyStatus(card.el, p);
     positionCard(card.el, POSITIONS[i]);
   }
 });
 
 /* ============================================================
-   STATUS SYSTEM
+   STATUS HANDLING
 ============================================================ */
 function resetStatus(el) {
   el.classList.remove(
@@ -179,44 +180,41 @@ function applyStatus(el, p) {
 
   if (p.eliminated) {
     el.classList.add("status-elimination");
-    animateOnce(el, "bb-elim-flash");
     return;
   }
 
   if (p.positionStatus === "danger") {
     el.classList.add("status-danger");
-    animateOnce(el, "bb-danger-pulse");
     return;
   }
 
   if (p.positionStatus === "immune") {
     if ((p.breakerHits ?? 0) > 0) {
       el.classList.add("status-immune-broken");
-      animateOnce(el, "bb-immune-broken-blink");
     } else {
       el.classList.add("status-immune");
-      animateOnce(el, "bb-immune-glow");
     }
     return;
   }
 
   el.classList.add("status-alive");
-  animateOnce(el, "bb-alive-pulse");
 }
 
 /* ============================================================
-   POSITIONING AROUND CENTER
+   POSITIONING
 ============================================================ */
 function positionCard(el, pos) {
   const dx = pos.x * RADIUS;
   const dy = pos.y * RADIUS;
+
   el.style.left = `${CENTER_X + dx - 80}px`;
   el.style.top = `${CENTER_Y + dy - 80}px`;
+
   el.style.transform = `rotate(${pos.rot}deg)`;
 }
 
 /* ============================================================
-   HUD RENDERING
+   HUD + RING RENDERING
 ============================================================ */
 arenaStore.subscribe((state) => {
   hudRound.textContent = `RONDE ${state.round ?? 0}`;
@@ -226,9 +224,9 @@ arenaStore.subscribe((state) => {
   let remaining = 0;
 
   if (state.status === "active") {
-    remaining = Math.max(0, Math.floor((state.roundCutoff - now) / 1000));
+    remaining = Math.max(0, (state.roundCutoff - now) / 1000 | 0);
   } else if (state.status === "grace") {
-    remaining = Math.max(0, Math.floor((state.graceEnd - now) / 1000));
+    remaining = Math.max(0, (state.graceEnd - now) / 1000 | 0);
   }
 
   hudTimer.textContent = remaining.toString().padStart(2, "0");
@@ -236,74 +234,57 @@ arenaStore.subscribe((state) => {
   renderHudProgress(state, hudRing);
 
   if (state.status === "active" && remaining === state.settings.roundDurationPre) {
-    shockwaveHUD();
+    animateOnce(root, "bb-round-start-shockwave");
   }
 });
 
 /* ============================================================
-   HUD EFFECTS
-============================================================ */
-function shockwaveHUD() {
-  animateOnce(container, "bb-round-start-shockwave");
-}
-
-/* ============================================================
-   TWIST TAKEOVER
+   TWIST — TAKEOVER + GALAXY
 ============================================================ */
 arenaTwistStore.subscribe((state) => {
   if (state.active) {
-    twistOverlay.classList.add("show");
-    animateOnce(twistOverlay, "bb-twist-flash");
-    twistOverlay.innerHTML = `
-      <div class="twist-takeover-title">
-        ${state.title || "TWIST ACTIVE"}
-      </div>
-    `;
+    // If GALAXY twist → spin mode
+    if (state.type === "galaxy") {
+      galaxyLayer.classList.remove("hidden");
+      galaxyLayer.classList.add("galaxy-active");
+
+      cardRefs.forEach(ref => ref.el.classList.add("bb-card-spin"));
+    }
+
+    playTwistAnimation(twistOverlay, state.type, state.title);
+
   } else {
-    twistOverlay.classList.remove("show");
-    twistOverlay.innerHTML = "";
+    clearTwistAnimation(twistOverlay);
+
+    // Reset galaxy mode
+    galaxyLayer.classList.add("hidden");
+    galaxyLayer.classList.remove("galaxy-active");
+
+    cardRefs.forEach(ref => ref.el.classList.remove("bb-card-spin"));
   }
 });
 
 /* ============================================================
-   ROUND EVENTS (FROM event-router)
+   ROUND EVENTS
 ============================================================ */
 document.addEventListener("arena:roundStart", () => {
-  shockwaveHUD();
-  animateOnce(container, "bb-round-start-shake");
+  animateOnce(root, "bb-round-start-shake");
 });
 
 document.addEventListener("arena:graceStart", () => {
-  animateOnce(container, "bb-grace-pulse");
+  animateOnce(root, "bb-grace-pulse");
 });
 
 document.addEventListener("arena:roundEnd", () => {
-  animateOnce(container, "bb-round-end-flash");
+  animateOnce(root, "bb-round-end-flash");
 
-  // Highlight danger players once more
-  cardRefs.forEach((ref) => {
+  cardRefs.forEach(ref => {
     if (ref.el.classList.contains("status-danger")) {
       animateOnce(ref.el, "bb-danger-pulse");
     }
   });
 
-  // HUD elimination mode
   animateOnce(hudRound, "bb-hud-elimination-flash");
-});
-
-/* ============================================================
-   SOCKET EVENTS (OPTIONAL)
-============================================================ */
-window.addEventListener("round:start", () => {
-  shockwaveHUD();
-});
-
-window.addEventListener("round:grace", () => {
-  animateOnce(container, "bb-grace-pulse");
-});
-
-window.addEventListener("round:end", () => {
-  animateOnce(container, "bb-round-end-flash");
 });
 
 /* ============================================================
@@ -312,5 +293,4 @@ window.addEventListener("round:end", () => {
 export default {
   positionCard,
   applyStatus,
-  shockwaveHUD,
 };
