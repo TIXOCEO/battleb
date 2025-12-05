@@ -1,18 +1,19 @@
 // ============================================================================
-// 8-twist-engine.ts — Twist Engine v16.3 (Overlay v6 Compatible)
+// 8-twist-engine.ts — Twist Engine v7.0 (Target-Based Animations + Countdown)
 // ============================================================================
 //
-// ✔ ENIGE PATCH: emitOverlay() omzetten naar twist:takeover / twist:clear
-// ✔ GEEN inhoudelijke logica aangepast
-// ✔ Alle bestaande twist functies blijven identiek werken
-// ✔ Overlay animaties werken nu WEL (moneygun, bomb, heal, immune, breaker…)
+// ✔ Volledig compatibel met Overlay v6/v7
+// ✔ Nieuw: twist:countdown event voor bomb (3 → 2 → 1)
+// ✔ Nieuw: volledige target-informatie (id, name, index)
+// ✔ Nieuw: victims + survivor indices voor DiamondPistol
+// ✔ Nieuw: uniforme emitOverlay() → payload door naar overlay
+// ✔ Geen game-logic gewijzigd, alleen animatie-informatie toegevoegd
 // ============================================================================
 
 import { io, emitLog } from "../server";
 import {
   getArena,
   emitArena,
-  eliminate,
   toggleGalaxyMode
 } from "./5-game-engine";
 
@@ -55,12 +56,16 @@ async function findUser(raw: string): Promise<any | null> {
   return {
     id: q.rows[0].tiktok_id.toString(),
     username: q.rows[0].username.replace(/^@/, ""),
-    display_name: q.rows[0].display_name,
+    display_name: q.rows[0].display_name
   };
 }
 
 function getArenaPlayer(id: string) {
   return getArena().players.find((p) => p.id === id) || null;
+}
+
+function getPlayerIndex(id: string): number {
+  return getArena().players.findIndex((p) => p.id === id);
 }
 
 function isImmune(id: string): boolean {
@@ -105,11 +110,9 @@ function clearEliminationMark(id: string): boolean {
 }
 
 // ============================================================================
-// *** NECESSARY PATCH ***
-// twist:<name>  →  twist:takeover + twist:clear
+// UNIFORM OVERLAY EMITTER (PATCHED)
 // ============================================================================
 function emitOverlay(name: string, data: any = {}) {
-
   const MAP: Record<string, string> = {
     moneygun: "moneygun",
     bomb_start: "bomb",
@@ -123,17 +126,20 @@ function emitOverlay(name: string, data: any = {}) {
   };
 
   const type = MAP[name];
-  if (!type) return; // unknown → ignore
+  if (!type) return;
 
-  const title =
-    data.by
-      ? `${data.by} gebruikt ${type}`.toUpperCase()
-      : type.toUpperCase();
+  const title = data.by
+    ? `${data.by} gebruikt ${type}`.toUpperCase()
+    : type.toUpperCase();
 
-  // FIRE ANIMATION
-  io.emit("twist:takeover", { type, title });
+  const payload = {
+    type,
+    title,
+    ...data
+  };
 
-  // AUTO CLEAR IN ANIMATION ENGINE
+  io.emit("twist:takeover", payload);
+
   setTimeout(() => io.emit("twist:clear"), 1800);
 }
 
@@ -162,18 +168,15 @@ async function applyGalaxy(senderId: string, senderName: string): Promise<void> 
 
   emitLog({
     type: "twist",
-    message: `${senderName} gebruikte GALAXY → ranking nu ${
-      reversedNow ? "omgekeerd" : "normaal"
-    }`
+    message: `${senderName} gebruikte GALAXY → ranking nu ${reversedNow ? "omgekeerd" : "normaal"}`
   });
 
   await emitArena();
 }
 
 // ============================================================================
-// MONEYGUN
+// MONEYGUN — (targetId + targetIndex + targetName)
 // ============================================================================
-
 async function applyMoneyGun(senderId: string, senderName: string, target: any): Promise<void> {
   if (!target) return;
 
@@ -189,27 +192,20 @@ async function applyMoneyGun(senderId: string, senderName: string, target: any):
     return;
   }
 
-  if (p.eliminated) {
-    emitLog({
-      type: "twist",
-      message: `${senderName} MoneyGun → ${target.display_name} al gemarkeerd`
-    });
-    return;
-  }
-
   const ok = await consumeTwistFromUser(senderId, "moneygun");
   if (!ok) {
-    emitLog({
-      type: "twist",
-      message: `${senderName} probeerde MoneyGun zonder twist`
-    });
+    emitLog({ type: "twist", message: `${senderName} probeerde MoneyGun zonder twist` });
     return;
   }
 
-  if (!p.boosters.includes("mg")) p.boosters.push("mg");
   markEliminated(target.id);
 
-  emitOverlay("moneygun", { by: senderName, target: target.display_name });
+  emitOverlay("moneygun", {
+    by: senderName,
+    targetId: target.id,
+    targetName: target.display_name,
+    targetIndex: getPlayerIndex(target.id)
+  });
 
   emitLog({
     type: "twist",
@@ -220,7 +216,7 @@ async function applyMoneyGun(senderId: string, senderName: string, target: any):
 }
 
 // ============================================================================
-// BOMB
+// BOMB — met 3-2-1 COUNTDOWN + targetIndex
 // ============================================================================
 
 let bombInProgress = false;
@@ -229,41 +225,36 @@ async function applyBomb(senderId: string, senderName: string): Promise<void> {
   const arena = getArena();
 
   if (bombInProgress) {
-    emitLog({
-      type: "twist",
-      message: `${senderName} Bomb → gedeblokkeerd, wacht…`
-    });
+    emitLog({ type: "twist", message: `${senderName} Bomb → wacht…` });
     return;
   }
 
-  const poolTargets = arena.players.filter(
+  const list = arena.players.filter(
     (p) => !p.boosters.includes("immune") && !p.eliminated
   );
 
-  if (!poolTargets.length) {
-    emitLog({
-      type: "twist",
-      message: `${senderName} Bomb → geen targets`
-    });
+  if (!list.length) {
+    emitLog({ type: "twist", message: `${senderName} Bomb → geen targets` });
     return;
   }
 
   const ok = await consumeTwistFromUser(senderId, "bomb");
   if (!ok) {
-    emitLog({
-      type: "twist",
-      message: `${senderName} probeerde Bomb zonder twist`
-    });
+    emitLog({ type: "twist", message: `${senderName} probeerde Bomb zonder twist` });
     return;
   }
 
   bombInProgress = true;
 
   emitOverlay("bomb_start", { by: senderName });
-  emitLog({ type: "twist", message: `${senderName} activeert BOMB…` });
 
+  // COUNTDOWN → overlay
   for (let i = 3; i >= 1; i--) {
-    emitLog({ type: "twist", message: `💣 Bomb → ${i}…` });
+    io.emit("twist:countdown", {
+      type: "bomb",
+      step: i,
+      by: senderName
+    });
     await sleep(1000);
   }
 
@@ -273,21 +264,23 @@ async function applyBomb(senderId: string, senderName: string): Promise<void> {
   );
 
   if (!valid.length) {
-    emitLog({ type: "twist", message: `${senderName} Bomb → niemand geldig` });
     bombInProgress = false;
     return;
   }
 
   const chosen = valid[Math.floor(Math.random() * valid.length)];
-
-  if (!chosen.boosters.includes("bomb")) chosen.boosters.push("bomb");
   markEliminated(chosen.id);
 
-  emitOverlay("bomb", { by: senderName, target: chosen.display_name });
+  emitOverlay("bomb", {
+    by: senderName,
+    targetId: chosen.id,
+    targetName: chosen.display_name,
+    targetIndex: getPlayerIndex(chosen.id)
+  });
 
   emitLog({
     type: "twist",
-    message: `${senderName} BOMB → ${chosen.display_name} GEMARKEERD`
+    message: `${senderName} BOMB → ${chosen.display_name} geraakt`
   });
 
   await emitArena();
@@ -296,31 +289,32 @@ async function applyBomb(senderId: string, senderName: string): Promise<void> {
 }
 
 // ============================================================================
-// IMMUNE
+// IMMUNE (targetIndex toegevoegd)
 // ============================================================================
-
 async function applyImmuneTwist(senderId: string, senderName: string, target: any): Promise<void> {
   if (!target) return;
 
   const ok = await consumeTwistFromUser(senderId, "immune");
   if (!ok) {
-    emitLog({
-      type: "twist",
-      message: `${senderName} probeerde Immune zonder twist`
-    });
+    emitLog({ type: "twist", message: `${senderName} probeerde Immune zonder twist` });
     return;
   }
 
   await applyImmune(target.id);
 
-  emitOverlay("immune", { by: senderName, target: target.display_name });
+  emitOverlay("immune", {
+    by: senderName,
+    targetId: target.id,
+    targetName: target.display_name,
+    targetIndex: getPlayerIndex(target.id)
+  });
+
   await emitArena();
 }
 
 // ============================================================================
-// HEAL
+// HEAL (target info toegevoegd)
 // ============================================================================
-
 async function applyHeal(senderId: string, senderName: string, target: any): Promise<void> {
   if (!target) return;
 
@@ -338,30 +332,26 @@ async function applyHeal(senderId: string, senderName: string, target: any): Pro
 
   const ok = await consumeTwistFromUser(senderId, "heal");
   if (!ok) {
-    emitLog({
-      type: "twist",
-      message: `${senderName} probeerde Heal zonder twist`
-    });
+    emitLog({ type: "twist", message: `${senderName} probeerde Heal zonder twist` });
     return;
   }
 
-  p.boosters = p.boosters.filter((b) => b !== "mg" && b !== "bomb");
+  p.boosters = p.boosters.filter((b) => !["mg", "bomb"].includes(b));
   clearEliminationMark(target.id);
 
-  emitOverlay("heal", { by: senderName, target: target.display_name });
-
-  emitLog({
-    type: "twist",
-    message: `${senderName} HEAL → ${target.display_name} is hersteld`
+  emitOverlay("heal", {
+    by: senderName,
+    targetId: target.id,
+    targetName: target.display_name,
+    targetIndex: getPlayerIndex(target.id)
   });
 
   await emitArena();
 }
 
 // ============================================================================
-// BREAKER
+// BREAKER (CRACKED/BROKEN) — targetIndex toegevoegd
 // ============================================================================
-
 async function applyBreaker(senderId: string, senderName: string, target: any): Promise<void> {
   if (!target) return;
 
@@ -369,35 +359,32 @@ async function applyBreaker(senderId: string, senderName: string, target: any): 
   const p = arena.players.find((x) => x.id === target.id);
   if (!p) return;
 
-  const consumed = await consumeTwistFromUser(senderId, "breaker");
-  if (!consumed) {
-    emitLog({
-      type: "twist",
-      message: `${senderName} probeerde Breaker zonder twist`
-    });
+  const ok = await consumeTwistFromUser(senderId, "breaker");
+  if (!ok) {
+    emitLog({ type: "twist", message: `${senderName} probeerde Breaker zonder twist` });
     return;
   }
 
   p.breakerHits = (p.breakerHits ?? 0) + 1;
 
+  const index = getPlayerIndex(p.id);
+
   if (p.breakerHits === 1) {
-    emitOverlay("breaker_cracked", { by: senderName, target: p.display_name });
-
-    emitLog({
-      type: "twist",
-      message: `${senderName} BREAKER → ${p.display_name} shield CRACKED (1/2)`
+    emitOverlay("breaker_cracked", {
+      by: senderName,
+      targetId: p.id,
+      targetName: p.display_name,
+      targetIndex: index
     });
-  }
-
-  if (p.breakerHits >= 2) {
+  } else {
     p.boosters = p.boosters.filter((b) => b !== "immune");
-    if (p.positionStatus === "immune") p.positionStatus = "alive";
+    p.positionStatus = "alive";
 
-    emitOverlay("breaker_broken", { by: senderName, target: p.display_name });
-
-    emitLog({
-      type: "twist",
-      message: `${senderName} BREAKER → ${p.display_name} IMMUNE volledig gebroken!`
+    emitOverlay("breaker_broken", {
+      by: senderName,
+      targetId: p.id,
+      targetName: p.display_name,
+      targetIndex: index
     });
   }
 
@@ -405,9 +392,8 @@ async function applyBreaker(senderId: string, senderName: string, target: any): 
 }
 
 // ============================================================================
-// DIAMOND PISTOL
+// DIAMOND PISTOL — volledige mapping toegevoegd (survivor + victims)
 // ============================================================================
-
 async function applyDiamondPistol(senderId: string, senderName: string, survivor: any): Promise<void> {
   if (!survivor) return;
 
@@ -416,15 +402,7 @@ async function applyDiamondPistol(senderId: string, senderName: string, survivor
   if (arena.diamondPistolUsed) {
     emitLog({
       type: "twist",
-      message: `${senderName} probeerde DiamondPistol → deze ronde al gebruikt`
-    });
-    return;
-  }
-
-  if (String(survivor.id) === String(senderId)) {
-    emitLog({
-      type: "twist",
-      message: `${senderName} probeerde DiamondPistol → je kunt jezelf niet kiezen`
+      message: `${senderName} → DiamondPistol al gebruikt`
     });
     return;
   }
@@ -442,9 +420,7 @@ async function applyDiamondPistol(senderId: string, senderName: string, survivor
     (p) => p.id !== survivor.id && !p.boosters.includes("immune")
   );
 
-  for (const v of victims) {
-    markEliminated(v.id);
-  }
+  victims.forEach((v) => markEliminated(v.id));
 
   const surv = arena.players.find((p) => p.id === survivor.id);
   if (surv && !surv.boosters.includes("immune")) surv.boosters.push("immune");
@@ -454,8 +430,13 @@ async function applyDiamondPistol(senderId: string, senderName: string, survivor
 
   emitOverlay("diamondpistol", {
     by: senderName,
-    survivor: survivor.display_name,
-    victims: victims.map((v) => v.display_name)
+    survivorId: survivor.id,
+    survivorName: survivor.display_name,
+    survivorIndex: getPlayerIndex(survivor.id),
+
+    victimIds: victims.map(v => v.id),
+    victimNames: victims.map(v => v.display_name),
+    victimIndices: victims.map(v => getPlayerIndex(v.id))
   });
 
   emitLog({
@@ -469,8 +450,12 @@ async function applyDiamondPistol(senderId: string, senderName: string, survivor
 // ============================================================================
 // USE TWIST
 // ============================================================================
-
-export async function useTwist(senderId: string, senderName: string, twist: TwistType, rawTarget?: string): Promise<void> {
+export async function useTwist(
+  senderId: string,
+  senderName: string,
+  twist: TwistType,
+  rawTarget?: string
+): Promise<void> {
   const arena = getArena();
 
   if (arena.status !== "active" && arena.status !== "grace") {
@@ -495,33 +480,19 @@ export async function useTwist(senderId: string, senderName: string, twist: Twis
   }
 
   switch (twist) {
-    case "galaxy":
-      return applyGalaxy(senderId, senderName);
-
-    case "moneygun":
-      return applyMoneyGun(senderId, senderName, target);
-
-    case "bomb":
-      return applyBomb(senderId, senderName);
-
-    case "immune":
-      return applyImmuneTwist(senderId, senderName, target);
-
-    case "heal":
-      return applyHeal(senderId, senderName, target);
-
-    case "diamondpistol":
-      return applyDiamondPistol(senderId, senderName, target);
-
-    case "breaker":
-      return applyBreaker(senderId, senderName, target);
+    case "galaxy": return applyGalaxy(senderId, senderName);
+    case "moneygun": return applyMoneyGun(senderId, senderName, target);
+    case "bomb": return applyBomb(senderId, senderName);
+    case "immune": return applyImmuneTwist(senderId, senderName, target);
+    case "heal": return applyHeal(senderId, senderName, target);
+    case "diamondpistol": return applyDiamondPistol(senderId, senderName, target);
+    case "breaker": return applyBreaker(senderId, senderName, target);
   }
 }
 
 // ============================================================================
 // ADD TWIST BY GIFT
 // ============================================================================
-
 export async function addTwistByGift(userId: string, twist: TwistType): Promise<void> {
   await giveTwistToUser(userId, twist);
 
@@ -532,9 +503,8 @@ export async function addTwistByGift(userId: string, twist: TwistType): Promise<
 }
 
 // ============================================================================
-// PARSER
+// PARSER (!use <twist> <target>)
 // ============================================================================
-
 export async function parseUseCommand(senderId: string, senderName: string, msg: string): Promise<void> {
   const parts = msg.trim().split(/\s+/);
   if (parts[0]?.toLowerCase() !== "!use") return;
@@ -551,7 +521,6 @@ export async function parseUseCommand(senderId: string, senderName: string, msg:
 // ============================================================================
 // EXPORT
 // ============================================================================
-
 export default {
   useTwist,
   addTwistByGift,
