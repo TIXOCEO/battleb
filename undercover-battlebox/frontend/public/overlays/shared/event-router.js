@@ -10,7 +10,7 @@
 //
 // ★ ADDITIONS:
 //   + updateArena listener
-//   + round lifecycle listeners
+//   + round lifecycle listeners  (PATCHED FOR TIMER)
 //   + twist overlay listeners
 //   + DOM event dispatch for arena.js animations
 //   + load arena snapshot into arenaStore
@@ -52,18 +52,17 @@ export async function initEventRouter() {
   );
 
   // -------------------------------------------------
-  // INITIAL SNAPSHOT — now includes arena
+  // INITIAL SNAPSHOT — includes arena
   // -------------------------------------------------
   socket.on("overlayInitialSnapshot", (snap) => {
     applySnapshot(snap);
 
-    // ★ ADD: arena snapshot
     if (snap.arena) {
       arenaStore.set(snap.arena);
     }
   });
 
-// -------------------------------------------------
+  // -------------------------------------------------
   // ARENA — realtime update
   // -------------------------------------------------
   socket.on("updateArena", (arena) => {
@@ -71,16 +70,26 @@ export async function initEventRouter() {
 
     arenaStore.set(arena);
 
-    // ★ dispatch DOM event for animation hooks
     document.dispatchEvent(
       new CustomEvent("arena:update", { detail: arena })
     );
   });
 
   // -------------------------------------------------
-  // ROUND START
+  // ROUND START — TIMER PATCH (totalMs + endsAt)
   // -------------------------------------------------
   socket.on("round:start", (payload) => {
+    const total = payload.duration * 1000;
+    const endsAt = Date.now() + total;
+
+    arenaStore.set({
+      status: "active",
+      round: payload.round,
+      type: payload.type,
+      totalMs: total,
+      endsAt,
+    });
+
     document.dispatchEvent(
       new CustomEvent("arena:roundStart", { detail: payload })
     );
@@ -91,9 +100,20 @@ export async function initEventRouter() {
   });
 
   // -------------------------------------------------
-  // GRACE START
+  // GRACE START — TIMER PATCH (totalMs + endsAt)
   // -------------------------------------------------
   socket.on("round:grace", (payload) => {
+    const total = payload.grace * 1000;
+    const endsAt = Date.now() + total;
+
+    arenaStore.set({
+      status: "grace",
+      round: payload.round,
+      type: "quarter",
+      totalMs: total,
+      endsAt,
+    });
+
     document.dispatchEvent(
       new CustomEvent("arena:graceStart", { detail: payload })
     );
@@ -104,9 +124,15 @@ export async function initEventRouter() {
   });
 
   // -------------------------------------------------
-  // ROUND END
+  // ROUND END — NEW CLEAN ENDING MODEL
   // -------------------------------------------------
   socket.on("round:end", (payload) => {
+    arenaStore.set({
+      status: "ended",
+      totalMs: 0,
+      endsAt: 0,
+    });
+
     document.dispatchEvent(
       new CustomEvent("arena:roundEnd", { detail: payload })
     );
@@ -135,7 +161,7 @@ export async function initEventRouter() {
     );
   });
 
-// -------------------------------------------------
+  // -------------------------------------------------
   // LIVE QUEUE UPDATES
   // -------------------------------------------------
   socket.on("updateQueue", (packet) => {
