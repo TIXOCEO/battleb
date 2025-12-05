@@ -1,30 +1,31 @@
 // ============================================================================
-// arena.js — BattleBox Arena Overlay (FINAL v6.1 — COMPATIBLE WITH arenaStore.js)
+// arena.js — BattleBox Arena Overlay (FINAL BUILD v5.0)
 // ============================================================================
 //
-// ✔ Transparante overlay
-// ✔ Geen rotatie voor playercards
-// ✔ mm:ss timer + werkende ring
-// ✔ Galaxy twist support
-// ✔ Volledig compatibel met /overlays/shared/arenaStore.js
+// • Pop-in new players
+// • Animated score flashes
+// • Full status system (alive, danger, immune, broken immune, eliminated)
+// • Round-start shockwave + shake
+// • Grace pulse
+// • Round-end elimination mode
+// • Twist takeover fullscreen
+// • Galaxy twist: vortex + card spin mode
+// • Wall-clock HUD ring progress
+//
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
-
 import {
   arenaStore,
   arenaTwistStore,
-  setArenaSnapshot,
-  updatePlayers,
-  renderHudProgress
-} from "/overlays/shared/arena-store.js";
+  renderHudProgress,
+} from "/overlays/arena/arenaStore.js";
 
 import {
   playTwistAnimation,
   clearTwistAnimation
 } from "/overlays/shared/twistAnim.js";
 
-// Start router
 initEventRouter();
 
 /* ============================================================
@@ -39,20 +40,20 @@ const hudRing = document.getElementById("hud-ring-progress");
 const playersContainer = document.getElementById("arena-players");
 
 const twistOverlay = document.getElementById("twist-takeover");
-const galaxyLayer = document.getElementById("twist-galaxy");
+const galaxyLayer = document.getElementById("twist-galaxy');
 
 /* ============================================================
-   CONSTANTS — card positions (no rotation)
+   CONSTANTS — circular positions
 ============================================================ */
 const POSITIONS = [
-  { x: 0.7071, y: -0.7071 },
-  { x: 1.0,    y: 0.0 },
-  { x: 0.7071, y: 0.7071 },
-  { x: 0.0,    y: 1.0 },
-  { x: -0.7071,y: 0.7071 },
-  { x: -1.0,   y: 0.0 },
-  { x: -0.7071,y: -0.7071 },
-  { x: 0.0,    y: -1.0 }
+  { idx: 1, x: 0.7071, y: -0.7071, rot: -45 },
+  { idx: 2, x: 1.0,    y: 0.0,     rot:   0 },
+  { idx: 3, x: 0.7071, y: 0.7071,  rot:  45 },
+  { idx: 4, x: 0.0,    y: 1.0,     rot:  90 },
+  { idx: 5, x: -0.7071,y: 0.7071,  rot: 135 },
+  { idx: 6, x: -1.0,   y: 0.0,     rot: 180 },
+  { idx: 7, x: -0.7071,y: -0.7071, rot: -135},
+  { idx: 8, x: 0.0,    y: -1.0,    rot: -90 },
 ];
 
 const CENTER_X = 600;
@@ -63,16 +64,14 @@ const EMPTY_AVATAR =
   "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
 
 /* ============================================================
-   HELPERS
+   ANIMATION HELPERS
 ============================================================ */
 function animateOnce(el, className) {
   if (!el) return;
   el.classList.remove(className);
   void el.offsetWidth;
   el.classList.add(className);
-  el.addEventListener("animationend", () => {
-    el.classList.remove(className);
-  }, { once: true });
+  el.addEventListener("animationend", () => el.classList.remove(className), { once: true });
 }
 
 const lastScoreMap = new Map();
@@ -133,7 +132,6 @@ arenaStore.subscribe((state) => {
     const p = players[i];
 
     if (!p) {
-      // EMPTY SLOT
       card.name.textContent = "LEEG";
       card.score.textContent = "0";
       card.bg.style.backgroundImage = `url(${EMPTY_AVATAR})`;
@@ -143,10 +141,8 @@ arenaStore.subscribe((state) => {
       continue;
     }
 
-    // NAME
     card.name.textContent = p.display_name ?? "Onbekend";
 
-    // SCORE ANIMATION
     const previous = lastScoreMap.get(p.id) ?? 0;
     if (p.score !== previous) {
       animateOnce(card.score, "bb-score-anim");
@@ -154,20 +150,14 @@ arenaStore.subscribe((state) => {
     }
 
     card.score.textContent = p.score ?? 0;
-
-    // AVATAR
     card.bg.style.backgroundImage = `url(${p.avatar_url || EMPTY_AVATAR})`;
 
-    // JOIN ANIMATION
     if (!lastCardOccupied[i]) {
       animateOnce(card.el, "bb-join-pop");
       lastCardOccupied[i] = true;
     }
 
-    // STATUS (immune / danger / alive / eliminated)
     applyStatus(card.el, p);
-
-    // POSITIONING
     positionCard(card.el, POSITIONS[i]);
   }
 });
@@ -207,12 +197,11 @@ function applyStatus(el, p) {
     return;
   }
 
-  // Default
   el.classList.add("status-alive");
 }
 
 /* ============================================================
-   POSITIONING — NO ROTATION
+   POSITIONING
 ============================================================ */
 function positionCard(el, pos) {
   const dx = pos.x * RADIUS;
@@ -221,12 +210,11 @@ function positionCard(el, pos) {
   el.style.left = `${CENTER_X + dx - 80}px`;
   el.style.top = `${CENTER_Y + dy - 80}px`;
 
-  // ✔ No rotation — upright cards
-  el.style.transform = `rotate(0deg)`;
+  el.style.transform = `rotate(${pos.rot}deg)`;
 }
 
 /* ============================================================
-   HUD + TIMER + PROGRESS RING
+   HUD + RING RENDERING
 ============================================================ */
 arenaStore.subscribe((state) => {
   hudRound.textContent = `RONDE ${state.round ?? 0}`;
@@ -236,85 +224,71 @@ arenaStore.subscribe((state) => {
   let remaining = 0;
 
   if (state.status === "active") {
-    remaining = Math.max(0, (state.roundCutoff - now) / 1000);
-  }
-  else if (state.status === "grace") {
-    remaining = Math.max(0, (state.graceEnd - now) / 1000);
+    remaining = Math.max(0, (state.roundCutoff - now) / 1000 | 0);
+  } else if (state.status === "grace") {
+    remaining = Math.max(0, (state.graceEnd - now) / 1000 | 0);
   }
 
-  // ✔ Format mm:ss
-  const m = Math.floor(remaining / 60).toString().padStart(2, "0");
-  const s = Math.floor(remaining % 60).toString().padStart(2, "0");
-  hudTimer.textContent = `${m}:${s}`;
+  hudTimer.textContent = remaining.toString().padStart(2, "0");
 
-  // PROGRESS RING
   renderHudProgress(state, hudRing);
+
+  if (state.status === "active" && remaining === state.settings.roundDurationPre) {
+    animateOnce(root, "bb-round-start-shockwave");
+  }
 });
 
 /* ============================================================
-   TWIST — TAKEOVER + GALAXY MODE
+   TWIST — TAKEOVER + GALAXY
 ============================================================ */
 arenaTwistStore.subscribe((state) => {
   if (state.active) {
-    // GALAXY MODE ENABLED
+    // If GALAXY twist → spin mode
     if (state.type === "galaxy") {
       galaxyLayer.classList.remove("hidden");
       galaxyLayer.classList.add("galaxy-active");
 
-      // All cards spin (but remain upright)
-      cardRefs.forEach(ref => {
-        ref.el.classList.add("bb-galaxy-spin-card");
-      });
+      cardRefs.forEach(ref => ref.el.classList.add("bb-card-spin"));
     }
 
-    // Play fullscreen twist animation
     playTwistAnimation(twistOverlay, state.type, state.title);
 
   } else {
-    // Disable takeover
     clearTwistAnimation(twistOverlay);
 
-    // Reset galaxy visuals
+    // Reset galaxy mode
     galaxyLayer.classList.add("hidden");
     galaxyLayer.classList.remove("galaxy-active");
 
-    cardRefs.forEach(ref => {
-      ref.el.classList.remove("bb-galaxy-spin-card");
-    });
+    cardRefs.forEach(ref => ref.el.classList.remove("bb-card-spin"));
   }
 });
 
 /* ============================================================
-   ROUND EVENTS (signals from server)
+   ROUND EVENTS
 ============================================================ */
-
-// ROUND START
 document.addEventListener("arena:roundStart", () => {
   animateOnce(root, "bb-round-start-shake");
 });
 
-// GRACE START
 document.addEventListener("arena:graceStart", () => {
   animateOnce(root, "bb-grace-pulse");
 });
 
-// ROUND END (elimination reveal)
 document.addEventListener("arena:roundEnd", () => {
   animateOnce(root, "bb-round-end-flash");
 
-  // Highlight players in danger
   cardRefs.forEach(ref => {
     if (ref.el.classList.contains("status-danger")) {
       animateOnce(ref.el, "bb-danger-pulse");
     }
   });
 
-  // HUD highlight
   animateOnce(hudRound, "bb-hud-elimination-flash");
 });
 
 /* ============================================================
-   EXPORT PUBLIC API
+   EXPORT
 ============================================================ */
 export default {
   positionCard,
