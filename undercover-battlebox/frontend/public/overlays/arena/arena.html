@@ -8,13 +8,13 @@
   <!-- GLOBAL THEME -->
   <link rel="stylesheet" href="/overlays/shared/theme.css" />
 
-  <!-- ARENA CSS (v1.9) -->
+  <!-- ARENA CSS (v1.9 TRANSPARENT PATCH) -->
   <link rel="stylesheet" href="/overlays/arena/arena.css" />
 
   <style>
     body {
       margin: 0;
-      background: transparent;
+      background: transparent !important;
       overflow: hidden;
       font-family: "Rajdhani", sans-serif;
     }
@@ -26,11 +26,13 @@
   <!-- ========================================================= -->
   <!--        MAIN ARENA CANVAS (fixed 1200 × 800)                -->
   <!-- ========================================================= -->
+  <!-- PATCH: root achtergrond wordt transparant via CSS -->
   <div id="arena-root" class="bb-arena-root">
 
     <!-- ===================================================== -->
     <!-- 1) GALAXY TWIST BACKGROUND (behind everything)        -->
     <!-- ===================================================== -->
+    <!-- Geen wijziging: deze laag mag animaties tonen -->
     <div id="twist-galaxy" class="twist-anim galaxy-vortex hidden">
       <div class="galaxy-stars"></div>
       <div class="galaxy-ring"></div>
@@ -41,11 +43,13 @@
     <!-- ===================================================== -->
     <!-- 2) TWIST TAKEOVER (over everything)                  -->
     <!-- ===================================================== -->
+    <!-- PATCH: achtergrond transparant via CSS -->
     <div id="twist-takeover" class="bb-twist-takeover hidden"></div>
 
     <!-- ===================================================== -->
     <!-- 3) CENTRAL HUD (round, type, timer, ring)            -->
     <!-- ===================================================== -->
+    <!-- PATCH: HUD achtergrond transparant via CSS -->
     <div id="arena-hud" class="bb-hud">
       <div class="hud-inner">
 
@@ -53,7 +57,7 @@
         <div id="hud-type" class="hud-type-text">KWARTFINALE</div>
 
         <!-- TIMER -->
-        <div id="hud-timer" class="hud-timer">00</div>
+        <div id="hud-timer" class="hud-timer">00:00</div>
 
         <!-- Progress Ring -->
         <svg class="hud-ring" width="360" height="360">
@@ -87,7 +91,7 @@
   <!-- Twist animation engine -->
   <script type="module" src="/overlays/shared/twistAnim.js"></script>
 
-  <!-- Arena renderer (FINAL v4.x) -->
+  <!-- Arena renderer (FINAL v5.x TRANSPARENT PATCH) -->
   <script type="module" src="/overlays/arena/arena.js"></script>
 
 </body>
