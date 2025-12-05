@@ -1,16 +1,12 @@
 // ============================================================================
-// arena.js — BattleBox Arena Overlay (FINAL BUILD v5.0)
+// arena.js — BattleBox Arena Overlay (FINAL BUILD v5.1 — TIMER & ROTATION PATCH)
 // ============================================================================
 //
-// • Pop-in new players
-// • Animated score flashes
-// • Full status system (alive, danger, immune, broken immune, eliminated)
-// • Round-start shockwave + shake
-// • Grace pulse
-// • Round-end elimination mode
-// • Twist takeover fullscreen
-// • Galaxy twist: vortex + card spin mode
-// • Wall-clock HUD ring progress
+// NECESSARY UPGRADES:
+// • Cards no longer rotated (everyone upright)
+// • Timer now uses endsAt + totalMs (mm:ss)
+// • Fallback to old cutoff values preserved
+// • Progress ring synced with new timer model
 //
 // ============================================================================
 
@@ -43,17 +39,17 @@ const twistOverlay = document.getElementById("twist-takeover");
 const galaxyLayer = document.getElementById("twist-galaxy");
 
 /* ============================================================
-   CONSTANTS — circular positions
+   CONSTANTS — positions around HUD (rotation removed!)
 ============================================================ */
 const POSITIONS = [
-  { idx: 1, x: 0.7071, y: -0.7071, rot: -45 },
-  { idx: 2, x: 1.0,    y: 0.0,     rot:   0 },
-  { idx: 3, x: 0.7071, y: 0.7071,  rot:  45 },
-  { idx: 4, x: 0.0,    y: 1.0,     rot:  90 },
-  { idx: 5, x: -0.7071,y: 0.7071,  rot: 135 },
-  { idx: 6, x: -1.0,   y: 0.0,     rot: 180 },
-  { idx: 7, x: -0.7071,y: -0.7071, rot: -135},
-  { idx: 8, x: 0.0,    y: -1.0,    rot: -90 },
+  { idx: 1, x: 0.7071, y: -0.7071 },
+  { idx: 2, x: 1.0,    y: 0.0 },
+  { idx: 3, x: 0.7071, y: 0.7071 },
+  { idx: 4, x: 0.0,    y: 1.0 },
+  { idx: 5, x: -0.7071, y: 0.7071 },
+  { idx: 6, x: -1.0,     y: 0.0 },
+  { idx: 7, x: -0.7071, y: -0.7071 },
+  { idx: 8, x: 0.0,     y: -1.0 },
 ];
 
 const CENTER_X = 600;
@@ -201,7 +197,7 @@ function applyStatus(el, p) {
 }
 
 /* ============================================================
-   POSITIONING
+   POSITIONING — ROTATION REMOVED
 ============================================================ */
 function positionCard(el, pos) {
   const dx = pos.x * RADIUS;
@@ -210,32 +206,43 @@ function positionCard(el, pos) {
   el.style.left = `${CENTER_X + dx - 80}px`;
   el.style.top = `${CENTER_Y + dy - 80}px`;
 
-  el.style.transform = `rotate(${pos.rot}deg)`;
+  // Remove rotation (cards must be upright)
+  el.style.transform = `rotate(0deg)`;
 }
 
 /* ============================================================
-   HUD + RING RENDERING
+   HUD TIMER + RING — NEW MODEL (mm:ss)
 ============================================================ */
 arenaStore.subscribe((state) => {
   hudRound.textContent = `RONDE ${state.round ?? 0}`;
   hudType.textContent = state.type === "finale" ? "FINALE" : "KWARTFINALE";
 
   const now = Date.now();
-  let remaining = 0;
 
-  if (state.status === "active") {
-    remaining = Math.max(0, (state.roundCutoff - now) / 1000 | 0);
-  } else if (state.status === "grace") {
-    remaining = Math.max(0, (state.graceEnd - now) / 1000 | 0);
+  let remainingMs = state.endsAt - now;
+  let totalMs = state.totalMs;
+
+  // Fallback for old backend
+  if (!state.totalMs || state.totalMs <= 0) {
+    if (state.status === "active") {
+      totalMs = state.settings.roundDurationPre * 1000;
+      remainingMs = Math.max(0, state.roundCutoff - now);
+    } else if (state.status === "grace") {
+      totalMs = 5000;
+      remainingMs = Math.max(0, state.graceEnd - now);
+    }
   }
 
-  hudTimer.textContent = remaining.toString().padStart(2, "0");
+  remainingMs = Math.max(0, remainingMs);
 
+  const sec = Math.floor(remainingMs / 1000);
+  const mm = String(Math.floor(sec / 60)).padStart(2, "0");
+  const ss = String(sec % 60).padStart(2, "0");
+
+  hudTimer.textContent = `${mm}:${ss}`;
+
+  // Progress ring
   renderHudProgress(state, hudRing);
-
-  if (state.status === "active" && remaining === state.settings.roundDurationPre) {
-    animateOnce(root, "bb-round-start-shockwave");
-  }
 });
 
 /* ============================================================
@@ -243,12 +250,9 @@ arenaStore.subscribe((state) => {
 ============================================================ */
 arenaTwistStore.subscribe((state) => {
   if (state.active) {
-    // If GALAXY twist → spin mode
     if (state.type === "galaxy") {
       galaxyLayer.classList.remove("hidden");
       galaxyLayer.classList.add("galaxy-active");
-
-      cardRefs.forEach(ref => ref.el.classList.add("bb-card-spin"));
     }
 
     playTwistAnimation(twistOverlay, state.type, state.title);
@@ -256,11 +260,8 @@ arenaTwistStore.subscribe((state) => {
   } else {
     clearTwistAnimation(twistOverlay);
 
-    // Reset galaxy mode
     galaxyLayer.classList.add("hidden");
     galaxyLayer.classList.remove("galaxy-active");
-
-    cardRefs.forEach(ref => ref.el.classList.remove("bb-card-spin"));
   }
 });
 
