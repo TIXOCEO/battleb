@@ -2,7 +2,7 @@
 // stores.js — BattleBox Overlay Stores (10-SLOT EVENTS — NO FADE VERSION)
 // ============================================================================
 
-// ✔ createStore is nu een NAMED EXPORT
+// ✔ FIXED: export createStore zodat arenaStore.js het kan importeren
 export function createStore(initialState) {
   let state = { ...initialState };
   const listeners = new Set();
@@ -23,11 +23,8 @@ export function createStore(initialState) {
   };
 }
 
-const EMPTY_AVATAR =
-  "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
-
 // ============================================================================
-// QUEUE STORE (unchanged)
+// QUEUE STORE
 // ============================================================================
 export const queueStore = createStore({
   entries: [],
@@ -49,7 +46,7 @@ queueStore.clearHighlight = () => {
 };
 
 // ============================================================================
-// EVENTS STORE — 10 items, new on top, NEVER auto-fade
+// EVENTS STORE — 10 items, no auto fade
 // ============================================================================
 export const eventStore = createStore({
   events: [],
@@ -60,11 +57,11 @@ eventStore.pushEvent = (evt) => {
   eventStore.set({ events: next });
 };
 
-// fadeOutEvent does NOTHING now
+// No fading
 eventStore.fadeOutEvent = () => {};
 
 // ============================================================================
-// TWISTS STORE
+// TWIST STORE
 // ============================================================================
 export const twistStore = createStore({
   visibleTwists: [],
@@ -86,7 +83,7 @@ tickerStore.setText = (txt) => {
 };
 
 // ============================================================================
-// SNAPSHOT LOADER — no event injection, no resetting events
+// SNAPSHOT LOADER
 // ============================================================================
 export function applySnapshot(snap) {
   if (!snap) return;
@@ -94,6 +91,5 @@ export function applySnapshot(snap) {
   if (snap.queue?.entries) queueStore.setQueue(snap.queue.entries);
   if (snap.ticker) tickerStore.setText(snap.ticker);
 
-  // ✔ DO NOT override eventStore
-  // events blijven zoals ze zijn
+  // Events blijven staan
 }
