@@ -308,3 +308,143 @@ bb-p2 { transform: rotate(0deg) translate(...); }
 /* Rotaties worden automatisch in JS toegepast omdat CSS calc() niet combineerbaar is met rotate().
    Daarom laten we alleen de translate hierboven staan.
 */
+
+/* ============================================================
+   PLAYER — JOIN POP-IN
+============================================================ */
+@keyframes bb-join-pop {
+  0% { transform: scale(0) rotate(var(--rot)); opacity: 0; }
+  60% { transform: scale(1.15) rotate(var(--rot)); opacity: 1; }
+  100% { transform: scale(1) rotate(var(--rot)); }
+}
+
+.bb-player-card.join-anim {
+  animation: bb-join-pop 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.4);
+}
+
+/* ============================================================
+   DANGER PULSE (ORANJE)
+============================================================ */
+@keyframes bb-danger-pulse {
+  0% { box-shadow: 0 0 12px rgba(255,120,40,0.7); }
+  50% { box-shadow: 0 0 28px rgba(255,140,40,1); }
+  100% { box-shadow: 0 0 12px rgba(255,120,40,0.7); }
+}
+
+.bb-player-card.status-danger {
+  animation: bb-danger-pulse 1.2s infinite ease-in-out;
+}
+
+/* ============================================================
+   ELIMINATION EXPLOSION
+============================================================ */
+@keyframes bb-elim-explode {
+  0% { transform: scale(1) rotate(var(--rot)); filter: brightness(1); }
+  25% { transform: scale(1.2) rotate(var(--rot)); filter: brightness(2); }
+  100% { transform: scale(0.4) rotate(var(--rot)); opacity: 0.25; }
+}
+
+.bb-player-card.status-elimination {
+  animation: bb-elim-explode 0.6s forwards cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ============================================================
+   IMMUNE GLOW
+============================================================ */
+@keyframes bb-immune-glow {
+  0% { box-shadow: 0 0 12px rgba(0,255,150,0.7); }
+  50% { box-shadow: 0 0 24px rgba(0,255,170,1); }
+  100% { box-shadow: 0 0 12px rgba(0,255,150,0.7); }
+}
+
+.bb-player-card.status-immune {
+  animation: bb-immune-glow 1.2s infinite ease-in-out;
+}
+
+/* ============================================================
+   IMMUNE BROKEN — WHITE FLASH
+============================================================ */
+@keyframes bb-immune-broken {
+  0% { box-shadow: 0 0 12px white; }
+  50% { box-shadow: 0 0 28px white; }
+  100% { box-shadow: 0 0 12px white; }
+}
+
+.bb-player-card.status-immune-broken {
+  animation: bb-immune-broken 0.7s infinite ease-in-out;
+}
+
+/* ============================================================
+   SCORE UPDATE FLASH
+============================================================ */
+@keyframes bb-score-flash {
+  0% { color: white; transform: scale(1); }
+  50% { color: gold; transform: scale(1.3); }
+  100% { color: white; transform: scale(1); }
+}
+
+.bb-score-anim {
+  animation: bb-score-flash 0.4s ease-out;
+}
+
+/* ============================================================
+   HUD — ROUND START SHOCKWAVE
+============================================================ */
+@keyframes bb-hud-shockwave {
+  0% { opacity: 0.6; transform: scale(0.8); filter: blur(4px); }
+  60% { opacity: 1; transform: scale(1.1); filter: blur(0px); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.bb-hud-start {
+  animation: bb-hud-shockwave 0.6s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+/* ============================================================
+   HUD TIMER TICK GLOW
+============================================================ */
+@keyframes bb-timer-tick {
+  0% { color: white; }
+  50% { color: var(--bb-orange); text-shadow: 0 0 12px var(--bb-orange); }
+  100% { color: white; }
+}
+
+.bb-timer-tick {
+  animation: bb-timer-tick 0.4s ease-out;
+}
+
+/* ============================================================
+   TWIST TAKEOVER — NEON FLASH
+============================================================ */
+@keyframes bb-twist-flash {
+  0% { opacity: 0; filter: brightness(0); }
+  50% { opacity: 1; filter: brightness(3); }
+  100% { opacity: 1; filter: brightness(1); }
+}
+
+.twist-takeover.show {
+  animation: bb-twist-flash 0.5s ease-out;
+}
+
+/* ============================================================
+   TWIST takeover CRT pulse
+============================================================ */
+@keyframes bb-crt-pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.85; }
+  100% { opacity: 1; }
+}
+
+.twist-takeover {
+  animation: bb-crt-pulse 2s infinite ease-in-out;
+}
+
+/* ============================================================
+   SMOOTH TRANSITIONS FOR CARD POSITIONING
+============================================================ */
+.bb-player-card {
+  transition:
+    left 0.35s cubic-bezier(0.2, 0.7, 0.3, 1),
+    top 0.35s cubic-bezier(0.2, 0.7, 0.3, 1),
+    transform 0.35s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
