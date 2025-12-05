@@ -1,33 +1,38 @@
 @import "/overlays/shared/theme.css";
 
 /* ========================================================================== */
-/* ROOT WRAPPER — fixed 1200 × 800                                            */
+/* ROOT WRAPPER — fixed 1200 × 800  (TRANSPARENT MODE)                        */
 /* ========================================================================== */
 .bb-arena-root {
   width: 1200px;
   height: 800px;
   position: relative;
   overflow: hidden;
-  background: rgba(5,5,8,0.75);
-  border: 2px solid rgba(255,255,255,0.08);
-  backdrop-filter: blur(10px);
-  box-shadow:
-    0 0 40px rgba(255,77,79,0.35),
-    inset 0 0 50px rgba(0,0,0,0.75);
+
+  /* WAS: background: rgba(5,5,8,0.75); */
+  background: transparent !important;
+
+  border: none !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
 }
 
 /* ========================================================================== */
-/* TWIST TAKEOVER (fullscreen overlay)                                        */
+/* TWIST TAKEOVER (fullscreen overlay) — NOW TRANSPARENT                      */
 /* ========================================================================== */
 .bb-twist-takeover {
   position: absolute;
   inset: 0;
-  z-index: 80; /* ABOVE EVERYTHING */
-  background: rgba(15,15,20,0.92);
+  z-index: 80;
+  
+  /* WAS: background: rgba(15,15,20,0.92); */
+  background: transparent !important;
+  
   display: flex;
   justify-content: center;
   align-items: center;
-  backdrop-filter: blur(12px);
+  backdrop-filter: none !important;
+
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.35s ease-out;
@@ -36,6 +41,7 @@
 .bb-twist-takeover.show {
   opacity: 1;
   pointer-events: all;
+
   animation: twist-flash 0.55s ease-out,
              crt-pulse 2s infinite ease-in-out;
 }
@@ -53,7 +59,7 @@
 }
 
 /* ========================================================================== */
-/* CENTRAL HUD (octagon)                                                      */
+/* CENTRAL HUD (octagon) — TRANSPARENT BACKGROUND                             */
 /* ========================================================================== */
 .bb-hud {
   width: 350px;
@@ -62,18 +68,22 @@
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
+
   clip-path: polygon(
     10% 0%, 90% 0%,
     100% 15%, 100% 85%,
     90% 100%, 10% 100%,
     0% 85%, 0% 15%
   );
-  background: rgba(20,20,24,0.76);
+
+  /* WAS: background: rgba(20,20,24,0.76); */
+  background: transparent !important;
+
   border: 2px solid rgba(255,255,255,0.14);
-  box-shadow:
-    0 0 25px rgba(0,0,0,0.8),
-    inset 0 0 32px rgba(0,0,0,0.55),
-    inset 0 0 22px rgba(255,77,79,0.25);
+
+  /* HUD shadow removed for transparency */
+  box-shadow: none !important;
+
   transition: box-shadow 0.35s ease-out;
 }
 
@@ -134,7 +144,7 @@
 }
 
 /* ========================================================================== */
-/* HUD PROGRESS RING                                                          */
+/* HUD PROGRESS RING (unchanged)                                              */
 /* ========================================================================== */
 .hud-ring {
   position: absolute;
@@ -158,11 +168,7 @@
 }
 
 /* ========================================================================== */
-/* SECTION COMPLETE                                                            */
-/* ========================================================================== */
-
-/* ========================================================================== */
-/* PLAYER CARDS — around the HUD                                              */
+/* PLAYER CARDS — around the HUD (TRANSPARENT VERSION)                        */
 /* ========================================================================== */
 #arena-players {
   position: absolute;
@@ -182,12 +188,12 @@
     0% 82%, 0% 18%
   );
 
-  background: rgba(12,12,18,0.72);
+  /* WAS: background: rgba(12,12,18,0.72); */
+  background: transparent !important;
+
+  /* Shadows removed for transparency */
   border: 2px solid rgba(255,255,255,0.12);
-  box-shadow:
-    0 0 20px rgba(0,0,0,0.65),
-    inset 0 0 22px rgba(0,0,0,0.65),
-    inset 0 0 14px rgba(255,77,79,0.18);
+  box-shadow: none !important;
 
   overflow: hidden;
   display: flex;
@@ -204,7 +210,7 @@
 }
 
 /* ========================================================================== */
-/* BACKGROUND AVATAR                                                          */
+/* BACKGROUND AVATAR (UNCHANGED, KEEP BLUR)                                   */
 /* ========================================================================== */
 .bb-player-bgavatar {
   position: absolute;
@@ -216,7 +222,7 @@
 }
 
 /* ========================================================================== */
-/* LABELS                                                                     */
+/* LABELS (unchanged)                                                         */
 /* ========================================================================== */
 .bb-player-labels {
   position: relative;
@@ -243,7 +249,7 @@
 }
 
 /* ========================================================================== */
-/* POSITION BADGE                                                             */
+/* POSITION BADGE (unchanged)                                                 */
 /* ========================================================================== */
 .bb-player-pos {
   position: absolute;
@@ -270,7 +276,7 @@
 }
 
 /* ========================================================================== */
-/* STATUS EFFECTS (alive, danger, immune, broken, elimination)                */
+/* STATUS EFFECTS — ALL RETAINED, NO LOGIC CHANGES                            */
 /* ========================================================================== */
 
 /* ALIVE */
@@ -281,7 +287,7 @@
     inset 0 0 18px rgba(255,255,255,0.22);
 }
 
-/* alive pulse (subtle) */
+/* alive pulse */
 .bb-alive-pulse {
   animation: alive-pulse 1.4s ease-in-out;
 }
@@ -291,9 +297,7 @@
   100% { transform: scale(1); }
 }
 
-/* ========================================================================== */
-/* IMMUNE                                                                     */
-/* ========================================================================== */
+/* IMMUNE */
 .status-immune {
   border-color: #00ff99;
   box-shadow:
@@ -310,9 +314,7 @@
   100% { box-shadow: 0 0 12px rgba(0,255,150,0.7); }
 }
 
-/* ========================================================================== */
-/* IMMUNE BROKEN (white strobe)                                               */
-/* ========================================================================== */
+/* IMMUNE BROKEN */
 .status-immune-broken {
   border-color: #fff;
   box-shadow: 0 0 20px white;
@@ -327,9 +329,7 @@
   100% { filter: brightness(1); }
 }
 
-/* ========================================================================== */
-/* DANGER (orange pulsing)                                                    */
-/* ========================================================================== */
+/* DANGER */
 .status-danger {
   border-color: #ff8800;
   box-shadow:
@@ -346,9 +346,7 @@
   100% { box-shadow: 0 0 14px rgba(255,140,40,0.7); }
 }
 
-/* ========================================================================== */
-/* ELIMINATION (explosion collapse)                                           */
-/* ========================================================================== */
+/* ELIMINATION */
 .status-elimination {
   border-color: #ff0033;
   box-shadow:
@@ -365,9 +363,7 @@
   100% { transform: scale(0.35); opacity: 0.2; filter: brightness(0.6); }
 }
 
-/* ========================================================================== */
-/* JOIN POP                                                                    */
-/* ========================================================================== */
+/* JOIN POP */
 .bb-join-pop {
   animation: join-pop 0.45s cubic-bezier(.25,1.15,.3,1.1);
 }
@@ -377,9 +373,7 @@
   100% { transform: scale(1); }
 }
 
-/* ========================================================================== */
-/* SCORE FLASH                                                                 */
-/* ========================================================================== */
+/* SCORE FLASH */
 .bb-score-anim {
   animation: score-flash .35s ease-out;
 }
@@ -390,11 +384,7 @@
 }
 
 /* ========================================================================== */
-/* END PART 2                                                                  */
-/* ========================================================================== */
-
-/* ========================================================================== */
-/* TWIST TAKEOVER BASE WRAPPER (fullscreen)                                   */
+/* TWIST ANIMATIONS (UNCHANGED)                                               */
 /* ========================================================================== */
 
 .twist-anim {
@@ -417,10 +407,7 @@
   z-index: 10;
 }
 
-/* ========================================================================== */
-/* DIAMOND PISTOL — SHARDS                                                    */
-/* ========================================================================== */
-
+/* DIAMOND SHARDS */
 .diamond-blast .diamond-shard {
   position: absolute;
   width: 22px;
@@ -437,10 +424,7 @@
   100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(1.4) rotate(220deg); }
 }
 
-/* ========================================================================== */
-/* MONEY GUN — BILLS                                                          */
-/* ========================================================================== */
-
+/* MONEY BILLS */
 .money-spray .money-bill {
   position: absolute;
   width: 120px;
@@ -457,10 +441,7 @@
   100% { opacity: 0; transform: translateX(900px) rotate(22deg); }
 }
 
-/* ========================================================================== */
-/* BOMB — shockwave                                                           */
-/* ========================================================================== */
-
+/* BOMB */
 .bomb-blast .bomb-core {
   position: absolute;
   width: 40px; height: 40px;
@@ -488,10 +469,7 @@
   100% { opacity: 0;   transform: scale(15); }
 }
 
-/* ========================================================================== */
-/* IMMUNE — AURA                                                              */
-/* ========================================================================== */
-
+/* IMMUNE AURA */
 .immune-aura .aura-ring {
   position: absolute;
   width: 260px;
@@ -507,10 +485,7 @@
   100% { transform: scale(0.85); opacity: 0.6; }
 }
 
-/* ========================================================================== */
-/* HEAL — CROSS                                                               */
-/* ========================================================================== */
-
+/* HEAL CROSS */
 .heal-cross .heal-plus {
   position: absolute;
   width: 80px; height: 80px;
@@ -530,17 +505,13 @@
   100% { transform: scale(0.7); opacity: 0.6; }
 }
 
-/* ========================================================================== */
-/* GALAXY — STARFIELD + VORTEX + FLARE                                        */
-/* ========================================================================== */
-
+/* GALAXY */
 .galaxy-vortex {
   position: absolute;
   inset: 0;
   overflow: hidden;
 }
 
-/* starfield drifting */
 .galaxy-stars {
   position: absolute;
   inset: 0;
@@ -554,7 +525,6 @@
   100% { transform: translate(-3%, -6%); }
 }
 
-/* FIRST RING */
 .galaxy-ring {
   position: absolute;
   top: 50%; left: 50%;
@@ -565,7 +535,6 @@
   animation: galaxy-spin 2.5s linear infinite;
 }
 
-/* SECOND RING */
 .galaxy-ring2 {
   position: absolute;
   top: 50%; left: 50%;
@@ -581,7 +550,6 @@
   to   { transform: translate(-50%, -50%) rotate(360deg); }
 }
 
-/* central glow */
 .galaxy-flare {
   position: absolute;
   top: 50%; left: 50%;
@@ -597,10 +565,7 @@
   100% { opacity: .3; transform: translate(-50%,-50%) scale(.85); }
 }
 
-/* ========================================================================== */
-/* GALAXY MODE — SPIN ALL 8 CARDS                                             */
-/* ========================================================================== */
-
+/* GALAXY CARD SPIN */
 .bb-galaxy-spin-card {
   animation: galaxy-card-spin 2.8s cubic-bezier(.2,.75,.3,1) forwards;
 }
@@ -612,7 +577,6 @@
   100% { transform: rotate(calc(var(--rot) + 360deg)) scale(1); }
 }
 
-/* Used when galaxy twist ends (return to normal snap positions) */
 .bb-galaxy-reset {
   animation: galaxy-reset 0.8s cubic-bezier(.2,.7,.3,1) forwards;
 }
@@ -623,5 +587,5 @@
 }
 
 /* ========================================================================== */
-/* END arena.css                                                              */
+/* END arena.css                                                               */
 /* ========================================================================== */
