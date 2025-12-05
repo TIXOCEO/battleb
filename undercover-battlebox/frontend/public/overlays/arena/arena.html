@@ -8,7 +8,7 @@
   <!-- GLOBAL THEME -->
   <link rel="stylesheet" href="/overlays/shared/theme.css" />
 
-  <!-- ARENA CSS (komt in stap 4.6) -->
+  <!-- ARENA CSS -->
   <link rel="stylesheet" href="/overlays/arena/arena.css" />
 
   <style>
@@ -22,140 +22,55 @@
 </head>
 
 <body>
-  <!-- ============================================================
-       ARENA PANEL = 1200 × 800
-  ============================================================ -->
-  <div id="arena-panel" class="bb-arena-panel">
 
-    <!-- ============================================================
-         CENTRAL OCTAGON HUD (placeholder)
-    ============================================================ -->
-    <div id="arena-hud" class="arena-hud">
-      <div class="hud-round">
-        Ronde <span id="hud-round-number">0</span> — 
-        <span id="hud-round-type">quarter</span>
-      </div>
-      <div class="hud-status" id="hud-round-status">
-        idle
-      </div>
-      <div class="hud-timer">
-        <span id="hud-timer-value">00:00</span>
+  <!-- MAIN ARENA CANVAS (fixed 1200×800) -->
+  <div id="arena-root" class="bb-arena-root">
+
+    <!-- =============================== -->
+    <!--         1) TWIST TAKEOVER       -->
+    <!-- =============================== -->
+    <div id="twist-takeover" class="bb-twist-takeover hidden"></div>
+
+    <!-- =============================== -->
+    <!--         2) CENTRAL HUD          -->
+    <!-- =============================== -->
+    <div id="arena-hud" class="bb-hud bb-octagon holo-scan led-sweep">
+      <div class="hud-inner">
+
+        <div id="hud-round" class="hud-round-text">Round 0</div>
+        <div id="hud-type" class="hud-type-text">quarter</div>
+
+        <!-- TIMER -->
+        <div id="hud-timer" class="hud-timer">00:00</div>
+
+        <!-- Progress Ring -->
+        <svg class="hud-ring" width="360" height="360">
+          <circle cx="180" cy="180" r="170" stroke-width="12"
+                  class="hud-ring-bg" />
+          <circle cx="180" cy="180" r="170" stroke-width="12"
+                  class="hud-ring-progress" />
+        </svg>
+
       </div>
     </div>
 
-    <!-- ============================================================
-         8 PLAYER SPOTS — CLOCKWISE POSITIONS
-         (1 starts top-right and goes clockwise)
-    ============================================================ -->
-    <div class="player-spot" id="player-spot-1"></div>
-    <div class="player-spot" id="player-spot-2"></div>
-    <div class="player-spot" id="player-spot-3"></div>
-    <div class="player-spot" id="player-spot-4"></div>
-    <div class="player-spot" id="player-spot-5"></div>
-    <div class="player-spot" id="player-spot-6"></div>
-    <div class="player-spot" id="player-spot-7"></div>
-    <div class="player-spot" id="player-spot-8"></div>
+    <!-- =============================== -->
+    <!--         3) PLAYER CARDS         -->
+    <!-- =============================== -->
+    <div id="arena-players">
+      <!-- cards worden via JS gegenereerd -->
+    </div>
 
   </div>
 
-  <!-- ============================================================
-       SHARED SOCKET + STORE + ROUTER
-  ============================================================ -->
+  <!-- Shared logic -->
   <script type="module" src="/overlays/shared/socket.js"></script>
+  <script type="module" src="/overlays/shared/event-router.js"></script>
+  <script type="module" src="/overlays/shared/stores.js"></script>
   <script type="module" src="/overlays/shared/arena-store.js"></script>
-  <script type="module" src="/overlays/shared/arena-router.js"></script>
 
-  <!-- ============================================================
-       RENDER LOGIC FOR HUD + PLAYERS
-  ============================================================ -->
-  <script type="module">
-    import { arenaStore } from "/overlays/shared/arena-store.js";
-
-    const hudRound = document.getElementById("hud-round-number");
-    const hudType = document.getElementById("hud-round-type");
-    const hudStatus = document.getElementById("hud-round-status");
-    const hudTimer = document.getElementById("hud-timer-value");
-
-    const spots = [
-      document.getElementById("player-spot-1"),
-      document.getElementById("player-spot-2"),
-      document.getElementById("player-spot-3"),
-      document.getElementById("player-spot-4"),
-      document.getElementById("player-spot-5"),
-      document.getElementById("player-spot-6"),
-      document.getElementById("player-spot-7"),
-      document.getElementById("player-spot-8"),
-    ];
-
-    // ======================================================================
-    // TIMER RENDER HELPER
-    // ======================================================================
-    function formatMs(ms) {
-      if (ms <= 0) return "00:00";
-      const sec = Math.floor(ms / 1000);
-      const m = String(Math.floor(sec / 60)).padStart(2, "0");
-      const s = String(sec % 60).padStart(2, "0");
-      return `${m}:${s}`;
-    }
-
-    // ======================================================================
-    // SUBSCRIBE TO ARENA STORE
-    // ======================================================================
-    arenaStore.subscribe((state) => {
-      // ------- HUD -------
-      hudRound.textContent = state.hud.roundNumber;
-      hudType.textContent = state.hud.roundType;
-      hudStatus.textContent = state.hud.roundStatus;
-      hudTimer.textContent = formatMs(state.hud.remainingMs);
-
-      // ------- PLAYERS -------
-      state.players.forEach((pl, i) => {
-        const spot = spots[i];
-
-        if (!pl.id) {
-          spot.innerHTML = `
-            <div class="player-card empty-player">
-              <div class="pos">#${i + 1}</div>
-              <div class="empty-text">Leeg</div>
-            </div>
-          `;
-          return;
-        }
-
-        const borderColor =
-          pl.positionStatus === "immune" ? "green" :
-          pl.positionStatus === "alive" ? "white" :
-          pl.positionStatus === "danger" ? "orange" :
-          pl.positionStatus === "elimination" ? "red" :
-          "white";
-
-        spot.innerHTML = `
-          <div class="player-card" style="border-color:${borderColor}">
-            <div class="pos">#${i + 1}</div>
-            <div class="name">${pl.display_name}</div>
-
-            <div class="score">${pl.score}💎</div>
-
-            <div class="bg-avatar" 
-                 style="background-image:url('${pl.avatar_url || ''}')">
-            </div>
-          </div>
-        `;
-      });
-    });
-
-    // ======================================================================
-    // TIMER DOWNCOUNTER - LOCAL (updates every 250ms)
-    // ======================================================================
-    setInterval(() => {
-      const st = arenaStore.state.hud;
-
-      if (st.remainingMs > 0 && st.roundStatus !== "ended") {
-        st.remainingMs -= 250;
-        hudTimer.textContent = formatMs(st.remainingMs);
-      }
-    }, 250);
-  </script>
+  <!-- Arena renderer -->
+  <script type="module" src="/overlays/arena/arena.js"></script>
 
 </body>
 </html>
