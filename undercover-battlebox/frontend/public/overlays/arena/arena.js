@@ -1,3 +1,16 @@
+// ============================================================================
+// arena.js — BattleBox Arena Overlay (FINAL PATCHED BUILD)
+// Implements:
+// • Pop-in join animation
+// • Score flash
+// • Status glow states (alive, immune, immune-broken, danger, elimination)
+// • Round-start shockwave
+// • Grace pulse
+// • Round-end flash + danger highlight + HUD ELIMINATIONS mode
+// • Twist takeover fullscreen
+// • Wall-clock HUD ring progress
+// ============================================================================
+
 import { initEventRouter } from "/overlays/shared/event-router.js";
 import {
   arenaStore,
@@ -20,7 +33,7 @@ const playersContainer = document.getElementById("arena-players");
 const twistOverlay = document.getElementById("twist-takeover");
 
 /* ============================================================
-   CONSTANTS — for card placement
+   CONSTANTS — circular 8-card positioning
 ============================================================ */
 const POSITIONS = [
   { idx: 1, x: 0.7071, y: -0.7071, rot: -45 },
@@ -44,15 +57,11 @@ const EMPTY_AVATAR =
    ANIMATION HELPERS
 ============================================================ */
 function animateOnce(el, className) {
+  if (!el) return;
   el.classList.remove(className);
   void el.offsetWidth; // force reflow
   el.classList.add(className);
-
-  el.addEventListener(
-    "animationend",
-    () => el.classList.remove(className),
-    { once: true }
-  );
+  el.addEventListener("animationend", () => el.classList.remove(className), { once: true });
 }
 
 const lastScoreMap = new Map();
@@ -71,12 +80,10 @@ function createPlayerCards() {
     const card = document.createElement("div");
     card.className = "bb-player-card";
 
-    // Background avatar layer
     const bg = document.createElement("div");
     bg.className = "bb-player-bgavatar";
     card.appendChild(bg);
 
-    // Foreground labels
     const labels = document.createElement("div");
     labels.className = "bb-player-labels";
 
@@ -113,7 +120,7 @@ function createPlayerCards() {
 createPlayerCards();
 
 /* ============================================================
-   UPDATE PLAYER CARDS FROM arenaStore
+   UPDATE PLAYER CARDS BASED ON STORE
 ============================================================ */
 arenaStore.subscribe((state) => {
   const players = state.players || [];
@@ -122,26 +129,16 @@ arenaStore.subscribe((state) => {
     const card = cardRefs[i];
     const data = players[i];
 
-    /* =============================
-       CARD EMPTY
-    ============================= */
     if (!data) {
       card.name.textContent = "LEEG";
       card.score.textContent = "0";
       card.bg.style.backgroundImage = `url(${EMPTY_AVATAR})`;
-
       resetStatus(card.el);
-
-      // mark as empty → triggers join animation next time filled
       lastCardOccupied[i] = false;
-
       positionCard(card.el, POSITIONS[i]);
       continue;
     }
 
-    /* =============================
-       UPDATE NAME + SCORE + AVATAR
-    ============================= */
     card.name.textContent = data.display_name || "Onbekend";
 
     const lastScore = lastScoreMap.get(data.id) ?? 0;
@@ -153,22 +150,19 @@ arenaStore.subscribe((state) => {
     card.score.textContent = data.score ?? 0;
     card.bg.style.backgroundImage = `url(${data.avatar_url || EMPTY_AVATAR})`;
 
-    /* JOIN POP ANIM */
     if (!lastCardOccupied[i]) {
       animateOnce(card.el, "bb-join-pop");
       lastCardOccupied[i] = true;
     }
 
-    /* APPLY STATUS CLASS */
     applyStatus(card.el, data);
 
-    /* POSITIONING */
     positionCard(card.el, POSITIONS[i]);
   }
 });
 
 /* ============================================================
-   STATUS SYSTEM + ANIMATIONS
+   STATUS SYSTEM
 ============================================================ */
 function resetStatus(el) {
   el.classList.remove(
@@ -183,59 +177,50 @@ function resetStatus(el) {
 function applyStatus(el, p) {
   resetStatus(el);
 
-  // Eliminated
   if (p.eliminated) {
     el.classList.add("status-elimination");
-    animateOnce(el, "bb-elim-flash");       // 🔥 elim flash
+    animateOnce(el, "bb-elim-flash");
     return;
   }
 
-  // Danger
   if (p.positionStatus === "danger") {
     el.classList.add("status-danger");
-    animateOnce(el, "bb-danger-pulse");     // 🔥 danger pulse
+    animateOnce(el, "bb-danger-pulse");
     return;
   }
 
-  // Immune
   if (p.positionStatus === "immune") {
     if ((p.breakerHits ?? 0) > 0) {
       el.classList.add("status-immune-broken");
-      animateOnce(el, "bb-immune-broken-blink");   // 🔥 broken immunity blink
+      animateOnce(el, "bb-immune-broken-blink");
     } else {
       el.classList.add("status-immune");
-      animateOnce(el, "bb-immune-glow");            // 🔥 immune glow
+      animateOnce(el, "bb-immune-glow");
     }
     return;
   }
 
-  // Alive
   el.classList.add("status-alive");
-  animateOnce(el, "bb-alive-pulse");               // subtle pulse
+  animateOnce(el, "bb-alive-pulse");
 }
 
 /* ============================================================
-   POSITIONING — translate into full circle
+   POSITIONING AROUND CENTER
 ============================================================ */
 function positionCard(el, pos) {
   const dx = pos.x * RADIUS;
   const dy = pos.y * RADIUS;
-
-  // Apply translate
   el.style.left = `${CENTER_X + dx - 80}px`;
   el.style.top = `${CENTER_Y + dy - 80}px`;
-
-  // Rotate toward center
   el.style.transform = `rotate(${pos.rot}deg)`;
 }
 
 /* ============================================================
-   HUD RENDERING + ROUND TIMER
+   HUD RENDERING
 ============================================================ */
 arenaStore.subscribe((state) => {
   hudRound.textContent = `RONDE ${state.round ?? 0}`;
-  hudType.textContent =
-    state.type === "finale" ? "FINALE" : "KWARTFINALE";
+  hudType.textContent = state.type === "finale" ? "FINALE" : "KWARTFINALE";
 
   const now = Date.now();
   let remaining = 0;
@@ -248,30 +233,27 @@ arenaStore.subscribe((state) => {
 
   hudTimer.textContent = remaining.toString().padStart(2, "0");
 
-  // Update HUD progress ring
   renderHudProgress(state, hudRing);
 
-  /* ROUND START SHOCKWAVE */
   if (state.status === "active" && remaining === state.settings.roundDurationPre) {
     shockwaveHUD();
   }
 });
 
 /* ============================================================
-   HUD SHOCKWAVE EFFECT
+   HUD EFFECTS
 ============================================================ */
 function shockwaveHUD() {
   animateOnce(container, "bb-round-start-shockwave");
 }
 
 /* ============================================================
-   TWIST TAKEOVER MODE (full-screen event)
+   TWIST TAKEOVER
 ============================================================ */
 arenaTwistStore.subscribe((state) => {
   if (state.active) {
     twistOverlay.classList.add("show");
     animateOnce(twistOverlay, "bb-twist-flash");
-
     twistOverlay.innerHTML = `
       <div class="twist-takeover-title">
         ${state.title || "TWIST ACTIVE"}
@@ -284,10 +266,9 @@ arenaTwistStore.subscribe((state) => {
 });
 
 /* ============================================================
-   ROUND / GRACE / END EVENT HOOKS
+   ROUND EVENTS (FROM event-router)
 ============================================================ */
 document.addEventListener("arena:roundStart", () => {
-  // Shockwave + pulse
   shockwaveHUD();
   animateOnce(container, "bb-round-start-shake");
 });
@@ -298,11 +279,20 @@ document.addEventListener("arena:graceStart", () => {
 
 document.addEventListener("arena:roundEnd", () => {
   animateOnce(container, "bb-round-end-flash");
+
+  // Highlight danger players once more
+  cardRefs.forEach((ref) => {
+    if (ref.el.classList.contains("status-danger")) {
+      animateOnce(ref.el, "bb-danger-pulse");
+    }
+  });
+
+  // HUD elimination mode
+  animateOnce(hudRound, "bb-hud-elimination-flash");
 });
 
 /* ============================================================
-   OPTIONAL: LISTEN TO SOCKET EVENTS
-   (event-router forwards them as DOM events)
+   SOCKET EVENTS (OPTIONAL)
 ============================================================ */
 window.addEventListener("round:start", () => {
   shockwaveHUD();
@@ -317,7 +307,7 @@ window.addEventListener("round:end", () => {
 });
 
 /* ============================================================
-   EXPORTS (if needed)
+   EXPORT
 ============================================================ */
 export default {
   positionCard,
