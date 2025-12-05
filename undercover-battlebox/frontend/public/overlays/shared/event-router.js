@@ -1,5 +1,5 @@
 // ============================================================================
-// event-router.js — BattleBox Event Brain v1.8 FINAL
+// event-router.js — BattleBox Event Brain v1.8 FINAL + ARENA EXTENSIONS
 // ============================================================================
 //
 // ✔ NO double listeners
@@ -7,6 +7,13 @@
 // ✔ NO loading old logs
 // ✔ Strict queueEvent filtering
 // ✔ Correct display_name/username fallback
+//
+// ★ ADDITIONS:
+//   + updateArena listener
+//   + round lifecycle listeners
+//   + twist overlay listeners
+//   + DOM event dispatch for arena.js animations
+//   + load arena snapshot into arenaStore
 // ============================================================================
 
 import { getSocket } from "/overlays/shared/socket.js";
@@ -17,6 +24,12 @@ import {
   tickerStore,
   applySnapshot
 } from "/overlays/shared/stores.js";
+
+// ★ NEW — arena stores
+import {
+  arenaStore,
+  arenaTwistStore
+} from "/overlays/arena/arenaStore.js";
 
 const EMPTY_AVATAR =
   "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
@@ -34,18 +47,95 @@ export async function initEventRouter() {
   const socket = await getSocket();
 
   console.log(
-    "%c[BattleBox] Event Router Ready",
+    "%c[BattleBox] Event Router Ready (ARENA EXTENDED)",
     "color:#0fffd7;font-weight:bold;"
   );
 
   // -------------------------------------------------
-  // INITIAL SNAPSHOT — NO EVENTS LOADED FROM BACKEND
+  // INITIAL SNAPSHOT — now includes arena
   // -------------------------------------------------
   socket.on("overlayInitialSnapshot", (snap) => {
     applySnapshot(snap);
+
+    // ★ ADD: arena snapshot
+    if (snap.arena) {
+      arenaStore.set(snap.arena);
+    }
+  });
+
+// -------------------------------------------------
+  // ARENA — realtime update
+  // -------------------------------------------------
+  socket.on("updateArena", (arena) => {
+    if (!arena) return;
+
+    arenaStore.set(arena);
+
+    // ★ dispatch DOM event for animation hooks
+    document.dispatchEvent(
+      new CustomEvent("arena:update", { detail: arena })
+    );
   });
 
   // -------------------------------------------------
+  // ROUND START
+  // -------------------------------------------------
+  socket.on("round:start", (payload) => {
+    document.dispatchEvent(
+      new CustomEvent("arena:roundStart", { detail: payload })
+    );
+
+    window.dispatchEvent(
+      new CustomEvent("round:start", { detail: payload })
+    );
+  });
+
+  // -------------------------------------------------
+  // GRACE START
+  // -------------------------------------------------
+  socket.on("round:grace", (payload) => {
+    document.dispatchEvent(
+      new CustomEvent("arena:graceStart", { detail: payload })
+    );
+
+    window.dispatchEvent(
+      new CustomEvent("round:grace", { detail: payload })
+    );
+  });
+
+  // -------------------------------------------------
+  // ROUND END
+  // -------------------------------------------------
+  socket.on("round:end", (payload) => {
+    document.dispatchEvent(
+      new CustomEvent("arena:roundEnd", { detail: payload })
+    );
+
+    window.dispatchEvent(
+      new CustomEvent("round:end", { detail: payload })
+    );
+  });
+
+  // -------------------------------------------------
+  // TWIST TAKEOVER
+  // -------------------------------------------------
+  socket.on("twist:takeover", (p) => {
+    arenaTwistStore.activate(p);
+
+    document.dispatchEvent(
+      new CustomEvent("arena:twistTakeover", { detail: p })
+    );
+  });
+
+  socket.on("twist:clear", () => {
+    arenaTwistStore.clear();
+
+    document.dispatchEvent(
+      new CustomEvent("arena:twistClear")
+    );
+  });
+
+// -------------------------------------------------
   // LIVE QUEUE UPDATES
   // -------------------------------------------------
   socket.on("updateQueue", (packet) => {
@@ -60,7 +150,6 @@ export async function initEventRouter() {
     if (!evt || !evt.type) return;
     if (!QUEUE_EVENTS.has(evt.type)) return;
 
-    // DISPLAY NAME + USERNAME FIX
     const safeDisplay =
       evt.display_name && evt.display_name.trim().length > 0
         ? evt.display_name
@@ -82,7 +171,6 @@ export async function initEventRouter() {
       username: safeUsername,
       is_vip: !!evt.is_vip,
       avatar_url: evt.avatar_url || EMPTY_AVATAR,
-
       reason:
         evt.reason ||
         (evt.type === "join"
@@ -96,7 +184,6 @@ export async function initEventRouter() {
 
     eventStore.pushEvent(mapped);
 
-    // Queue card highlight
     if (mapped.username) {
       queueStore.highlightCard(mapped.username);
       setTimeout(() => queueStore.clearHighlight(), 900);
@@ -116,20 +203,11 @@ export async function initEventRouter() {
   window.bb = window.bb || {};
   window.bb.socket = socket;
   window.bb.eventStore = eventStore;
-
-  window.bb.testEvent = () => {
-    eventStore.pushEvent({
-      type: "join",
-      timestamp: Date.now(),
-      display_name: "DebugUser",
-      username: "debug",
-      is_vip: false,
-      reason: "debug test"
-    });
-  };
+  window.bb.arenaStore = arenaStore;
+  window.bb.twistStore = twistStore;
 
   console.log(
-    "%c[BB DEBUG] Debug bridge active → window.bb",
+    "%c[BB DEBUG] Debug bridge active → window.bb (ARENA ENABLED)",
     "color:#0fffd7"
   );
 }
