@@ -1,81 +1,80 @@
-// ============================================================================
-// arena-store.js — Shared Arena Store (OBS Overlays)
-// Standalone store (geen React, geen Zustand)
-// ============================================================================
+/* ============================================================================
+   arena-store.js — FINAL PATCH
+   Compatibel met jouw stores.js (createStore aanwezig)
+   ============================================================================
+*/
 
-export const arenaStore = {
-  state: {
-    hud: {
-      roundNumber: 0,
-      roundType: "quarter",
-      roundStatus: "idle",
-      remainingMs: 0,
-      totalMs: 0,
-    },
+import { createStore } from "/overlays/shared/stores.js";
 
-    players: Array.from({ length: 8 }, () => ({
-      id: null,
-      display_name: "",
-      username: "",
-      avatar_url: null,
-      score: 0,
-      positionStatus: "alive",
-      breakerHits: 0,
-    })),
-
-    lastUpdateAt: 0,
+export const arenaStore = createStore({
+  round: 0,
+  type: "quarter",
+  status: "idle",
+  players: [],
+  settings: {
+    roundDurationPre: 30,
+    roundDurationFinal: 300,
   },
+  roundCutoff: 0,
+  graceEnd: 0,
+});
 
-  subscribers: new Set(),
+/* ============================================================================
+   HUD PROGRESS
+============================================================================ */
 
-  // -----------------------------------------------------
-  // Subscribe to changes
-  // -----------------------------------------------------
-  subscribe(fn) {
-    this.subscribers.add(fn);
-    fn(this.state); // immediately call with current state
+export function renderHudProgress(state, ringEl) {
+  if (!ringEl) return;
 
-    return () => {
-      this.subscribers.delete(fn);
-    };
-  },
+  const radius = 170;
+  const circumference = 2 * Math.PI * radius;
 
-  // -----------------------------------------------------
-  // Set HUD section
-  // -----------------------------------------------------
-  setHUD(hud) {
-    this.state.hud = { ...this.state.hud, ...hud };
-    this.state.lastUpdateAt = Date.now();
-    this.emit();
-  },
+  ringEl.style.strokeDasharray = `${circumference}`;
 
-  // -----------------------------------------------------
-  // Replace full players array (8 spots)
-  // -----------------------------------------------------
-  setPlayers(playersArray) {
-    const filled = [...playersArray];
+  const now = Date.now();
 
-    while (filled.length < 8) {
-      filled.push({
-        id: null,
-        display_name: "",
-        username: "",
-        avatar_url: null,
-        score: 0,
-        positionStatus: "empty",
-        breakerHits: 0,
-      });
-    }
+  let total = 1;
+  let remaining = 0;
 
-    this.state.players = filled.slice(0, 8);
-    this.state.lastUpdateAt = Date.now();
-    this.emit();
-  },
+  if (state.status === "active") {
+    total = state.settings.roundDurationPre;
+    remaining = Math.max(0, Math.floor((state.roundCutoff - now) / 1000));
+  }
 
-  // -----------------------------------------------------
-  // Emit update to all subscribers
-  // -----------------------------------------------------
-  emit() {
-    for (const fn of this.subscribers) fn(this.state);
-  },
+  if (state.status === "grace") {
+    total = 5;
+    remaining = Math.max(0, Math.floor((state.graceEnd - now) / 1000));
+  }
+
+  const progress = 1 - remaining / total;
+  const offset = circumference * progress;
+
+  ringEl.style.strokeDashoffset = offset;
+}
+
+/* ============================================================================
+   TWISTS STORE (Overlay-only twist state)
+============================================================================ */
+
+export const arenaTwistStore = createStore({
+  active: false,
+  type: null,
+  title: "",
+});
+
+arenaTwistStore.activate = (type, title) => {
+  arenaTwistStore.set({ active: true, type, title });
+};
+
+arenaTwistStore.clear = () => {
+  arenaTwistStore.set({ active: false, type: null, title: "" });
+};
+
+/* ============================================================================
+   EXPORT
+============================================================================ */
+export default {
+  arenaStore,
+  arenaTwistStore,
+  renderHudProgress,
 };
