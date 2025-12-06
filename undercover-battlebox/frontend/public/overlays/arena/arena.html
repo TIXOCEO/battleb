@@ -25,7 +25,9 @@
 
   <div id="arena-root" class="bb-arena-root">
 
-    <!-- 1) GALAXY BACKGROUND -->
+    <!-- ========================================================== -->
+    <!-- 1) GALAXY BACKGROUND                                       -->
+    <!-- ========================================================== -->
     <div id="twist-galaxy" class="galaxy-vortex hidden">
       <div class="galaxy-stars"></div>
       <div class="galaxy-ring"></div>
@@ -33,16 +35,24 @@
       <div class="galaxy-flare"></div>
     </div>
 
-    <!-- 2) TWIST TAKEOVER (MAIN ANIMATION LAYER) -->
+    <!-- ========================================================== -->
+    <!-- 2) TWIST TAKEOVER LAYER                                    -->
+    <!-- ========================================================== -->
     <div id="twist-takeover" class="bb-twist-takeover hidden"></div>
 
-    <!-- 2B) TWIST COUNTDOWN (Bomb 3-2-1) -->
+    <!-- ========================================================== -->
+    <!-- 2B) BOMB COUNTDOWN (3 → 2 → 1)                             -->
+    <!-- ========================================================== -->
     <div id="twist-countdown" class="bb-twist-countdown hidden"></div>
 
-    <!-- 2C) TWIST TARGET LAYER (Moneygun / Heal / Immune / Diamond / Bomb victim marker) -->
+    <!-- ========================================================== -->
+    <!-- 2C) TARGET/VICTIM/SURVIVOR EFFECT LAYER                    -->
+    <!-- ========================================================== -->
     <div id="twist-target" class="bb-twist-target hidden"></div>
 
-    <!-- 3) HUD -->
+    <!-- ========================================================== -->
+    <!-- 3) HUD                                                      -->
+    <!-- ========================================================== -->
     <div id="arena-hud" class="bb-hud">
       <div class="hud-inner">
 
@@ -61,12 +71,14 @@
       </div>
     </div>
 
-    <!-- 4) PLAYER CARDS -->
+    <!-- ========================================================== -->
+    <!-- 4) PLAYER CARDS                                            -->
+    <!-- ========================================================== -->
     <div id="arena-players"></div>
 
   </div>
 
-  <!-- New Combined Loader -->
+  <!-- MASTER MODULE: loads router + store + twist animations -->
   <script type="module" src="/overlays/arena/arena.js"></script>
 
 </body>
