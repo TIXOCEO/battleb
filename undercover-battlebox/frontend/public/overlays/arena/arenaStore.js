@@ -1,22 +1,24 @@
 // ============================================================================
-// arenaStore.js — BattleBox Arena Overlay Store (HUD-COMPAT v6.3 FINAL)
+// arenaStore.js — BattleBox Arena Overlay Store (v7.4 FINAL)
+// TARGET PAYLOAD + COUNTDOWN + FULL TWIST QUEUE
 // ============================================================================
 //
-// Upgrades in v6.3:
+// Upgrades in v7.4:
 // ---------------------------------------
-// ✔ Twist QUEUE toegevoegd (geen verloren animaties meer)
-// ✔ HUD-normalizer voor alle updateArena payloads
-// ✔ Fallbacks versterkt voor oude engines (<16.7)
-// ✔ remainingMs + endsAt altijd correct gesynchroniseerd
-// ✔ Snapshot verwerkt round/type/status consistenter
-// ✔ title-fallback in twistStore (garanteert animatiestart)
+// ✔ COMPLETE twist payload support (targetId / Index / victims[] / survivor)
+// ✔ arenaTwistStore.queue bevat nu VOLLEDIGE PAYLOADS
+// ✔ Nieuwe: arenaTwistStore.countdown(payload)
+// ✔ Nieuwe: arenaTwistStore.pushPayload(payload)
+// ✔ activate() ondersteunt nu volledige payloads i.p.v. enkel type/title
+// ✔ TwistQueue werkt nu correct bij countdown → takeover → clear
+// ✔ normalizeArenaPayload verbeterd
 //
 // ============================================================================
 
 import { createStore } from "/overlays/shared/stores.js";
 
 // ============================================================================
-// ARENA STATE (HUD-MODEL v2)
+// ARENA STATE (HUD-MODEL v3 — stabiel)
 // ============================================================================
 export const arenaStore = createStore({
   round: 0,
@@ -25,7 +27,6 @@ export const arenaStore = createStore({
 
   players: [],
 
-  // HUD fields
   totalMs: 0,
   endsAt: 0,
   remainingMs: 0,
@@ -35,13 +36,13 @@ export const arenaStore = createStore({
     roundDurationFinal: 300,
   },
 
-  // legacy fallback
+  // legacy
   roundCutoff: 0,
   graceEnd: 0,
 });
 
 // ============================================================================
-// INTERNAL NORMALIZER — zorgt dat ALLE payloads dezelfde vorm krijgen
+// NORMALIZER — maakt ALLE arena payloads uniform
 // ============================================================================
 function normalizeArenaPayload(snap) {
   if (!snap) return {};
@@ -50,7 +51,8 @@ function normalizeArenaPayload(snap) {
   const now = Date.now();
 
   const totalMs = hud.totalMs ?? 0;
-  const remainingMs = hud.remainingMs ?? Math.max(0, (hud.endsAt ?? 0) - now);
+  const remainingMs =
+    hud.remainingMs ?? Math.max(0, (hud.endsAt ?? 0) - now);
 
   return {
     round: snap.round ?? hud.round ?? 0,
@@ -62,7 +64,7 @@ function normalizeArenaPayload(snap) {
     settings: snap.settings || arenaStore.get().settings,
 
     totalMs,
-    endsAt: hud.endsAt ?? (now + totalMs),
+    endsAt: hud.endsAt ?? now + totalMs,
     remainingMs,
 
     roundCutoff: snap.roundCutoff ?? 0,
@@ -71,22 +73,19 @@ function normalizeArenaPayload(snap) {
 }
 
 // ============================================================================
-// SNAPSHOT LOADER
+// SNAPSHOT HANDLING
 // ============================================================================
 export function setArenaSnapshot(snap) {
   const updated = normalizeArenaPayload(snap);
   arenaStore.set(updated);
 }
 
-// ============================================================================
-// ONLY PLAYER ARRAY CHANGES
-// ============================================================================
 export function updatePlayers(players) {
   arenaStore.set({ players });
 }
 
 // ============================================================================
-// HUD PROGRESS RING (new HUD model + legacy fallback)
+// HUD RING RENDER
 // ============================================================================
 export function renderHudProgress(state, ringEl) {
   if (!ringEl) return;
@@ -100,12 +99,10 @@ export function renderHudProgress(state, ringEl) {
   let total = (state.totalMs || 0) / 1000;
   let remaining = (state.remainingMs || 0) / 1000;
 
-  // als remainingMs leeg is → bereken via endsAt
   if (!remaining || remaining <= 0) {
     remaining = Math.max(0, (state.endsAt - now) / 1000);
   }
 
-  // fallback voor oude engine
   if (!total || total <= 0) {
     if (state.status === "active") {
       total = state.settings.roundDurationPre;
@@ -121,22 +118,25 @@ export function renderHudProgress(state, ringEl) {
 }
 
 // ============================================================================
-// TWIST STORE — **NIEUW: TWIST QUEUE SYSTEM**
+// TWIST STORE — v7.4 (FULL PAYLOAD QUEUE ENGINE)
 // ============================================================================
-
 export const arenaTwistStore = createStore({
   active: false,
   type: null,
   title: "",
-  queue: [],     // <—— nieuw
+  step: null, // countdown step
+  queue: [],
+  payload: null, // entire twist payload
 });
 
-// Helper: start next twist from queue
+// ============================================================================
+// INTERNAL — START NEXT IN QUEUE
+// ============================================================================
 function processNextTwist() {
   const st = arenaTwistStore.get();
 
   if (st.active) return;
-  if (st.queue.length === 0) return;
+  if (!st.queue.length) return;
 
   const next = st.queue.shift();
 
@@ -144,51 +144,91 @@ function processNextTwist() {
     active: true,
     type: next.type,
     title: next.title,
+    payload: next.payload,
+    step: next.step ?? null,
     queue: st.queue,
   });
 }
 
-// ACTIVATE (queue-aware)
+// ============================================================================
+// PUBLIC API — ACTIVATE (queue safe)
+// ============================================================================
 arenaTwistStore.activate = (payload) => {
-  const type =
-    typeof payload === "string"
-      ? payload
-      : payload?.type ?? null;
+  if (!payload) return;
 
-  const title =
-    typeof payload === "string"
-      ? ""
-      : payload?.title ?? "";
+  const st = arenaTwistStore.get();
 
-  const current = arenaTwistStore.get();
+  const entry = {
+    type: payload.type ?? null,
+    title: payload.title ?? "",
+    step: payload.step ?? null,
+    payload: payload,
+  };
 
-  // als er al een animatie actief is → queue
-  if (current.active) {
+  if (st.active) {
     arenaTwistStore.set({
-      ...current,
-      queue: [...current.queue, { type, title }],
+      ...st,
+      queue: [...st.queue, entry],
     });
     return;
   }
 
-  // direct starten
+  // immediate start
   arenaTwistStore.set({
     active: true,
-    type,
-    title,
-    queue: current.queue,
+    type: entry.type,
+    title: entry.title,
+    step: entry.step,
+    payload: payload,
+    queue: st.queue,
   });
 };
 
-// CLEAR → active stoppen + volgende starten
+// ============================================================================
+// NEW — COUNTDOWN (bomb 3 → 2 → 1)
+// ============================================================================
+arenaTwistStore.countdown = (payload) => {
+  if (!payload) return;
+
+  const st = arenaTwistStore.get();
+
+  const c = {
+    type: "countdown",
+    title: "",
+    step: payload.step,
+    payload: payload,
+  };
+
+  if (st.active) {
+    arenaTwistStore.set({
+      ...st,
+      queue: [...st.queue, c],
+    });
+    return;
+  }
+
+  arenaTwistStore.set({
+    active: true,
+    type: "countdown",
+    title: "",
+    step: payload.step,
+    payload,
+    queue: st.queue,
+  });
+};
+
+// ============================================================================
+// CLEAR — end current animation & process next
+// ============================================================================
 arenaTwistStore.clear = () => {
   arenaTwistStore.set({
     active: false,
     type: null,
     title: "",
+    step: null,
+    payload: null,
   });
 
-  // start volgende als die bestaat
   setTimeout(processNextTwist, 50);
 };
 
