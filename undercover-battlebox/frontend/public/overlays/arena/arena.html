@@ -18,6 +18,14 @@
       overflow: hidden;
       font-family: "Rajdhani", sans-serif;
     }
+
+    /* Canvas moet boven ALLES liggen behalve admin-menus */
+    #fx-canvas {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 999999;
+    }
   </style>
 </head>
 
@@ -26,17 +34,9 @@
   <div id="arena-root" class="bb-arena-root">
 
     <!-- ========================================================== -->
-    <!-- 0) CINEMATIC ANIMATION LAYER (NEW, HIGHEST Z-INDEX)        -->
+    <!-- 0) CINEMATIC ANIMATION CANVAS (NIEUW, CORE VAN AOE ENGINE) -->
     <!-- ========================================================== -->
-    <div id="bb-animation-layer"
-         style="
-           position:absolute;
-           inset:0;
-           pointer-events:none;
-           z-index:999999;
-           overflow:visible;
-         ">
-    </div>
+    <canvas id="fx-canvas" width="1200" height="800"></canvas>
 
     <!-- ========================================================== -->
     <!-- 1) GALAXY BACKGROUND                                       -->
@@ -49,7 +49,7 @@
     </div>
 
     <!-- ========================================================== -->
-    <!-- 2) TWIST TAKEOVER LAYER (LEGACY COMPAT)                    -->
+    <!-- 2) TWIST TAKEOVER LAYER (LEGACY COMPATIBILITY)             -->
     <!-- ========================================================== -->
     <div id="twist-takeover" class="bb-twist-takeover hidden"></div>
 
@@ -64,7 +64,7 @@
     <div id="twist-target" class="bb-twist-target hidden"></div>
 
     <!-- ========================================================== -->
-    <!-- 3) HUD                                                      -->
+    <!-- 3) HUD (Central timer + round info)                        -->
     <!-- ========================================================== -->
     <div id="arena-hud" class="bb-hud">
       <div class="hud-inner">
@@ -91,7 +91,7 @@
 
   </div>
 
-  <!-- MASTER MODULE: loads router + store + twist animations -->
+  <!-- MASTER MODULE -->
   <script type="module" src="/overlays/arena/arena.js"></script>
 
 </body>
