@@ -19,12 +19,25 @@
       font-family: "Rajdhani", sans-serif;
     }
 
-    /* Canvas moet boven ALLES liggen behalve admin-menus */
+    /* ==========================================================
+       CANVAS ABOVE EVERYTHING BUT HUD SHOULD SHOW THROUGH
+       ========================================================== */
     #fx-canvas {
       position: absolute;
       inset: 0;
+      width: 100%;
+      height: 100%;
       pointer-events: none;
-      z-index: 999999;
+      z-index: 999999; /* Highest layer */
+    }
+
+    /* Container must isolate stacking contexts so canvas stays visible */
+    #arena-root {
+      position: relative;
+      width: 1200px;
+      height: 800px;
+      overflow: hidden;
+      isolation: isolate;
     }
   </style>
 </head>
@@ -34,7 +47,7 @@
   <div id="arena-root" class="bb-arena-root">
 
     <!-- ========================================================== -->
-    <!-- 0) CINEMATIC ANIMATION CANVAS (NIEUW, CORE VAN AOE ENGINE) -->
+    <!-- 0) CINEMATIC CANVAS — CORE VAN AOE ENGINE                  -->
     <!-- ========================================================== -->
     <canvas id="fx-canvas" width="1200" height="800"></canvas>
 
@@ -49,38 +62,33 @@
     </div>
 
     <!-- ========================================================== -->
-    <!-- 2) TWIST TAKEOVER LAYER (LEGACY COMPATIBILITY)             -->
+    <!-- 2A) LEGACY TWIST TAKEOVER                                  -->
     <!-- ========================================================== -->
     <div id="twist-takeover" class="bb-twist-takeover hidden"></div>
 
     <!-- ========================================================== -->
-    <!-- 2B) BOMB COUNTDOWN (3 → 2 → 1)                             -->
+    <!-- 2B) COUNTDOWN (3-2-1)                                      -->
     <!-- ========================================================== -->
     <div id="twist-countdown" class="bb-twist-countdown hidden"></div>
 
     <!-- ========================================================== -->
-    <!-- 2C) TARGET/VICTIM/SURVIVOR EFFECT LAYER (LEGACY COMPAT)    -->
+    <!-- 2C) TARGET/VICTIM/SURVIVOR EFFECT LAYER                    -->
     <!-- ========================================================== -->
     <div id="twist-target" class="bb-twist-target hidden"></div>
 
     <!-- ========================================================== -->
-    <!-- 3) HUD (Central timer + round info)                        -->
+    <!-- 3) HUD (CENTER OCTAGON)                                    -->
     <!-- ========================================================== -->
     <div id="arena-hud" class="bb-hud">
       <div class="hud-inner">
-
         <div id="hud-round" class="hud-round-text">RONDE 0</div>
         <div id="hud-type" class="hud-type-text">KWARTFINALE</div>
-
         <div id="hud-timer" class="hud-timer">00:00</div>
 
         <svg class="hud-ring" width="360" height="360">
-          <circle cx="180" cy="180" r="170" stroke-width="12"
-                  class="hud-ring-bg" />
-          <circle cx="180" cy="180" r="170" stroke-width="12"
-                  class="hud-ring-progress" id="hud-ring-progress" />
+          <circle cx="180" cy="180" r="170" stroke-width="12" class="hud-ring-bg" />
+          <circle cx="180" cy="180" r="170" stroke-width="12" class="hud-ring-progress" id="hud-ring-progress" />
         </svg>
-
       </div>
     </div>
 
