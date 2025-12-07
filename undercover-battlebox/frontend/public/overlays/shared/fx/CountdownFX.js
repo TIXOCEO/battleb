@@ -1,13 +1,12 @@
 // ============================================================================
-// CountdownFX.js — Canvas Number Drop Animation (AOE)
+// CountdownFX — floating 3 → 2 → 1 numbers
 // ============================================================================
 
 export default class CountdownFX {
   constructor(step = 3) {
     this.step = step;
     this.time = 0;
-    this.duration = 0.75; // sec voor fade-out
-    this.alive = true;
+    this.duration = 0.7;
   }
 
   setup(canvas) {
@@ -17,26 +16,20 @@ export default class CountdownFX {
 
   update(dt) {
     this.time += dt;
-    if (this.time >= this.duration) return true;
-    return false;
+    return this.time > this.duration;
   }
 
   render(ctx) {
-    const t = this.time / this.duration;
-    const scale = 1 + t * 1.2;
-    const alpha = 1 - t;
-
     ctx.save();
-    ctx.translate(this.cx, this.cy);
-    ctx.scale(scale, scale);
-    ctx.globalAlpha = alpha;
-
-    ctx.fillStyle = "#ff4d00";
-    ctx.font = "bold 220px Rajdhani";
+    ctx.font = "120px Rajdhani";
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(String(this.step), 0, 0);
 
+    const alpha = 1 - (this.time / this.duration);
+    ctx.globalAlpha = alpha;
+
+    ctx.fillText(this.step, this.cx, this.cy);
     ctx.restore();
   }
 }
