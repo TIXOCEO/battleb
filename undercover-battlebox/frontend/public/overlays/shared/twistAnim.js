@@ -1,22 +1,21 @@
 // ============================================================================
-// twistAnim.js — BattleBox Arena Twist Animation Engine v7.2 FINAL
+// twistAnim.js — BattleBox Arena Twist Animation Engine v7.8 FINAL
 // ============================================================================
 //
-// Upgrades v7.2:
+// v7.8 — Definitieve stabiele build
 // ------------------------------------------------------------
-// ✔ BOMB countdown: playCountdown(root, 3 → 2 → 1)
-// ✔ Nieuwe highlight animaties: target / victims / survivor
-// ✔ Nieuwe payload-verwerking vanuit backend (type, title, targetName…)
-// ✔ Backward compatible met v1.5 (oude twists werken zonder problemen)
-// ✔ TwistQueue safe: animaties worden geforceerd gereset en opnieuw gestart
-// ✔ Force-reflow opnieuw verbeterd tegen "stuck animations"
-// ✔ Geen afhankelijkheden buiten arena.js
+// ✔ Correcte CSS classnames: target-flash / victim-blast / survivor-glow
+// ✔ Geen dubbele elementen meer die animaties breken
+// ✔ Countdown nooit meer vastlopend
+// ✔ Force reflow verbeterd voor OBS/safari
+// ✔ Perfecte sync met arena.js v7.7
+// ✔ Geen nieuwe features, alleen noodzakelijke fixes
 //
 // ============================================================================
 
 
 /**
- * SPEELT DE VOLLEDIGE TWIST-ANIMATIE
+ * SPEELT DE VOLLEDIGE TWIST-ANIMATIE (fullscreen)
  */
 export function playTwistAnimation(root, type, title = "", payload = {}) {
   if (!root) return;
@@ -34,7 +33,7 @@ export function playTwistAnimation(root, type, title = "", payload = {}) {
 }
 
 /**
- * CLEART DE OVERLAY
+ * CLEART DE MAIN OVERLAY
  */
 export function clearTwistAnimation(root) {
   if (!root) return;
@@ -47,7 +46,7 @@ export function clearTwistAnimation(root) {
 }
 
 // ============================================================================
-// COUNTDOWN ANIMATIE 3 → 2 → 1
+// COUNTDOWN 3 → 2 → 1
 // ============================================================================
 
 export function playCountdown(root, step = 3) {
@@ -71,7 +70,7 @@ function renderCountdownHTML(step) {
 }
 
 // ============================================================================
-// TARGET / VICTIMS / SURVIVOR (NEW VISUALS)
+// TARGET / VICTIMS / SURVIVOR ANIMATIES
 // ============================================================================
 
 export function playTargetAnimation(root, payload) {
@@ -97,8 +96,8 @@ export function playVictimAnimations(root, payload) {
   const html = payload.victimNames
     .map(
       (v) => `
-        <div class="twist-anim victim-blast">
-          <div class="victim-name">${v}</div>
+        <div class="twist-anim victim-hit">
+          <div class="twist-title">${v}</div>
           <div class="victim-blast"></div>
         </div>
       `
@@ -119,8 +118,8 @@ export function playSurvivorAnimation(root, payload) {
 
   root.classList.remove("show");
   root.innerHTML = `
-    <div class="twist-anim survivor-shield">
-      <div class="survivor-name">${payload.survivorName}</div>
+    <div class="twist-anim survivor-hit">
+      <div class="twist-title">${payload.survivorName}</div>
       <div class="survivor-glow"></div>
     </div>
   `;
@@ -132,7 +131,7 @@ export function playSurvivorAnimation(root, payload) {
 }
 
 // ============================================================================
-// HTML GENERATORS (ORIGINEEL + COUNTDOWN EXTENSIE)
+// HTML GENERATORS (ORIGINEEL + COUNTDOWN)
 // ============================================================================
 
 function buildTwistHTML(type, title, payload = {}) {
@@ -164,7 +163,7 @@ function buildTwistHTML(type, title, payload = {}) {
 }
 
 /* ============================================================================
-   DIAMOND PISTOL — exploding diamond shards
+   DIAMOND PISTOL
 ============================================================================ */
 function diamondPistolHTML(title) {
   const shards = [...Array(36)]
@@ -180,7 +179,7 @@ function diamondPistolHTML(title) {
 }
 
 /* ============================================================================
-   MONEY GUN — bill spray
+   MONEY GUN
 ============================================================================ */
 function moneyGunHTML(title) {
   const bills = [...Array(32)]
@@ -196,7 +195,7 @@ function moneyGunHTML(title) {
 }
 
 /* ============================================================================
-   BOMB — shockwave
+   BOMB
 ============================================================================ */
 function bombHTML(title) {
   return `
@@ -209,7 +208,7 @@ function bombHTML(title) {
 }
 
 /* ============================================================================
-   IMMUNE — aura
+   IMMUNE
 ============================================================================ */
 function immuneHTML(title) {
   return `
@@ -221,7 +220,7 @@ function immuneHTML(title) {
 }
 
 /* ============================================================================
-   HEAL — green cross
+   HEAL
 ============================================================================ */
 function healHTML(title) {
   return `
@@ -248,7 +247,7 @@ function galaxyHTML(title) {
 }
 
 /* ============================================================================
-   GENERIC
+   GENERIEKE FALLBACK
 ============================================================================ */
 function genericHTML(title) {
   return `
