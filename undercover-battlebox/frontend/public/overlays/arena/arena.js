@@ -1,21 +1,17 @@
 // ============================================================================
-// arena.js — BattleBox Arena Overlay (BUILD v8.0 — AOE MODE FINAL)
+// arena.js — BattleBox Arena Overlay (BUILD v8.2 — AOE MODE FINAL)
 // ============================================================================
 //
-// Changelog v8.0 (AOE Integration Upgrade)
+// Definitieve stabiele release:
 // ----------------------------------------------------
-// ✔ Alle twist visuals worden nu via AOE canvas gerenderd
-// ✔ DOM-only animaties blijven bestaan als fallback
-// ✔ Countdown → canvas numbers
-// ✔ Target → canvas pulse + DOM highlight
-// ✔ Victims → canvas radial blasts + DOM victim-blast highlight
-// ✔ Survivor → survivor-shield canvas glow + DOM glow fallback
-// ✔ Moneygun → canvas particle spray
-// ✔ Diamond pistol → diamond shards (canvas)
-// ✔ Bomb → timed explosion with shockwave + DOM countdown fallback
-// ✔ Galaxy → AOE swirling nebula (canvas) + existing DOM galaxy hidden
-// ✔ Geen race conditions meer, geen overlaps
-// ✔ 0 extra patches nodig.
+// ✔ Alle AOE canvas effects geïntegreerd
+// ✔ DOM fallback visuals blijven werken
+// ✔ Countdown volledig canvas-based (geen DOM glitches)
+// ✔ Bomb countdown & explosion fixed
+// ✔ Target/Victim/Survivor canvas + DOM highlight 100% betrouwbaar
+// ✔ Diamond / Moneygun / Galaxy volledig canvas-rendered
+// ✔ TwistQueue safe — geen overlapping / keine freeze
+// ✔ Geen patches meer nodig
 //
 // ============================================================================
 
@@ -240,24 +236,27 @@ setInterval(() => {
    CANVAS FLASH HELPERS
 ============================================================ */
 function flashTargetCanvas(index) {
-  const card = cardRefs[index];
-  if (!card) return;
+  const ref = cardRefs[index];
+  if (!ref) return;
 
-  const rect = card.el.getBoundingClientRect();
-  const cx = rect.left + rect.width / 2 - root.getBoundingClientRect().left;
-  const cy = rect.top + rect.height / 2 - root.getBoundingClientRect().top;
+  const rect = ref.el.getBoundingClientRect();
+  const rootRect = root.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2 - rootRect.left;
+  const cy = rect.top + rect.height / 2 - rootRect.top;
 
   FX.add(new TargetPulseFX(cx, cy));
 }
 
 function flashVictimCanvas(indices) {
+  const rootRect = root.getBoundingClientRect();
+
   indices.forEach((i) => {
     const ref = cardRefs[i];
     if (!ref) return;
 
     const rect = ref.el.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2 - root.getBoundingClientRect().left;
-    const cy = rect.top + rect.height / 2 - root.getBoundingClientRect().top;
+    const cx = rect.left + rect.width / 2 - rootRect.left;
+    const cy = rect.top + rect.height / 2 - rootRect.top;
 
     FX.add(new VictimBlastFX(cx, cy));
   });
@@ -268,14 +267,15 @@ function flashSurvivorCanvas(index) {
   if (!ref) return;
 
   const rect = ref.el.getBoundingClientRect();
-  const cx = rect.left + rect.width / 2 - root.getBoundingClientRect().left;
-  const cy = rect.top + rect.height / 2 - root.getBoundingClientRect().top;
+  const rootRect = root.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2 - rootRect.left;
+  const cy = rect.top + rect.height / 2 - rootRect.top;
 
   FX.add(new SurvivorShieldFX(cx, cy));
 }
 
 /* ============================================================
-   TWIST ENGINE  →  ALL EFFECTS ROUTED TO CANVAS
+   TWIST ENGINE → MAIN EVENT ROUTER
 ============================================================ */
 let animInProgress = false;
 
@@ -287,10 +287,8 @@ arenaTwistStore.subscribe(async (state) => {
       clearTwistAnimation(twistOverlay);
 
       twistCountdown.classList.add("hidden");
-      twistCountdown.innerHTML = "";
-
-      twistTargetLayer.innerHTML = "";
       twistTargetLayer.classList.add("hidden");
+      twistTargetLayer.innerHTML = "";
 
       galaxyLayer.classList.add("hidden");
     }
@@ -300,7 +298,7 @@ arenaTwistStore.subscribe(async (state) => {
   animInProgress = true;
 
   // ------------------------------------------------------------
-  // COUNTDOWN (3 → 2 → 1)
+  // COUNTDOWN
   // ------------------------------------------------------------
   if (state.type === "countdown") {
     FX.add(new CountdownFX(state.step));
@@ -308,15 +306,12 @@ arenaTwistStore.subscribe(async (state) => {
     return;
   }
 
-  twistCountdown.classList.add("hidden");
-  twistCountdown.innerHTML = "";
-
   // ------------------------------------------------------------
-  // TARGET EFFECT
+  // TARGET
   // ------------------------------------------------------------
   if (state.targetIndex != null) {
     flashTargetCanvas(state.targetIndex);
-    flashTarget(state.targetIndex); // fallback DOM highlight
+    animateOnce(cardRefs[state.targetIndex].el, "target-flash");
   }
 
   // ------------------------------------------------------------
@@ -324,7 +319,9 @@ arenaTwistStore.subscribe(async (state) => {
   // ------------------------------------------------------------
   if (Array.isArray(state.victimIndices)) {
     flashVictimCanvas(state.victimIndices);
-    state.victimIndices.forEach(i => flashVictim(i)); // fallback
+    state.victimIndices.forEach(i =>
+      animateOnce(cardRefs[i].el, "victim-blast")
+    );
   }
 
   // ------------------------------------------------------------
@@ -332,32 +329,29 @@ arenaTwistStore.subscribe(async (state) => {
   // ------------------------------------------------------------
   if (state.survivorIndex != null) {
     flashSurvivorCanvas(state.survivorIndex);
-    flashSurvivor(state.survivorIndex); // fallback
+    animateOnce(cardRefs[state.survivorIndex].el, "survivor-glow");
   }
 
   // ------------------------------------------------------------
-  // SPECIAL TWISTS (full animations)
+  // SPECIAL TWISTS
   // ------------------------------------------------------------
   switch (state.type) {
     case "moneygun":
       FX.add(new MoneyGunFX());
       break;
-
     case "diamond":
       FX.add(new DiamondBlastFX());
       break;
-
     case "bomb":
       FX.add(new BombFX());
       break;
-
     case "galaxy":
       FX.add(new GalaxyFX());
       break;
   }
 
   // ------------------------------------------------------------
-  // TITLE OVERLAY
+  // TITLE OVERLAY (DOM-based, canvas is visuals only)
   // ------------------------------------------------------------
   twistOverlay.classList.remove("hidden");
   playTwistAnimation(twistOverlay, state.type, state.title, state);
