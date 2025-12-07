@@ -1,20 +1,16 @@
+
 // ============================================================================
-// GalaxyFX.js — Rotating Nebula + Starfield Swirl
+// GalaxyFX — draaiende sterrennevel
 // ============================================================================
 
 export default class GalaxyFX {
   constructor() {
-    this.time = 0;
-    this.duration = 3.5;
-
-    this.stars = [];
-    for (let i = 0; i < 180; i++) {
-      this.stars.push({
-        angle: Math.random() * Math.PI * 2,
-        dist: 60 + Math.random() * 380,
-        size: 1 + Math.random() * 2,
-      });
-    }
+    this.t = 0;
+    this.stars = Array.from({ length: 120 }, () => ({
+      r: Math.random() * 380 + 20,
+      a: Math.random() * Math.PI * 2,
+      s: (Math.random() * 0.4) + 0.1,
+    }));
   }
 
   setup(canvas) {
@@ -23,23 +19,21 @@ export default class GalaxyFX {
   }
 
   update(dt) {
-    this.time += dt;
-    return this.time >= this.duration;
+    this.t += dt;
+    return false; // galaxy blijft actief tot twist eindigt
   }
 
   render(ctx) {
-    const rot = this.time * 0.6;
-
     ctx.save();
-    ctx.translate(this.cx, this.cy);
-    ctx.rotate(rot);
+    ctx.fillStyle = "rgba(255,255,255,0.5)";
 
-    this.stars.forEach((s) => {
-      const x = Math.cos(s.angle) * s.dist;
-      const y = Math.sin(s.angle) * s.dist;
+    this.stars.forEach(star => {
+      star.a += star.s * 0.02;
 
-      ctx.fillStyle = "rgba(0,255,255,0.7)";
-      ctx.fillRect(x, y, s.size, s.size);
+      const x = this.cx + Math.cos(star.a) * star.r;
+      const y = this.cy + Math.sin(star.a) * star.r;
+
+      ctx.fillRect(x, y, 3, 3);
     });
 
     ctx.restore();
