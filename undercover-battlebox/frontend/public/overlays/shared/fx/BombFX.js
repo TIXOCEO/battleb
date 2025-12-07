@@ -1,58 +1,53 @@
 // ============================================================================
-// BombFX.js — Central Shockwave + Smoke Pulse
+// BombFX — countdown → shockwave → rook
 // ============================================================================
 
 export default class BombFX {
   constructor() {
-    this.time = 0;
-    this.duration = 1.2;
-
-    this.waves = [];
-    this.maxWaves = 3;
+    this.t = 0;
+    this.stage = 0;
   }
 
   setup(canvas) {
     this.cx = canvas.width / 2;
     this.cy = canvas.height / 2;
-
-    for (let i = 0; i < this.maxWaves; i++) {
-      this.waves.push({
-        delay: i * 0.15,
-        life: 0,
-        maxLife: 0.9,
-      });
-    }
   }
 
   update(dt) {
-    this.time += dt;
-    let alive = false;
+    this.t += dt;
 
-    for (const w of this.waves) {
-      if (this.time < w.delay) continue;
+    // 0 → 3 seconden countdown (reeds gedaan via CountdownFX in arena.js)
+    if (this.t < 0.1) return false;
 
-      w.life += dt;
-      if (w.life < w.maxLife) alive = true;
+    // STAGE 1: shockwave
+    if (this.stage === 0 && this.t > 0.1) {
+      this.stage = 1;
     }
 
-    return !alive;
+    // STAGE 2: fade out rook
+    if (this.t > 1.5) return true;
+
+    return false;
   }
 
   render(ctx) {
-    for (const w of this.waves) {
-      if (this.time < w.delay) continue;
+    ctx.save();
 
-      const t = w.life / w.maxLife;
-      const radius = 40 + t * 300;
-      const alpha = 0.7 - t * 0.7;
+    const p = Math.min(1, this.t / 1.2);
 
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(this.cx, this.cy, radius, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(255,150,0,${alpha})`;
-      ctx.lineWidth = 8 - t * 7;
-      ctx.stroke();
-      ctx.restore();
-    }
+    // shockwave ring
+    ctx.beginPath();
+    ctx.arc(this.cx, this.cy, p * 300, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255,100,0,${1 - p})`;
+    ctx.lineWidth = 25 * (1 - p);
+    ctx.stroke();
+
+    // rook
+    ctx.fillStyle = `rgba(150,150,150,${0.4 * (1 - p)})`;
+    ctx.beginPath();
+    ctx.arc(this.cx, this.cy, 150 + p * 200, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
   }
 }
