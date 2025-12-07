@@ -298,6 +298,7 @@
 .bb-alive-pulse {
   animation: alive-pulse 1.4s ease-in-out;
 }
+
 @keyframes alive-pulse {
   0%   { transform: scale(1); }
   50%  { transform: scale(1.03); }
@@ -482,7 +483,9 @@
   100% { opacity: 0;   transform: scale(15); }
 }
 
-/* IMMUNE AURA */
+/* ========================================================================== */
+/* IMMUNE AURA                                                                */
+/* ========================================================================== */
 .immune-aura .aura-ring {
   position: absolute;
   width: 260px;
@@ -498,7 +501,9 @@
   100% { transform: scale(0.85); opacity: 0.6; }
 }
 
-/* HEAL CROSS */
+/* ========================================================================== */
+/* HEAL CROSS                                                                  */
+/* ========================================================================== */
 .heal-cross .heal-plus {
   position: absolute;
   width: 80px; height: 80px;
@@ -524,7 +529,7 @@
 .galaxy-vortex {
   position: absolute;
   inset: 0;
-  z-index: 20; /* UPGRADE: onder players */
+  z-index: 20; /* onder player cards */
   overflow: hidden;
 }
 
@@ -582,9 +587,8 @@
 }
 
 /* ========================================================================== */
-/* TWIST COUNTDOWN (Bomb 3-2-1) — NEW                                         */
+/* TWIST COUNTDOWN (Bomb 3-2-1)                                               */
 /* ========================================================================== */
-
 .bb-twist-countdown {
   position: absolute;
   inset: 0;
@@ -617,9 +621,8 @@
 }
 
 /* ========================================================================== */
-/* TWIST TARGET / VICTIM / SURVIVOR — NEW                                     */
+/* TWIST TARGET LAYER                                                         */
 /* ========================================================================== */
-
 .bb-twist-target {
   position: absolute;
   inset: 0;
@@ -636,7 +639,7 @@
   opacity: 1;
 }
 
-/* TARGET FLASH (Moneygun / Heal / Immune) */
+/* Target flash */
 .target-flash {
   position: absolute;
   width: 420px;
@@ -653,7 +656,7 @@
   100% { transform: scale(1.45); opacity: 0; }
 }
 
-/* VICTIM BLAST — used by Bomb or Moneygun target */
+/* Victim blast */
 .victim-blast {
   position: absolute;
   width: 320px;
@@ -668,7 +671,7 @@
   100% { transform: scale(2.4); opacity: 0; }
 }
 
-/* SURVIVOR GLOW — DiamondPistol */
+/* Survivor glow (DiamondPistol) */
 .survivor-glow {
   position: absolute;
   width: 420px;
@@ -686,9 +689,8 @@
 }
 
 /* ========================================================================== */
-/* OVERLAY FADES / ENHANCEMENTS — NEW                                         */
+/* OVERLAY FADE OUT                                                           */
 /* ========================================================================== */
-
 .bb-overlay-fade {
   animation: overlay-fade-out .45s ease-out forwards;
 }
@@ -699,5 +701,5 @@
 }
 
 /* ========================================================================== */
-/* END arena.css                                                               */
+/* END arena.css v7.5 FINAL                                                   */
 /* ========================================================================== */
