@@ -1,33 +1,32 @@
 // ============================================================================
-// SurvivorShieldFX.js — Blue Protective Pulsating Ring
+// SurvivorShieldFX — blauw beschermschild
 // ============================================================================
 
 export default class SurvivorShieldFX {
   constructor(x, y) {
     this.x = x;
     this.y = y;
-    this.time = 0;
+    this.t = 0;
     this.duration = 1.2;
   }
 
-  setup() {}
-
   update(dt) {
-    this.time += dt;
-    return this.time >= this.duration;
+    this.t += dt;
+    return this.t > this.duration;
   }
 
   render(ctx) {
-    const t = this.time / this.duration;
-    const radius = 50 + Math.sin(t * Math.PI) * 40;
-    const alpha = 0.8 - t * 0.8;
+    const p = this.t / this.duration;
+    const r = 40 + Math.sin(p * Math.PI) * 25;
 
     ctx.save();
     ctx.beginPath();
-    ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
-    ctx.strokeStyle = `rgba(0,255,255,${alpha})`;
-    ctx.lineWidth = 8;
+    ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
+
+    ctx.strokeStyle = `rgba(80,180,255,${1 - p})`;
+    ctx.lineWidth = 5;
     ctx.stroke();
+
     ctx.restore();
   }
 }
