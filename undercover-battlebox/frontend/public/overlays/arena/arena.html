@@ -26,6 +26,19 @@
   <div id="arena-root" class="bb-arena-root">
 
     <!-- ========================================================== -->
+    <!-- 0) CINEMATIC ANIMATION LAYER (NEW, HIGHEST Z-INDEX)        -->
+    <!-- ========================================================== -->
+    <div id="bb-animation-layer"
+         style="
+           position:absolute;
+           inset:0;
+           pointer-events:none;
+           z-index:999999;
+           overflow:visible;
+         ">
+    </div>
+
+    <!-- ========================================================== -->
     <!-- 1) GALAXY BACKGROUND                                       -->
     <!-- ========================================================== -->
     <div id="twist-galaxy" class="galaxy-vortex hidden">
@@ -36,7 +49,7 @@
     </div>
 
     <!-- ========================================================== -->
-    <!-- 2) TWIST TAKEOVER LAYER                                    -->
+    <!-- 2) TWIST TAKEOVER LAYER (LEGACY COMPAT)                    -->
     <!-- ========================================================== -->
     <div id="twist-takeover" class="bb-twist-takeover hidden"></div>
 
@@ -46,7 +59,7 @@
     <div id="twist-countdown" class="bb-twist-countdown hidden"></div>
 
     <!-- ========================================================== -->
-    <!-- 2C) TARGET/VICTIM/SURVIVOR EFFECT LAYER                    -->
+    <!-- 2C) TARGET/VICTIM/SURVIVOR EFFECT LAYER (LEGACY COMPAT)    -->
     <!-- ========================================================== -->
     <div id="twist-target" class="bb-twist-target hidden"></div>
 
