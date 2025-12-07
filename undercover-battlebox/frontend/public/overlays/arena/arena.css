@@ -19,12 +19,24 @@
 }
 
 /* ========================================================================== */
+/* CINEMATIC ANIMATION LAYER (NIEUW)                                          */
+/* ========================================================================== */
+#bb-animation-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 999999; /* hoogste laag */
+  pointer-events: none;
+  overflow: visible !important; /* effecten mogen buiten viewport vliegen */
+  will-change: opacity, transform;
+}
+
+/* ========================================================================== */
 /* TWIST TAKEOVER (fullscreen overlay) — TRANSPARENT                          */
 /* ========================================================================== */
 .bb-twist-takeover {
   position: absolute;
   inset: 0;
-  z-index: 300; /* UPGRADE: boven alles */
+  z-index: 300; /* legacy twist layer onder cinematic layer */
 
   background: transparent !important;
 
@@ -69,7 +81,7 @@
   width: 350px;
   height: 350px;
   position: absolute;
-  z-index: 120; /* UPGRADE: boven players, onder twist */
+  z-index: 120; /* onder legacy twist + cinematic layer */
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
@@ -176,13 +188,13 @@
 }
 
 /* ========================================================================== */
-/* PLAYER CARDS — Transparent Version                                          */
+/* PLAYER CARDS — Transparent Version                                         */
 /* ========================================================================== */
 #arena-players {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 100; /* UPGRADE: boven galaxy */
+  z-index: 100; /* boven galaxy, onder HUD */
 }
 
 .bb-player-card {
@@ -214,13 +226,10 @@
     border-color .25s ease-out,
     box-shadow .25s ease-out;
 
-  /* UPGRADE: voorkomt animatie-caching */
   will-change: transform, border-color, box-shadow;
 }
 
-/* ========================================================================== */
-/* BACKGROUND AVATAR (unchanged)                                              */
-/* ========================================================================== */
+/* BACKGROUND AVATAR */
 .bb-player-bgavatar {
   position: absolute;
   inset: 0;
@@ -230,9 +239,7 @@
   filter: blur(1px);
 }
 
-/* ========================================================================== */
-/* LABELS                                                                      */
-/* ========================================================================== */
+/* LABELS */
 .bb-player-labels {
   position: relative;
   z-index: 2;
@@ -258,9 +265,7 @@
   transition: transform .25s, color .25s;
 }
 
-/* ========================================================================== */
-/* POSITION BADGE (unchanged)                                                 */
-/* ========================================================================== */
+/* POSITION BADGE */
 .bb-player-pos {
   position: absolute;
   top: 4px;
@@ -286,7 +291,7 @@
 }
 
 /* ========================================================================== */
-/* STATUS EFFECTS — retained                                                  */
+/* STATUS EFFECTS                                                             */
 /* ========================================================================== */
 .status-alive {
   border-color: rgba(255,255,255,0.75);
@@ -371,43 +376,20 @@
   100% { transform: scale(0.35); opacity: 0.2; filter: brightness(0.6); }
 }
 
-/* JOIN POP */
-.bb-join-pop {
-  animation: join-pop 0.45s cubic-bezier(.25,1.15,.3,1.1);
-}
-
-@keyframes join-pop {
-  0%   { transform: scale(0); opacity: 0; }
-  60%  { transform: scale(1.25); opacity: 1; }
-  100% { transform: scale(1); }
-}
-
-/* SCORE FLASH */
-.bb-score-anim {
-  animation: score-flash .35s ease-out;
-}
-
-@keyframes score-flash {
-  0%   { color: white; transform: scale(1); }
-  50%  { color: gold;  transform: scale(1.32); }
-  100% { color: white; transform: scale(1); }
-}
-
 /* ========================================================================== */
 /* TWIST ANIMATIONS                                                           */
 /* ========================================================================== */
 .twist-anim {
   position: absolute;
   inset: 0;
-  z-index: 301; /* UPGRADE */
+  z-index: 301;
   display: flex;
   justify-content: center;
   align-items: center;
   flex-direction: column;
   pointer-events: none;
-  overflow: hidden;
 
-  /* UPGRADE: voorkomt animatie-caching */
+  overflow: visible !important; /* essentieel voor shards/bills */
   will-change: opacity, transform;
   animation-fill-mode: both !important;
 }
@@ -483,9 +465,7 @@
   100% { opacity: 0;   transform: scale(15); }
 }
 
-/* ========================================================================== */
-/* IMMUNE AURA                                                                */
-/* ========================================================================== */
+/* IMMUNE AURA */
 .immune-aura .aura-ring {
   position: absolute;
   width: 260px;
@@ -501,9 +481,7 @@
   100% { transform: scale(0.85); opacity: 0.6; }
 }
 
-/* ========================================================================== */
-/* HEAL CROSS                                                                  */
-/* ========================================================================== */
+/* HEAL CROSS */
 .heal-cross .heal-plus {
   position: absolute;
   width: 80px; height: 80px;
@@ -524,12 +502,12 @@
 }
 
 /* ========================================================================== */
-/* GALAXY                                                                     */
+/* GALAXY BACKGROUND                                                          */
 /* ========================================================================== */
 .galaxy-vortex {
   position: absolute;
   inset: 0;
-  z-index: 20; /* onder player cards */
+  z-index: 20;
   overflow: hidden;
 }
 
@@ -587,7 +565,7 @@
 }
 
 /* ========================================================================== */
-/* TWIST COUNTDOWN (Bomb 3-2-1)                                               */
+/* BOMB COUNTDOWN                                                             */
 /* ========================================================================== */
 .bb-twist-countdown {
   position: absolute;
@@ -621,7 +599,7 @@
 }
 
 /* ========================================================================== */
-/* TWIST TARGET LAYER                                                         */
+/* TARGET / VICTIM / SURVIVOR EFFECT LAYER                                    */
 /* ========================================================================== */
 .bb-twist-target {
   position: absolute;
@@ -639,7 +617,6 @@
   opacity: 1;
 }
 
-/* Target flash */
 .target-flash {
   position: absolute;
   width: 420px;
@@ -656,7 +633,6 @@
   100% { transform: scale(1.45); opacity: 0; }
 }
 
-/* Victim blast */
 .victim-blast {
   position: absolute;
   width: 320px;
@@ -671,7 +647,6 @@
   100% { transform: scale(2.4); opacity: 0; }
 }
 
-/* Survivor glow (DiamondPistol) */
 .survivor-glow {
   position: absolute;
   width: 420px;
@@ -701,5 +676,5 @@
 }
 
 /* ========================================================================== */
-/* END arena.css v7.5 FINAL                                                   */
+/* END arena.css v7.6 FINAL                                                   */
 /* ========================================================================== */
