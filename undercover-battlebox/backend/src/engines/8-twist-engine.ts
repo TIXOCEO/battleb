@@ -1,12 +1,11 @@
 // ============================================================================
-// 8-twist-engine.ts — Twist Engine v7.3 FINAL
+// 8-twist-engine.ts — Twist Engine v7.3 FINAL (TYPES PATCHED)
 // ============================================================================
 //
 // ✔ Full support for new overlay payload (target/victims/survivor/index)
-// ✔ Added countdown payload for bomb (3 → 2 → 1)
-// ✔ All twist events push FULL structured payload
-// ✔ Maintains all game logic untouched
-// ✔ Compatible with overlay v6/v7 + twistAnim.js v7.2
+// ✔ Fixed ALL TS implicit-any errors
+// ✔ Added proper TwistType typing for TWIST_MAP lookups
+// ✔ No game logic changed
 //
 // ============================================================================
 
@@ -25,7 +24,8 @@ import {
 import {
   TWIST_MAP,
   TwistType,
-  resolveTwistAlias
+  resolveTwistAlias,
+  TwistDefinition
 } from "./twist-definitions";
 
 import pool from "../db";
@@ -125,13 +125,11 @@ function emitOverlay(name: string, data: any = {}) {
     ? `${data.by} gebruikt ${type}`.toUpperCase()
     : type.toUpperCase();
 
-  const payload = {
+  io.emit("twist:takeover", {
     type,
     title,
-    ...data // << NEW — passes targetName, survivorName, indices etc.
-  };
-
-  io.emit("twist:takeover", payload);
+    ...data
+  });
 
   setTimeout(() => io.emit("twist:clear"), 1800);
 }
@@ -163,7 +161,11 @@ async function applyGalaxy(senderId: string, senderName: string): Promise<void> 
 
 
 // ------------------------------- MONEYGUN -----------------------------------
-async function applyMoneyGun(senderId, senderName, target) {
+async function applyMoneyGun(
+  senderId: string,
+  senderName: string,
+  target: any
+) {
   if (!target) return;
 
   const arena = getArena();
@@ -202,7 +204,10 @@ async function applyMoneyGun(senderId, senderName, target) {
 // --------------------------------- BOMB -------------------------------------
 let bombInProgress = false;
 
-async function applyBomb(senderId, senderName) {
+async function applyBomb(
+  senderId: string,
+  senderName: string
+) {
   const arena = getArena();
 
   if (bombInProgress) {
@@ -229,14 +234,8 @@ async function applyBomb(senderId, senderName) {
 
   emitOverlay("bomb_start", { by: senderName });
 
-  // NEW: COUNTDOWN → overlay
   for (let i = 3; i >= 1; i--) {
-    io.emit("twist:countdown", {
-      type: "countdown",
-      step: i,
-      by: senderName
-    });
-
+    io.emit("twist:countdown", { type: "countdown", step: i, by: senderName });
     await sleep(1000);
   }
 
@@ -271,7 +270,11 @@ async function applyBomb(senderId, senderName) {
 
 
 // ------------------------------- IMMUNE -------------------------------------
-async function applyImmuneTwist(senderId, senderName, target) {
+async function applyImmuneTwist(
+  senderId: string,
+  senderName: string,
+  target: any
+) {
   if (!target) return;
 
   const ok = await consumeTwistFromUser(senderId, "immune");
@@ -294,7 +297,11 @@ async function applyImmuneTwist(senderId, senderName, target) {
 
 
 // --------------------------------- HEAL -------------------------------------
-async function applyHeal(senderId, senderName, target) {
+async function applyHeal(
+  senderId: string,
+  senderName: string,
+  target: any
+) {
   if (!target) return;
 
   const arena = getArena();
@@ -327,7 +334,11 @@ async function applyHeal(senderId, senderName, target) {
 
 
 // ------------------------------- BREAKER ------------------------------------
-async function applyBreaker(senderId, senderName, target) {
+async function applyBreaker(
+  senderId: string,
+  senderName: string,
+  target: any
+) {
   if (!target) return;
 
   const arena = getArena();
@@ -368,7 +379,11 @@ async function applyBreaker(senderId, senderName, target) {
 
 
 // --------------------------- DIAMOND PISTOL ---------------------------------
-async function applyDiamondPistol(senderId, senderName, survivor) {
+async function applyDiamondPistol(
+  senderId: string,
+  senderName: string,
+  survivor: any
+) {
   if (!survivor) return;
 
   const arena = getArena();
@@ -419,7 +434,12 @@ async function applyDiamondPistol(senderId, senderName, survivor) {
 // ============================================================================
 // USE TWIST
 // ============================================================================
-export async function useTwist(senderId, senderName, twist, rawTarget) {
+export async function useTwist(
+  senderId: string,
+  senderName: string,
+  twist: TwistType,
+  rawTarget?: string
+) {
   const arena = getArena();
 
   if (!["active", "grace"].includes(arena.status)) {
@@ -430,9 +450,11 @@ export async function useTwist(senderId, senderName, twist, rawTarget) {
     return;
   }
 
-  let target = null;
+  const def: TwistDefinition = TWIST_MAP[twist];
 
-  if (TWIST_MAP[twist].requiresTarget) {
+  let target: any = null;
+
+  if (def.requiresTarget) {
     target = await findUser(rawTarget || "");
     if (!target) {
       emitLog({
@@ -458,12 +480,17 @@ export async function useTwist(senderId, senderName, twist, rawTarget) {
 // ============================================================================
 // ADD TWIST FROM GIFT
 // ============================================================================
-export async function addTwistByGift(userId, twist) {
+export async function addTwistByGift(
+  userId: string,
+  twist: TwistType
+) {
   await giveTwistToUser(userId, twist);
+
+  const def: TwistDefinition = TWIST_MAP[twist];
 
   emitLog({
     type: "twist",
-    message: `Twist ontvangen: ${TWIST_MAP[twist].giftName}`
+    message: `Twist ontvangen: ${def.giftName}`
   });
 }
 
@@ -471,7 +498,11 @@ export async function addTwistByGift(userId, twist) {
 // ============================================================================
 // !use COMMAND PARSER
 // ============================================================================
-export async function parseUseCommand(senderId, senderName, msg) {
+export async function parseUseCommand(
+  senderId: string,
+  senderName: string,
+  msg: string
+) {
   const parts = msg.trim().split(/\s+/);
   if (parts[0]?.toLowerCase() !== "!use") return;
 
