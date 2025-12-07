@@ -1,32 +1,30 @@
 // ============================================================================
-// TargetPulseFX.js — Single Player Focus Pulse
+// TargetPulseFX — pulserende cirkel op target speler
 // ============================================================================
 
 export default class TargetPulseFX {
   constructor(x, y) {
     this.x = x;
     this.y = y;
-    this.time = 0;
-    this.duration = 0.5;
+    this.t = 0;
+    this.duration = 0.7;
   }
 
-  setup() {}
-
   update(dt) {
-    this.time += dt;
-    return this.time >= this.duration;
+    this.t += dt;
+    return this.t > this.duration;
   }
 
   render(ctx) {
-    const t = this.time / this.duration;
-    const radius = 40 + t * 90;
-    const alpha = 1 - t;
+    const p = this.t / this.duration;
+    const radius = 20 + p * 80;
 
     ctx.save();
     ctx.beginPath();
     ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
-    ctx.strokeStyle = `rgba(255,80,0,${alpha})`;
-    ctx.lineWidth = 6;
+
+    ctx.strokeStyle = `rgba(255,80,80,${1 - p})`;
+    ctx.lineWidth = 4;
     ctx.stroke();
     ctx.restore();
   }
