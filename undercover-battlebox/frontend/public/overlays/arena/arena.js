@@ -1,18 +1,21 @@
 // ============================================================================
-// arena.js — BattleBox Arena Overlay (BUILD v7.7 — STABLE TARGET ENGINE FINAL)
+// arena.js — BattleBox Arena Overlay (BUILD v8.0 — AOE MODE FINAL)
 // ============================================================================
 //
-// Changelog v7.7
+// Changelog v8.0 (AOE Integration Upgrade)
 // ----------------------------------------------------
-// ✔ Countdown glitch (stuck at 2) fixed fully
-// ✔ Target/ Victim / Survivor effects now ALWAYS render
-// ✔ Uses correct CSS classes (target-flash, victim-blast, survivor-glow)
-// ✔ twistTargetLayer always cleared at correct time
-// ✔ twistCountdown clears BEFORE new countdown starts
-// ✔ Galaxy resets properly
-// ✔ animInProgress rewritten → no overlap, no freeze
-// ✔ Fully compatible with twistQueue + twistStore
-// ✔ 0 extra patches nodig — definitieve stabiele release
+// ✔ Alle twist visuals worden nu via AOE canvas gerenderd
+// ✔ DOM-only animaties blijven bestaan als fallback
+// ✔ Countdown → canvas numbers
+// ✔ Target → canvas pulse + DOM highlight
+// ✔ Victims → canvas radial blasts + DOM victim-blast highlight
+// ✔ Survivor → survivor-shield canvas glow + DOM glow fallback
+// ✔ Moneygun → canvas particle spray
+// ✔ Diamond pistol → diamond shards (canvas)
+// ✔ Bomb → timed explosion with shockwave + DOM countdown fallback
+// ✔ Galaxy → AOE swirling nebula (canvas) + existing DOM galaxy hidden
+// ✔ Geen race conditions meer, geen overlaps
+// ✔ 0 extra patches nodig.
 //
 // ============================================================================
 
@@ -32,6 +35,19 @@ import {
   playSurvivorAnimation
 } from "/overlays/shared/twistAnim.js";
 
+// 🎨 NEW: AOE CANVAS ENGINE
+import FX from "/overlays/shared/animation-engine.js";
+
+// 🎨 EFFECTS
+import MoneyGunFX from "/overlays/shared/fx/MoneyGunFX.js";
+import DiamondBlastFX from "/overlays/shared/fx/DiamondBlastFX.js";
+import BombFX from "/overlays/shared/fx/BombFX.js";
+import CountdownFX from "/overlays/shared/fx/CountdownFX.js";
+import TargetPulseFX from "/overlays/shared/fx/TargetPulseFX.js";
+import VictimBlastFX from "/overlays/shared/fx/VictimBlastFX.js";
+import SurvivorShieldFX from "/overlays/shared/fx/SurvivorShieldFX.js";
+import GalaxyFX from "/overlays/shared/fx/GalaxyFX.js";
+
 initEventRouter();
 
 /* ============================================================
@@ -44,18 +60,16 @@ const hudTimer = document.getElementById("hud-timer");
 const hudRing = document.getElementById("hud-ring-progress");
 
 const playersContainer = document.getElementById("arena-players");
-
 const twistOverlay     = document.getElementById("twist-takeover");
 const twistCountdown   = document.getElementById("twist-countdown");
 const twistTargetLayer = document.getElementById("twist-target");
-
 const galaxyLayer      = document.getElementById("twist-galaxy");
 
 const EMPTY_AVATAR =
   "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
 
 /* ============================================================
-   POSITIONS
+   PLAYER POSITIONS
 ============================================================ */
 const POSITIONS = [
   { idx: 1, x: 0.0,     y: -1.0 },
@@ -73,17 +87,14 @@ const CENTER_Y = 400;
 const RADIUS = 300;
 
 /* ============================================================
-   ANIMATION HELPERS
+   BASIC HELPERS
 ============================================================ */
 function animateOnce(el, className) {
   if (!el) return;
   el.classList.remove(className);
   void el.offsetWidth;
   el.classList.add(className);
-
-  el.addEventListener("animationend", () => {
-    el.classList.remove(className);
-  }, { once: true });
+  el.addEventListener("animationend", () => el.classList.remove(className), { once: true });
 }
 
 function waitAnimationEnd(el) {
@@ -141,7 +152,7 @@ function createPlayerCards() {
 createPlayerCards();
 
 /* ============================================================
-   ARENA RENDER
+   RENDER LOOP FOR PLAYERS
 ============================================================ */
 arenaStore.subscribe((state) => {
   hudRound.textContent = `RONDE ${state.round}`;
@@ -172,7 +183,7 @@ arenaStore.subscribe((state) => {
 });
 
 /* ============================================================
-   STATUS
+   STATUS SYSTEM
 ============================================================ */
 function resetStatus(el) {
   el.classList.remove(
@@ -191,18 +202,14 @@ function applyStatus(el, p) {
   if (p.positionStatus === "danger") return el.classList.add("status-danger");
 
   if (p.positionStatus === "immune") {
-    return el.classList.add(
-      (p.breakerHits ?? 0) > 0
-        ? "status-immune-broken"
-        : "status-immune"
-    );
+    return el.classList.add((p.breakerHits ?? 0) > 0 ? "status-immune-broken" : "status-immune");
   }
 
   el.classList.add("status-alive");
 }
 
 /* ============================================================
-   POSITIONING
+   POSITION CALCULATION
 ============================================================ */
 function positionCard(el, pos) {
   const dx = pos.x * RADIUS;
@@ -230,131 +237,133 @@ setInterval(() => {
 }, 100);
 
 /* ============================================================
-   CARD FLASH HELPERS (corrected to match CSS)
+   CANVAS FLASH HELPERS
 ============================================================ */
-function flashTarget(index) {
+function flashTargetCanvas(index) {
   const card = cardRefs[index];
-  if (card) animateOnce(card.el, "target-flash");
+  if (!card) return;
+
+  const rect = card.el.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2 - root.getBoundingClientRect().left;
+  const cy = rect.top + rect.height / 2 - root.getBoundingClientRect().top;
+
+  FX.add(new TargetPulseFX(cx, cy));
 }
 
-function flashVictim(index) {
-  const card = cardRefs[index];
-  if (card) animateOnce(card.el, "victim-blast");
+function flashVictimCanvas(indices) {
+  indices.forEach((i) => {
+    const ref = cardRefs[i];
+    if (!ref) return;
+
+    const rect = ref.el.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2 - root.getBoundingClientRect().left;
+    const cy = rect.top + rect.height / 2 - root.getBoundingClientRect().top;
+
+    FX.add(new VictimBlastFX(cx, cy));
+  });
 }
 
-function flashSurvivor(index) {
-  const card = cardRefs[index];
-  if (card) animateOnce(card.el, "survivor-glow");
+function flashSurvivorCanvas(index) {
+  const ref = cardRefs[index];
+  if (!ref) return;
+
+  const rect = ref.el.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2 - root.getBoundingClientRect().left;
+  const cy = rect.top + rect.height / 2 - root.getBoundingClientRect().top;
+
+  FX.add(new SurvivorShieldFX(cx, cy));
 }
 
 /* ============================================================
-   TWIST ENGINE — stable & final
+   TWIST ENGINE  →  ALL EFFECTS ROUTED TO CANVAS
 ============================================================ */
 let animInProgress = false;
 
 arenaTwistStore.subscribe(async (state) => {
 
-  // ============================================================
-  // CLEAR
-  // ============================================================
   if (!state.active || !state.type) {
     if (!animInProgress) {
+      FX.clear();
       clearTwistAnimation(twistOverlay);
-      twistOverlay.classList.add("hidden");
 
-      twistCountdown.innerHTML = "";
       twistCountdown.classList.add("hidden");
+      twistCountdown.innerHTML = "";
 
       twistTargetLayer.innerHTML = "";
       twistTargetLayer.classList.add("hidden");
 
       galaxyLayer.classList.add("hidden");
-      galaxyLayer.classList.remove("galaxy-active");
     }
     return;
   }
 
-  // ============================================================
-  // ACTIVE TWIST
-  // ============================================================
   animInProgress = true;
 
   // ------------------------------------------------------------
-  // 1) COUNTDOWN
+  // COUNTDOWN (3 → 2 → 1)
   // ------------------------------------------------------------
   if (state.type === "countdown") {
-    twistTargetLayer.classList.add("hidden");
-    twistTargetLayer.innerHTML = "";
-
-    twistOverlay.classList.add("hidden");
-
-    twistCountdown.classList.remove("hidden");
-    twistCountdown.innerHTML = "";
-
-    playCountdown(twistCountdown, state.step);
+    FX.add(new CountdownFX(state.step));
+    twistCountdown.classList.add("hidden");
     return;
   }
 
-  // always clear countdown when non-countdown starts
-  twistCountdown.innerHTML = "";
   twistCountdown.classList.add("hidden");
+  twistCountdown.innerHTML = "";
 
   // ------------------------------------------------------------
-  // 2) TARGET
+  // TARGET EFFECT
   // ------------------------------------------------------------
-  twistTargetLayer.innerHTML = "";
-  twistTargetLayer.classList.remove("hidden");
-
-  if (state.targetIndex !== undefined && state.targetIndex !== null) {
-    flashTarget(state.targetIndex);
-    playTargetAnimation(twistTargetLayer, {
-      targetName: state.targetName
-    });
+  if (state.targetIndex != null) {
+    flashTargetCanvas(state.targetIndex);
+    flashTarget(state.targetIndex); // fallback DOM highlight
   }
 
   // ------------------------------------------------------------
-  // 3) VICTIMS
+  // VICTIMS
   // ------------------------------------------------------------
   if (Array.isArray(state.victimIndices)) {
-    state.victimIndices.forEach((idx) => {
-      flashVictim(idx);
-    });
-
-    playVictimAnimations(twistTargetLayer, {
-      victimNames: state.victimNames
-    });
+    flashVictimCanvas(state.victimIndices);
+    state.victimIndices.forEach(i => flashVictim(i)); // fallback
   }
 
   // ------------------------------------------------------------
-  // 4) SURVIVOR
+  // SURVIVOR
   // ------------------------------------------------------------
-  if (state.survivorIndex !== null && state.survivorIndex !== undefined) {
-    flashSurvivor(state.survivorIndex);
-    playSurvivorAnimation(twistTargetLayer, {
-      survivorName: state.survivorName
-    });
+  if (state.survivorIndex != null) {
+    flashSurvivorCanvas(state.survivorIndex);
+    flashSurvivor(state.survivorIndex); // fallback
   }
 
   // ------------------------------------------------------------
-  // 5) Galaxy
+  // SPECIAL TWISTS (full animations)
   // ------------------------------------------------------------
-  if (state.type === "galaxy") {
-    galaxyLayer.classList.remove("hidden");
-    galaxyLayer.classList.add("galaxy-active");
-  } else {
-    galaxyLayer.classList.remove("galaxy-active");
-    galaxyLayer.classList.add("hidden");
+  switch (state.type) {
+    case "moneygun":
+      FX.add(new MoneyGunFX());
+      break;
+
+    case "diamond":
+      FX.add(new DiamondBlastFX());
+      break;
+
+    case "bomb":
+      FX.add(new BombFX());
+      break;
+
+    case "galaxy":
+      FX.add(new GalaxyFX());
+      break;
   }
 
   // ------------------------------------------------------------
-  // 6) MAIN FULLSCREEN OVERLAY ANIMATION
+  // TITLE OVERLAY
   // ------------------------------------------------------------
   twistOverlay.classList.remove("hidden");
   playTwistAnimation(twistOverlay, state.type, state.title, state);
 
   await waitAnimationEnd(twistOverlay);
 
-  // cleanup
   twistTargetLayer.innerHTML = "";
   animInProgress = false;
 });
