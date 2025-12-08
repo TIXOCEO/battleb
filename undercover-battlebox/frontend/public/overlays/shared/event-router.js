@@ -9,7 +9,7 @@ import {
   queueStore,
   eventStore,
   tickerStore,
-  twistStore,      // ★ required for twist overlay restore
+  twistStore,
   applySnapshot
 } from "/overlays/shared/stores.js";
 
@@ -28,6 +28,7 @@ let routerStarted = false;
 // ============================================================================
 // NORMALIZER — arena updates
 // ============================================================================
+
 function normalizeArena(pkt) {
   if (!pkt) return null;
 
@@ -54,6 +55,7 @@ function normalizeArena(pkt) {
 // ============================================================================
 // ⭐ LEGACY TWIST MAP RESTORED (from v1.6)
 // ============================================================================
+
 const TWIST_MAP = {
   galaxy: {
     giftName: "Galaxy",
@@ -119,7 +121,6 @@ const TWIST_MAP = {
   },
 };
 
-// Legacy → array of mapped twist objects
 const TWIST_KEYS = Object.entries(TWIST_MAP).map(([key, t]) => ({
   key,
   giftName: t.giftName,
@@ -133,6 +134,7 @@ const TWIST_KEYS = Object.entries(TWIST_MAP).map(([key, t]) => ({
 // ============================================================================
 // INIT ROUTER
 // ============================================================================
+
 export async function initEventRouter() {
   if (routerStarted) return;
   routerStarted = true;
@@ -145,31 +147,26 @@ export async function initEventRouter() {
   );
 
   // ------------------------------------------------------------------------
-  // 1) INITIAL SNAPSHOT
+  // INITIAL SNAPSHOT
   // ------------------------------------------------------------------------
   socket.on("overlayInitialSnapshot", (snap) => {
-    console.log("[DEBUG] Initial snapshot:", snap);
-
     applySnapshot(snap);
-
     if (snap.arena) setArenaSnapshot(snap.arena);
 
-    // ★ Legacy twist display — show static twist list immediately
     twistStore.setTwists(TWIST_KEYS.slice(0, 3));
   });
 
   // ------------------------------------------------------------------------
-  // 2) LIVE ARENA UPDATES
+  // ARENA UPDATES
   // ------------------------------------------------------------------------
   socket.on("updateArena", (pkt) => {
     const norm = normalizeArena(pkt);
     if (norm) arenaStore.set(norm);
-
     document.dispatchEvent(new CustomEvent("arena:update", { detail: norm }));
   });
 
   // ------------------------------------------------------------------------
-  // 3) ROUND EVENTS
+  // ROUND EVENTS
   // ------------------------------------------------------------------------
   socket.on("round:start", (payload) => {
     const total = (payload.duration || 0) * 1000;
@@ -185,7 +182,6 @@ export async function initEventRouter() {
     });
 
     document.dispatchEvent(new CustomEvent("arena:roundStart", { detail: payload }));
-    window.dispatchEvent(new CustomEvent("round:start", { detail: payload }));
   });
 
   socket.on("round:grace", (payload) => {
@@ -202,7 +198,6 @@ export async function initEventRouter() {
     });
 
     document.dispatchEvent(new CustomEvent("arena:graceStart", { detail: payload }));
-    window.dispatchEvent(new CustomEvent("round:grace", { detail: payload }));
   });
 
   socket.on("round:end", () => {
@@ -214,34 +209,52 @@ export async function initEventRouter() {
     });
 
     document.dispatchEvent(new CustomEvent("arena:roundEnd"));
-    window.dispatchEvent(new CustomEvent("round:end"));
   });
 
   // ------------------------------------------------------------------------
-  // 4) TWIST TAKEOVER — ARENA TWIST ENGINE
+  // ⭐ TWIST TAKEOVER — **FIXED: sender name now included**
   // ------------------------------------------------------------------------
   socket.on("twist:takeover", (raw) => {
     const payload = {
       type: raw.type || null,
       title: raw.title || "",
+
+      // ⭐ NEW — sender fields (fix!)
+      by: raw.by || raw.sender || raw.senderName || null,
+      byUsername: raw.byUsername || raw.senderUsername || null,
+      byDisplayName: raw.byDisplayName || raw.senderDisplayName || null,
+      senderName: raw.senderName || raw.by || null,
+
+      // target info
       targetId: raw.targetId || null,
       targetName: raw.targetName || null,
       targetIndex: Number.isFinite(raw.targetIndex) ? raw.targetIndex : null,
+
+      // victims
       victimIds: Array.isArray(raw.victimIds) ? raw.victimIds : [],
       victimNames: Array.isArray(raw.victimNames) ? raw.victimNames : [],
-      victimIndices: (raw.victimIndices || []).map(i => Number.isFinite(i) ? i : null),
+      victimIndices: (raw.victimIndices || []).map(i =>
+        Number.isFinite(i) ? i : null
+      ),
+
+      // survivor
       survivorId: raw.survivorId || null,
       survivorName: raw.survivorName || null,
-      survivorIndex: Number.isFinite(raw.survivorIndex) ? raw.survivorIndex : null,
+      survivorIndex: Number.isFinite(raw.survivorIndex)
+        ? raw.survivorIndex
+        : null,
+
       reverse: raw.reverse || false
     };
 
     arenaTwistStore.activate(payload);
-    document.dispatchEvent(new CustomEvent("arena:twistTakeover", { detail: payload }));
+    document.dispatchEvent(
+      new CustomEvent("arena:twistTakeover", { detail: payload })
+    );
   });
 
   // ------------------------------------------------------------------------
-  // 5) TWIST CLEAR
+  // TWIST CLEAR
   // ------------------------------------------------------------------------
   socket.on("twist:clear", () => {
     arenaTwistStore.clear();
@@ -249,21 +262,27 @@ export async function initEventRouter() {
   });
 
   // ------------------------------------------------------------------------
-  // 6) TWIST COUNTDOWN
+  // TWIST COUNTDOWN
   // ------------------------------------------------------------------------
   socket.on("twist:countdown", (raw) => {
     const payload = {
       type: "countdown",
       step: Number.isFinite(raw.step) ? raw.step : 3,
-      by: raw.by || ""
+
+      // ⭐ include sender for consistency
+      by: raw.by || raw.senderName || null,
+      byUsername: raw.byUsername || null,
+      byDisplayName: raw.byDisplayName || null
     };
 
     arenaTwistStore.countdown(payload);
-    document.dispatchEvent(new CustomEvent("arena:twistCountdown", { detail: payload }));
+    document.dispatchEvent(
+      new CustomEvent("arena:twistCountdown", { detail: payload })
+    );
   });
 
   // ------------------------------------------------------------------------
-  // 7) QUEUE UPDATE
+  // QUEUE UPDATE
   // ------------------------------------------------------------------------
   socket.on("updateQueue", (packet) => {
     if (!packet || !Array.isArray(packet.entries)) return;
@@ -271,7 +290,7 @@ export async function initEventRouter() {
   });
 
   // ------------------------------------------------------------------------
-  // 8) QUEUE EVENTS
+  // QUEUE EVENTS
   // ------------------------------------------------------------------------
   socket.on("queueEvent", (evt) => {
     if (!evt || !QUEUE_EVENTS.has(evt.type)) return;
@@ -306,14 +325,14 @@ export async function initEventRouter() {
   });
 
   // ------------------------------------------------------------------------
-  // 9) HUD TICKER
+  // HUD TICKER
   // ------------------------------------------------------------------------
   socket.on("hudTickerUpdate", (text) => {
     tickerStore.setText(text || "");
   });
 
   // ------------------------------------------------------------------------
-  // 10) LEGACY TWIST ROTATION (3 items → overlay shows 2)
+  // LEGACY TWIST ROTATION
   // ------------------------------------------------------------------------
   let twistIndex = 0;
   function rotateLegacyTwists() {
@@ -329,7 +348,7 @@ export async function initEventRouter() {
   setInterval(rotateLegacyTwists, 10000);
 
   // ------------------------------------------------------------------------
-  // 11) DEBUG BRIDGE
+  // DEBUG BRIDGE
   // ------------------------------------------------------------------------
   window.bb = { socket, eventStore, arenaStore, arenaTwistStore, twistStore };
   console.log("%c[BB DEBUG] Debug bridge active → window.bb", "color:#0fffd7");
