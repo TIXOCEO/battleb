@@ -1,5 +1,5 @@
 // ============================================================================
-// event-router.js — BattleBox Event Brain v4.5 FINAL
+// event-router.js — BattleBox Event Brain v4.5 FINAL (PATCHED)
 // FULL PAYLOAD NORMALIZATION + COUNTDOWN + TWIST QUEUE v7.4 SUPPORT
 // ============================================================================
 //
@@ -12,6 +12,13 @@
 // ✔ Improve: empty arrays always normalized
 // ✔ Improve: twistQueue sequencing never breaks
 //
+// PATCH v4.5.1:
+// -----------------------------------------------------
+// ✔ Herstelt twistStore (zichtbare winkel-twists)
+// ✔ Ondersteunt `twist:list` én `updateTwists` (legacy)
+// ✔ Geen impact op arenaTwistStore en gameplay
+// ✔ Volledig backward compatible met oude overlays
+//
 // ============================================================================
 
 import { getSocket } from "/overlays/shared/socket.js";
@@ -19,6 +26,7 @@ import {
   queueStore,
   eventStore,
   tickerStore,
+  twistStore,
   applySnapshot
 } from "/overlays/shared/stores.js";
 
@@ -84,6 +92,13 @@ export async function initEventRouter() {
 
     if (snap.arena) {
       setArenaSnapshot(snap.arena);
+    }
+
+    // PATCH: twistStore initialiseren indien snapshot twists bevat
+    if (Array.isArray(snap.twists)) {
+      const mapped = snap.twists.map(mapTwist);
+      twistStore.setTwists(mapped);
+      console.log("[DEBUG] Initial snapshot → twistStore restored:", mapped);
     }
   });
 
@@ -282,8 +297,42 @@ export async function initEventRouter() {
   });
 
   // ==========================================================================
-  // 10) DEBUG BRIDGE
-  // ==========================================================================
-  window.bb = { socket, eventStore, arenaStore, arenaTwistStore };
-  console.log("%c[BB DEBUG] Debug bridge active → window.bb", "color:#0fffd7");
+  // 10) TWIST LIST RESTORE (NEW + LEGACY SUPPORT)
+// ==========================================================================
+socket.on("twist:list", (twists) => {
+  if (!Array.isArray(twists)) return;
+
+  const mapped = twists.map(mapTwist);
+  twistStore.setTwists(mapped);
+
+  console.log("[DEBUG] twist:list → twistStore restored:", mapped);
+});
+
+socket.on("updateTwists", (twists) => {
+  if (!Array.isArray(twists)) return;
+
+  const mapped = twists.map(mapTwist);
+  twistStore.setTwists(mapped);
+
+  console.log("[DEBUG] updateTwists → twistStore restored:", mapped);
+});
+
+// ============================================================================
+// 11) DEBUG BRIDGE
+// ============================================================================
+window.bb = { socket, eventStore, arenaStore, arenaTwistStore, twistStore };
+console.log("%c[BB DEBUG] Debug bridge active → window.bb", "color:#0fffd7");
+}
+
+// ============================================================================
+// TWIST MAPPER — uniforme structuur voor twists overlay
+// ============================================================================
+function mapTwist(tw) {
+  return {
+    twistName: tw.twistName || tw.name || "",
+    giftName: tw.giftName || tw.gift || "",
+    description: tw.description || "",
+    icon: tw.icon || "/overlays/shared/default-icon.png",
+    aliases: Array.isArray(tw.aliases) ? tw.aliases : []
+  };
 }
