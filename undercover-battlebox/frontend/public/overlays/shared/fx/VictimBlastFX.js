@@ -1,5 +1,6 @@
 // ============================================================================
-// VictimBlastFX — kleine explosie op elke victim
+// VictimBlastFX — ULTRA MODE
+// expanding fire ring • core flash • scorch pulse
 // ============================================================================
 
 export default class VictimBlastFX {
@@ -7,7 +8,7 @@ export default class VictimBlastFX {
     this.x = x;
     this.y = y;
     this.t = 0;
-    this.duration = 0.5;
+    this.duration = 0.9;
   }
 
   update(dt) {
@@ -17,15 +18,31 @@ export default class VictimBlastFX {
 
   render(ctx) {
     const p = this.t / this.duration;
-    const r = p * 60;
 
     ctx.save();
+    ctx.globalCompositeOperation = "lighter";
 
+    // Core flash
+    if (p < 0.25) {
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, 40 - p * 20, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,160,60,${1 - p * 4})`;
+      ctx.fill();
+    }
+
+    // Fire ring
+    const radius = 40 + p * 180;
     ctx.beginPath();
-    ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
-    ctx.strokeStyle = `rgba(255,200,0,${1 - p})`;
-    ctx.lineWidth = 6 * (1 - p);
+    ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
+    ctx.lineWidth = 14 * (1 - p);
+    ctx.strokeStyle = `rgba(255,120,0,${1 - p})`;
     ctx.stroke();
+
+    // Scorch field
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, radius * 0.6, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,80,0,${0.4 * (1 - p)})`;
+    ctx.fill();
 
     ctx.restore();
   }
