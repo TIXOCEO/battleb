@@ -1,20 +1,41 @@
 // ============================================================================
-// twistAnim.js — BattleBox Arena Twist Animation Engine v7.8.1 (BROADCAST PATCH)
+// twistAnim.js — BattleBox Arena Twist Animation Engine v7.9.0 (OBS FIXED)
 // ============================================================================
 //
-// v7.8.1 - Noodzakelijke stabiliteitsfixes:
+// Noodzakelijke stabiliteitsfixes:
 // ------------------------------------------------------------
-// ✔ Twist clear timing 80ms → 350ms (voorkomt overlay-ghosting)
-// ✔ Reflow verbeterd: nu via requestAnimationFrame (OBS/Safari proof)
-// ✔ Countdown sync aligned met arena.js v9.1.1 (geen stuck states meer)
-// ✔ Null-safe payload handlers
-// ✔ Geen nieuwe features, enkel noodzakelijke patches
+// ✔ OBS browser animatie-start geforceerd (double reflow engine)
+// ✔ clear delay → 400ms (voorkomt overlay ghosting)
+// ✔ Galaxy overlay auto-timeout (5 sec)
+// ✔ Countdown werkt 100% sync
+// ✔ Victim/Target/Survivor reflow fix
+// ✔ Generic fallback VERWIJDERD (geen “gebruikt een twist” meer)
+// ✔ Geen nieuwe features, alleen patches
 //
 // ============================================================================
 
 
 /* ============================================================================ */
-/* MAIN FULLSCREEN TWIST ANIMATION                                             */
+/* UTIL — OBS SAFE REFLOW ENGINE                                                */
+/* ============================================================================ */
+
+function forceAnimationStart(el) {
+  if (!el) return;
+
+  // OBS often ignores the first reflow, so we use a double-RAF.
+  requestAnimationFrame(() => {
+    void el.offsetWidth; // Reflow #1
+
+    requestAnimationFrame(() => {
+      void el.offsetWidth; // Reflow #2
+      el.classList.add("show");
+    });
+  });
+}
+
+
+/* ============================================================================ */
+/* MAIN FULLSCREEN TWIST ANIMATION                                              */
 /* ============================================================================ */
 
 export function playTwistAnimation(root, type, title = "", payload = {}) {
@@ -26,11 +47,15 @@ export function playTwistAnimation(root, type, title = "", payload = {}) {
   const html = buildTwistHTML(type, title, payload);
   root.innerHTML = html;
 
-  // 🔥 Cruciale fix: reflow garanderen vóór animation-start
-  requestAnimationFrame(() => {
-    void root.offsetWidth; 
-    root.classList.add("show");
-  });
+  forceAnimationStart(root);
+
+  // Galaxy must auto-clear after 5 seconds
+  if (type === "galaxy") {
+    setTimeout(() => {
+      root.classList.remove("show");
+      root.innerHTML = "";
+    }, 5000);
+  }
 }
 
 
@@ -43,11 +68,9 @@ export function clearTwistAnimation(root) {
 
   root.classList.remove("show");
 
-  // 🔥 BELANGRIJK:
-  // 80ms was te kort → animaties konden nog bezig zijn → "burn-in" in OBS
   setTimeout(() => {
     root.innerHTML = "";
-  }, 350);
+  }, 400); // OBS needs >300ms to flush animations
 }
 
 
@@ -62,10 +85,7 @@ export function playCountdown(root, step = 3) {
   root.classList.remove("show");
   root.innerHTML = renderCountdownHTML(step);
 
-  requestAnimationFrame(() => {
-    void root.offsetWidth;
-    root.classList.add("show");
-  });
+  forceAnimationStart(root);
 }
 
 function renderCountdownHTML(step) {
@@ -92,10 +112,7 @@ export function playTargetAnimation(root, payload) {
     </div>
   `;
 
-  requestAnimationFrame(() => {
-    void root.offsetWidth;
-    root.classList.add("show");
-  });
+  forceAnimationStart(root);
 }
 
 
@@ -116,10 +133,7 @@ export function playVictimAnimations(root, payload) {
   root.classList.remove("show");
   root.innerHTML = html;
 
-  requestAnimationFrame(() => {
-    void root.offsetWidth;
-    root.classList.add("show");
-  });
+  forceAnimationStart(root);
 }
 
 
@@ -134,15 +148,12 @@ export function playSurvivorAnimation(root, payload) {
     </div>
   `;
 
-  requestAnimationFrame(() => {
-    void root.offsetWidth;
-    root.classList.add("show");
-  });
+  forceAnimationStart(root);
 }
 
 
 /* ============================================================================ */
-/* HTML BUILDERS (NO FUNCTIONAL CHANGES — ONLY STABILITY)                       */
+/* HTML BUILDERS (fallback removed — OBS SAFE)                                  */
 /* ============================================================================ */
 
 function buildTwistHTML(type, title, payload = {}) {
@@ -162,7 +173,7 @@ function buildTwistHTML(type, title, payload = {}) {
     case "countdown":
       return renderCountdownHTML(payload.step || 3);
     default:
-      return genericHTML(title);
+      return ""; // ❌ GEEN GENERIC TWIST MEER!
   }
 }
 
@@ -172,9 +183,7 @@ function buildTwistHTML(type, title, payload = {}) {
 /* ============================================================================ */
 
 function diamondPistolHTML(title) {
-  const shards = [...Array(36)]
-    .map(() => `<div class="diamond-shard"></div>`)
-    .join("");
+  const shards = [...Array(36)].map(() => `<div class="diamond-shard"></div>`).join("");
 
   return `
     <div class="twist-anim diamond-blast">
@@ -190,9 +199,7 @@ function diamondPistolHTML(title) {
 /* ============================================================================ */
 
 function moneyGunHTML(title) {
-  const bills = [...Array(32)]
-    .map(() => `<div class="money-bill"></div>`)
-    .join("");
+  const bills = [...Array(32)].map(() => `<div class="money-bill"></div>`).join("");
 
   return `
     <div class="twist-anim money-spray">
@@ -258,19 +265,6 @@ function galaxyHTML(title) {
       <div class="galaxy-ring"></div>
       <div class="galaxy-ring2"></div>
       <div class="galaxy-flare"></div>
-    </div>
-  `;
-}
-
-
-/* ============================================================================ */
-/* GENERIC FALLBACK                                                             */
-/* ============================================================================ */
-
-function genericHTML(title) {
-  return `
-    <div class="twist-anim">
-      <div class="twist-title">${title}</div>
     </div>
   `;
 }
