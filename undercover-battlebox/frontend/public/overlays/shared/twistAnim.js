@@ -1,22 +1,22 @@
 // ============================================================================
-// twistAnim.js — BattleBox Arena Twist Animation Engine v7.8 FINAL
+// twistAnim.js — BattleBox Arena Twist Animation Engine v7.8.1 (BROADCAST PATCH)
 // ============================================================================
 //
-// v7.8 — Definitieve stabiele build
+// v7.8.1 - Noodzakelijke stabiliteitsfixes:
 // ------------------------------------------------------------
-// ✔ Correcte CSS classnames: target-flash / victim-blast / survivor-glow
-// ✔ Geen dubbele elementen meer die animaties breken
-// ✔ Countdown nooit meer vastlopend
-// ✔ Force reflow verbeterd voor OBS/safari
-// ✔ Perfecte sync met arena.js v7.7
-// ✔ Geen nieuwe features, alleen noodzakelijke fixes
+// ✔ Twist clear timing 80ms → 350ms (voorkomt overlay-ghosting)
+// ✔ Reflow verbeterd: nu via requestAnimationFrame (OBS/Safari proof)
+// ✔ Countdown sync aligned met arena.js v9.1.1 (geen stuck states meer)
+// ✔ Null-safe payload handlers
+// ✔ Geen nieuwe features, enkel noodzakelijke patches
 //
 // ============================================================================
 
 
-/**
- * SPEELT DE VOLLEDIGE TWIST-ANIMATIE (fullscreen)
- */
+/* ============================================================================ */
+/* MAIN FULLSCREEN TWIST ANIMATION                                             */
+/* ============================================================================ */
+
 export function playTwistAnimation(root, type, title = "", payload = {}) {
   if (!root) return;
 
@@ -26,36 +26,43 @@ export function playTwistAnimation(root, type, title = "", payload = {}) {
   const html = buildTwistHTML(type, title, payload);
   root.innerHTML = html;
 
-  queueMicrotask(() => {
-    void root.offsetWidth; // force reflow
+  // 🔥 Cruciale fix: reflow garanderen vóór animation-start
+  requestAnimationFrame(() => {
+    void root.offsetWidth; 
     root.classList.add("show");
   });
 }
 
-/**
- * CLEART DE MAIN OVERLAY
- */
+
+/* ============================================================================ */
+/* CLEAR MAIN OVERLAY — timing fix                                              */
+/* ============================================================================ */
+
 export function clearTwistAnimation(root) {
   if (!root) return;
 
   root.classList.remove("show");
 
+  // 🔥 BELANGRIJK:
+  // 80ms was te kort → animaties konden nog bezig zijn → "burn-in" in OBS
   setTimeout(() => {
     root.innerHTML = "";
-  }, 80);
+  }, 350);
 }
 
-// ============================================================================
-// COUNTDOWN 3 → 2 → 1
-// ============================================================================
+
+/* ============================================================================ */
+/* COUNTDOWN (3 → 2 → 1)                                                        */
+/* ============================================================================ */
 
 export function playCountdown(root, step = 3) {
   if (!root) return;
+  if (step == null) step = 3;
 
   root.classList.remove("show");
   root.innerHTML = renderCountdownHTML(step);
 
-  queueMicrotask(() => {
+  requestAnimationFrame(() => {
     void root.offsetWidth;
     root.classList.add("show");
   });
@@ -69,9 +76,10 @@ function renderCountdownHTML(step) {
   `;
 }
 
-// ============================================================================
-// TARGET / VICTIMS / SURVIVOR ANIMATIES
-// ============================================================================
+
+/* ============================================================================ */
+/* TARGET / VICTIM / SURVIVOR ANIMATIONS                                       */
+/* ============================================================================ */
 
 export function playTargetAnimation(root, payload) {
   if (!root || !payload?.targetName) return;
@@ -84,11 +92,12 @@ export function playTargetAnimation(root, payload) {
     </div>
   `;
 
-  queueMicrotask(() => {
+  requestAnimationFrame(() => {
     void root.offsetWidth;
     root.classList.add("show");
   });
 }
+
 
 export function playVictimAnimations(root, payload) {
   if (!root || !payload?.victimNames?.length) return;
@@ -107,11 +116,12 @@ export function playVictimAnimations(root, payload) {
   root.classList.remove("show");
   root.innerHTML = html;
 
-  queueMicrotask(() => {
+  requestAnimationFrame(() => {
     void root.offsetWidth;
     root.classList.add("show");
   });
 }
+
 
 export function playSurvivorAnimation(root, payload) {
   if (!root || !payload?.survivorName) return;
@@ -124,47 +134,43 @@ export function playSurvivorAnimation(root, payload) {
     </div>
   `;
 
-  queueMicrotask(() => {
+  requestAnimationFrame(() => {
     void root.offsetWidth;
     root.classList.add("show");
   });
 }
 
-// ============================================================================
-// HTML GENERATORS (ORIGINEEL + COUNTDOWN)
-// ============================================================================
+
+/* ============================================================================ */
+/* HTML BUILDERS (NO FUNCTIONAL CHANGES — ONLY STABILITY)                       */
+/* ============================================================================ */
 
 function buildTwistHTML(type, title, payload = {}) {
   switch (type) {
     case "diamond":
       return diamondPistolHTML(title);
-
     case "moneygun":
       return moneyGunHTML(title);
-
     case "bomb":
       return bombHTML(title);
-
     case "immune":
       return immuneHTML(title);
-
     case "heal":
       return healHTML(title);
-
     case "galaxy":
       return galaxyHTML(title);
-
     case "countdown":
       return renderCountdownHTML(payload.step || 3);
-
     default:
       return genericHTML(title);
   }
 }
 
-/* ============================================================================
-   DIAMOND PISTOL
-============================================================================ */
+
+/* ============================================================================ */
+/* DIAMOND PISTOL                                                               */
+/* ============================================================================ */
+
 function diamondPistolHTML(title) {
   const shards = [...Array(36)]
     .map(() => `<div class="diamond-shard"></div>`)
@@ -178,9 +184,11 @@ function diamondPistolHTML(title) {
   `;
 }
 
-/* ============================================================================
-   MONEY GUN
-============================================================================ */
+
+/* ============================================================================ */
+/* MONEY GUN                                                                    */
+/* ============================================================================ */
+
 function moneyGunHTML(title) {
   const bills = [...Array(32)]
     .map(() => `<div class="money-bill"></div>`)
@@ -194,9 +202,11 @@ function moneyGunHTML(title) {
   `;
 }
 
-/* ============================================================================
-   BOMB
-============================================================================ */
+
+/* ============================================================================ */
+/* BOMB                                                                         */
+/* ============================================================================ */
+
 function bombHTML(title) {
   return `
     <div class="twist-anim bomb-blast">
@@ -207,9 +217,11 @@ function bombHTML(title) {
   `;
 }
 
-/* ============================================================================
-   IMMUNE
-============================================================================ */
+
+/* ============================================================================ */
+/* IMMUNE                                                                       */
+/* ============================================================================ */
+
 function immuneHTML(title) {
   return `
     <div class="twist-anim immune-aura">
@@ -219,9 +231,11 @@ function immuneHTML(title) {
   `;
 }
 
-/* ============================================================================
-   HEAL
-============================================================================ */
+
+/* ============================================================================ */
+/* HEAL                                                                         */
+/* ============================================================================ */
+
 function healHTML(title) {
   return `
     <div class="twist-anim heal-cross">
@@ -231,9 +245,11 @@ function healHTML(title) {
   `;
 }
 
-/* ============================================================================
-   GALAXY
-============================================================================ */
+
+/* ============================================================================ */
+/* GALAXY                                                                       */
+/* ============================================================================ */
+
 function galaxyHTML(title) {
   return `
     <div class="twist-anim galaxy-vortex">
@@ -246,9 +262,11 @@ function galaxyHTML(title) {
   `;
 }
 
-/* ============================================================================
-   GENERIEKE FALLBACK
-============================================================================ */
+
+/* ============================================================================ */
+/* GENERIC FALLBACK                                                             */
+/* ============================================================================ */
+
 function genericHTML(title) {
   return `
     <div class="twist-anim">
