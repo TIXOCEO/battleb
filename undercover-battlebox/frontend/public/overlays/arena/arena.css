@@ -14,10 +14,10 @@
   backdrop-filter: none !important;
   box-shadow: none !important;
 
-  /* CRUCIAAL: twist / beam / chaos FX blijven ALTIJD boven UI */
+  /* Fix: twist/beam/chaos liggen gegarandeerd boven UI */
   isolation: isolate;
 
-  /* Broadcast contrast — iets hoger baseline brightness */
+  /* Fix: licht verhoogde luminantie voor OBS clarity */
   filter: brightness(1.08);
 }
 
@@ -27,7 +27,7 @@
 #bb-animation-layer {
   position: absolute;
   inset: 0;
-  z-index: 999999; /* boven ALLES */
+  z-index: 999999; /* hoogste layer */
   pointer-events: none;
   overflow: visible !important;
   will-change: opacity, transform;
@@ -71,19 +71,19 @@
 }
 
 @keyframes crt-pulse {
-  0%   { opacity: 1;   }
+  0%   { opacity: 1; }
   50%  { opacity: 0.85; }
-  100% { opacity: 1;   }
+  100% { opacity: 1; }
 }
 
 /* ========================================================================== */
-/* CENTRAL HUD — Broadcast readability                                         */
+/* CENTRAL HUD — Broadcast readability                                        */
 /* ========================================================================== */
 .bb-hud {
   width: 350px;
   height: 350px;
   position: absolute;
-  z-index: 120; 
+  z-index: 120;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
@@ -95,13 +95,13 @@
     0% 85%, 0% 15%
   );
 
-  /* DARKENED for BEAMFX & CHAOS visibility */
+  /* Upgrade: donkerder panel voor betere BeamFX / Galaxy contrast */
   background: rgba(8, 8, 12, 0.72) !important;
   backdrop-filter: blur(6px);
 
   border: 2px solid rgba(255,255,255,0.14);
 
-  /* Broadcast stronger rim */
+  /* Upgrade: sterkere broadcast rim */
   box-shadow:
     0 0 35px rgba(0,0,0,0.9),
     inset 0 0 32px rgba(255,77,79,0.25) !important;
@@ -144,7 +144,7 @@
   transition: transform 0.2s ease-out;
 }
 
-/* Start shockwave */
+/* ROUND START SHOCKWAVE */
 .bb-round-start-shockwave {
   animation: hud-shockwave 0.6s cubic-bezier(.18,.85,.28,1);
 }
@@ -155,7 +155,7 @@
   100% { opacity: 1;    transform: scale(1); }
 }
 
-/* HUD timer tick */
+/* TIMER TICK */
 .bb-timer-tick {
   animation: hud-timer-tick 0.4s ease-out;
 }
@@ -167,7 +167,7 @@
 }
 
 /* ========================================================================== */
-/* HUD PROGRESS RING                                                          */
+/* PROGRESS RING                                                              */
 /* ========================================================================== */
 .hud-ring {
   position: absolute;
@@ -188,12 +188,12 @@
   transform: rotate(-90deg);
   transition: stroke-dashoffset 0.25s linear;
 
-  /* MUCH stronger broadcast glow */
+  /* Upgrade: sterkere ring glow */
   filter: drop-shadow(0 0 16px rgba(255,77,79,1));
 }
 
 /* ========================================================================== */
-/* PLAYER CARDS — Broadcast polished                                          */
+/* PLAYER CARDS — Broadcast Upgrade                                           */
 /* ========================================================================== */
 #arena-players {
   position: absolute;
@@ -214,7 +214,6 @@
     0% 82%, 0% 18%
   );
 
-  /* Broadcast variant: clearer, glowing edges */
   background: rgba(10,10,14,0.45);
   border: 2px solid rgba(255,255,255,0.22);
   box-shadow:
@@ -237,14 +236,13 @@
   will-change: transform, border-color, box-shadow;
 }
 
-/* Avatar background */
 .bb-player-bgavatar {
   position: absolute;
   inset: 0;
   background-size: cover;
   background-position: center;
   opacity: 0.22;
-  filter: blur(1.2px) brightness(1.2);
+  filter: blur(1.2px) brightness(1.15);
 }
 
 .bb-player-labels {
@@ -273,7 +271,7 @@
   transition: transform .25s, color .25s;
 }
 
-/* Position badge */
+/* POSITION BADGE */
 .bb-player-pos {
   position: absolute;
   top: 4px;
@@ -390,8 +388,9 @@
 }
 
 /* ========================================================================== */
-/* BROADCAST TWIST ANIMATIONS                                                 */
+/* TWIST ANIMATIONS — Broadcast Mode                                          */
 /* ========================================================================== */
+
 .twist-anim {
   position: absolute;
   inset: 0;
@@ -416,7 +415,7 @@
   z-index: 10;
 }
 
-/* DIAMOND SHARDS — stronger */
+/* DIAMOND SHARDS */
 .diamond-blast .diamond-shard {
   position: absolute;
   width: 24px;
@@ -452,7 +451,10 @@
   100% { opacity: 0; transform: translateX(900px) rotate(22deg); }
 }
 
-/* BOMB FX — enhanced */
+/* ========================================================================== */
+/* BOMB FX                                                                    */
+/* ========================================================================== */
+
 .bomb-blast .bomb-core {
   position: absolute;
   width: 48px; height: 48px;
@@ -479,7 +481,10 @@
   100% { opacity: 0;   transform: scale(17); }
 }
 
-/* IMMUNE AURA */
+/* ========================================================================== */
+/* IMMUNE                                                                     */
+/* ========================================================================== */
+
 .immune-aura .aura-ring {
   position: absolute;
   width: 300px;
@@ -496,7 +501,10 @@
   100% { transform: scale(0.85); opacity: 0.6; }
 }
 
-/* HEAL CROSS */
+/* ========================================================================== */
+/* HEAL                                                                       */
+/* ========================================================================== */
+
 .heal-cross .heal-plus {
   position: absolute;
   width: 90px; height: 90px;
@@ -517,8 +525,9 @@
 }
 
 /* ========================================================================== */
-/* GALAXY BACKGROUND (Broadcast clarity)                                      */
+/* GALAXY BACKGROUND                                                          */
 /* ========================================================================== */
+
 .galaxy-vortex {
   position: absolute;
   inset: 0;
@@ -544,12 +553,12 @@
   position: absolute;
   top: 50%; left: 50%;
   border-radius: 50%;
-  transform: translate(-50%,-50%);
+  transform: translate(-50%, -50%);
 }
 
 .galaxy-ring {
   width: 640px; height: 640px;
-  border: 4px solid rgba(255,255,255,0.2);
+  border: 4px solid rgba(255,255,white,0.2);
   animation: galaxy-spin 2.5s linear infinite;
 }
 
@@ -581,7 +590,7 @@
 }
 
 /* ========================================================================== */
-/* BOMB COUNTDOWN                                                             */
+/* COUNTDOWN                                                                  */
 /* ========================================================================== */
 .bb-twist-countdown {
   position: absolute;
@@ -617,6 +626,7 @@
 /* ========================================================================== */
 /* TARGET / VICTIM / SURVIVOR                                                 */
 /* ========================================================================== */
+
 .bb-twist-target {
   position: absolute;
   inset: 0;
@@ -692,5 +702,5 @@
 }
 
 /* ========================================================================== */
-/* END arena.css v9.0 BROADCAST FINAL                                         */
+/* END arena.css v9.1 NECESSARY BROADCAST UPGRADE FINAL                       */
 /* ========================================================================== */
