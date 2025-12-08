@@ -1,11 +1,11 @@
 // ============================================================================
-// BombFX — countdown → shockwave → rook
+// BombFX — ULTRA MODE
+// Double shockwave • fireball bloom • vapor ring • smoke
 // ============================================================================
 
 export default class BombFX {
   constructor() {
     this.t = 0;
-    this.stage = 0;
   }
 
   setup(canvas) {
@@ -15,38 +15,52 @@ export default class BombFX {
 
   update(dt) {
     this.t += dt;
-
-    // 0 → 3 seconden countdown (reeds gedaan via CountdownFX in arena.js)
-    if (this.t < 0.1) return false;
-
-    // STAGE 1: shockwave
-    if (this.stage === 0 && this.t > 0.1) {
-      this.stage = 1;
-    }
-
-    // STAGE 2: fade out rook
-    if (this.t > 1.5) return true;
-
-    return false;
+    return this.t > 2.2; // longer animation
   }
 
   render(ctx) {
     ctx.save();
+    ctx.globalCompositeOperation = "lighter";
 
-    const p = Math.min(1, this.t / 1.2);
+    const t = this.t;
 
-    // shockwave ring
-    ctx.beginPath();
-    ctx.arc(this.cx, this.cy, p * 300, 0, Math.PI * 2);
-    ctx.strokeStyle = `rgba(255,100,0,${1 - p})`;
-    ctx.lineWidth = 25 * (1 - p);
-    ctx.stroke();
+    // FIREBALL BLOOM
+    if (t < 0.45) {
+      const p = t / 0.45;
+      ctx.beginPath();
+      ctx.arc(this.cx, this.cy, 20 + p * 160, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,50,0,${1 - p})`;
+      ctx.fill();
+    }
 
-    // rook
-    ctx.fillStyle = `rgba(150,150,150,${0.4 * (1 - p)})`;
-    ctx.beginPath();
-    ctx.arc(this.cx, this.cy, 150 + p * 200, 0, Math.PI * 2);
-    ctx.fill();
+    // INNER SHOCKWAVE
+    if (t < 1.0) {
+      const p = t / 1.0;
+      ctx.beginPath();
+      ctx.arc(this.cx, this.cy, 40 + p * 260, 0, Math.PI * 2);
+      ctx.lineWidth = 18 * (1 - p);
+      ctx.strokeStyle = `rgba(255,120,0,${1 - p})`;
+      ctx.stroke();
+    }
+
+    // OUTER SHOCKWAVE
+    if (t > 0.3 && t < 1.6) {
+      const p = (t - 0.3) / 1.3;
+      ctx.beginPath();
+      ctx.arc(this.cx, this.cy, 120 + p * 420, 0, Math.PI * 2);
+      ctx.lineWidth = 10 * (1 - p);
+      ctx.strokeStyle = `rgba(255,200,120,${1 - p})`;
+      ctx.stroke();
+    }
+
+    // SMOKE
+    if (t > 0.4) {
+      const p = (t - 0.4) / 1.8;
+      ctx.fillStyle = `rgba(120,120,120,${0.5 * (1 - p)})`;
+      ctx.beginPath();
+      ctx.arc(this.cx, this.cy, 180 + p * 200, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     ctx.restore();
   }
