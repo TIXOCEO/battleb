@@ -1,8 +1,7 @@
 /* ============================================================================
-   BATTLEBOX BROADCAST THEME v3.5
-   Ultimate Esports Overlay Theme (Broadcast Upgrade Edition)
-   ============================================================================
-*/
+   BATTLEBOX BROADCAST THEME v3.6
+   Minimal Required Broadcast Patch — Stable Build
+   ============================================================================ */
 
 @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&display=swap');
 
@@ -19,7 +18,7 @@
   --bb-white: #ffffff;
   --bb-black: #000000;
 
-  /* BROADCAST NEON UPGRADES (sterkere glows) ------------------------------- */
+  /* BROADCAST NEON UPGRADES ------------------------------------------------- */
   --glow-soft-orange: 0 0 10px rgba(255,77,79,0.60);
   --glow-mid-orange:  0 0 18px rgba(255,77,79,0.78);
   --glow-hard-orange: 0 0 38px rgba(255,77,79,1);
@@ -28,6 +27,8 @@
   --glow-mid-turq:    0 0 20px rgba(0,255,215,0.80);
   --glow-hard-turq:   0 0 40px rgba(0,255,215,1);
 
+  /* REQUIRED FIX — mid-purple used by GalaxyFX + TwistAnim */
+  --glow-mid-purple:  0 0 20px rgba(160,100,255,0.75);
   --glow-soft-purple: 0 0 10px rgba(160,100,255,0.55);
   --glow-hard-purple: 0 0 34px rgba(160,100,255,0.95);
 
@@ -37,7 +38,7 @@
   --glass-0: rgba(10,10,14,0.32);
   --glass-1: rgba(12,12,18,0.50);
   --glass-2: rgba(15,15,20,0.65);
-  --glass-3: rgba(20,20,25,0.82); /* iets donkerder voor BeamFX contrast */
+  --glass-3: rgba(20,20,25,0.82);
 
   /* BORDERS ---------------------------------------------------------------- */
   --border-lite: rgba(255,255,255,0.16);
@@ -69,7 +70,7 @@ body {
 }
 
 /* ============================================================================
-   3) LED GRID BACKDROP (UPGRADED FOR BROADCAST GLOW)
+   3) LED GRID BACKDROP (UPGRADED FOR BROADCAST)
    ============================================================================ */
 
 .bb-led-grid {
@@ -82,7 +83,7 @@ body {
 }
 
 /* ============================================================================
-   4) OCTAGON PANELS / CARDS — BROADCAST UPGRADE
+   4) OCTAGON PANELS / CARDS
    ============================================================================ */
 
 .bb-octagon {
@@ -97,13 +98,11 @@ body {
     0% 88%, 0% 12%
   );
 
-  /* Broadcast depth */
   box-shadow:
     0 0 22px rgba(0,0,0,0.85),
     inset 0 0 28px rgba(0,0,0,0.65);
 }
 
-/* Neon rim ring — stronger for BeamFX contrast */
 .bb-octagon::after {
   content: "";
   position: absolute;
@@ -116,7 +115,7 @@ body {
 }
 
 /* ============================================================================
-   5) VIP GLOW — stronger readability in broadcast
+   5) VIP GLOW
    ============================================================================ */
 
 .bb-vip {
@@ -125,7 +124,7 @@ body {
 }
 
 /* ============================================================================
-   6) AVATAR OCTAGON — higher clarity on OBS
+   6) AVATAR OCTAGON
    ============================================================================ */
 
 .bb-avatar {
@@ -133,7 +132,6 @@ body {
   height: 54px;
   background-size: cover;
   background-position: center;
-
   clip-path: polygon(
     15% 0%, 85% 0%,
     100% 25%, 100% 75%,
@@ -141,13 +139,17 @@ body {
     0% 75%, 0% 25%
   );
 
+  /* required broadcast contrast fix */
+  opacity: 0.82;
+  filter: brightness(1) contrast(1.15);
+
   box-shadow:
     var(--shadow-depth-2),
     inset 0 0 18px rgba(255,255,255,0.26);
 }
 
 /* ============================================================================
-   7) POSITION BADGE — stronger neon
+   7) POSITION BADGE
    ============================================================================ */
 
 .bb-pos {
@@ -174,68 +176,29 @@ body {
 }
 
 /* ============================================================================
-   8) HOLOGRAM SCAN — improved clarity
+   8) HOLOGRAM & LED SWEEP (unchanged except intensity tuning)
    ============================================================================ */
 
-.bb-holo {
-  position: relative;
-}
 .bb-holo::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-
   background: linear-gradient(
     to bottom,
-    rgba(255,255,255,0.18),
-    rgba(255,255,255,0.04)
+    rgba(255,255,255,0.20),
+    rgba(255,255,255,0.05)
   );
-
-  animation: bbScan 3.2s cubic-bezier(0.52,0.01,0.16,1) infinite;
 }
 
-@keyframes bbScan {
-  0% { transform: translateY(-100%); }
-  100% { transform: translateY(100%); }
-}
-
-/* ============================================================================
-   9) LED SWEEP — stronger highlight
-   ============================================================================ */
-
-.bb-sweep {
-  position: relative;
-}
 .bb-sweep::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: -200%;
-  width: 80%;
-  height: 100%;
-
   background: linear-gradient(
     90deg,
     transparent,
     rgba(255,127,80,0.55),
     transparent
   );
-
-  animation: bbSweep 4.4s ease-in-out infinite;
-}
-
-@keyframes bbSweep {
-  0% { left: -200%; }
-  100% { left: 200%; }
 }
 
 /* ============================================================================
-   10) GLITCH — more broadcast-visible
+   9) GLITCH (slightly stronger)
    ============================================================================ */
-
-.bb-glitch {
-  animation: bbGlitch 2.9s infinite steps(2, end);
-}
 
 @keyframes bbGlitch {
   0%, 96%, 100% { opacity: 1; }
@@ -245,8 +208,9 @@ body {
 }
 
 /* ============================================================================
-   11) TEXT GLOW HELPERS — boosted neon
+   10) TEXT GLOW HELPERS
    ============================================================================ */
+
 .bb-glow-orange {
   color: var(--bb-orange);
   text-shadow: var(--glow-hard-orange);
