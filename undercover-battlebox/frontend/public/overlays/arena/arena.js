@@ -33,7 +33,7 @@ import SurvivorShieldFX from "/overlays/shared/fx/SurvivorShieldFX.js";
 import GalaxyFX from "/overlays/shared/fx/GalaxyFX.js";
 
 import BeamFX from "/overlays/shared/fx/BeamFX.js";
-import { enableGalaxyChaos, disableGalaxyChaos } from "/overlays/shared/galaxy-chaos.js";
+import { enableGalaxyChaos, disableGalaxyChaos } from "/overlays/shared/fx/GalaxyChaosFX.js";
 
 initEventRouter();
 
