@@ -1,5 +1,6 @@
 // ============================================================================
-// twistMessage.js — Simple Broadcast Twist Messaging v1.5 (USERNAME FIX + DIAMOND GUN LOGIC)
+// twistMessage.js — Broadcast Twist Messaging v1.8 FINAL
+// Punchy messages • Clean usernames • Viewer-friendly terminology
 // ============================================================================
 
 let box = null;
@@ -11,25 +12,21 @@ export function initTwistMessage() {
     return;
   }
 
-  // Listen for forwarded messages from arena.js
   document.addEventListener("twist:message", (e) => {
     showMessage(e.detail);
   });
 }
 
-// Internal show helper
 function show(msg) {
   if (!box) return;
   box.textContent = msg;
   box.classList.add("show");
 
-  setTimeout(() => {
-    box.classList.remove("show");
-  }, 2500);
+  setTimeout(() => box.classList.remove("show"), 2600);
 }
 
 // ============================================================================
-// NAME RESOLVERS — ALWAYS return a clean display name
+// NAME RESOLUTION — clean & safe
 // ============================================================================
 
 function resolveSender(p) {
@@ -38,7 +35,7 @@ function resolveSender(p) {
     p.byUsername ||
     p.by ||
     p.senderName ||
-    "@onbekend"
+    "Onbekend"
   );
 }
 
@@ -65,7 +62,7 @@ function resolveSurvivor(p) {
 }
 
 // ============================================================================
-// MAIN DISPATCH
+// MAIN LOGIC — Improved BattleBox Broadcast Phrases
 // ============================================================================
 
 export function showMessage(payload) {
@@ -83,56 +80,60 @@ export function showMessage(payload) {
   switch (payload.type) {
 
     // ------------------------------------------------------------------------
-    // MONEYGUN
+    // MONEYGUN — elimination marker
     // ------------------------------------------------------------------------
     case "moneygun":
       if (target)
-        return show(`${sender} markeert ${tStr} voor eliminatie aan het einde van de ronde!`);
+        return show(`${sender} markeert ${tStr} voor ELIMINATIE aan het einde van de ronde!`);
       return show(`${sender} gebruikt MoneyGun!`);
 
     // ------------------------------------------------------------------------
-    // IMMUNE
+    // IMMUNE — shield
     // ------------------------------------------------------------------------
     case "immune":
-      return show(`${sender} geeft immuniteit aan ${tStr}!`);
+      if (target)
+        return show(`${sender} geeft ${tStr} IMMUNITEIT!`);
+      return show(`${sender} deelt een immuniteit uit!`);
 
     // ------------------------------------------------------------------------
-    // HEAL
+    // HEAL — removes elimination mark
     // ------------------------------------------------------------------------
     case "heal":
-      return show(`${sender} herstelt ${tStr}!`);
+      if (target)
+        return show(`${sender} herstelt ${tStr}!`);
+      return show(`${sender} voert een HEAL uit!`);
 
     // ------------------------------------------------------------------------
-    // BOMB
+    // BOMB — random victim(s)
     // ------------------------------------------------------------------------
     case "bomb":
       if (victims)
-        return show(`${sender} gooit een BOM → slachtoffer: ${vStr}!`);
-      return show(`${sender} gooit een BOM!`);
+        return show(`${sender} gooit een BOM! Slachtoffer: ${vStr}!`);
+      return show(`${sender} laat een BOM ontploffen!`);
 
     // ------------------------------------------------------------------------
-    // GALAXY
+    // GALAXY — ranking flip
     // ------------------------------------------------------------------------
     case "galaxy":
-      return show(`${sender} draait de ranking om!`);
+      return show(`${sender} draait de HELE ranking om! Chaos!`);
 
     // ------------------------------------------------------------------------
-    // BREAKER
+    // BREAKER — breaks immunity
     // ------------------------------------------------------------------------
     case "breaker":
-      return show(`${sender} breekt de immuniteit van ${tStr}!`);
+      if (target)
+        return show(`${sender} BREKT de immuniteit van ${tStr}!`);
+      return show(`${sender} gebruikt een Immunity Breaker!`);
 
     // ------------------------------------------------------------------------
-    // DIAMOND PISTOL
+    // DIAMOND PISTOL — single survivor
     // ------------------------------------------------------------------------
     case "diamond":
     case "diamondpistol":
       if (survivor) {
-        // Diamond pistol full logic:
-        // 1 player survives, all others marked → beautiful message
-        return show(`${sender} gebruikt Diamond Gun! ${sStr} overleeft — ALLE anderen gemarkeerd!`);
+        return show(`${sender} vuurt de DIAMOND GUN! ${sStr} overleeft — de rest ligt eruit!`);
       }
-      return show(`${sender} gebruikt Diamond Gun op ${tStr}!`);
+      return show(`${sender} gebruikt de Diamond Gun op ${tStr}!`);
 
     // ------------------------------------------------------------------------
     // DEFAULT
@@ -142,5 +143,4 @@ export function showMessage(payload) {
   }
 }
 
-// Export to window for debugging
 window.twistMessage = { show: showMessage };
