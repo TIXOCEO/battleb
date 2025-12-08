@@ -9,6 +9,8 @@
 // ✔ OBS-safe filter (geen ghost shadows)
 // ✔ Elliptical pulses automatisch geclamped aan viewport
 // ✔ destroy() reset ALTIJD alle styles zonder edge-cases
+// ✔ Compat-layer: enableGalaxyChaos() + disableGalaxyChaos()
+//      → noodzakelijk voor arena.js v9.x
 //
 // ============================================================================
 
@@ -24,35 +26,25 @@ export default class GalaxyChaosFX {
   update(dt) {
     this.t += dt;
 
-    // Pulsing (smooth sinus)
     const pulse = Math.sin(this.t * 3.2) * 0.15 + 1;
-
-    // Global smooth base-rotation (no drift)
     const baseRot = Math.sin(this.t * 1.8) * 5.5;
 
     this.cards.forEach(ref => {
       if (!ref?.el) return;
-
       const el = ref.el;
 
-      // Normalize jitter influence (fixed amplitude)
-      const jitterX = Math.sin(this.t * 4 + ref.el.dataset.seedX) * 3.8;
-      const jitterY = Math.sin(this.t * 3 + ref.el.dataset.seedY) * 3.8;
+      const jitterX = Math.sin(this.t * 4 + el.dataset.seedX) * 3.8;
+      const jitterY = Math.sin(this.t * 3 + el.dataset.seedY) * 3.8;
 
-      // Micro-random rotation, clamped
-      const rot = baseRot + (Math.sin(this.t * 2.1 + ref.el.dataset.seedR) * 2.2);
-
-      // Scale driven by pulse
+      const rot = baseRot + Math.sin(this.t * 2.1 + el.dataset.seedR) * 2.2;
       const scale = pulse;
 
-      // Safe stack — never modifies original layout
       el.style.transform = `
         translate(${jitterX}px, ${jitterY}px)
         rotate(${rot}deg)
         scale(${scale})
       `;
 
-      // OBS-safe flicker (bounded brightness)
       const flick = 0.35 + pulse * 0.55;
       el.style.filter = `drop-shadow(0 0 16px rgba(160,100,255,${flick}))`;
     });
@@ -67,11 +59,9 @@ export default class GalaxyChaosFX {
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
 
-    // Subtle nebula overlay
     ctx.fillStyle = `rgba(150,80,255,0.08)`;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Elliptical pulses around each card
     const maxR = Math.min(canvas.width, canvas.height) * 0.22;
 
     this.cards.forEach(ref => {
@@ -83,7 +73,6 @@ export default class GalaxyChaosFX {
       const cx = rect.left + rect.width / 2 - rootRect.left;
       const cy = rect.top + rect.height / 2 - rootRect.top;
 
-      // Pulse radius with clamp
       const base = 55 + Math.sin(t * 6 + cx * 0.03) * 18;
       const r = Math.min(base, maxR);
 
@@ -100,7 +89,6 @@ export default class GalaxyChaosFX {
     ctx.restore();
   }
 
-  // Hard reset when Galaxy ends
   destroy() {
     this.cards.forEach(ref => {
       if (!ref?.el) return;
@@ -108,4 +96,49 @@ export default class GalaxyChaosFX {
       ref.el.style.filter = "";
     });
   }
+}
+
+// ============================================================================
+// COMPAT LAYER — noodzakelijk voor arena.js v9.x
+// ----------------------------------------------------------------------------
+// arena.js verwacht:
+//
+// import { enableGalaxyChaos, disableGalaxyChaos } from "./GalaxyChaosFX.js"
+//
+// Deze helpers moeten bestaan, anders breekt de overlay.
+// ============================================================================
+
+let chaosInstance = null;
+
+/**
+ * Start GalaxyChaosFX
+ */
+export function enableGalaxyChaos(cardRefs, root = document.body) {
+  // Unieke seeds genereren voor smooth jitter
+  cardRefs.forEach(ref => {
+    if (!ref?.el) return;
+    ref.el.dataset.seedX = Math.random();
+    ref.el.dataset.seedY = Math.random();
+    ref.el.dataset.seedR = Math.random();
+  });
+
+  chaosInstance = new GalaxyChaosFX(cardRefs, root);
+  return chaosInstance;
+}
+
+/**
+ * Stop GalaxyChaosFX en reset transforms
+ */
+export function disableGalaxyChaos(cardRefs) {
+  if (chaosInstance) {
+    chaosInstance.destroy();
+    chaosInstance = null;
+  }
+
+  // Hard reset fallback
+  cardRefs.forEach(ref => {
+    if (!ref?.el) return;
+    ref.el.style.transform = "";
+    ref.el.style.filter = "";
+  });
 }
