@@ -1,6 +1,6 @@
 // ============================================================================
 // arena.js — BattleBox Arena Overlay
-// BUILD v9.3 — SAFE QUEUE, RESET-COMPATIBLE, MESSAGE-FIXED VERSION
+// BUILD v9.4 — OBS-PROOF, BLURLESS, MESSAGE-FIXED, QUEUE-SAFE EDITION
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -10,7 +10,10 @@ import {
   renderHudProgress,
 } from "/overlays/arena/arenaStore.js";
 
-import { playTwistAnimation, clearTwistAnimation } from "/overlays/shared/twistAnim.js";
+import {
+  playTwistAnimation,
+  clearTwistAnimation
+} from "/overlays/shared/twistAnim.js";
 
 import FX from "/overlays/shared/animation-engine.js";
 
@@ -46,8 +49,8 @@ const playersContainer = document.getElementById("arena-players");
 const twistOverlay = document.getElementById("twist-takeover");
 const twistTargetLayer = document.getElementById("twist-target");
 
-// MESSAGE + BLUR LAYERS
-const bombBlur = document.getElementById("bomb-blur");
+// ❌ REMOVED BOM BLUR COMPLETELY
+// const bombBlur = document.getElementById("bomb-blur");
 
 const EMPTY_AVATAR =
   "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
@@ -72,16 +75,16 @@ const CENTER_Y = 400;
 const RADIUS = 300;
 
 /* ============================================================================ */
-/* Helpers */
+/* OBS-SAFE Animation Helper */
 /* ============================================================================ */
 
 function animateOnce(el, className) {
   if (!el) return;
   el.classList.remove(className);
   void el.offsetWidth;
-  el.classList.add(className);
-  el.addEventListener("animationend", () => el.classList.remove(className), {
-    once: true,
+  requestAnimationFrame(() => {
+    void el.offsetWidth;
+    el.classList.add(className);
   });
 }
 
@@ -253,33 +256,27 @@ function getCardCenter(index) {
 }
 
 /* ============================================================================ */
-/* MAIN TWIST HANDLER — QUEUE-SAFE & RESET-SAFE */
+/* MAIN TWIST HANDLER — OBS-PROOF + QUEUE-SAFE */
 /* ============================================================================ */
 
 arenaTwistStore.subscribe(async (st) => {
   if (!st.active || !st.type) return;
 
-  // MESSAGE FIRST
+  // message
   document.dispatchEvent(new CustomEvent("twist:message", { detail: st.payload }));
 
-  // Bomb blur
-  if (st.type === "bomb") {
-    bombBlur.classList.add("show");
-    setTimeout(() => bombBlur.classList.remove("show"), 3000);
-  }
-
-  // CLEAR FX + cleanup before new twist
+  // kill any FX before new twist
   FX.clear();
   twistTargetLayer.innerHTML = "";
 
-  // COUNTDOWN MODE
+  // COUNTDOWN
   if (st.type === "countdown") {
     FX.add(new CountdownFX(st.step));
-    setTimeout(() => arenaTwistStore.clear(), 600);
+    setTimeout(() => arenaTwistStore.clear(), 650);
     return;
   }
 
-  // TARGET FX
+  // TARGET
   if (st.payload?.targetIndex != null) {
     const c = getCardCenter(st.payload.targetIndex);
     if (c) {
@@ -289,7 +286,7 @@ arenaTwistStore.subscribe(async (st) => {
     animateOnce(cardRefs[st.payload.targetIndex].el, "target-flash");
   }
 
-  // VICTIMS FX
+  // VICTIMS
   if (Array.isArray(st.payload?.victimIndices)) {
     st.payload.victimIndices.forEach((i) => {
       const c = getCardCenter(i);
@@ -298,7 +295,7 @@ arenaTwistStore.subscribe(async (st) => {
     });
   }
 
-  // SURVIVOR FX
+  // SURVIVOR
   if (st.payload?.survivorIndex != null) {
     const c = getCardCenter(st.payload.survivorIndex);
     if (c) FX.add(new SurvivorShieldFX(c.x, c.y));
@@ -319,20 +316,21 @@ arenaTwistStore.subscribe(async (st) => {
     case "galaxy":
       FX.add(new GalaxyFX());
       enableGalaxyChaos(cardRefs);
+      setTimeout(() => disableGalaxyChaos(cardRefs), 5000);
       break;
   }
 
-  // TITLE CARD
+  // TITLE CARD → OBS-safe
   twistOverlay.classList.remove("hidden");
   playTwistAnimation(twistOverlay, st.type, st.title, st.payload);
 
   await waitForAnimation(twistOverlay);
 
-  // ALWAYS cleanup
+  // cleanup
   disableGalaxyChaos(cardRefs);
   clearTwistAnimation(twistOverlay);
 
-  // CRITICAL: queue-safe clear → starts next twist
+  // queue-safe progression
   arenaTwistStore.clear();
 });
 
