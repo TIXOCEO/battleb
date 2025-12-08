@@ -1,5 +1,5 @@
 // ============================================================================
-// twistMessage.js — Simple Broadcast Twist Messaging v1.0
+// twistMessage.js — Simple Broadcast Twist Messaging v1.5 (USERNAME FIX + DIAMOND GUN LOGIC)
 // ============================================================================
 
 let box = null;
@@ -11,45 +11,136 @@ export function initTwistMessage() {
     return;
   }
 
-  // Listen to dispatch from arena.js
+  // Listen for forwarded messages from arena.js
   document.addEventListener("twist:message", (e) => {
     showMessage(e.detail);
   });
 }
 
+// Internal show helper
 function show(msg) {
   if (!box) return;
   box.textContent = msg;
   box.classList.add("show");
-  setTimeout(() => box.classList.remove("show"), 2500);
+
+  setTimeout(() => {
+    box.classList.remove("show");
+  }, 2500);
 }
+
+// ============================================================================
+// NAME RESOLVERS — ALWAYS return a clean display name
+// ============================================================================
+
+function resolveSender(p) {
+  return (
+    p.byDisplayName ||
+    p.byUsername ||
+    p.by ||
+    p.senderName ||
+    "@onbekend"
+  );
+}
+
+function resolveTarget(p) {
+  return (
+    p.targetDisplayName ||
+    p.targetUsername ||
+    p.targetName ||
+    null
+  );
+}
+
+function resolveVictims(p) {
+  if (!Array.isArray(p.victimNames) || !p.victimNames.length) return null;
+  return p.victimNames.map((v) => `@${v}`).join(", ");
+}
+
+function resolveSurvivor(p) {
+  return (
+    p.survivorName ||
+    p.survivorDisplayName ||
+    null
+  );
+}
+
+// ============================================================================
+// MAIN DISPATCH
+// ============================================================================
 
 export function showMessage(payload) {
   if (!payload || !payload.type) return;
 
-  const user = payload.by || payload.senderName || "@user";
-  const target = payload.targetName ? `@${payload.targetName}` : "";
-  const victim = payload.victimNames?.length ? payload.victimNames.map(v => `@${v}`).join(", ") : "";
+  const sender = resolveSender(payload);
+  const target = resolveTarget(payload);
+  const victims = resolveVictims(payload);
+  const survivor = resolveSurvivor(payload);
+
+  const tStr = target ? `@${target}` : "";
+  const vStr = victims ? victims : "";
+  const sStr = survivor ? `@${survivor}` : "";
 
   switch (payload.type) {
+
+    // ------------------------------------------------------------------------
+    // MONEYGUN
+    // ------------------------------------------------------------------------
     case "moneygun":
-      return show(`${user} elimineert ${target} aan het einde van de ronde!`);
+      if (target)
+        return show(`${sender} markeert ${tStr} voor eliminatie aan het einde van de ronde!`);
+      return show(`${sender} gebruikt MoneyGun!`);
+
+    // ------------------------------------------------------------------------
+    // IMMUNE
+    // ------------------------------------------------------------------------
     case "immune":
-      return show(`${user} geeft immuniteit aan ${target}!`);
+      return show(`${sender} geeft immuniteit aan ${tStr}!`);
+
+    // ------------------------------------------------------------------------
+    // HEAL
+    // ------------------------------------------------------------------------
     case "heal":
-      return show(`${user} herstelt ${target}!`);
+      return show(`${sender} herstelt ${tStr}!`);
+
+    // ------------------------------------------------------------------------
+    // BOMB
+    // ------------------------------------------------------------------------
     case "bomb":
-      return show(`${user} gooit een BOM!`);
+      if (victims)
+        return show(`${sender} gooit een BOM → slachtoffer: ${vStr}!`);
+      return show(`${sender} gooit een BOM!`);
+
+    // ------------------------------------------------------------------------
+    // GALAXY
+    // ------------------------------------------------------------------------
     case "galaxy":
-      return show(`${user} draait de ranking om!`);
+      return show(`${sender} draait de ranking om!`);
+
+    // ------------------------------------------------------------------------
+    // BREAKER
+    // ------------------------------------------------------------------------
+    case "breaker":
+      return show(`${sender} breekt de immuniteit van ${tStr}!`);
+
+    // ------------------------------------------------------------------------
+    // DIAMOND PISTOL
+    // ------------------------------------------------------------------------
     case "diamond":
     case "diamondpistol":
-      return show(`${user} gebruikt Diamond Gun op ${target}!`);
-    case "breaker":
-      return show(`${user} breekt de immuniteit van ${target}!`);
+      if (survivor) {
+        // Diamond pistol full logic:
+        // 1 player survives, all others marked → beautiful message
+        return show(`${sender} gebruikt Diamond Gun! ${sStr} overleeft — ALLE anderen gemarkeerd!`);
+      }
+      return show(`${sender} gebruikt Diamond Gun op ${tStr}!`);
+
+    // ------------------------------------------------------------------------
+    // DEFAULT
+    // ------------------------------------------------------------------------
     default:
-      return show(`${user} gebruikt een twist!`);
+      return show(`${sender} gebruikt een twist!`);
   }
 }
 
+// Export to window for debugging
 window.twistMessage = { show: showMessage };
