@@ -1,6 +1,6 @@
 // ============================================================================
 // arena.js — BattleBox Arena Overlay
-// BUILD v9.2 — QUEUE-SYNCED, MESSAGE-FIXED, SAFE-ANIMATION VERSION
+// BUILD v9.3 — SAFE QUEUE, RESET-COMPATIBLE, MESSAGE-FIXED VERSION
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -76,6 +76,7 @@ const RADIUS = 300;
 /* ============================================================================ */
 
 function animateOnce(el, className) {
+  if (!el) return;
   el.classList.remove(className);
   void el.offsetWidth;
   el.classList.add(className);
@@ -252,32 +253,33 @@ function getCardCenter(index) {
 }
 
 /* ============================================================================ */
-/* MAIN TWIST HANDLER — NOW PROPERLY QUEUE-SYNCED */
+/* MAIN TWIST HANDLER — QUEUE-SAFE & RESET-SAFE */
 /* ============================================================================ */
 
 arenaTwistStore.subscribe(async (st) => {
   if (!st.active || !st.type) return;
 
-  // 🔥 ALWAYS send message first
+  // MESSAGE FIRST
   document.dispatchEvent(new CustomEvent("twist:message", { detail: st.payload }));
 
-  // 🔥 Bomb blur logic
+  // Bomb blur
   if (st.type === "bomb") {
     bombBlur.classList.add("show");
     setTimeout(() => bombBlur.classList.remove("show"), 3000);
   }
 
+  // CLEAR FX + cleanup before new twist
   FX.clear();
   twistTargetLayer.innerHTML = "";
 
-  // COUNTDOWN (only number FX)
+  // COUNTDOWN MODE
   if (st.type === "countdown") {
     FX.add(new CountdownFX(st.step));
     setTimeout(() => arenaTwistStore.clear(), 600);
     return;
   }
 
-  // TARGET
+  // TARGET FX
   if (st.payload?.targetIndex != null) {
     const c = getCardCenter(st.payload.targetIndex);
     if (c) {
@@ -287,7 +289,7 @@ arenaTwistStore.subscribe(async (st) => {
     animateOnce(cardRefs[st.payload.targetIndex].el, "target-flash");
   }
 
-  // VICTIMS
+  // VICTIMS FX
   if (Array.isArray(st.payload?.victimIndices)) {
     st.payload.victimIndices.forEach((i) => {
       const c = getCardCenter(i);
@@ -296,7 +298,7 @@ arenaTwistStore.subscribe(async (st) => {
     });
   }
 
-  // SURVIVOR
+  // SURVIVOR FX
   if (st.payload?.survivorIndex != null) {
     const c = getCardCenter(st.payload.survivorIndex);
     if (c) FX.add(new SurvivorShieldFX(c.x, c.y));
@@ -326,10 +328,11 @@ arenaTwistStore.subscribe(async (st) => {
 
   await waitForAnimation(twistOverlay);
 
+  // ALWAYS cleanup
   disableGalaxyChaos(cardRefs);
   clearTwistAnimation(twistOverlay);
 
-  // 🔥🔥 CRITICAL — CLEAR QUEUE & START NEXT
+  // CRITICAL: queue-safe clear → starts next twist
   arenaTwistStore.clear();
 });
 
@@ -358,15 +361,19 @@ function getBeamColor(type) {
 
 document.addEventListener("arena:roundStart", () => {
   animateOnce(root, "bb-round-start-shockwave");
+  FX.clear();
+  disableGalaxyChaos(cardRefs);
 });
 
 document.addEventListener("arena:graceStart", () => {
   animateOnce(root, "bb-grace-pulse");
+  FX.clear();
+  disableGalaxyChaos(cardRefs);
 });
 
 document.addEventListener("arena:roundEnd", () => {
   animateOnce(root, "bb-round-end-flash");
-
+  FX.clear();
   disableGalaxyChaos(cardRefs);
 
   cardRefs.forEach((ref) => {
