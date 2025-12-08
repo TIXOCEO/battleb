@@ -1,6 +1,6 @@
 // ============================================================================
 // arena.js — BattleBox Arena Overlay
-// BUILD v9.4 — OBS-PROOF, BLURLESS, MESSAGE-FIXED, QUEUE-SAFE EDITION
+// BUILD v9.5 — PlayerCard Fade System + OBS-SAFE + Message-Fixed + Queue-Safe
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -49,25 +49,39 @@ const playersContainer = document.getElementById("arena-players");
 const twistOverlay = document.getElementById("twist-takeover");
 const twistTargetLayer = document.getElementById("twist-target");
 
-// ❌ REMOVED BOM BLUR COMPLETELY
-// const bombBlur = document.getElementById("bomb-blur");
-
 const EMPTY_AVATAR =
   "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
+
+/* ============================================================================ */
+/* PlayerCard Fade Controls (NEW) */
+/* ============================================================================ */
+
+function hidePlayerCards() {
+  playersContainer.classList.add("fade-out");
+}
+
+function showPlayerCards() {
+  playersContainer.classList.remove("fade-out");
+  playersContainer.classList.add("fade-in");
+
+  setTimeout(() => {
+    playersContainer.classList.remove("fade-in");
+  }, 450);
+}
 
 /* ============================================================================ */
 /* Positions */
 /* ============================================================================ */
 
 const POSITIONS = [
-  { idx: 1, x: 0.0, y: -1.0 },
-  { idx: 2, x: 0.7071, y: -0.7071 },
-  { idx: 3, x: 1.0, y: 0.0 },
-  { idx: 4, x: 0.7071, y: 0.7071 },
-  { idx: 5, x: 0.0, y: 1.0 },
-  { idx: 6, x: -0.7071, y: 0.7071 },
-  { idx: 7, x: -1.0, y: 0.0 },
-  { idx: 8, x: -0.7071, y: -0.7071 },
+  { x: 0.0, y: -1.0 },
+  { x: 0.7071, y: -0.7071 },
+  { x: 1.0, y: 0.0 },
+  { x: 0.7071, y: 0.7071 },
+  { x: 0.0, y: 1.0 },
+  { x: -0.7071, y: 0.7071 },
+  { x: -1.0, y: 0.0 },
+  { x: -0.7071, y: -0.7071 },
 ];
 
 const CENTER_X = 600;
@@ -238,7 +252,7 @@ setInterval(() => {
 }, 100);
 
 /* ============================================================================ */
-/* Helper: get card center */
+/* Helper: card center */
 /* ============================================================================ */
 
 function getCardCenter(index) {
@@ -256,23 +270,26 @@ function getCardCenter(index) {
 }
 
 /* ============================================================================ */
-/* MAIN TWIST HANDLER — OBS-PROOF + QUEUE-SAFE */
+/* MAIN TWIST HANDLER — NOW WITH PLAYERCARD FADE SYSTEM */
 /* ============================================================================ */
 
 arenaTwistStore.subscribe(async (st) => {
   if (!st.active || !st.type) return;
 
-  // message
+  hidePlayerCards();  // ⭐ HIDE CARDS AT START
+
   document.dispatchEvent(new CustomEvent("twist:message", { detail: st.payload }));
 
-  // kill any FX before new twist
   FX.clear();
   twistTargetLayer.innerHTML = "";
 
   // COUNTDOWN
   if (st.type === "countdown") {
     FX.add(new CountdownFX(st.step));
-    setTimeout(() => arenaTwistStore.clear(), 650);
+    setTimeout(() => {
+      arenaTwistStore.clear();
+      showPlayerCards();
+    }, 650);
     return;
   }
 
@@ -320,18 +337,17 @@ arenaTwistStore.subscribe(async (st) => {
       break;
   }
 
-  // TITLE CARD → OBS-safe
   twistOverlay.classList.remove("hidden");
   playTwistAnimation(twistOverlay, st.type, st.title, st.payload);
 
   await waitForAnimation(twistOverlay);
 
-  // cleanup
   disableGalaxyChaos(cardRefs);
   clearTwistAnimation(twistOverlay);
 
-  // queue-safe progression
   arenaTwistStore.clear();
+
+  showPlayerCards(); // ⭐ FADE CARDS BACK IN
 });
 
 /* ============================================================================ */
@@ -340,16 +356,11 @@ arenaTwistStore.subscribe(async (st) => {
 
 function getBeamColor(type) {
   switch (type) {
-    case "moneygun":
-      return "#00FF80";
-    case "diamond":
-      return "#00CFFF";
-    case "immune":
-      return "#00FFE5";
-    case "heal":
-      return "#FFD84A";
-    default:
-      return "#FFFFFF";
+    case "moneygun": return "#00FF80";
+    case "diamond": return "#00CFFF";
+    case "immune": return "#00FFE5";
+    case "heal": return "#FFD84A";
+    default: return "#FFFFFF";
   }
 }
 
