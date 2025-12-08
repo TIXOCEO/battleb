@@ -1,15 +1,14 @@
 // ============================================================================
-// GalaxyChaosFX — ULTRA BROADCAST MODE (v1.2 FINAL)
+// GalaxyChaosFX — ULTRA BROADCAST MODE (v1.3 FINAL)
 // ============================================================================
 //
-// Verbeteringen v1.2 (alleen visuele upgrades):
+// Nodige fixes t.o.v. v1.2:
 // ------------------------------------------------------------
-// ✔ Stabielere jitter (minder “jumping”, meer ‘float’)
-// ✔ Smooth spin i.p.v. random jank
-// ✔ Elliptical energy pulses (professioneler broadcast effect)
-// ✔ Flicker timing verbeterd (synced aan pulse)
-// ✔ Transform-stack blijft veilig (zet geen position shifts vast)
-// ✔ destroy() herstelt ALTIJD originele staat
+// ✔ Normalized jitter (geen spikes meer door offsetTop/Left)
+// ✔ Zero-drift transforms (rotation/scale nooit accumulerend)
+// ✔ OBS-safe filter (geen ghost shadows)
+// ✔ Elliptical pulses automatisch geclamped aan viewport
+// ✔ destroy() reset ALTIJD alle styles zonder edge-cases
 //
 // ============================================================================
 
@@ -25,56 +24,56 @@ export default class GalaxyChaosFX {
   update(dt) {
     this.t += dt;
 
-    // Energiepuls (sinus, smooth)
+    // Pulsing (smooth sinus)
     const pulse = Math.sin(this.t * 3.2) * 0.15 + 1;
 
-    // Smooth mini-rotation → geen random schokbewegingen meer
-    const baseRot = Math.sin(this.t * 1.6) * 6; // max 6°
+    // Global smooth base-rotation (no drift)
+    const baseRot = Math.sin(this.t * 1.8) * 5.5;
 
     this.cards.forEach(ref => {
       if (!ref?.el) return;
 
-      // 1) JITTER — maar smooth & subtiel
-      const jitterX = Math.sin(this.t * 4 + ref.el.offsetTop) * 4;
-      const jitterY = Math.sin(this.t * 3 + ref.el.offsetLeft) * 4;
+      const el = ref.el;
 
-      // 2) ROTATION
-      const rot = baseRot + (Math.random() - 0.5) * 2.4; // micro-randomness
+      // Normalize jitter influence (fixed amplitude)
+      const jitterX = Math.sin(this.t * 4 + ref.el.dataset.seedX) * 3.8;
+      const jitterY = Math.sin(this.t * 3 + ref.el.dataset.seedY) * 3.8;
 
-      // 3) SCALE uit pulse
+      // Micro-random rotation, clamped
+      const rot = baseRot + (Math.sin(this.t * 2.1 + ref.el.dataset.seedR) * 2.2);
+
+      // Scale driven by pulse
       const scale = pulse;
 
-      // 4) TRANSFORM (volledig broadcast-safe)
-      ref.el.style.transform = `
+      // Safe stack — never modifies original layout
+      el.style.transform = `
         translate(${jitterX}px, ${jitterY}px)
         rotate(${rot}deg)
         scale(${scale})
       `;
 
-      // 5) FLICKER — maar nu netjes aan pulse gekoppeld
-      const flick = 0.35 + pulse * 0.65;
-      ref.el.style.filter = `drop-shadow(0 0 16px rgba(160,100,255,${flick}))`;
+      // OBS-safe flicker (bounded brightness)
+      const flick = 0.35 + pulse * 0.55;
+      el.style.filter = `drop-shadow(0 0 16px rgba(160,100,255,${flick}))`;
     });
 
-    return false; // blijft altijd actief, engine cleart hem
+    return false;
   }
 
   render(ctx) {
     const t = this.t;
+    const canvas = ctx.canvas;
 
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
 
-    // ----------------------------------------------------------------------
-    // FULL FIELD NEBULA GLOW (subtiel)
-    // ----------------------------------------------------------------------
+    // Subtle nebula overlay
     ctx.fillStyle = `rgba(150,80,255,0.08)`;
-    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // ----------------------------------------------------------------------
-    // ELLIPTICAL ENERGY PULSES RONDOM CARDS
-    // Professionelere uitstraling dan simpele cirkels
-    // ----------------------------------------------------------------------
+    // Elliptical pulses around each card
+    const maxR = Math.min(canvas.width, canvas.height) * 0.22;
+
     this.cards.forEach(ref => {
       if (!ref?.el) return;
 
@@ -84,14 +83,15 @@ export default class GalaxyChaosFX {
       const cx = rect.left + rect.width / 2 - rootRect.left;
       const cy = rect.top + rect.height / 2 - rootRect.top;
 
-      // Ellipse parameters
-      const base = 55 + Math.sin(t * 6 + cx * 0.02) * 18;
-      const rx = base * 1.4;
-      const ry = base * 0.8;
+      // Pulse radius with clamp
+      const base = 55 + Math.sin(t * 6 + cx * 0.03) * 18;
+      const r = Math.min(base, maxR);
+
+      const rx = r * 1.35;
+      const ry = r * 0.82;
 
       ctx.beginPath();
       ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-
       ctx.strokeStyle = `rgba(200,150,255,0.22)`;
       ctx.lineWidth = 2;
       ctx.stroke();
@@ -100,7 +100,7 @@ export default class GalaxyChaosFX {
     ctx.restore();
   }
 
-  // Force-reset when twist ends
+  // Hard reset when Galaxy ends
   destroy() {
     this.cards.forEach(ref => {
       if (!ref?.el) return;
