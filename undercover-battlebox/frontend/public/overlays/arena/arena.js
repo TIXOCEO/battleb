@@ -1,5 +1,6 @@
 // ============================================================================
-// arena.js — BattleBox Arena Overlay (BUILD v9.1.1 — BROADCAST MODE + MESSAGE LAYER)
+// arena.js — BattleBox Arena Overlay
+// BUILD v9.2 — QUEUE-SYNCED, MESSAGE-FIXED, SAFE-ANIMATION VERSION
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -25,14 +26,14 @@ import GalaxyFX from "/overlays/shared/fx/GalaxyFX.js";
 import BeamFX from "/overlays/shared/fx/BeamFX.js";
 import { enableGalaxyChaos, disableGalaxyChaos } from "/overlays/shared/galaxy-chaos.js";
 
-// ⭐ NEW: Simple twist message system
+// SIMPLE MESSAGE SYSTEM
 import { initTwistMessage } from "/overlays/arena/twistMessage.js";
 
 initEventRouter();
 initTwistMessage();
 
 /* ============================================================================ */
-/* DOM refs                                                                    */
+/* DOM refs */
 /* ============================================================================ */
 
 const root = document.getElementById("arena-root");
@@ -43,18 +44,16 @@ const hudRing = document.getElementById("hud-ring-progress");
 const playersContainer = document.getElementById("arena-players");
 
 const twistOverlay = document.getElementById("twist-takeover");
-const twistCountdown = document.getElementById("twist-countdown");
 const twistTargetLayer = document.getElementById("twist-target");
+
+// MESSAGE + BLUR LAYERS
+const bombBlur = document.getElementById("bomb-blur");
 
 const EMPTY_AVATAR =
   "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
 
-// NEW:
-const messageBox = document.getElementById("twist-message");
-const bombBlur = document.getElementById("bomb-blur");
-
 /* ============================================================================ */
-/* Positions                                                                    */
+/* Positions */
 /* ============================================================================ */
 
 const POSITIONS = [
@@ -73,11 +72,10 @@ const CENTER_Y = 400;
 const RADIUS = 300;
 
 /* ============================================================================ */
-/* Helpers                                                                      */
+/* Helpers */
 /* ============================================================================ */
 
 function animateOnce(el, className) {
-  if (!el) return;
   el.classList.remove(className);
   void el.offsetWidth;
   el.classList.add(className);
@@ -86,13 +84,13 @@ function animateOnce(el, className) {
   });
 }
 
-function waitAnimationEnd(el) {
+function waitForAnimation(el) {
   return new Promise((resolve) => {
-    let timeout = setTimeout(resolve, 450);
+    let t = setTimeout(resolve, 500);
     el.addEventListener(
       "animationend",
       () => {
-        clearTimeout(timeout);
+        clearTimeout(t);
         resolve();
       },
       { once: true }
@@ -101,7 +99,7 @@ function waitAnimationEnd(el) {
 }
 
 /* ============================================================================ */
-/* Player cards                                                                 */
+/* Player cards */
 /* ============================================================================ */
 
 const cardRefs = [];
@@ -116,7 +114,6 @@ function createPlayerCards() {
 
     const bg = document.createElement("div");
     bg.className = "bb-player-bgavatar";
-    card.appendChild(bg);
 
     const labels = document.createElement("div");
     labels.className = "bb-player-labels";
@@ -133,6 +130,8 @@ function createPlayerCards() {
 
     labels.appendChild(name);
     labels.appendChild(score);
+
+    card.appendChild(bg);
     card.appendChild(pos);
     card.appendChild(labels);
 
@@ -145,39 +144,39 @@ function createPlayerCards() {
 createPlayerCards();
 
 /* ============================================================================ */
-/* Render loop                                                                   */
+/* Render loop */
 /* ============================================================================ */
 
 arenaStore.subscribe((state) => {
   hudRound.textContent = `RONDE ${state.round}`;
   hudType.textContent = state.type === "finale" ? "FINALE" : "KWARTFINALE";
 
-  const players = state.players || [];
+  const players = state.players;
 
   for (let i = 0; i < 8; i++) {
-    const card = cardRefs[i];
+    const ref = cardRefs[i];
     const p = players[i];
 
     if (!p) {
-      card.name.textContent = "LEEG";
-      card.score.textContent = "0";
-      card.bg.style.backgroundImage = `url(${EMPTY_AVATAR})`;
-      resetStatus(card.el);
-      positionCard(card.el, POSITIONS[i]);
+      ref.name.textContent = "LEEG";
+      ref.score.textContent = "0";
+      ref.bg.style.backgroundImage = `url(${EMPTY_AVATAR})`;
+      resetStatus(ref.el);
+      positionCard(ref.el, POSITIONS[i]);
       continue;
     }
 
-    card.name.textContent = p.display_name;
-    card.score.textContent = p.score;
-    card.bg.style.backgroundImage = `url(${p.avatar_url || EMPTY_AVATAR})`;
+    ref.name.textContent = p.display_name;
+    ref.score.textContent = p.score;
+    ref.bg.style.backgroundImage = `url(${p.avatar_url || EMPTY_AVATAR})`;
 
-    applyStatus(card.el, p);
-    positionCard(card.el, POSITIONS[i]);
+    applyStatus(ref.el, p);
+    positionCard(ref.el, POSITIONS[i]);
   }
 });
 
 /* ============================================================================ */
-/* Status                                                                        */
+/* Status */
 /* ============================================================================ */
 
 function resetStatus(el) {
@@ -197,46 +196,45 @@ function applyStatus(el, p) {
   if (p.positionStatus === "danger") return el.classList.add("status-danger");
 
   if (p.positionStatus === "immune") {
-    return el.classList.add((p.breakerHits ?? 0) > 0 ? "status-immune-broken" : "status-immune");
+    return el.classList.add(
+      (p.breakerHits ?? 0) > 0 ? "status-immune-broken" : "status-immune"
+    );
   }
 
   el.classList.add("status-alive");
 }
 
 /* ============================================================================ */
-/* Positioning                                                                   */
+/* Card positioning */
 /* ============================================================================ */
 
 function positionCard(el, pos) {
   const dx = pos.x * RADIUS;
   const dy = pos.y * RADIUS;
+
   el.style.left = `${CENTER_X + dx - 80}px`;
   el.style.top = `${CENTER_Y + dy - 80}px`;
 }
 
 /* ============================================================================ */
-/* Timer loop                                                                    */
+/* Timer */
 /* ============================================================================ */
 
 setInterval(() => {
-  const raw = arenaStore.get();
-  const state = raw.hud ? { ...raw, ...raw.hud } : raw;
-
+  const st = arenaStore.get();
   const now = Date.now();
-  const remainingMs = Math.max(0, (state.endsAt ?? 0) - now);
+  const remaining = Math.max(0, (st.endsAt ?? 0) - now);
 
-  const sec = Math.floor(remainingMs / 1000);
-  hudTimer.textContent =
-    `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(
-      2,
-      "0"
-    )}`;
+  const sec = Math.floor(remaining / 1000);
+  hudTimer.textContent = `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(
+    sec % 60
+  ).padStart(2, "0")}`;
 
-  renderHudProgress(state, hudRing);
+  renderHudProgress(st, hudRing);
 }, 100);
 
 /* ============================================================================ */
-/* Beam coord helper                                                             */
+/* Helper: get card center */
 /* ============================================================================ */
 
 function getCardCenter(index) {
@@ -254,52 +252,44 @@ function getCardCenter(index) {
 }
 
 /* ============================================================================ */
-/* Twist router — Broadcast Mode                                                 */
+/* MAIN TWIST HANDLER — NOW PROPERLY QUEUE-SYNCED */
 /* ============================================================================ */
 
-let animInProgress = false;
+arenaTwistStore.subscribe(async (st) => {
+  if (!st.active || !st.type) return;
 
-arenaTwistStore.subscribe(async (state) => {
-  if (!state.active || !state.type) {
-    if (!animInProgress) {
-      FX.clear();
-      clearTwistAnimation(twistOverlay);
-      disableGalaxyChaos(cardRefs);
-      twistTargetLayer.innerHTML = "";
-    }
-    return;
-  }
+  // 🔥 ALWAYS send message first
+  document.dispatchEvent(new CustomEvent("twist:message", { detail: st.payload }));
 
-  animInProgress = true;
-
-  // NEW — Send simple message for ANY twist
-  document.dispatchEvent(new CustomEvent("twist:message", { detail: state }));
-
-  // NEW — BOM blur
-  if (state.type === "bomb") {
+  // 🔥 Bomb blur logic
+  if (st.type === "bomb") {
     bombBlur.classList.add("show");
     setTimeout(() => bombBlur.classList.remove("show"), 3000);
   }
 
-  // COUNTDOWN
-  if (state.type === "countdown") {
-    FX.add(new CountdownFX(state.step));
+  FX.clear();
+  twistTargetLayer.innerHTML = "";
+
+  // COUNTDOWN (only number FX)
+  if (st.type === "countdown") {
+    FX.add(new CountdownFX(st.step));
+    setTimeout(() => arenaTwistStore.clear(), 600);
     return;
   }
 
   // TARGET
-  if (state.targetIndex != null) {
-    const c = getCardCenter(state.targetIndex);
+  if (st.payload?.targetIndex != null) {
+    const c = getCardCenter(st.payload.targetIndex);
     if (c) {
       FX.add(new TargetPulseFX(c.x, c.y));
-      FX.add(new BeamFX(CENTER_X, CENTER_Y, c.x, c.y, getBeamColor(state.type)));
+      FX.add(new BeamFX(CENTER_X, CENTER_Y, c.x, c.y, getBeamColor(st.type)));
     }
-    animateOnce(cardRefs[state.targetIndex].el, "target-flash");
+    animateOnce(cardRefs[st.payload.targetIndex].el, "target-flash");
   }
 
   // VICTIMS
-  if (Array.isArray(state.victimIndices)) {
-    state.victimIndices.forEach((i) => {
+  if (Array.isArray(st.payload?.victimIndices)) {
+    st.payload.victimIndices.forEach((i) => {
       const c = getCardCenter(i);
       if (c) FX.add(new VictimBlastFX(c.x, c.y));
       animateOnce(cardRefs[i].el, "victim-blast");
@@ -307,14 +297,14 @@ arenaTwistStore.subscribe(async (state) => {
   }
 
   // SURVIVOR
-  if (state.survivorIndex != null) {
-    const c = getCardCenter(state.survivorIndex);
+  if (st.payload?.survivorIndex != null) {
+    const c = getCardCenter(st.payload.survivorIndex);
     if (c) FX.add(new SurvivorShieldFX(c.x, c.y));
-    animateOnce(cardRefs[state.survivorIndex].el, "survivor-glow");
+    animateOnce(cardRefs[st.payload.survivorIndex].el, "survivor-glow");
   }
 
   // SPECIAL FX
-  switch (state.type) {
+  switch (st.type) {
     case "moneygun":
       FX.add(new MoneyGunFX());
       break;
@@ -328,33 +318,23 @@ arenaTwistStore.subscribe(async (state) => {
       FX.add(new GalaxyFX());
       enableGalaxyChaos(cardRefs);
       break;
-    case "immune": {
-      const c = getCardCenter(state.targetIndex);
-      if (c) FX.add(new BeamFX(CENTER_X, CENTER_Y, c.x, c.y, "#00FFE5"));
-      break;
-    }
-    case "heal": {
-      const c = getCardCenter(state.targetIndex);
-      if (c) FX.add(new BeamFX(CENTER_X, CENTER_Y, c.x, c.y, "#FFD84A"));
-      break;
-    }
   }
 
-  // TITLE OVERLAY
+  // TITLE CARD
   twistOverlay.classList.remove("hidden");
-  playTwistAnimation(twistOverlay, state.type, state.title, state);
+  playTwistAnimation(twistOverlay, st.type, st.title, st.payload);
 
-  await waitAnimationEnd(twistOverlay);
+  await waitForAnimation(twistOverlay);
 
-  if (state.type === "galaxy") {
-    disableGalaxyChaos(cardRefs);
-  }
+  disableGalaxyChaos(cardRefs);
+  clearTwistAnimation(twistOverlay);
 
-  animInProgress = false;
+  // 🔥🔥 CRITICAL — CLEAR QUEUE & START NEXT
+  arenaTwistStore.clear();
 });
 
 /* ============================================================================ */
-/* Beam color map                                                                */
+/* Beam colors */
 /* ============================================================================ */
 
 function getBeamColor(type) {
@@ -373,7 +353,7 @@ function getBeamColor(type) {
 }
 
 /* ============================================================================ */
-/* Round events                                                                  */
+/* Round events */
 /* ============================================================================ */
 
 document.addEventListener("arena:roundStart", () => {
@@ -386,6 +366,7 @@ document.addEventListener("arena:graceStart", () => {
 
 document.addEventListener("arena:roundEnd", () => {
   animateOnce(root, "bb-round-end-flash");
+
   disableGalaxyChaos(cardRefs);
 
   cardRefs.forEach((ref) => {
@@ -398,7 +379,7 @@ document.addEventListener("arena:roundEnd", () => {
 });
 
 /* ============================================================================ */
-/* EXPORT                                                                        */
+/* EXPORT */
 /* ============================================================================ */
 
 export default {
