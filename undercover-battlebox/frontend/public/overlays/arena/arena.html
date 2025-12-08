@@ -28,7 +28,7 @@
       width: 100%;
       height: 100%;
       pointer-events: none;
-      z-index: 999900; /* FX sits under banner but above everything else */
+      z-index: 999900;
     }
 
     /* Overlay root isolation ensures layers cannot merge */
@@ -41,7 +41,7 @@
     }
 
     /* ==========================================================
-       CALLOUT BANNER WRAPPER (NEW)
+       CALLOUT BANNER WRAPPER
        ========================================================== */
     #callout-banner {
       position: absolute;
@@ -61,7 +61,7 @@
       color: var(--bb-orange);
       text-shadow: 0 0 18px var(--bb-orange);
       opacity: 0;
-      z-index: 999999; /* above canvas */
+      z-index: 999999;
       pointer-events: none;
       transition: opacity 0.35s ease-out, transform 0.35s ease-out;
     }
@@ -72,7 +72,7 @@
     }
 
     /* ==========================================================
-       GLOBAL SHAKE WRAPPER (NEW)
+       GLOBAL SHAKE WRAPPER
        ========================================================== */
     #shake-wrapper {
       position: absolute;
@@ -109,6 +109,51 @@
       100% { transform: translate(0,0); }
     }
 
+    /* ==========================================================
+       NEW: SIMPLE TWIST MESSAGE (bottom center)
+       ========================================================== */
+    #twist-message {
+      position: absolute;
+      bottom: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 20px 40px;
+      background: rgba(0,0,0,0.55);
+      border: 2px solid rgba(255,255,255,0.25);
+      border-radius: 10px;
+      font-size: 42px;
+      font-weight: 900;
+      text-align: center;
+      pointer-events: none;
+      color: var(--bb-orange);
+      text-shadow: 0 0 18px var(--bb-orange);
+      opacity: 0;
+      transition: opacity .25s ease-out;
+      z-index: 999999;
+    }
+
+    #twist-message.show {
+      opacity: 1;
+    }
+
+    /* ==========================================================
+       NEW: BOM-BLUR LAYER
+       ========================================================== */
+    #bomb-blur {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.35);
+      backdrop-filter: blur(18px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .25s ease-out;
+      z-index: 999998;
+    }
+
+    #bomb-blur.show {
+      opacity: 1;
+    }
+
   </style>
 </head>
 
@@ -117,23 +162,23 @@
   <div id="arena-root" class="bb-arena-root">
 
     <!-- ========================================================== -->
-    <!-- 0) CINEMATIC CANVAS (ULTRA FX ENGINE)                       -->
+    <!-- 0) CINEMATIC CANVAS                                        -->
     <!-- ========================================================== -->
     <canvas id="fx-canvas" width="1200" height="800"></canvas>
 
-    <!-- ========================================================== -->
-    <!-- SHAKE WRAPPER (NEW — FOR CAMERA SHAKE EFFECTS)              -->
-    <!-- ========================================================== -->
+    <!-- NEW: blur layer for BOM -->
+    <div id="bomb-blur"></div>
+
+    <!-- NEW: message layer -->
+    <div id="twist-message"></div>
+
+    <!-- SHAKE WRAPPER -->
     <div id="shake-wrapper"></div>
 
-    <!-- ========================================================== -->
-    <!-- CALLOUT BANNER (NEW — SHOWTIME ANNOUNCEMENTS)              -->
-    <!-- ========================================================== -->
+    <!-- CALLOUT -->
     <div id="callout-banner"></div>
 
-    <!-- ========================================================== -->
-    <!-- 1) GALAXY BACKGROUND                                       -->
-    <!-- ========================================================== -->
+    <!-- GALAXY -->
     <div id="twist-galaxy" class="galaxy-vortex hidden">
       <div class="galaxy-stars"></div>
       <div class="galaxy-ring"></div>
@@ -141,24 +186,12 @@
       <div class="galaxy-flare"></div>
     </div>
 
-    <!-- ========================================================== -->
-    <!-- 2A) LEGACY TWIST TAKEOVER                                  -->
-    <!-- ========================================================== -->
+    <!-- TWIST OVERLAY -->
     <div id="twist-takeover" class="bb-twist-takeover hidden"></div>
-
-    <!-- ========================================================== -->
-    <!-- 2B) COUNTDOWN                                              -->
-    <!-- ========================================================== -->
     <div id="twist-countdown" class="bb-twist-countdown hidden"></div>
-
-    <!-- ========================================================== -->
-    <!-- 2C) TARGET / VICTIM / SURVIVOR LAYER                       -->
-    <!-- ========================================================== -->
     <div id="twist-target" class="bb-twist-target hidden"></div>
 
-    <!-- ========================================================== -->
-    <!-- 3) HUD (CENTER OCTAGON)                                    -->
-    <!-- ========================================================== -->
+    <!-- HUD -->
     <div id="arena-hud" class="bb-hud">
       <div class="hud-inner">
         <div id="hud-round" class="hud-round-text">RONDE 0</div>
@@ -172,15 +205,15 @@
       </div>
     </div>
 
-    <!-- ========================================================== -->
-    <!-- 4) PLAYER CARDS                                            -->
-    <!-- ========================================================== -->
+    <!-- PLAYER CARDS -->
     <div id="arena-players"></div>
 
   </div>
 
   <!-- MASTER MODULE -->
   <script type="module" src="/overlays/arena/arena.js"></script>
+  <!-- NEW: SIMPLE MESSAGE ENGINE -->
+  <script type="module" src="/overlays/arena/twistMessage.js"></script>
 
 </body>
 </html>
