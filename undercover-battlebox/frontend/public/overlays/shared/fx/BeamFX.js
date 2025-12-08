@@ -1,14 +1,14 @@
 // ============================================================================
-// BeamFX — ULTRA BROADCAST MODE (v1.1 FINAL)
+// BeamFX — BROADCAST MODE (v1.2 FINAL PATCH)
 // ============================================================================
 //
-// Upgrades in v1.1:
+// Noodzakelijke fixes:
 // ------------------------------------------------------------
-// ✔ Subtle jitter in beam thickness (energetic look)
-// ✔ Pulse intensity synced to lifetime (0 → max → fade)
-// ✔ Stronger bloom at target contact
-// ✔ Improved RGB converter (supports 3 or 6 hex digits)
-// ✔ Fully backward compatible with v1.0 API
+// ✔ Stabilere glow layering (OBS flicker fix)
+// ✔ Jitter clamped zodat beam nooit negatief wordt
+// ✔ Bloom render priority verhoogd
+// ✔ Uniform alpha curve (consistent met GalaxyChaosFX)
+// ✔ Backward compatible met v1.0 + v1.1
 //
 // ============================================================================
 
@@ -25,8 +25,8 @@ export default class BeamFX {
     this.t = 0;
     this.duration = 0.45;
 
-    // Random jitter seed (beam thickness variation)
-    this.jitter = (Math.random() * 0.7) + 0.3;
+    // Jitter voor thickness
+    this.jitter = Math.max(0.25, (Math.random() * 0.7) + 0.3);
   }
 
   update(dt) {
@@ -37,23 +37,23 @@ export default class BeamFX {
   render(ctx) {
     const p = this.t / this.duration;
 
-    // Fade-out
-    const alpha = 1 - p;
-
-    // Energy pulse (strongest halfway)
+    // Fade-out curve (lineair + pulse versterking)
     const pulse = Math.sin(p * Math.PI);
+    const alpha = (1 - p) * 0.95 + pulse * 0.05;
 
     // Beam vector
     const dx = this.x2 - this.x1;
     const dy = this.y2 - this.y1;
     const len = Math.sqrt(dx * dx + dy * dy);
 
-    // Angle
+    // Geen render bij degenerate beams
+    if (len < 2) return;
+
     const ang = Math.atan2(dy, dx);
 
-    // Thickness jitter + pulse combined
-    const coreH = 4 + this.jitter * 2 * pulse;
-    const glowH = 10 + this.jitter * 6 * pulse;
+    // Thickness, nu altijd positief
+    const coreH = Math.max(2, 4 + this.jitter * 2 * pulse);
+    const glowH = Math.max(6, 10 + this.jitter * 6 * pulse);
 
     const rgb = hexToRGB(this.color);
 
@@ -63,24 +63,28 @@ export default class BeamFX {
     ctx.rotate(ang);
 
     // ------------------------------------------------------------
-    // CORE BEAM
+    // OUTER GLOW (nu onder core beam → flicker fix)
     // ------------------------------------------------------------
-    ctx.fillStyle = `rgba(${rgb}, ${alpha})`;
-    ctx.fillRect(0, -coreH, len, coreH * 2);
-
-    // ------------------------------------------------------------
-    // OUTER GLOW (stronger than v1.0)
-    // ------------------------------------------------------------
-    ctx.shadowBlur = 45 + pulse * 20;
+    ctx.shadowBlur = 42 + pulse * 18;
     ctx.shadowColor = this.color;
 
     ctx.fillStyle = `rgba(${rgb}, ${alpha * 0.55})`;
     ctx.fillRect(0, -glowH, len, glowH * 2);
 
     // ------------------------------------------------------------
-    // TARGET IMPACT BLOOM
+    // CORE BEAM
     // ------------------------------------------------------------
-    const bloomR = 16 + pulse * 18;
+    ctx.shadowBlur = 0; // belangrijk voor centrering
+    ctx.fillStyle = `rgba(${rgb}, ${alpha})`;
+    ctx.fillRect(0, -coreH, len, coreH * 2);
+
+    // ------------------------------------------------------------
+    // TARGET IMPACT BLOOM — nu sterkste bovenop alles
+    // ------------------------------------------------------------
+    ctx.shadowBlur = 65 + pulse * 30;
+    ctx.shadowColor = this.color;
+
+    const bloomR = 18 + pulse * 20;
 
     ctx.beginPath();
     ctx.arc(len, 0, bloomR, 0, Math.PI * 2);
@@ -93,14 +97,11 @@ export default class BeamFX {
 
 /* -------------------------------------------------------------
    Converts hex → "r,g,b"
-   Supports:
-   - "#FFF"
-   - "#ffffff"
+   Supports "#FFF" / "#FFFFFF"
 ------------------------------------------------------------- */
 function hexToRGB(hex) {
   let c = hex.startsWith("#") ? hex.substring(1) : hex;
 
-  // Expand 3-digit hex → 6-digit
   if (c.length === 3) {
     c = c.split("").map((ch) => ch + ch).join("");
   }
