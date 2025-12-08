@@ -1,12 +1,13 @@
 // ============================================================================
-// CountdownFX — floating 3 → 2 → 1 numbers
+// CountdownFX — ULTRA MODE
+// Smooth pop • neon fade • longer visibility
 // ============================================================================
 
 export default class CountdownFX {
   constructor(step = 3) {
     this.step = step;
-    this.time = 0;
-    this.duration = 0.7;
+    this.t = 0;
+    this.duration = 1.0;
   }
 
   setup(canvas) {
@@ -15,21 +16,28 @@ export default class CountdownFX {
   }
 
   update(dt) {
-    this.time += dt;
-    return this.time > this.duration;
+    this.t += dt;
+    return this.t > this.duration;
   }
 
   render(ctx) {
+    const p = this.t / this.duration;
+    const scale = 1 + Math.sin(p * Math.PI) * 0.4;
+    const alpha = 1 - p;
+
     ctx.save();
-    ctx.font = "120px Rajdhani";
-    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.translate(this.cx, this.cy);
+    ctx.scale(scale, scale);
+
+    ctx.font = "180px Rajdhani";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
+    ctx.fillStyle = `rgba(255,120,0,${alpha})`;
+    ctx.shadowBlur = 40;
+    ctx.shadowColor = "rgba(255,120,0,1)";
 
-    const alpha = 1 - (this.time / this.duration);
-    ctx.globalAlpha = alpha;
+    ctx.fillText(this.step, 0, 0);
 
-    ctx.fillText(this.step, this.cx, this.cy);
     ctx.restore();
   }
 }
