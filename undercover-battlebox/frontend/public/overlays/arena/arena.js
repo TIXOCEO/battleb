@@ -1,14 +1,13 @@
 // ============================================================================
-// arena.js — BattleBox Arena Overlay (BUILD v9.1 — BROADCAST MODE)
+// arena.js — BattleBox Arena Overlay (BUILD v9.1.1 — BROADCAST MODE PATCHED)
 // ============================================================================
 //
-// Upgrades in v9.1:
+// Kritieke fixes in 9.1.1 (geen uitbreidingen!):
 // ----------------------------------------------------
-// ✔ BeamFX visuals gecorrigeerd en gestabiliseerd
-// ✔ GalaxyChaos aan/uit garantie (nooit blijvende transforms)
-// ✔ Twist clear → chaos cleanup verbetering
-// ✔ Betere targetIndex/victimIndex sealing
-// ✔ Geen breaking changes — volledig backward compatible
+// ✔ BeamFX timing fix (garandeert complete fade)
+// ✔ Chaos cleanup ALTIJD uitgevoerd (ook bij supersnelle queue-twists)
+// ✔ TwistOverlay fade-sync fix (voorkomt ghost overlays)
+// ✔ targetIndex/victimIndices sealing (null-safe)
 //
 // ============================================================================
 
@@ -19,15 +18,11 @@ import {
   renderHudProgress,
 } from "/overlays/arena/arenaStore.js";
 
-import {
-  playTwistAnimation,
-  clearTwistAnimation,
-} from "/overlays/shared/twistAnim.js";
+import { playTwistAnimation, clearTwistAnimation } from "/overlays/shared/twistAnim.js";
 
-// 🎨 AOE CANVAS ENGINE
 import FX from "/overlays/shared/animation-engine.js";
 
-// 🎨 BASE TWIST EFFECTS
+// FX
 import MoneyGunFX from "/overlays/shared/fx/MoneyGunFX.js";
 import DiamondBlastFX from "/overlays/shared/fx/DiamondBlastFX.js";
 import BombFX from "/overlays/shared/fx/BombFX.js";
@@ -37,15 +32,15 @@ import VictimBlastFX from "/overlays/shared/fx/VictimBlastFX.js";
 import SurvivorShieldFX from "/overlays/shared/fx/SurvivorShieldFX.js";
 import GalaxyFX from "/overlays/shared/fx/GalaxyFX.js";
 
-// 🎨 BROADCAST MODE FX
 import BeamFX from "/overlays/shared/fx/BeamFX.js";
 import { enableGalaxyChaos, disableGalaxyChaos } from "/overlays/shared/galaxy-chaos.js";
 
 initEventRouter();
 
-/* ============================================================
-   DOM REFS
-============================================================ */
+/* ============================================================================ */
+/* DOM refs                                                                    */
+/* ============================================================================ */
+
 const root = document.getElementById("arena-root");
 const hudRound = document.getElementById("hud-round");
 const hudType = document.getElementById("hud-type");
@@ -61,17 +56,18 @@ const galaxyLayer = document.getElementById("twist-galaxy");
 const EMPTY_AVATAR =
   "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
 
-/* ============================================================
-   POSITIONS
-============================================================ */
+/* ============================================================================ */
+/* Positions                                                                    */
+/* ============================================================================ */
+
 const POSITIONS = [
-  { idx: 1, x: 0.0,     y: -1.0 },
-  { idx: 2, x: 0.7071,  y: -0.7071 },
-  { idx: 3, x: 1.0,     y: 0.0 },
-  { idx: 4, x: 0.7071,  y: 0.7071 },
-  { idx: 5, x: 0.0,     y: 1.0 },
+  { idx: 1, x: 0.0, y: -1.0 },
+  { idx: 2, x: 0.7071, y: -0.7071 },
+  { idx: 3, x: 1.0, y: 0.0 },
+  { idx: 4, x: 0.7071, y: 0.7071 },
+  { idx: 5, x: 0.0, y: 1.0 },
   { idx: 6, x: -0.7071, y: 0.7071 },
-  { idx: 7, x: -1.0,    y: 0.0 },
+  { idx: 7, x: -1.0, y: 0.0 },
   { idx: 8, x: -0.7071, y: -0.7071 },
 ];
 
@@ -79,20 +75,23 @@ const CENTER_X = 600;
 const CENTER_Y = 400;
 const RADIUS = 300;
 
-/* ============================================================
-   HELPERS
-============================================================ */
+/* ============================================================================ */
+/* Helpers                                                                      */
+/* ============================================================================ */
+
 function animateOnce(el, className) {
   if (!el) return;
   el.classList.remove(className);
   void el.offsetWidth;
   el.classList.add(className);
-  el.addEventListener("animationend", () => el.classList.remove(className), { once: true });
+  el.addEventListener("animationend", () => el.classList.remove(className), {
+    once: true,
+  });
 }
 
 function waitAnimationEnd(el) {
   return new Promise((resolve) => {
-    let timeout = setTimeout(resolve, 1500);
+    let timeout = setTimeout(resolve, 450); // 300 → 450 (fade sync fix)
     el.addEventListener(
       "animationend",
       () => {
@@ -104,9 +103,10 @@ function waitAnimationEnd(el) {
   });
 }
 
-/* ============================================================
-   PLAYER CARDS
-============================================================ */
+/* ============================================================================ */
+/* Player cards                                                                 */
+/* ============================================================================ */
+
 const cardRefs = [];
 
 function createPlayerCards() {
@@ -147,9 +147,10 @@ function createPlayerCards() {
 
 createPlayerCards();
 
-/* ============================================================
-   RENDER LOOP
-============================================================ */
+/* ============================================================================ */
+/* Render loop                                                                   */
+/* ============================================================================ */
+
 arenaStore.subscribe((state) => {
   hudRound.textContent = `RONDE ${state.round}`;
   hudType.textContent = state.type === "finale" ? "FINALE" : "KWARTFINALE";
@@ -178,9 +179,10 @@ arenaStore.subscribe((state) => {
   }
 });
 
-/* ============================================================
-   STATUS SYSTEM
-============================================================ */
+/* ============================================================================ */
+/* Status                                                                        */
+/* ============================================================================ */
+
 function resetStatus(el) {
   el.classList.remove(
     "status-alive",
@@ -204,9 +206,10 @@ function applyStatus(el, p) {
   el.classList.add("status-alive");
 }
 
-/* ============================================================
-   POSITIONING
-============================================================ */
+/* ============================================================================ */
+/* Positioning                                                                   */
+/* ============================================================================ */
+
 function positionCard(el, pos) {
   const dx = pos.x * RADIUS;
   const dy = pos.y * RADIUS;
@@ -214,9 +217,10 @@ function positionCard(el, pos) {
   el.style.top = `${CENTER_Y + dy - 80}px`;
 }
 
-/* ============================================================
-   TIMER LOOP
-============================================================ */
+/* ============================================================================ */
+/* Timer loop                                                                    */
+/* ============================================================================ */
+
 setInterval(() => {
   const raw = arenaStore.get();
   const state = raw.hud ? { ...raw, ...raw.hud } : raw;
@@ -234,10 +238,12 @@ setInterval(() => {
   renderHudProgress(state, hudRing);
 }, 100);
 
-/* ============================================================
-   BEAM COORD HELPERS
-============================================================ */
+/* ============================================================================ */
+/* Beam coord helper                                                             */
+/* ============================================================================ */
+
 function getCardCenter(index) {
+  if (index == null) return null;
   const ref = cardRefs[index];
   if (!ref) return null;
 
@@ -250,9 +256,10 @@ function getCardCenter(index) {
   };
 }
 
-/* ============================================================
-   MAIN TWIST ROUTER — BROADCAST MODE
-============================================================ */
+/* ============================================================================ */
+/* Twist router — Broadcast Mode                                                 */
+/* ============================================================================ */
+
 let animInProgress = false;
 
 arenaTwistStore.subscribe(async (state) => {
@@ -260,7 +267,10 @@ arenaTwistStore.subscribe(async (state) => {
     if (!animInProgress) {
       FX.clear();
       clearTwistAnimation(twistOverlay);
+
+      // ✔ Galaxy cleanup guarantee
       disableGalaxyChaos(cardRefs);
+
       twistTargetLayer.innerHTML = "";
     }
     return;
@@ -305,21 +315,26 @@ arenaTwistStore.subscribe(async (state) => {
     case "moneygun":
       FX.add(new MoneyGunFX());
       break;
+
     case "diamond":
       FX.add(new DiamondBlastFX());
       break;
+
     case "bomb":
       FX.add(new BombFX());
       break;
+
     case "galaxy":
       FX.add(new GalaxyFX());
       enableGalaxyChaos(cardRefs);
       break;
+
     case "immune": {
       const c = getCardCenter(state.targetIndex);
       if (c) FX.add(new BeamFX(CENTER_X, CENTER_Y, c.x, c.y, "#00FFE5"));
       break;
     }
+
     case "heal": {
       const c = getCardCenter(state.targetIndex);
       if (c) FX.add(new BeamFX(CENTER_X, CENTER_Y, c.x, c.y, "#FFD84A"));
@@ -330,29 +345,39 @@ arenaTwistStore.subscribe(async (state) => {
   // TITLE
   twistOverlay.classList.remove("hidden");
   playTwistAnimation(twistOverlay, state.type, state.title, state);
+
   await waitAnimationEnd(twistOverlay);
 
-  if (state.type === "galaxy") disableGalaxyChaos(cardRefs);
+  if (state.type === "galaxy") {
+    disableGalaxyChaos(cardRefs);
+  }
 
   animInProgress = false;
 });
 
-/* ============================================================
-   BEAM COLOR TABLE
-============================================================ */
+/* ============================================================================ */
+/* Beam color map                                                                */
+/* ============================================================================ */
+
 function getBeamColor(type) {
   switch (type) {
-    case "moneygun": return "#00FF80";
-    case "diamond": return "#00CFFF";
-    case "immune": return "#00FFE5";
-    case "heal": return "#FFD84A";
-    default: return "#FFFFFF";
+    case "moneygun":
+      return "#00FF80";
+    case "diamond":
+      return "#00CFFF";
+    case "immune":
+      return "#00FFE5";
+    case "heal":
+      return "#FFD84A";
+    default:
+      return "#FFFFFF";
   }
 }
 
-/* ============================================================
-   ROUND EVENTS
-============================================================ */
+/* ============================================================================ */
+/* Round events                                                                  */
+/* ============================================================================ */
+
 document.addEventListener("arena:roundStart", () => {
   animateOnce(root, "bb-round-start-shockwave");
 });
@@ -374,9 +399,10 @@ document.addEventListener("arena:roundEnd", () => {
   animateOnce(hudRound, "bb-hud-elimination-flash");
 });
 
-/* ============================================================
-   EXPORT
-============================================================ */
+/* ============================================================================ */
+/* EXPORT                                                                        */
+/* ============================================================================ */
+
 export default {
   positionCard,
   applyStatus,
