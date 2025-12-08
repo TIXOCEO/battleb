@@ -1,18 +1,6 @@
 // ============================================================================
-// arenaStore.js — BattleBox Arena Overlay Store (v7.4 FINAL)
-// TARGET PAYLOAD + COUNTDOWN + FULL TWIST QUEUE
-// ============================================================================
-//
-// Upgrades in v7.4:
-// ---------------------------------------
-// ✔ COMPLETE twist payload support (targetId / Index / victims[] / survivor)
-// ✔ arenaTwistStore.queue bevat nu VOLLEDIGE PAYLOADS
-// ✔ Nieuwe: arenaTwistStore.countdown(payload)
-// ✔ Nieuwe: arenaTwistStore.pushPayload(payload)
-// ✔ activate() ondersteunt nu volledige payloads i.p.v. enkel type/title
-// ✔ TwistQueue werkt nu correct bij countdown → takeover → clear
-// ✔ normalizeArenaPayload verbeterd
-//
+// arenaStore.js — BattleBox Arena Overlay Store (v9.0 NO-RACE QUEUE EDITION)
+// FULL TWIST QUEUE REWRITE — 100% ORDER GUARANTEED
 // ============================================================================
 
 import { createStore } from "/overlays/shared/stores.js";
@@ -36,28 +24,25 @@ export const arenaStore = createStore({
     roundDurationFinal: 300,
   },
 
-  // legacy
   roundCutoff: 0,
   graceEnd: 0,
 });
 
 // ============================================================================
-// NORMALIZER — maakt ALLE arena payloads uniform
+// SNAPSHOT HANDLING
 // ============================================================================
-function normalizeArenaPayload(snap) {
-  if (!snap) return {};
-
-  const hud = snap.hud ?? snap;
+export function setArenaSnapshot(snap) {
+  if (!snap) return;
   const now = Date.now();
 
+  const hud = snap.hud ?? snap;
   const totalMs = hud.totalMs ?? 0;
-  const remainingMs =
-    hud.remainingMs ?? Math.max(0, (hud.endsAt ?? 0) - now);
+  const remainingMs = hud.remainingMs ?? Math.max(0, (hud.endsAt ?? 0) - now);
 
-  return {
-    round: snap.round ?? hud.round ?? 0,
-    type: snap.type ?? hud.type ?? "quarter",
-    status: snap.status ?? hud.status ?? "idle",
+  arenaStore.set({
+    round: hud.round ?? 0,
+    type: hud.type ?? "quarter",
+    status: hud.status ?? "idle",
 
     players: snap.players ?? [],
 
@@ -66,18 +51,9 @@ function normalizeArenaPayload(snap) {
     totalMs,
     endsAt: hud.endsAt ?? now + totalMs,
     remainingMs,
-
     roundCutoff: snap.roundCutoff ?? 0,
     graceEnd: snap.graceEnd ?? 0,
-  };
-}
-
-// ============================================================================
-// SNAPSHOT HANDLING
-// ============================================================================
-export function setArenaSnapshot(snap) {
-  const updated = normalizeArenaPayload(snap);
-  arenaStore.set(updated);
+  });
 }
 
 export function updatePlayers(players) {
@@ -118,109 +94,94 @@ export function renderHudProgress(state, ringEl) {
 }
 
 // ============================================================================
-// TWIST STORE — v7.4 (FULL PAYLOAD QUEUE ENGINE)
+// TWIST STORE — v9.0 (ULTRA-STABLE QUEUE ENGINE)
 // ============================================================================
+
 export const arenaTwistStore = createStore({
   active: false,
   type: null,
   title: "",
-  step: null, // countdown step
+  step: null,
+  payload: null,
   queue: [],
-  payload: null, // entire twist payload
+
+  // internal lock to prevent race conditions
+  lock: false,
 });
 
 // ============================================================================
-// INTERNAL — START NEXT IN QUEUE
+// INTERNAL — PROCESS NEXT QUEUED TWIST
 // ============================================================================
 function processNextTwist() {
   const st = arenaTwistStore.get();
 
-  if (st.active) return;
-  if (!st.queue.length) return;
+  if (st.lock) return;               // still processing
+  if (st.active) return;             // still playing
+  if (!st.queue.length) return;      // nothing to do
 
-  const next = st.queue.shift();
+  const next = st.queue[0];          // do NOT shift yet (atomic)
+  arenaTwistStore.set({ lock: true });
 
+  // Start twist
   arenaTwistStore.set({
     active: true,
     type: next.type,
     title: next.title,
-    payload: next.payload,
     step: next.step ?? null,
-    queue: st.queue,
+    payload: next.payload,
+  });
+
+  // Now remove from queue
+  arenaTwistStore.set({
+    queue: st.queue.slice(1),
+    lock: false,
   });
 }
 
 // ============================================================================
-// PUBLIC API — ACTIVATE (queue safe)
+// PUBLIC — ADD A TWIST TO QUEUE
+// ============================================================================
+function enqueue(entry) {
+  const st = arenaTwistStore.get();
+  const nextQueue = [...st.queue, entry];
+
+  arenaTwistStore.set({ queue: nextQueue });
+  processNextTwist();
+}
+
+// ============================================================================
+// PUBLIC API — ACTIVATE (always queued, never direct)
 // ============================================================================
 arenaTwistStore.activate = (payload) => {
   if (!payload) return;
 
-  const st = arenaTwistStore.get();
-
-  const entry = {
+  enqueue({
     type: payload.type ?? null,
     title: payload.title ?? "",
     step: payload.step ?? null,
-    payload: payload,
-  };
-
-  if (st.active) {
-    arenaTwistStore.set({
-      ...st,
-      queue: [...st.queue, entry],
-    });
-    return;
-  }
-
-  // immediate start
-  arenaTwistStore.set({
-    active: true,
-    type: entry.type,
-    title: entry.title,
-    step: entry.step,
-    payload: payload,
-    queue: st.queue,
+    payload,
   });
 };
 
 // ============================================================================
-// NEW — COUNTDOWN (bomb 3 → 2 → 1)
+// PUBLIC API — COUNTDOWN (queued like normal twist)
 // ============================================================================
 arenaTwistStore.countdown = (payload) => {
   if (!payload) return;
 
-  const st = arenaTwistStore.get();
-
-  const c = {
+  enqueue({
     type: "countdown",
     title: "",
-    step: payload.step,
-    payload: payload,
-  };
-
-  if (st.active) {
-    arenaTwistStore.set({
-      ...st,
-      queue: [...st.queue, c],
-    });
-    return;
-  }
-
-  arenaTwistStore.set({
-    active: true,
-    type: "countdown",
-    title: "",
-    step: payload.step,
+    step: payload.step ?? 3,
     payload,
-    queue: st.queue,
   });
 };
 
 // ============================================================================
-// CLEAR — end current animation & process next
+// CLEAR — END CURRENT & PROCESS NEXT IMMEDIATELY
 // ============================================================================
 arenaTwistStore.clear = () => {
+  // clear active twist
   arenaTwistStore.set({
     active: false,
     type: null,
@@ -229,7 +190,8 @@ arenaTwistStore.clear = () => {
     payload: null,
   });
 
-  setTimeout(processNextTwist, 50);
+  // run next twist synchronously
+  processNextTwist();
 };
 
 // ============================================================================
