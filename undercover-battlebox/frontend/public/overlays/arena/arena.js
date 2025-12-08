@@ -1,17 +1,14 @@
 // ============================================================================
-// arena.js — BattleBox Arena Overlay (BUILD v8.2 — AOE MODE FINAL)
+// arena.js — BattleBox Arena Overlay (BUILD v9.0 — BROADCAST MODE)
 // ============================================================================
 //
-// Definitieve stabiele release:
+// Upgrades in v9.0:
 // ----------------------------------------------------
-// ✔ Alle AOE canvas effects geïntegreerd
-// ✔ DOM fallback visuals blijven werken
-// ✔ Countdown volledig canvas-based (geen DOM glitches)
-// ✔ Bomb countdown & explosion fixed
-// ✔ Target/Victim/Survivor canvas + DOM highlight 100% betrouwbaar
-// ✔ Diamond / Moneygun / Galaxy volledig canvas-rendered
-// ✔ TwistQueue safe — geen overlapping / keine freeze
-// ✔ Geen patches meer nodig
+// ✔ BeamFX: center → target neon beams (canvas-based, per twist color)
+// ✔ BeamFX triggers on: moneygun, diamond, immune, heal
+// ✔ Galaxy Chaos Mode: cards spin + flicker during galaxy twist
+// ✔ Safe restore of all card transforms after galaxy ends
+// ✔ No API changes — fully backward compatible
 //
 // ============================================================================
 
@@ -25,16 +22,12 @@ import {
 import {
   playTwistAnimation,
   clearTwistAnimation,
-  playCountdown,
-  playTargetAnimation,
-  playVictimAnimations,
-  playSurvivorAnimation
 } from "/overlays/shared/twistAnim.js";
 
-// 🎨 NEW: AOE CANVAS ENGINE
+// 🎨 AOE CANVAS ENGINE
 import FX from "/overlays/shared/animation-engine.js";
 
-// 🎨 EFFECTS
+// 🎨 BASE TWIST EFFECTS
 import MoneyGunFX from "/overlays/shared/fx/MoneyGunFX.js";
 import DiamondBlastFX from "/overlays/shared/fx/DiamondBlastFX.js";
 import BombFX from "/overlays/shared/fx/BombFX.js";
@@ -43,6 +36,10 @@ import TargetPulseFX from "/overlays/shared/fx/TargetPulseFX.js";
 import VictimBlastFX from "/overlays/shared/fx/VictimBlastFX.js";
 import SurvivorShieldFX from "/overlays/shared/fx/SurvivorShieldFX.js";
 import GalaxyFX from "/overlays/shared/fx/GalaxyFX.js";
+
+// 🎨 NEW — BROADCAST MODE EFFECTS
+import BeamFX from "/overlays/shared/fx/BeamFX.js";
+import { enableGalaxyChaos, disableGalaxyChaos } from "/overlays/shared/galaxy-chaos.js";
 
 initEventRouter();
 
@@ -54,12 +51,12 @@ const hudRound = document.getElementById("hud-round");
 const hudType = document.getElementById("hud-type");
 const hudTimer = document.getElementById("hud-timer");
 const hudRing = document.getElementById("hud-ring-progress");
-
 const playersContainer = document.getElementById("arena-players");
-const twistOverlay     = document.getElementById("twist-takeover");
-const twistCountdown   = document.getElementById("twist-countdown");
+
+const twistOverlay = document.getElementById("twist-takeover");
+const twistCountdown = document.getElementById("twist-countdown");
 const twistTargetLayer = document.getElementById("twist-target");
-const galaxyLayer      = document.getElementById("twist-galaxy");
+const galaxyLayer = document.getElementById("twist-galaxy");
 
 const EMPTY_AVATAR =
   "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
@@ -83,7 +80,7 @@ const CENTER_Y = 400;
 const RADIUS = 300;
 
 /* ============================================================
-   BASIC HELPERS
+   HELPERS
 ============================================================ */
 function animateOnce(el, className) {
   if (!el) return;
@@ -148,7 +145,7 @@ function createPlayerCards() {
 createPlayerCards();
 
 /* ============================================================
-   RENDER LOOP FOR PLAYERS
+   RENDER LOOP
 ============================================================ */
 arenaStore.subscribe((state) => {
   hudRound.textContent = `RONDE ${state.round}`;
@@ -205,7 +202,7 @@ function applyStatus(el, p) {
 }
 
 /* ============================================================
-   POSITION CALCULATION
+   POSITIONING
 ============================================================ */
 function positionCard(el, pos) {
   const dx = pos.x * RADIUS;
@@ -233,63 +230,36 @@ setInterval(() => {
 }, 100);
 
 /* ============================================================
-   CANVAS FLASH HELPERS
+   COORD HELPERS FOR BEAMS
 ============================================================ */
-function flashTargetCanvas(index) {
+function getCardCenter(index) {
   const ref = cardRefs[index];
-  if (!ref) return;
+  if (!ref) return null;
 
   const rect = ref.el.getBoundingClientRect();
   const rootRect = root.getBoundingClientRect();
-  const cx = rect.left + rect.width / 2 - rootRect.left;
-  const cy = rect.top + rect.height / 2 - rootRect.top;
 
-  FX.add(new TargetPulseFX(cx, cy));
-}
-
-function flashVictimCanvas(indices) {
-  const rootRect = root.getBoundingClientRect();
-
-  indices.forEach((i) => {
-    const ref = cardRefs[i];
-    if (!ref) return;
-
-    const rect = ref.el.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2 - rootRect.left;
-    const cy = rect.top + rect.height / 2 - rootRect.top;
-
-    FX.add(new VictimBlastFX(cx, cy));
-  });
-}
-
-function flashSurvivorCanvas(index) {
-  const ref = cardRefs[index];
-  if (!ref) return;
-
-  const rect = ref.el.getBoundingClientRect();
-  const rootRect = root.getBoundingClientRect();
-  const cx = rect.left + rect.width / 2 - rootRect.left;
-  const cy = rect.top + rect.height / 2 - rootRect.top;
-
-  FX.add(new SurvivorShieldFX(cx, cy));
+  return {
+    x: rect.left + rect.width / 2 - rootRect.left,
+    y: rect.top + rect.height / 2 - rootRect.top,
+  };
 }
 
 /* ============================================================
-   TWIST ENGINE → MAIN EVENT ROUTER
+   TWIST ENGINE ROUTER (NOW WITH BEAMS + CHAOS)
 ============================================================ */
 let animInProgress = false;
 
 arenaTwistStore.subscribe(async (state) => {
-
   if (!state.active || !state.type) {
     if (!animInProgress) {
       FX.clear();
       clearTwistAnimation(twistOverlay);
+      disableGalaxyChaos(cardRefs);
 
       twistCountdown.classList.add("hidden");
       twistTargetLayer.classList.add("hidden");
       twistTargetLayer.innerHTML = "";
-
       galaxyLayer.classList.add("hidden");
     }
     return;
@@ -302,15 +272,22 @@ arenaTwistStore.subscribe(async (state) => {
   // ------------------------------------------------------------
   if (state.type === "countdown") {
     FX.add(new CountdownFX(state.step));
-    twistCountdown.classList.add("hidden");
     return;
   }
 
   // ------------------------------------------------------------
-  // TARGET
+  // TARGET (Pulse + Beam)
   // ------------------------------------------------------------
   if (state.targetIndex != null) {
-    flashTargetCanvas(state.targetIndex);
+    const center = getCardCenter(state.targetIndex);
+    if (center) {
+      FX.add(new TargetPulseFX(center.x, center.y));
+
+      // 🔥 NEW — BEAMFX (center → target)
+      const beamColor = getBeamColor(state.type);
+      FX.add(new BeamFX(CENTER_X, CENTER_Y, center.x, center.y, beamColor));
+    }
+
     animateOnce(cardRefs[state.targetIndex].el, "target-flash");
   }
 
@@ -318,17 +295,19 @@ arenaTwistStore.subscribe(async (state) => {
   // VICTIMS
   // ------------------------------------------------------------
   if (Array.isArray(state.victimIndices)) {
-    flashVictimCanvas(state.victimIndices);
-    state.victimIndices.forEach(i =>
-      animateOnce(cardRefs[i].el, "victim-blast")
-    );
+    state.victimIndices.forEach(i => {
+      const c = getCardCenter(i);
+      if (c) FX.add(new VictimBlastFX(c.x, c.y));
+      animateOnce(cardRefs[i].el, "victim-blast");
+    });
   }
 
   // ------------------------------------------------------------
   // SURVIVOR
   // ------------------------------------------------------------
   if (state.survivorIndex != null) {
-    flashSurvivorCanvas(state.survivorIndex);
+    const c = getCardCenter(state.survivorIndex);
+    if (c) FX.add(new SurvivorShieldFX(c.x, c.y));
     animateOnce(cardRefs[state.survivorIndex].el, "survivor-glow");
   }
 
@@ -339,28 +318,68 @@ arenaTwistStore.subscribe(async (state) => {
     case "moneygun":
       FX.add(new MoneyGunFX());
       break;
+
     case "diamond":
       FX.add(new DiamondBlastFX());
       break;
+
     case "bomb":
       FX.add(new BombFX());
       break;
+
     case "galaxy":
       FX.add(new GalaxyFX());
+      enableGalaxyChaos(cardRefs);
+      break;
+
+    case "immune":
+      // immune beam only
+      if (state.targetIndex != null) {
+        const c = getCardCenter(state.targetIndex);
+        if (c) FX.add(new BeamFX(CENTER_X, CENTER_Y, c.x, c.y, "#00FFE5"));
+      }
+      break;
+
+    case "heal":
+      if (state.targetIndex != null) {
+        const c = getCardCenter(state.targetIndex);
+        if (c) FX.add(new BeamFX(CENTER_X, CENTER_Y, c.x, c.y, "#FFD84A"));
+      }
       break;
   }
 
   // ------------------------------------------------------------
-  // TITLE OVERLAY (DOM-based, canvas is visuals only)
+  // TITLE OVERLAY
   // ------------------------------------------------------------
   twistOverlay.classList.remove("hidden");
   playTwistAnimation(twistOverlay, state.type, state.title, state);
 
   await waitAnimationEnd(twistOverlay);
 
-  twistTargetLayer.innerHTML = "";
+  if (state.type === "galaxy") {
+    disableGalaxyChaos(cardRefs);
+  }
+
   animInProgress = false;
 });
+
+/* ============================================================
+   BEAM COLOR MAPPER
+============================================================ */
+function getBeamColor(type) {
+  switch (type) {
+    case "moneygun":
+      return "#00FF80";
+    case "diamond":
+      return "#00CFFF";
+    case "immune":
+      return "#00FFE5";
+    case "heal":
+      return "#FFD84A";
+    default:
+      return "#FFFFFF";
+  }
+}
 
 /* ============================================================
    ROUND EVENTS
@@ -375,6 +394,7 @@ document.addEventListener("arena:graceStart", () => {
 
 document.addEventListener("arena:roundEnd", () => {
   animateOnce(root, "bb-round-end-flash");
+  disableGalaxyChaos(cardRefs);
 
   cardRefs.forEach(ref => {
     if (ref.el.classList.contains("status-danger")) {
