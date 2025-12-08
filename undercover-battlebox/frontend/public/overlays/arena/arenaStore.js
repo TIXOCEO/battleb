@@ -1,6 +1,6 @@
 // ============================================================================
 // arenaStore.js — BattleBox Arena Overlay Store (v9.0 NO-RACE QUEUE EDITION)
-// FULL TWIST QUEUE REWRITE — 100% ORDER GUARANTEED
+// FULL TWIST QUEUE REWRITE — 100% ORDER GUARANTEED + HARD RESET SYSTEM
 // ============================================================================
 
 import { createStore } from "/overlays/shared/stores.js";
@@ -94,9 +94,8 @@ export function renderHudProgress(state, ringEl) {
 }
 
 // ============================================================================
-// TWIST STORE — v9.0 (ULTRA-STABLE QUEUE ENGINE)
+// TWIST STORE — v9.0 (ULTRA-STABLE QUEUE ENGINE + HARD RESET SYSTEM)
 // ============================================================================
-
 export const arenaTwistStore = createStore({
   active: false,
   type: null,
@@ -105,9 +104,37 @@ export const arenaTwistStore = createStore({
   payload: null,
   queue: [],
 
-  // internal lock to prevent race conditions
-  lock: false,
+  lock: false, // prevents race conditions
 });
+
+// ============================================================================
+// HARD RESET — NEVER allow lingering Galaxy / stuck queue
+// ============================================================================
+arenaTwistStore.resetAll = () => {
+  arenaTwistStore.set({
+    active: false,
+    type: null,
+    title: "",
+    step: null,
+    payload: null,
+    queue: [],
+    lock: false,
+  });
+
+  // SAFETY: Clear FX engine + galaxy chaos if available
+  try {
+    if (window.FX && window.FX.clear) window.FX.clear();
+  } catch (e) {}
+
+  try {
+    if (window.disableGalaxyChaos) {
+      const refs = window.cardRefs || [];
+      window.disableGalaxyChaos(refs);
+    }
+  } catch (e) {}
+
+  console.log("%c[TWIST] Hard reset executed", "color:#ff4f4f");
+};
 
 // ============================================================================
 // INTERNAL — PROCESS NEXT QUEUED TWIST
@@ -115,14 +142,14 @@ export const arenaTwistStore = createStore({
 function processNextTwist() {
   const st = arenaTwistStore.get();
 
-  if (st.lock) return;               // still processing
-  if (st.active) return;             // still playing
-  if (!st.queue.length) return;      // nothing to do
+  if (st.lock) return;
+  if (st.active) return;
+  if (!st.queue.length) return;
 
-  const next = st.queue[0];          // do NOT shift yet (atomic)
+  const next = st.queue[0];
   arenaTwistStore.set({ lock: true });
 
-  // Start twist
+  // start twist
   arenaTwistStore.set({
     active: true,
     type: next.type,
@@ -131,7 +158,7 @@ function processNextTwist() {
     payload: next.payload,
   });
 
-  // Now remove from queue
+  // remove from queue
   arenaTwistStore.set({
     queue: st.queue.slice(1),
     lock: false,
@@ -150,7 +177,7 @@ function enqueue(entry) {
 }
 
 // ============================================================================
-// PUBLIC API — ACTIVATE (always queued, never direct)
+// PUBLIC API — ACTIVATE
 // ============================================================================
 arenaTwistStore.activate = (payload) => {
   if (!payload) return;
@@ -164,7 +191,7 @@ arenaTwistStore.activate = (payload) => {
 };
 
 // ============================================================================
-// PUBLIC API — COUNTDOWN (queued like normal twist)
+// PUBLIC API — COUNTDOWN
 // ============================================================================
 arenaTwistStore.countdown = (payload) => {
   if (!payload) return;
@@ -178,10 +205,9 @@ arenaTwistStore.countdown = (payload) => {
 };
 
 // ============================================================================
-// CLEAR — END CURRENT & PROCESS NEXT IMMEDIATELY
+// CLEAR — END CURRENT & PROCESS NEXT
 // ============================================================================
 arenaTwistStore.clear = () => {
-  // clear active twist
   arenaTwistStore.set({
     active: false,
     type: null,
@@ -190,8 +216,15 @@ arenaTwistStore.clear = () => {
     payload: null,
   });
 
-  // run next twist synchronously
   processNextTwist();
+};
+
+// ============================================================================
+// OPTIONAL — FORCE FLUSH (Admin/Debug)
+// ============================================================================
+arenaTwistStore.forceFlush = () => {
+  arenaTwistStore.resetAll();
+  console.log("%c[TWIST] Force-flush executed (manual)", "color:#ff9f00");
 };
 
 // ============================================================================
