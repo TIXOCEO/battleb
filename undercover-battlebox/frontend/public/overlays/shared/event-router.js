@@ -1,24 +1,6 @@
 // ============================================================================
-// event-router.js — BattleBox Event Brain v4.5 FINAL (PATCHED)
+// event-router.js — BattleBox Event Brain v4.5 FINAL (PATCHED + TWIST OVERLAY FIX)
 // FULL PAYLOAD NORMALIZATION + COUNTDOWN + TWIST QUEUE v7.4 SUPPORT
-// ============================================================================
-//
-// Upgrades v4.5:
-// -----------------------------------------------------
-// ✔ Volledig synchroon met arenaTwistStore v7.4 payload model
-// ✔ Improve: twist payload normalization (null-safe)
-// ✔ Fix: integer casting targetIndex/victimIndices/survivorIndex
-// ✔ Fix: countdown race (active twist cannot overwrite countdown)
-// ✔ Improve: empty arrays always normalized
-// ✔ Improve: twistQueue sequencing never breaks
-//
-// PATCH v4.5.1:
-// -----------------------------------------------------
-// ✔ Herstelt twistStore (zichtbare winkel-twists)
-// ✔ Ondersteunt `twist:list` én `updateTwists` (legacy)
-// ✔ Geen impact op arenaTwistStore en gameplay
-// ✔ Volledig backward compatible met oude overlays
-//
 // ============================================================================
 
 import { getSocket } from "/overlays/shared/socket.js";
@@ -69,6 +51,19 @@ function normalizeArena(pkt) {
 }
 
 // ============================================================================
+// TWIST MAPPER — unified output for overlays
+// ============================================================================
+function mapTwist(tw) {
+  return {
+    twistName: tw.twistName || tw.name || "",
+    giftName: tw.giftName || tw.gift || "",
+    description: tw.description || "",
+    icon: tw.icon || "/overlays/shared/default-icon.png",
+    aliases: Array.isArray(tw.aliases) ? tw.aliases : []
+  };
+}
+
+// ============================================================================
 // INITIALIZER
 // ============================================================================
 export async function initEventRouter() {
@@ -82,9 +77,9 @@ export async function initEventRouter() {
     "color:#0fffd7;font-weight:bold;"
   );
 
-  // ==========================================================================
+  // ========================================================================
   // 1) INITIAL SNAPSHOT
-  // ==========================================================================
+  // ========================================================================
   socket.on("overlayInitialSnapshot", (snap) => {
     console.log("[DEBUG] Initial snapshot received:", snap);
 
@@ -94,7 +89,7 @@ export async function initEventRouter() {
       setArenaSnapshot(snap.arena);
     }
 
-    // PATCH: twistStore initialiseren indien snapshot twists bevat
+    // ⭐ CRITICAL FIX: Restore twist overlay (NEW)
     if (Array.isArray(snap.twists)) {
       const mapped = snap.twists.map(mapTwist);
       twistStore.setTwists(mapped);
@@ -102,9 +97,9 @@ export async function initEventRouter() {
     }
   });
 
-  // ==========================================================================
+  // ========================================================================
   // 2) LIVE ARENA UPDATES
-  // ==========================================================================
+  // ========================================================================
   socket.on("updateArena", (pkt) => {
     const norm = normalizeArena(pkt);
     console.log("[DEBUG] updateArena normalized:", norm);
@@ -116,9 +111,9 @@ export async function initEventRouter() {
     );
   });
 
-  // ==========================================================================
+  // ========================================================================
   // 3) ROUND EVENTS
-  // ==========================================================================
+  // ========================================================================
   socket.on("round:start", (payload) => {
     console.log("[DEBUG] round:start:", payload);
 
@@ -171,9 +166,9 @@ export async function initEventRouter() {
     window.dispatchEvent(new CustomEvent("round:end", { detail: payload }));
   });
 
-  // ==========================================================================
-  // 4) TWIST TAKEOVER — FULL PAYLOAD NORMALIZATION
-  // ==========================================================================
+  // ========================================================================
+  // 4) TWIST TAKEOVER — arenaTwistStore
+  // ========================================================================
   socket.on("twist:takeover", (raw) => {
     console.log("[DEBUG] twist:takeover raw:", raw);
 
@@ -213,9 +208,9 @@ export async function initEventRouter() {
     );
   });
 
-  // ==========================================================================
+  // ========================================================================
   // 5) TWIST CLEAR
-  // ==========================================================================
+  // ========================================================================
   socket.on("twist:clear", () => {
     console.log("[DEBUG] twist:clear");
 
@@ -224,9 +219,9 @@ export async function initEventRouter() {
     document.dispatchEvent(new CustomEvent("arena:twistClear"));
   });
 
-  // ==========================================================================
-  // 6) COUNTDOWN — 3 → 2 → 1
-  // ==========================================================================
+  // ========================================================================
+  // 6) TWIST COUNTDOWN
+  // ========================================================================
   socket.on("twist:countdown", (raw) => {
     console.log("[DEBUG] twist:countdown raw:", raw);
 
@@ -245,18 +240,17 @@ export async function initEventRouter() {
     );
   });
 
-  // ==========================================================================
+  // ========================================================================
   // 7) QUEUE UPDATE
-  // ==========================================================================
+  // ========================================================================
   socket.on("updateQueue", (packet) => {
     if (!packet || !Array.isArray(packet.entries)) return;
-
     queueStore.setQueue(packet.entries);
   });
 
-  // ==========================================================================
+  // ========================================================================
   // 8) QUEUE EVENTS
-  // ==========================================================================
+  // ========================================================================
   socket.on("queueEvent", (evt) => {
     if (!evt || !QUEUE_EVENTS.has(evt.type)) return;
 
@@ -289,16 +283,16 @@ export async function initEventRouter() {
     setTimeout(() => queueStore.clearHighlight(), 900);
   });
 
-  // ==========================================================================
+  // ========================================================================
   // 9) HUD TICKER
-  // ==========================================================================
+  // ========================================================================
   socket.on("hudTickerUpdate", (text) => {
     tickerStore.setText(text || "");
   });
 
-  // ==========================================================================
-  // 10) TWIST LIST RESTORE (NEW + LEGACY SUPPORT)
-// ==========================================================================
+  // ========================================================================
+  // 10) TWIST LIST RESTORE (NEW + LEGACY)
+// ========================================================================
 socket.on("twist:list", (twists) => {
   if (!Array.isArray(twists)) return;
 
@@ -322,17 +316,4 @@ socket.on("updateTwists", (twists) => {
 // ============================================================================
 window.bb = { socket, eventStore, arenaStore, arenaTwistStore, twistStore };
 console.log("%c[BB DEBUG] Debug bridge active → window.bb", "color:#0fffd7");
-}
-
-// ============================================================================
-// TWIST MAPPER — uniforme structuur voor twists overlay
-// ============================================================================
-function mapTwist(tw) {
-  return {
-    twistName: tw.twistName || tw.name || "",
-    giftName: tw.giftName || tw.gift || "",
-    description: tw.description || "",
-    icon: tw.icon || "/overlays/shared/default-icon.png",
-    aliases: Array.isArray(tw.aliases) ? tw.aliases : []
-  };
 }
