@@ -1,14 +1,5 @@
 // ============================================================================
-// arena.js — BattleBox Arena Overlay (BUILD v9.1.1 — BROADCAST MODE PATCHED)
-// ============================================================================
-//
-// Kritieke fixes in 9.1.1 (geen uitbreidingen!):
-// ----------------------------------------------------
-// ✔ BeamFX timing fix (garandeert complete fade)
-// ✔ Chaos cleanup ALTIJD uitgevoerd (ook bij supersnelle queue-twists)
-// ✔ TwistOverlay fade-sync fix (voorkomt ghost overlays)
-// ✔ targetIndex/victimIndices sealing (null-safe)
-//
+// arena.js — BattleBox Arena Overlay (BUILD v9.1.1 — BROADCAST MODE + MESSAGE LAYER)
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -31,11 +22,14 @@ import TargetPulseFX from "/overlays/shared/fx/TargetPulseFX.js";
 import VictimBlastFX from "/overlays/shared/fx/VictimBlastFX.js";
 import SurvivorShieldFX from "/overlays/shared/fx/SurvivorShieldFX.js";
 import GalaxyFX from "/overlays/shared/fx/GalaxyFX.js";
-
 import BeamFX from "/overlays/shared/fx/BeamFX.js";
 import { enableGalaxyChaos, disableGalaxyChaos } from "/overlays/shared/galaxy-chaos.js";
 
+// ⭐ NEW: Simple twist message system
+import { initTwistMessage } from "/overlays/arena/twistMessage.js";
+
 initEventRouter();
+initTwistMessage();
 
 /* ============================================================================ */
 /* DOM refs                                                                    */
@@ -51,10 +45,13 @@ const playersContainer = document.getElementById("arena-players");
 const twistOverlay = document.getElementById("twist-takeover");
 const twistCountdown = document.getElementById("twist-countdown");
 const twistTargetLayer = document.getElementById("twist-target");
-const galaxyLayer = document.getElementById("twist-galaxy");
 
 const EMPTY_AVATAR =
   "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
+
+// NEW:
+const messageBox = document.getElementById("twist-message");
+const bombBlur = document.getElementById("bomb-blur");
 
 /* ============================================================================ */
 /* Positions                                                                    */
@@ -91,7 +88,7 @@ function animateOnce(el, className) {
 
 function waitAnimationEnd(el) {
   return new Promise((resolve) => {
-    let timeout = setTimeout(resolve, 450); // 300 → 450 (fade sync fix)
+    let timeout = setTimeout(resolve, 450);
     el.addEventListener(
       "animationend",
       () => {
@@ -267,16 +264,22 @@ arenaTwistStore.subscribe(async (state) => {
     if (!animInProgress) {
       FX.clear();
       clearTwistAnimation(twistOverlay);
-
-      // ✔ Galaxy cleanup guarantee
       disableGalaxyChaos(cardRefs);
-
       twistTargetLayer.innerHTML = "";
     }
     return;
   }
 
   animInProgress = true;
+
+  // NEW — Send simple message for ANY twist
+  document.dispatchEvent(new CustomEvent("twist:message", { detail: state }));
+
+  // NEW — BOM blur
+  if (state.type === "bomb") {
+    bombBlur.classList.add("show");
+    setTimeout(() => bombBlur.classList.remove("show"), 3000);
+  }
 
   // COUNTDOWN
   if (state.type === "countdown") {
@@ -310,31 +313,26 @@ arenaTwistStore.subscribe(async (state) => {
     animateOnce(cardRefs[state.survivorIndex].el, "survivor-glow");
   }
 
-  // SPECIAL TWISTS
+  // SPECIAL FX
   switch (state.type) {
     case "moneygun":
       FX.add(new MoneyGunFX());
       break;
-
     case "diamond":
       FX.add(new DiamondBlastFX());
       break;
-
     case "bomb":
       FX.add(new BombFX());
       break;
-
     case "galaxy":
       FX.add(new GalaxyFX());
       enableGalaxyChaos(cardRefs);
       break;
-
     case "immune": {
       const c = getCardCenter(state.targetIndex);
       if (c) FX.add(new BeamFX(CENTER_X, CENTER_Y, c.x, c.y, "#00FFE5"));
       break;
     }
-
     case "heal": {
       const c = getCardCenter(state.targetIndex);
       if (c) FX.add(new BeamFX(CENTER_X, CENTER_Y, c.x, c.y, "#FFD84A"));
@@ -342,7 +340,7 @@ arenaTwistStore.subscribe(async (state) => {
     }
   }
 
-  // TITLE
+  // TITLE OVERLAY
   twistOverlay.classList.remove("hidden");
   playTwistAnimation(twistOverlay, state.type, state.title, state);
 
