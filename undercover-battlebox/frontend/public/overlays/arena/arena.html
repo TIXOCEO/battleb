@@ -5,9 +5,8 @@
   <title>BattleBox Arena Overlay</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <!-- GLOBAL THEME -->
+  <!-- THEME -->
   <link rel="stylesheet" href="/overlays/shared/theme.css" />
-
   <!-- ARENA CSS -->
   <link rel="stylesheet" href="/overlays/arena/arena.css" />
 
@@ -20,7 +19,7 @@
     }
 
     /* ==========================================================
-       CINEMATIC CANVAS — FX ABOVE ALL BUT BANNERS & HUD
+       FX CANVAS
        ========================================================== */
     #fx-canvas {
       position: absolute;
@@ -31,7 +30,7 @@
       z-index: 999900;
     }
 
-    /* Overlay root isolation ensures layers cannot merge */
+    /* Arena root */
     #arena-root {
       position: relative;
       width: 1200px;
@@ -41,76 +40,7 @@
     }
 
     /* ==========================================================
-       CALLOUT BANNER WRAPPER
-       ========================================================== */
-    #callout-banner {
-      position: absolute;
-      top: 22px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 900px;
-      height: auto;
-      padding: 14px 28px;
-      background: rgba(0, 0, 0, 0.55);
-      border: 2px solid rgba(255, 255, 255, 0.25);
-      border-radius: 10px;
-      backdrop-filter: blur(8px);
-      font-size: 42px;
-      font-weight: 900;
-      text-align: center;
-      color: var(--bb-orange);
-      text-shadow: 0 0 18px var(--bb-orange);
-      opacity: 0;
-      z-index: 999999;
-      pointer-events: none;
-      transition: opacity 0.35s ease-out, transform 0.35s ease-out;
-    }
-
-    #callout-banner.show {
-      opacity: 1;
-      transform: translateX(-50%) scale(1.03);
-    }
-
-    /* ==========================================================
-       GLOBAL SHAKE WRAPPER
-       ========================================================== */
-    #shake-wrapper {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-      z-index: 10;
-    }
-
-    .shake-strong {
-      animation: camshake-strong 0.5s ease-out;
-    }
-
-    .shake-medium {
-      animation: camshake-medium 0.45s ease-out;
-    }
-
-    @keyframes camshake-strong {
-      0% { transform: translate(0,0); }
-      20% { transform: translate(18px, -12px); }
-      40% { transform: translate(-14px, 10px); }
-      60% { transform: translate(9px, -8px); }
-      80% { transform: translate(-6px, 4px); }
-      100% { transform: translate(0,0); }
-    }
-
-    @keyframes camshake-medium {
-      0% { transform: translate(0,0); }
-      20% { transform: translate(10px, -6px); }
-      40% { transform: translate(-8px, 6px); }
-      60% { transform: translate(5px, -4px); }
-      80% { transform: translate(-3px, 2px); }
-      100% { transform: translate(0,0); }
-    }
-
-    /* ==========================================================
-       NEW: SIMPLE TWIST MESSAGE (bottom center)
+       SIMPLE MESSAGE
        ========================================================== */
     #twist-message {
       position: absolute;
@@ -123,10 +53,9 @@
       border-radius: 10px;
       font-size: 42px;
       font-weight: 900;
-      text-align: center;
-      pointer-events: none;
       color: var(--bb-orange);
       text-shadow: 0 0 18px var(--bb-orange);
+      pointer-events: none;
       opacity: 0;
       transition: opacity .25s ease-out;
       z-index: 999999;
@@ -136,21 +65,32 @@
       opacity: 1;
     }
 
+
     /* ==========================================================
-       NEW: BOM-BLUR LAYER
+       CALLOUT BANNER (OPTIONAL, UNUSED)
        ========================================================== */
-    #bomb-blur {
+    #callout-banner {
       position: absolute;
-      inset: 0;
-      background: rgba(0,0,0,0.35);
-      backdrop-filter: blur(18px);
+      top: 22px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 900px;
+      padding: 14px 28px;
+      background: rgba(0, 0, 0, 0.55);
+      border: 2px solid rgba(255,255,255,0.25);
+      border-radius: 10px;
+      font-size: 42px;
+      font-weight: 900;
+      text-align: center;
+      color: var(--bb-orange);
+      text-shadow: 0 0 18px var(--bb-orange);
       opacity: 0;
       pointer-events: none;
-      transition: opacity .25s ease-out;
+      transition: opacity .35s ease-out;
       z-index: 999998;
     }
 
-    #bomb-blur.show {
+    #callout-banner.show {
       opacity: 1;
     }
 
@@ -159,26 +99,18 @@
 
 <body>
 
-  <div id="arena-root" class="bb-arena-root">
+  <div id="arena-root">
 
-    <!-- ========================================================== -->
-    <!-- 0) CINEMATIC CANVAS                                        -->
-    <!-- ========================================================== -->
+    <!-- FX CANVAS -->
     <canvas id="fx-canvas" width="1200" height="800"></canvas>
 
-    <!-- NEW: blur layer for BOM -->
-    <div id="bomb-blur"></div>
-
-    <!-- NEW: message layer -->
+    <!-- MESSAGE -->
     <div id="twist-message"></div>
-
-    <!-- SHAKE WRAPPER -->
-    <div id="shake-wrapper"></div>
 
     <!-- CALLOUT -->
     <div id="callout-banner"></div>
 
-    <!-- GALAXY -->
+    <!-- GALAXY (cinematic) -->
     <div id="twist-galaxy" class="galaxy-vortex hidden">
       <div class="galaxy-stars"></div>
       <div class="galaxy-ring"></div>
@@ -186,7 +118,7 @@
       <div class="galaxy-flare"></div>
     </div>
 
-    <!-- TWIST OVERLAY -->
+    <!-- TWIST OVERLAYS -->
     <div id="twist-takeover" class="bb-twist-takeover hidden"></div>
     <div id="twist-countdown" class="bb-twist-countdown hidden"></div>
     <div id="twist-target" class="bb-twist-target hidden"></div>
@@ -210,9 +142,9 @@
 
   </div>
 
-  <!-- MASTER MODULE -->
+  <!-- Arena Logic -->
   <script type="module" src="/overlays/arena/arena.js"></script>
-  <!-- NEW: SIMPLE MESSAGE ENGINE -->
+  <!-- Message Engine -->
   <script type="module" src="/overlays/arena/twistMessage.js"></script>
 
 </body>
