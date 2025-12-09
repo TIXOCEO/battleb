@@ -24,6 +24,10 @@
 <body>
   <!-- PANEL -->
   <div class="bb-battlelog-panel holo-scan led-sweep">
+
+    <!-- ⭐ NEW: GLOWING HEADER ⭐ -->
+    <div class="battlelog-header">BATTLE LOG</div>
+
     <div class="battlelog-mask">
       <div id="battlelog-pages" class="battlelog-pages"></div>
     </div>
@@ -33,7 +37,7 @@
   <script type="module" src="/overlays/shared/socket.js"></script>
   <script type="module" src="/overlays/shared/stores.js"></script>
 
-  <!-- ⭐ THIS WAS MISSING — REQUIRED FOR ANY EVENTS TO FLOW ⭐ -->
+  <!-- REQUIRED FOR EVENT FLOW -->
   <script type="module" src="/overlays/shared/event-router.js"></script>
 
   <!-- BATTLELOG RENDERER -->
