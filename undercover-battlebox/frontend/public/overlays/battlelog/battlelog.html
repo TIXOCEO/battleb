@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>BattleBox BattleLog</title>
+  <title>BattleBox BattleLog Carousel</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
   <link rel="stylesheet" href="/overlays/shared/theme.css">
@@ -20,7 +20,9 @@
 
 <body>
   <div id="battlelog-root" class="bb-battlelog-panel holo-scan">
-    <div class="battlelog-list" id="battlelog-list"></div>
+    <div id="battlelog-container" class="battlelog-container">
+      <div id="battlelog-list" class="battlelog-list"></div>
+    </div>
   </div>
 
   <script type="module" src="/overlays/shared/socket.js"></script>
