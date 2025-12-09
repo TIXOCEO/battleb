@@ -1,6 +1,6 @@
 // ============================================================================
 // arena.js — BattleBox Arena Overlay
-// BUILD v9.5 — PlayerCard Fade System + OBS-SAFE + Message-Fixed + Queue-Safe
+// BUILD v9.6 — LITE MODE (Galaxy Shuffle + Bomb Roulette) + Fade System
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -17,7 +17,7 @@ import {
 
 import FX from "/overlays/shared/animation-engine.js";
 
-// FX
+// OLD FX remain imported but no longer used in LITE mode
 import MoneyGunFX from "/overlays/shared/fx/MoneyGunFX.js";
 import DiamondBlastFX from "/overlays/shared/fx/DiamondBlastFX.js";
 import BombFX from "/overlays/shared/fx/BombFX.js";
@@ -29,7 +29,6 @@ import GalaxyFX from "/overlays/shared/fx/GalaxyFX.js";
 import BeamFX from "/overlays/shared/fx/BeamFX.js";
 import { enableGalaxyChaos, disableGalaxyChaos } from "/overlays/shared/galaxy-chaos.js";
 
-// SIMPLE MESSAGE SYSTEM
 import { initTwistMessage } from "/overlays/arena/twistMessage.js";
 
 initEventRouter();
@@ -45,7 +44,6 @@ const hudType = document.getElementById("hud-type");
 const hudTimer = document.getElementById("hud-timer");
 const hudRing = document.getElementById("hud-ring-progress");
 const playersContainer = document.getElementById("arena-players");
-
 const twistOverlay = document.getElementById("twist-takeover");
 const twistTargetLayer = document.getElementById("twist-target");
 
@@ -53,7 +51,7 @@ const EMPTY_AVATAR =
   "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
 
 /* ============================================================================ */
-/* PlayerCard Fade Controls (NEW) */
+/* PlayerCard Fade Controls */
 /* ============================================================================ */
 
 function hidePlayerCards() {
@@ -96,23 +94,16 @@ function animateOnce(el, className) {
   if (!el) return;
   el.classList.remove(className);
   void el.offsetWidth;
-  requestAnimationFrame(() => {
-    void el.offsetWidth;
-    el.classList.add(className);
-  });
+  requestAnimationFrame(() => el.classList.add(className));
 }
 
 function waitForAnimation(el) {
   return new Promise((resolve) => {
     let t = setTimeout(resolve, 500);
-    el.addEventListener(
-      "animationend",
-      () => {
-        clearTimeout(t);
-        resolve();
-      },
-      { once: true }
-    );
+    el.addEventListener("animationend", () => {
+      clearTimeout(t);
+      resolve();
+    }, { once: true });
   });
 }
 
@@ -244,9 +235,8 @@ setInterval(() => {
   const remaining = Math.max(0, (st.endsAt ?? 0) - now);
 
   const sec = Math.floor(remaining / 1000);
-  hudTimer.textContent = `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(
-    sec % 60
-  ).padStart(2, "0")}`;
+  hudTimer.textContent =
+    `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
 
   renderHudProgress(st, hudRing);
 }, 100);
@@ -270,20 +260,60 @@ function getCardCenter(index) {
 }
 
 /* ============================================================================ */
-/* MAIN TWIST HANDLER — NOW WITH PLAYERCARD FADE SYSTEM */
+/* ⭐ LITE MODE: GALAXY SHUFFLE */
+/* ============================================================================ */
+
+async function runGalaxyShuffle() {
+  const duration = 2600;
+  const steps = 14;
+  const interval = duration / steps;
+
+  for (let i = 0; i < steps; i++) {
+    let shuffled = [...POSITIONS].sort(() => Math.random() - 0.5);
+
+    shuffled.forEach((pos, idx) => {
+      positionCard(cardRefs[idx].el, pos);
+      cardRefs[idx].el.classList.add("card-shuffle");
+    });
+
+    await new Promise((res) => setTimeout(res, interval));
+  }
+
+  POSITIONS.forEach((pos, idx) => {
+    positionCard(cardRefs[idx].el, pos);
+    cardRefs[idx].el.classList.remove("card-shuffle");
+  });
+}
+
+/* ============================================================================ */
+/* ⭐ LITE MODE: BOMB ROULETTE */
+/* ============================================================================ */
+
+async function runBombRoulette() {
+  const order = [...Array(8).keys(), ...Array(8).keys()];
+
+  for (let idx of order) {
+    let el = cardRefs[idx].el;
+    el.classList.add("card-glow-red");
+    await new Promise((res) => setTimeout(res, 85));
+    el.classList.remove("card-glow-red");
+  }
+}
+
+/* ============================================================================ */
+/* MAIN TWIST HANDLER — LITE */
 /* ============================================================================ */
 
 arenaTwistStore.subscribe(async (st) => {
   if (!st.active || !st.type) return;
 
-  hidePlayerCards();  // ⭐ HIDE CARDS AT START
+  hidePlayerCards();
 
   document.dispatchEvent(new CustomEvent("twist:message", { detail: st.payload }));
 
   FX.clear();
   twistTargetLayer.innerHTML = "";
 
-  // COUNTDOWN
   if (st.type === "countdown") {
     FX.add(new CountdownFX(st.step));
     setTimeout(() => {
@@ -293,47 +323,13 @@ arenaTwistStore.subscribe(async (st) => {
     return;
   }
 
-  // TARGET
-  if (st.payload?.targetIndex != null) {
-    const c = getCardCenter(st.payload.targetIndex);
-    if (c) {
-      FX.add(new TargetPulseFX(c.x, c.y));
-      FX.add(new BeamFX(CENTER_X, CENTER_Y, c.x, c.y, getBeamColor(st.type)));
-    }
-    animateOnce(cardRefs[st.payload.targetIndex].el, "target-flash");
-  }
-
-  // VICTIMS
-  if (Array.isArray(st.payload?.victimIndices)) {
-    st.payload.victimIndices.forEach((i) => {
-      const c = getCardCenter(i);
-      if (c) FX.add(new VictimBlastFX(c.x, c.y));
-      animateOnce(cardRefs[i].el, "victim-blast");
-    });
-  }
-
-  // SURVIVOR
-  if (st.payload?.survivorIndex != null) {
-    const c = getCardCenter(st.payload.survivorIndex);
-    if (c) FX.add(new SurvivorShieldFX(c.x, c.y));
-    animateOnce(cardRefs[st.payload.survivorIndex].el, "survivor-glow");
-  }
-
-  // SPECIAL FX
   switch (st.type) {
-    case "moneygun":
-      FX.add(new MoneyGunFX());
-      break;
-    case "diamond":
-      FX.add(new DiamondBlastFX());
-      break;
-    case "bomb":
-      FX.add(new BombFX());
-      break;
     case "galaxy":
-      FX.add(new GalaxyFX());
-      enableGalaxyChaos(cardRefs);
-      setTimeout(() => disableGalaxyChaos(cardRefs), 5000);
+      await runGalaxyShuffle();
+      break;
+
+    case "bomb":
+      await runBombRoulette();
       break;
   }
 
@@ -342,16 +338,14 @@ arenaTwistStore.subscribe(async (st) => {
 
   await waitForAnimation(twistOverlay);
 
-  disableGalaxyChaos(cardRefs);
   clearTwistAnimation(twistOverlay);
-
   arenaTwistStore.clear();
 
-  showPlayerCards(); // ⭐ FADE CARDS BACK IN
+  showPlayerCards();
 });
 
 /* ============================================================================ */
-/* Beam colors */
+/* Beam colors (unused in LITE but kept for compatibility) */
 /* ============================================================================ */
 
 function getBeamColor(type) {
@@ -370,28 +364,14 @@ function getBeamColor(type) {
 
 document.addEventListener("arena:roundStart", () => {
   animateOnce(root, "bb-round-start-shockwave");
-  FX.clear();
-  disableGalaxyChaos(cardRefs);
 });
 
 document.addEventListener("arena:graceStart", () => {
   animateOnce(root, "bb-grace-pulse");
-  FX.clear();
-  disableGalaxyChaos(cardRefs);
 });
 
 document.addEventListener("arena:roundEnd", () => {
   animateOnce(root, "bb-round-end-flash");
-  FX.clear();
-  disableGalaxyChaos(cardRefs);
-
-  cardRefs.forEach((ref) => {
-    if (ref.el.classList.contains("status-danger")) {
-      animateOnce(ref.el, "bb-danger-pulse");
-    }
-  });
-
-  animateOnce(hudRound, "bb-hud-elimination-flash");
 });
 
 /* ============================================================================ */
