@@ -1076,11 +1076,9 @@ io.on("connection", (socket: AdminSocket) => {
 // ============================================================================
 // START SERVER
 // ============================================================================
+
 (async () => {
   try {
-    await loadArenaSettingsFromDB();
-    console.log("✔ Arena settings geladen");
-
     server.listen(PORT, () => {
       console.log(`🚀 Backend live op poort ${PORT}`);
     });
