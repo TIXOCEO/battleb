@@ -789,11 +789,12 @@ io.on("connection", (socket: AdminSocket) => {
           avatar_url: user.avatar_url || null
         });
 
-        await arenaJoin(
-          String(user.tiktok_id),
-          user.display_name,
-          user.username
-        );
+await arenaJoin(
+  String(user.tiktok_id),
+  user.display_name,
+  user.username,
+  user.avatar_url ?? null
+);
 
         await emitArena();
 
