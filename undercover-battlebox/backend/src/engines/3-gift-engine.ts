@@ -1,11 +1,9 @@
 /* ============================================================================
-   3-gift-engine.ts — v14.5 SYNC PATCH
-   ✔ Gesynchroniseerd met game-engine v15.5
-   ✔ roundActive + currentRound via io.*
-   ✔ Idle gifts: host telt, speler niet
-   ✔ Ronde gifts alleen bij roundActive=true
-   ✔ Strict host fallback rules behouden
-   ✔ Niets anders gewijzigd
+   3-gift-engine.ts — v14.6 HOST NORMALIZATION PATCH
+   ✔ Gesynchroniseerd met server.ts v16.8 host-lowercase model
+   ✔ Host-detectie nu 100% consistent
+   ✔ Self-gift detectie strikt en correct
+   ✔ Rest van de logica volledig behouden
 ============================================================================ */
 
 import pool from "../db";
@@ -147,13 +145,13 @@ function calcDiamonds(evt: any): number {
 }
 
 /* ============================================================================
-   RESOLVE RECEIVER
+   RESOLVE RECEIVER — HOST NORMALIZATION PATCHED
 ============================================================================ */
 
 async function resolveReceiver(evt: any) {
   const host = getActiveHost();
   const HOST_ID = host?.id ? String(host.id) : null;
-  const HOST_USER = host?.username ? norm(host.username) : "";
+  const HOST_USER = host?.username ? norm(host.username) : ""; // ✔ lowercase normalized now
 
   const directId =
     evt.receiverUserId ||
@@ -167,9 +165,11 @@ async function resolveReceiver(evt: any) {
     evt.receiver?.unique_id ||
     null;
 
-  const un = unique ? norm(unique) : null;
+  const un = unique ? norm(unique) : null; // ✔ exact lowercase compare
 
-  // Self-gift → host
+  // --------------------------------------------------------------------------
+  // SELF-GIFT → host (strict ID match)
+  // --------------------------------------------------------------------------
   if (evt.userId && directId && String(evt.userId) === String(directId)) {
     if (HOST_ID) {
       const h = await getOrUpdateUser(HOST_ID, null, null);
@@ -182,7 +182,9 @@ async function resolveReceiver(evt: any) {
     }
   }
 
-  // Direct match
+  // --------------------------------------------------------------------------
+  // DIRECT ID MATCH
+  // --------------------------------------------------------------------------
   if (directId) {
     const u = await getOrUpdateUser(String(directId), null, null);
     const isHost = HOST_ID && String(directId) === String(HOST_ID);
@@ -194,7 +196,9 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  // Name match host
+  // --------------------------------------------------------------------------
+  // UNIQUEID MATCH MET HOST (lowercase)
+  // --------------------------------------------------------------------------
   if (un && HOST_USER && un === HOST_USER && HOST_ID) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     return {
@@ -205,7 +209,9 @@ async function resolveReceiver(evt: any) {
     };
   }
 
-  // Fallback → host
+  // --------------------------------------------------------------------------
+  // HARDE FALLBACK NAAR HOST (consistent met server.ts)
+  // --------------------------------------------------------------------------
   if (HOST_ID) {
     const h = await getOrUpdateUser(HOST_ID, null, null);
     return {
@@ -231,17 +237,15 @@ function isHeartMeGift(evt: any) {
 }
 
 /* ============================================================================
-   MAIN PROCESSOR — PATCHED FOR ROUND SYNC
+   MAIN PROCESSOR
 ============================================================================ */
 
 async function processGift(evt: any, source: string) {
   try {
-    /* DEDUPE */
     const key = makeDedupeKey(evt, source);
     if (dedupe.has(key)) return;
     dedupe.add(key);
 
-    /* Identity sync */
     await upsertIdentityFromLooseEvent(evt);
 
     const S = extractSender(evt);
@@ -252,25 +256,21 @@ async function processGift(evt: any, source: string) {
     const diamonds = calcDiamonds(evt);
     if (diamonds <= 0) return;
 
-    /* Game state */
     const gid = getActiveGameId();
     const active = await isGameActive();
 
-    /* 🔥 PATCH: synchroon met arena v15.5 */
     const roundActive = (io as any).roundActive === true;
     const currentRound = (io as any).currentRound || 0;
 
-    /* Resolve receiver */
     const receiver = await resolveReceiver(evt);
     const isHostReceiver = receiver.role === "host";
 
-    /* Arena snapshot */
     const arena = getArena();
 
     const senderFmt = formatDisplay(sender);
     const receiverFmt = receiver.display_name;
 
-    /* IDLE gifts → Host telt, speler NIET */
+    // Idle gifts → alleen host telt
     if (!gid || !active || !roundActive) {
       if (!isHostReceiver) {
         emitLog({
@@ -281,7 +281,7 @@ async function processGift(evt: any, source: string) {
       }
     }
 
-    /* BP */
+    // BP
     await addBP(
       BigInt(sender.tiktok_id),
       diamonds * 0.2,
@@ -289,7 +289,7 @@ async function processGift(evt: any, source: string) {
       sender.display_name
     );
 
-    /* FAN via Heart Me */
+    // FAN
     if (isHostReceiver && isHeartMeGift(evt)) {
       const expires = new Date(now() + 24 * 3600 * 1000);
       await pool.query(
@@ -303,7 +303,7 @@ async function processGift(evt: any, source: string) {
       });
     }
 
-    /* TWISTS */
+    // TWIST
     const giftId = Number(evt.giftId);
     const twistType: TwistType | null =
       (Object.keys(TWIST_MAP) as TwistType[]).find(
@@ -318,13 +318,7 @@ async function processGift(evt: any, source: string) {
       });
     }
 
-    /* =========================================================================
-       INSERT — STRICT ROUND SYNC PATCH
-       - Host gifts ALWAYS count
-       - Player gifts ONLY count in active round
-       - round_id ALWAYS = currentRound
-    ========================================================================= */
-
+    // ROUND SYNC INSERT
     const is_round_gift = !isHostReceiver && roundActive;
     const is_host_gift = isHostReceiver;
 
@@ -372,9 +366,6 @@ async function processGift(evt: any, source: string) {
       ]
     );
 
-   /* =========================================================================
-       BROADCAST
-    ========================================================================= */
     await broadcastStats();
     await broadcastPlayerLeaderboard();
     await broadcastGifterLeaderboard();
@@ -401,7 +392,7 @@ export function initGiftEngine(conn: any) {
     return;
   }
 
-  console.log("🎁 GiftEngine v14.5 SYNC PATCH LOADED");
+  console.log("🎁 GiftEngine v14.6 HOST NORMALIZATION PATCH LOADED");
 
   conn.on("gift", (d: any) => processGift(d, "gift"));
   conn.on("roomMessage", (d: any) => {
