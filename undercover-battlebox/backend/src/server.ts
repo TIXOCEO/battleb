@@ -1,12 +1,12 @@
 // ============================================================================
-// server.ts — BATTLEBOX BACKEND v16.8 (Full Sync Build, Patched)
+// server.ts — BATTLEBOX BACKEND v16.8 (Full Sync Build, Patched & Cleaned)
 // ============================================================================
 // - Queue ↔ Arena perfect gesynchroniseerd
-// - Identifier resolution 100% correct (id/username/display)
+// - Identifier resolution correct (id/username/display)
 // - Removal werkt altijd (queue + arena)
-// - No dubbele events
-// - Overlays 100% stable
-// - TikTok connect flow unchanged
+// - Geen dubbele handler-blokken (fix voor jouw file)
+// - Overlay events stabiel
+// - Host username normalisatie → host gifts werken weer
 // ============================================================================
 
 import express from "express";
@@ -30,8 +30,7 @@ import {
   getArenaSettings,
   startRound,
   endRound,
-  loadArenaSettingsFromDB,
-  updateArenaSettings
+  loadArenaSettingsFromDB
 } from "./engines/5-game-engine";
 
 // Queue Engine v16
@@ -139,16 +138,18 @@ io.use((socket: AdminSocket, next) => {
 // ============================================================================
 // HOST STATE
 // ============================================================================
+
 let HARD_HOST_USERNAME = "";
 let HARD_HOST_ID: string | null = null;
 
+/** ⬇ Belangrijk: maakt host-username ALTIJD lowercase (fix host-gift) */
 async function loadActiveHostProfile() {
-  const r = await pool.query(`
-    SELECT username, tiktok_id
-    FROM hosts
-    WHERE active=TRUE
-    LIMIT 1
-  `);
+  const r = await pool.query(
+    `SELECT username, tiktok_id
+     FROM hosts
+     WHERE active=TRUE
+     LIMIT 1`
+  );
 
   if (!r.rows.length) {
     HARD_HOST_USERNAME = "";
@@ -156,7 +157,7 @@ async function loadActiveHostProfile() {
     return;
   }
 
-  HARD_HOST_USERNAME = r.rows[0].username;
+  HARD_HOST_USERNAME = String(r.rows[0].username || "").toLowerCase();
   HARD_HOST_ID = String(r.rows[0].tiktok_id);
 }
 
@@ -217,14 +218,14 @@ export async function broadcastPlayerLeaderboard() {
     [currentGameId, hostId]
   );
 
-  q.rows = q.rows.map(r => ({
+  const rows = q.rows.map(r => ({
     ...r,
     total_score: Number(r.total_score || 0)
   }));
 
-  const summary = q.rows.reduce((acc, r) => acc + r.total_score, 0);
+  const summary = rows.reduce((acc, r) => acc + r.total_score, 0);
 
-  io.to("overlays").emit("leaderboardPlayers", q.rows);
+  io.to("overlays").emit("leaderboardPlayers", rows);
   io.to("overlays").emit("leaderboardPlayersSummary", summary);
 }
 
@@ -251,21 +252,18 @@ export async function broadcastGifterLeaderboard() {
     [currentGameId]
   );
 
-  r.rows = r.rows.map(x => ({
+  const rows = r.rows.map(x => ({
     ...x,
     total_diamonds: Number(x.total_diamonds || 0)
   }));
 
-  io.to("overlays").emit("leaderboardGifters", r.rows);
+  io.to("overlays").emit("leaderboardGifters", rows);
   io.to("overlays").emit(
     "leaderboardGiftersSummary",
-    r.rows.reduce((a, b) => a + b.total_diamonds, 0)
+    rows.reduce((a, b) => a + b.total_diamonds, 0)
   );
 }
 
-// ============================================================================
-// HOST DIAMONDS
-// ============================================================================
 export async function broadcastHostDiamonds() {
   if (!currentGameId || !HARD_HOST_ID) {
     io.to("overlays").emit("hostDiamonds", { username: "", total: 0 });
@@ -310,9 +308,11 @@ export async function broadcastStats() {
   );
 
   const h = await pool.query(
-    `SELECT COALESCE(SUM(diamonds),0) AS total 
-     FROM gifts 
-     WHERE game_id=$1 AND is_host_gift=TRUE`,
+    `
+    SELECT COALESCE(SUM(diamonds),0) AS total
+    FROM gifts
+    WHERE game_id=$1 AND is_host_gift=TRUE
+    `,
     [currentGameId]
   );
 
@@ -433,8 +433,11 @@ async function buildInitialSnapshot() {
     );
 
     const h = await pool.query(
-      `SELECT COALESCE(SUM(diamonds),0) AS total 
-       FROM gifts WHERE game_id=$1 AND is_host_gift=TRUE`,
+      `
+      SELECT COALESCE(SUM(diamonds),0) AS total
+      FROM gifts
+      WHERE game_id=$1 AND is_host_gift=TRUE
+      `,
       [currentGameId]
     );
 
@@ -469,13 +472,13 @@ async function buildInitialSnapshot() {
       [currentGameId, hostId]
     );
 
-    pl.rows = pl.rows.map(r => ({
+    const rows = pl.rows.map(r => ({
       ...r,
       total_score: Number(r.total_score || 0)
     }));
 
-    snap.playerLeaderboard = pl.rows;
-    snap.playerLeaderboardSummary = pl.rows.reduce(
+    snap.playerLeaderboard = rows;
+    snap.playerLeaderboardSummary = rows.reduce(
       (acc, r) => acc + r.total_score,
       0
     );
@@ -532,7 +535,7 @@ io.on("connection", async (socket: AdminSocket) => {
       await broadcastStats();
     }
 
-    // admin requests full snapshot
+    // ADMIN -> vraagt volledige snapshot
     socket.on("getInitialSnapshot", async (_payload, ack) => {
       const snap = await buildInitialSnapshot();
       ack(snap);
@@ -548,7 +551,7 @@ async function resolveUserIdentifier(input: string) {
 
   const clean = input.trim().replace(/^@+/, "").toLowerCase();
 
-  // Try exact tiktok_id
+  // TikTok ID (exact numeric)
   if (/^\d+$/.test(clean)) {
     const r = await pool.query(
       `SELECT tiktok_id, username, display_name, avatar_url
@@ -558,7 +561,7 @@ async function resolveUserIdentifier(input: string) {
     if (r.rows.length) return r.rows[0];
   }
 
-  // Try username
+  // Match username
   let r = await pool.query(
     `SELECT tiktok_id, username, display_name, avatar_url
      FROM users WHERE LOWER(username)=LOWER($1) LIMIT 1`,
@@ -566,7 +569,7 @@ async function resolveUserIdentifier(input: string) {
   );
   if (r.rows.length) return r.rows[0];
 
-  // Try display_name
+  // Match display_name
   r = await pool.query(
     `SELECT tiktok_id, username, display_name, avatar_url
      FROM users WHERE LOWER(display_name)=LOWER($1) LIMIT 1`,
@@ -578,16 +581,16 @@ async function resolveUserIdentifier(input: string) {
 }
 
 // ============================================================================
-// ADMIN ACTION HANDLER (v16.8 + PATCH)
+// ADMIN ACTION HANDLER
 // ============================================================================
 io.on("connection", (socket: AdminSocket) => {
   if (!socket.isAdmin) return;
 
   async function handle(action: string, data: any, ack: Function) {
     try {
-      // ======================================================================
+      // ----------------------------------------------------------------------
       // HOST MANAGEMENT
-      // ======================================================================
+      // ----------------------------------------------------------------------
       if (action === "getHosts") {
         const r = await pool.query(
           `SELECT id, label, username, tiktok_id, active FROM hosts ORDER BY id`
@@ -597,7 +600,10 @@ io.on("connection", (socket: AdminSocket) => {
 
       if (action === "createHost") {
         const label = (data?.label || "").trim();
-        const un = (data?.username || "").trim().replace(/^@+/, "").toLowerCase();
+        const un = (data?.username || "")
+          .trim()
+          .replace(/^@+/, "")
+          .toLowerCase();
         const id = data?.tiktok_id ? String(data.tiktok_id) : null;
 
         if (!label || !un || !id)
@@ -622,13 +628,11 @@ io.on("connection", (socket: AdminSocket) => {
 
       if (action === "deleteHost") {
         const id = data?.id;
-
         if (!id) return ack({ success: false, message: "id verplicht" });
 
         const check = await pool.query(`SELECT active FROM hosts WHERE id=$1`, [
           id
         ]);
-
         if (check.rows[0]?.active)
           return ack({
             success: false,
@@ -643,11 +647,9 @@ io.on("connection", (socket: AdminSocket) => {
 
       if (action === "setActiveHost") {
         const id = data?.id;
-
         if (!id) return ack({ success: false, message: "id verplicht" });
 
         const find = await pool.query(`SELECT * FROM hosts WHERE id=$1`, [id]);
-
         if (!find.rows.length)
           return ack({ success: false, message: "Host niet gevonden" });
 
@@ -672,9 +674,9 @@ io.on("connection", (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // ======================================================================
+      // ----------------------------------------------------------------------
       // GAME MANAGEMENT
-      // ======================================================================
+      // ----------------------------------------------------------------------
       if (action === "startGame") {
         const r = await pool.query(`
           INSERT INTO games (status, started_at)
@@ -731,9 +733,9 @@ io.on("connection", (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // ======================================================================
+      // ----------------------------------------------------------------------
       // ROUND MANAGEMENT
-      // ======================================================================
+      // ----------------------------------------------------------------------
       if (action === "startRound") {
         const type = data?.type === "finale" ? "finale" : "quarter";
 
@@ -765,22 +767,17 @@ io.on("connection", (socket: AdminSocket) => {
         return ack({ success: true });
       }
 
-      // ======================================================================
+      // ----------------------------------------------------------------------
       // ARENA MANAGEMENT
-      // ======================================================================
+      // ----------------------------------------------------------------------
       if (action === "addToArena") {
         const user = await resolveUserIdentifier(data?.username);
         if (!user)
           return ack({ success: false, message: "User niet gevonden" });
 
-        // Host mag niet
         if (String(user.tiktok_id) === HARD_HOST_ID)
-          return ack({
-            success: false,
-            message: "Host kan niet in arena staan"
-          });
+          return ack({ success: false, message: "Host kan niet in arena staan" });
 
-        // remove from queue first
         await removeFromQueue(String(user.tiktok_id));
 
         emitQueueEvent("leave", {
@@ -789,12 +786,12 @@ io.on("connection", (socket: AdminSocket) => {
           avatar_url: user.avatar_url || null
         });
 
-await arenaJoin(
-  String(user.tiktok_id),
-  user.display_name,
-  user.username,
-  user.avatar_url ?? null
-);
+        await arenaJoin(
+          String(user.tiktok_id),
+          user.display_name,
+          user.username,
+          user.avatar_url ?? null
+        );
 
         await emitArena();
 
@@ -811,15 +808,12 @@ await arenaJoin(
         return ack({ success: true });
       }
 
-      // SOFT ELIMINATION (markeren)
       if (action === "eliminate") {
         const user = await resolveUserIdentifier(data?.username);
         if (!user)
           return ack({ success: false, message: "User niet gevonden" });
 
-        // Mark or remove from arena (soft)
-        await arenaLeave(String(user.tiktok_id)); // force = false
-
+        await arenaLeave(String(user.tiktok_id)); // soft
         await removeFromQueue(String(user.tiktok_id));
 
         emitQueueEvent("leave", {
@@ -838,18 +832,12 @@ await arenaJoin(
         return ack({ success: true });
       }
 
-      // ======================================================================
-      // HARD DELETE (NIEUW PATCHED COMMAND)
-      // ======================================================================
       if (action === "removeFromArenaPermanent") {
         const user = await resolveUserIdentifier(data?.username);
         if (!user)
           return ack({ success: false, message: "User niet gevonden" });
 
-        // HARD REMOVE uit arena
         await arenaLeave(String(user.tiktok_id), true);
-
-        // Altijd ook uit queue (failsafe)
         await removeFromQueue(String(user.tiktok_id));
 
         emitQueueEvent("leave", {
@@ -868,9 +856,9 @@ await arenaJoin(
         return ack({ success: true });
       }
 
-      // ======================================================================
+      // ----------------------------------------------------------------------
       // SEARCH USERS
-      // ======================================================================
+      // ----------------------------------------------------------------------
       if (action === "searchUsers") {
         const q = (data?.query || "").trim().toLowerCase();
         if (!q || q.length < 2) return ack({ users: [] });
@@ -891,19 +879,16 @@ await arenaJoin(
         return ack({ users: r.rows });
       }
 
-      // ======================================================================
+      // ----------------------------------------------------------------------
       // QUEUE MANAGEMENT
-      // ======================================================================
+      // ----------------------------------------------------------------------
       if (action === "addToQueue") {
         const user = await resolveUserIdentifier(data?.username);
         if (!user)
           return ack({ success: false, message: "User niet gevonden" });
 
         if (String(user.tiktok_id) === HARD_HOST_ID)
-          return ack({
-            success: false,
-            message: "Host kan niet in queue staan"
-          });
+          return ack({ success: false, message: "Host kan niet in queue staan" });
 
         const exists = await pool.query(
           `SELECT 1 FROM queue WHERE user_tiktok_id=$1`,
@@ -1000,9 +985,9 @@ await arenaJoin(
         return ack({ success: true });
       }
 
-      // ======================================================================
+      // ----------------------------------------------------------------------
       // VIP MANAGEMENT
-      // ======================================================================
+      // ----------------------------------------------------------------------
       if (action === "giveVip") {
         const user = await resolveUserIdentifier(data?.username);
         if (!user)
@@ -1056,9 +1041,9 @@ await arenaJoin(
         return ack({ success: true });
       }
 
-      // ======================================================================
+      // ----------------------------------------------------------------------
       // TWISTS
-      // ======================================================================
+      // ----------------------------------------------------------------------
       if (action === "giveTwist") {
         await giveTwistAdmin(data.username, data.twist);
         return ack({ success: true });
@@ -1070,13 +1055,10 @@ await arenaJoin(
         return ack({ success: true });
       }
 
-      // ======================================================================
-      // UNKNOWN COMMAND
-      // ======================================================================
-      return ack({
-        success: false,
-        message: "Onbekend admin commando"
-      });
+      // ----------------------------------------------------------------------
+      // UNKNOWN ACTION
+      // ----------------------------------------------------------------------
+      return ack({ success: false, message: "Onbekend admin commando" });
     } catch (err: any) {
       console.error("Admin error:", err);
       return ack({
@@ -1097,14 +1079,12 @@ await arenaJoin(
 // ============================================================================
 (async () => {
   try {
-    // load settings from DB
     await loadArenaSettingsFromDB();
     console.log("✔ Arena settings geladen");
 
     server.listen(PORT, () => {
       console.log(`🚀 Backend live op poort ${PORT}`);
     });
-
   } catch (err) {
     console.error("❌ Fout bij server startup:", err);
     process.exit(1);
