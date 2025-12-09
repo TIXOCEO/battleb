@@ -18,9 +18,7 @@
       font-family: "Rajdhani", sans-serif;
     }
 
-    /* ==========================================================
-       FX CANVAS
-       ========================================================== */
+    /* FX CANVAS */
     #fx-canvas {
       position: absolute;
       inset: 0;
@@ -30,7 +28,6 @@
       z-index: 999900;
     }
 
-    /* Arena root */
     #arena-root {
       position: relative;
       width: 1200px;
@@ -39,9 +36,7 @@
       isolation: isolate;
     }
 
-    /* ==========================================================
-       SIMPLE MESSAGE
-       ========================================================== */
+    /* SIMPLE MESSAGE */
     #twist-message {
       position: absolute;
       bottom: 40px;
@@ -61,14 +56,9 @@
       z-index: 999999;
     }
 
-    #twist-message.show {
-      opacity: 1;
-    }
+    #twist-message.show { opacity: 1; }
 
-
-    /* ==========================================================
-       CALLOUT BANNER (OPTIONAL, UNUSED)
-       ========================================================== */
+    /* Optional callout */
     #callout-banner {
       position: absolute;
       top: 22px;
@@ -90,10 +80,7 @@
       z-index: 999998;
     }
 
-    #callout-banner.show {
-      opacity: 1;
-    }
-
+    #callout-banner.show { opacity: 1; }
   </style>
 </head>
 
@@ -101,27 +88,13 @@
 
   <div id="arena-root">
 
-    <!-- FX CANVAS -->
     <canvas id="fx-canvas" width="1200" height="800"></canvas>
 
-    <!-- MESSAGE -->
     <div id="twist-message"></div>
-
-    <!-- CALLOUT -->
     <div id="callout-banner"></div>
 
-    <!-- GALAXY (cinematic) -->
-    <div id="twist-galaxy" class="galaxy-vortex hidden">
-      <div class="galaxy-stars"></div>
-      <div class="galaxy-ring"></div>
-      <div class="galaxy-ring2"></div>
-      <div class="galaxy-flare"></div>
-    </div>
-
-    <!-- TWIST OVERLAYS -->
+    <!-- ONLY ONE OVERLAY IN LITE -->
     <div id="twist-takeover" class="bb-twist-takeover hidden"></div>
-    <div id="twist-countdown" class="bb-twist-countdown hidden"></div>
-    <div id="twist-target" class="bb-twist-target hidden"></div>
 
     <!-- HUD -->
     <div id="arena-hud" class="bb-hud">
@@ -137,14 +110,11 @@
       </div>
     </div>
 
-    <!-- PLAYER CARDS -->
     <div id="arena-players"></div>
 
   </div>
 
-  <!-- Arena Logic -->
   <script type="module" src="/overlays/arena/arena.js"></script>
-  <!-- Message Engine -->
   <script type="module" src="/overlays/arena/twistMessage.js"></script>
 
 </body>
