@@ -1,0 +1,153 @@
+@import "/overlays/shared/theme.css";
+
+/* PANEL BASE — bottom center */
+.bb-battlelog-panel {
+  width: 1200px;
+  height: 300px;
+
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+
+  background: rgba(5,5,8,0.75);
+  backdrop-filter: blur(8px);
+  border: 2px solid rgba(255,255,255,0.08);
+
+  box-shadow:
+    0 0 45px rgba(255,77,79,0.45),
+    inset 0 0 60px rgba(255,77,79,0.25);
+
+  overflow: hidden;
+}
+
+/* LIST column of 3 */
+.battlelog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* CARD BASE */
+.battlelog-item {
+  width: 100%;
+  min-height: 80px;
+
+  display: flex;
+  align-items: center;
+  gap: 14px;
+
+  padding: 10px 14px;
+
+  background: rgba(15,15,20,0.88);
+  border: 2px solid rgba(255,255,255,0.12);
+
+  clip-path: polygon(
+    8% 0%, 92% 0%,
+    100% 18%, 100% 82%,
+    92% 100%, 8% 100%,
+    0% 82%, 0% 18%
+  );
+
+  box-shadow:
+    0 0 22px rgba(0,0,0,0.9),
+    inset 0 0 28px rgba(0,0,0,0.65),
+    inset 0 0 22px rgba(255,77,79,0.22);
+
+  opacity: 0;
+  transform: translateY(20px);
+  animation: itemFadeIn 0.45s ease-out forwards;
+}
+
+@keyframes itemFadeIn {
+  0% { opacity: 0; transform: translateY(25px); filter: blur(3px); }
+  100% { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+/* When items move down */
+.battlelog-shift {
+  animation: itemShift 0.35s ease-out both;
+}
+
+@keyframes itemShift {
+  0% { transform: translateY(0); opacity: 1; }
+  100% { transform: translateY(14px); opacity: 1; }
+}
+
+/* ICON */
+.battlelog-icon {
+  width: 46px;
+  height: 46px;
+
+  background: rgba(0,0,0,0.55);
+  clip-path: polygon(
+    15% 0%, 85% 0%,
+    100% 25%, 100% 75%,
+    85% 100%, 15% 100%,
+    0% 75%, 0% 25%
+  );
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+
+  font-size: 26px;
+  font-weight: 900;
+  color: var(--bb-orange);
+
+  box-shadow:
+    0 0 12px rgba(0,0,0,0.8),
+    inset 0 0 14px rgba(255,255,255,0.2);
+}
+
+/* TEXT */
+.battlelog-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.battlelog-text .name {
+  font-weight: 800;
+  font-size: 22px;
+  color: white;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.battlelog-text .reason {
+  font-weight: 600;
+  font-size: 20px;
+  color: var(--bb-turquoise);
+  opacity: 0.9;
+
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* VIP badge */
+.battlelog-vip {
+  margin-left: auto;
+  width: 12px;
+  height: 12px;
+
+  background: gold;
+  border-radius: 50%;
+  box-shadow: 0 0 20px gold;
+  animation: vipPulse 2s ease-in-out infinite;
+}
+
+@keyframes vipPulse {
+  0%,100% { transform: scale(1); }
+  50%     { transform: scale(1.25); }
+}
