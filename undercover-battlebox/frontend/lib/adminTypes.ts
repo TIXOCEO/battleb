@@ -8,11 +8,13 @@
      - giveVip / removeVip (realtime queue refresh)
    ✔ Galaxy reverseMode + breakerHits veld voor breaker twist
    ✔ Overige logica volledig ongewijzigd gelaten
+   ✔ ★ PATCH: ArenaPlayer bevat nu avatar_url voor arena overlays + admin UI
 ============================================================================ */
 
 /* ================================
    ARENA PLAYER TYPES
 ================================ */
+
 export type ArenaPlayerStatus =
   | "alive"
   | "eliminated"
@@ -25,6 +27,9 @@ export interface ArenaPlayer {
   id: string;
   display_name: string;
   username: string;
+
+  /** ★ PATCH — avatar support */
+  avatar_url?: string | null;
 
   /** v15 legacy field — blijft bestaan */
   score: number;
@@ -105,6 +110,9 @@ export interface QueueEntry {
 
   vip_expires_at?: string | null;
   fan_expires_at?: string | null;
+
+  /** ★ PATCH (in queue.ts) maar niet in type nodig:
+      avatar_url wordt wel doorgegeven, maar queue overlay gebruikt eigen model */
 }
 
 /* ================================
@@ -279,6 +287,7 @@ export interface AdminSocketInbound {
 /* ================================
    SOCKET OUTBOUND — UPDATED v16
 ================================ */
+
 export interface AdminSocketOutbound {
   ping: () => void;
 
