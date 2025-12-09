@@ -1,5 +1,5 @@
 /* ====================================================================== */
-/* ARENA QUEUE MINI PANEL 250 × 700                                       */
+/* ARENA QUEUE MINI PANEL 250 × 700 — 10 FIXED SLOTS                       */
 /* ====================================================================== */
 
 #arena-queue-panel {
@@ -8,11 +8,11 @@
 
   background: rgba(10, 10, 16, 0.70);
   border: 2px solid rgba(255,255,255,0.10);
-  padding: 14px 18px;
+  padding: 10px 14px;
 
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 
   box-shadow:
     0 0 25px rgba(255,77,79,0.45),
@@ -25,28 +25,43 @@
 
 /* Title */
 .queue-title {
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 900;
   color: var(--bb-orange);
   text-shadow: var(--glow-hard-orange);
-  letter-spacing: 2px;
+  letter-spacing: 1px;
 
-  margin-bottom: 6px;
+  margin-bottom: 4px;
   text-align: center;
 }
 
-/* Each line entry */
+/* ---------------------------- */
+/* ENTRY BLOCKS — AUTO HEIGHT   */
+/* ---------------------------- */
+
+.queue-list {
+  flex: 1;
+  display: grid;
+  grid-template-rows: repeat(10, 1fr); /* exactly 10 lines */
+  gap: 4px;
+}
+
+/* One entry */
 .queue-entry {
-  padding: 6px 4px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+
+  padding: 4px 4px;
   color: #fff;
-  font-size: 28px;            /* ⬆️ Was 18px → +10px */
-  font-weight: 900;           /* ⬆️ Extra bold */
-  line-height: 28px;
 
   border-left: 3px solid transparent;
   transition: border-color .25s, filter .25s;
+
+  overflow: hidden;
 }
 
+/* Highlight / VIP */
 .queue-entry.vip {
   border-color: gold;
 }
@@ -55,9 +70,26 @@
   filter: brightness(2);
 }
 
-/* 2nd line (username) */
+/* Displayname */
+.queue-name {
+  font-weight: 800;
+  font-size: 24px; /* 4px kleiner dan eerdere versie */
+  line-height: 24px;
+
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis; /* add … */
+}
+
+/* Username */
 .queue-user {
-  font-size: 22px;            /* ⬆️ Was 14px → +8px */
-  opacity: 0.8;
-  margin-left: 4px;
+  font-size: 18px; /* 4px kleiner */
+  opacity: 0.85;
+  margin-left: 2px;
+
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
