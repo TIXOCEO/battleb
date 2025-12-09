@@ -844,9 +844,11 @@ export async function arenaClear() {
 /* ============================================================================
    addFromQueue — PATCH avatar_url pass-through
 ============================================================================ */
-
 export async function addFromQueue(candidate: any) {
   if (!candidate) return;
+
+  // ⭐ DEBUG: ziet het candidate object eruit zoals verwacht?
+  console.log("ADD FROM QUEUE CANDIDATE:", candidate);
 
   if (typeof candidate === "object") {
     const id = String(candidate.tiktok_id ?? candidate.user_tiktok_id);
