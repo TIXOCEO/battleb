@@ -22,7 +22,6 @@
     inset 0 0 60px rgba(255,77,79,0.25);
 
   backdrop-filter: blur(6px);
-
   position: relative;
 }
 
@@ -55,7 +54,7 @@
    PAGE (3 events per page)
 --------------------------------------------------------- */
 .battlelog-page {
-  width: 50%; /* Half of the 200% */
+  width: 50%; /* 50% of the 200% wrapper */
   height: 100%;
 
   display: flex;
@@ -109,7 +108,7 @@
 }
 
 /* ---------------------------------------------------------
-   EVENT ICON
+   EVENT ICON (Neon Octagon)
 --------------------------------------------------------- */
 .battlelog-icon {
   width: 36px;
@@ -157,7 +156,7 @@
 .battlelog-text {
   display: flex;
   flex-direction: column;
-  line-height: 1.2;
+  line-height: 1.18;
   max-width: 900px;
 }
 
@@ -178,5 +177,5 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-top: 2px;
+  margin-top: 1px;
 }
