@@ -1,62 +1,51 @@
 // ============================================================================
-// battlelog.js — BattleBox BattleLog v1.0
-// Shows last 3 events, newest on top, animated slide + fade
+// battlelog.js — BattleBox BattleLog Carousel v2.1
+// 2 pages • 3 items per page • auto-rotate
 // ============================================================================
 
 import { eventStore } from "/overlays/shared/stores.js";
-import { initEventRouter } from "/overlays/shared/event-router.js";
-
-initEventRouter();
 
 const root = document.getElementById("battlelog-list");
-const MAX = 3;
+const container = document.getElementById("battlelog-container");
 
-function iconFor(type) {
-  if (!type) return "▶";
+const ITEMS_PER_PAGE = 3;
+const AUTO_ROTATE_MS = 4000;
 
-  if (type.startsWith("twist:")) return "★";
+let currentPage = 0;
+let autoTimer = null;
 
+// ICONS
+function getEventIcon(type) {
   switch (type) {
-    case "join": return "➤";
-    case "leave": return "←";
+    case "join": return "▶";
+    case "leave": return "◀";
     case "promote": return "↑";
     case "demote": return "↓";
-    case "arenaJoin": return "⯈";
-    case "arenaLeave": return "⯇";
-    case "eliminated": return "✖";
-    default: return "•";
+    case "bomb": return "💣";
+    case "moneygun": return "💵";
+    case "diamond": return "💎";
+    case "galaxy": return "🌌";
+    case "heal": return "✨";
+    case "immune": return "🛡️";
+    case "breaker": return "⚡";
+    case "eliminate": return "✖";
+    default: return "▶";
   }
 }
 
-function truncate(str, max) {
-  if (!str) return "";
-  return str.length > max ? str.substring(0, max - 3) + "..." : str;
-}
-
-let lastCount = 0;
-
-function render(events) {
-  const list = events.slice(0, MAX);
-
+function buildPage(events) {
   root.innerHTML = "";
 
-  list.forEach((evt, index) => {
+  events.forEach(evt => {
     const el = document.createElement("div");
     el.className = "battlelog-item";
 
-    // Animate shift for old items
-    if (events.length > lastCount && index > 0) {
-      el.classList.add("battlelog-shift");
-    }
-
-    const icon = iconFor(evt.type);
-
     el.innerHTML = `
-      <div class="battlelog-icon">${icon}</div>
+      <div class="battlelog-icon">${getEventIcon(evt.type)}</div>
 
       <div class="battlelog-text">
-        <div class="name">${truncate(evt.display_name, 28)}</div>
-        <div class="reason">${truncate(evt.reason, 80)}</div>
+        <div class="name">${evt.display_name}</div>
+        <div class="reason">${evt.reason || ""}</div>
       </div>
 
       ${evt.is_vip ? `<div class="battlelog-vip"></div>` : ""}
@@ -64,10 +53,49 @@ function render(events) {
 
     root.appendChild(el);
   });
-
-  lastCount = events.length;
 }
 
-eventStore.subscribe((state) => {
-  render(state.events);
+function showPage(pageIndex, events) {
+  const totalPages = Math.ceil(events.length / ITEMS_PER_PAGE);
+  if (pageIndex >= totalPages) pageIndex = 0;
+
+  const start = pageIndex * ITEMS_PER_PAGE;
+  const slice = events.slice(start, start + ITEMS_PER_PAGE);
+
+  // Exit animation
+  root.classList.add("page-exit");
+  setTimeout(() => {
+    root.classList.remove("page-exit");
+
+    // Enter transition
+    root.classList.add("page-enter");
+    buildPage(slice);
+
+    requestAnimationFrame(() => {
+      root.classList.add("page-enter-active");
+    });
+
+    setTimeout(() => {
+      root.classList.remove("page-enter", "page-enter-active");
+    }, 450);
+  }, 350);
+
+  currentPage = pageIndex;
+}
+
+function resetAuto(events) {
+  if (autoTimer) clearInterval(autoTimer);
+
+  autoTimer = setInterval(() => {
+    showPage(currentPage + 1, events);
+  }, AUTO_ROTATE_MS);
+}
+
+eventStore.subscribe(state => {
+  const events = state.events;
+
+  // Always show page 0 first when new event arrives
+  currentPage = 0;
+  showPage(0, events);
+  resetAuto(events);
 });
