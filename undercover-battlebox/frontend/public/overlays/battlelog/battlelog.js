@@ -1,6 +1,7 @@
 // ============================================================================
-// battlelog.js — BattleBox BattleLog v2.0
-// 2 PAGES × 3 EVENTS • Twist aware • Arena/Queue events
+// battlelog.js — BattleBox BattleLog v2.2
+// 2 PAGES × 3 EVENTS • Twist aware • Arena-aware • Queue-aware
+// Fully patched for extended event-router.js
 // ============================================================================
 
 import { eventStore } from "/overlays/shared/stores.js";
@@ -15,9 +16,26 @@ const TOTAL_PAGES = 2;
 let currentPage = 0;
 
 // ------------------------------------------------------------
-// ICON MAPPER
+// SAFETY HELPERS
+// ------------------------------------------------------------
+function safe(text) {
+  return text ?? "";
+}
+
+function truncate(text, max = 42) {
+  if (!text) return "";
+  return text.length > max ? text.slice(0, max - 3) + "..." : text;
+}
+
+// ------------------------------------------------------------
+// ICON MAPPER — supports twist:xxx, arena, queue
 // ------------------------------------------------------------
 function iconFor(type) {
+  if (!type) return { cls: "icon-default", sym: "▶" };
+
+  // Twist types always start with twist:
+  if (type.startsWith("twist:")) return { cls: "icon-twist", sym: "★" };
+
   switch (type) {
     case "join": return { cls: "icon-join", sym: "▶" };
     case "leave": return { cls: "icon-leave", sym: "◀" };
@@ -25,12 +43,15 @@ function iconFor(type) {
     case "demote": return { cls: "icon-demote", sym: "-" };
 
     case "arenaJoin": return { cls: "icon-arena", sym: "⭘" };
-    case "arenaLeave": return { cls: "icon-elim", sym: "✖" };
+    case "arenaLeave": return { cls: "icon-arena", sym: "◁" };
     case "eliminated": return { cls: "icon-elim", sym: "✖" };
 
-    case "twist": return { cls: "icon-twist", sym: "★" };
+    case "round:start": return { cls: "icon-round", sym: "⏵" };
+    case "round:grace": return { cls: "icon-round", sym: "⏳" };
+    case "round:end": return { cls: "icon-round", sym: "⏹" };
 
-    default: return { cls: "icon-join", sym: "▶" };
+    default:
+      return { cls: "icon-default", sym: "▶" };
   }
 }
 
@@ -38,7 +59,9 @@ function iconFor(type) {
 // RENDER FUNCTION
 // ------------------------------------------------------------
 function render(events) {
-  // Only show the newest 6 events
+  if (!Array.isArray(events)) return;
+
+  // Only newest 6 items
   const sliced = events.slice(0, PAGE_SIZE * TOTAL_PAGES);
 
   root.innerHTML = "";
@@ -51,10 +74,10 @@ function render(events) {
     const pageEvents = sliced.slice(start, start + PAGE_SIZE);
 
     pageEvents.forEach((evt) => {
-      const item = document.createElement("div");
-      item.className = "battlelog-item";
-
       const icon = iconFor(evt.type);
+
+      const item = document.createElement("div");
+      item.className = "battlelog-item fade-in";
 
       item.innerHTML = `
         <div class="battlelog-icon ${icon.cls}">
@@ -62,8 +85,8 @@ function render(events) {
         </div>
 
         <div class="battlelog-text">
-          <div class="battlelog-name">${evt.display_name}</div>
-          <div class="battlelog-reason">${evt.reason}</div>
+          <div class="battlelog-name">${truncate(safe(evt.display_name), 26)}</div>
+          <div class="battlelog-reason">${truncate(safe(evt.reason), 48)}</div>
         </div>
       `;
 
@@ -77,21 +100,21 @@ function render(events) {
 }
 
 // ------------------------------------------------------------
-// PAGE SWITCH
+// PAGE SWITCH ANIMATION
 // ------------------------------------------------------------
 function updatePage() {
-  const x = currentPage * -50; // because width = 200% (two pages)
+  const x = currentPage * -50; // viewport width is 200% for 2 pages
   root.style.transform = `translateX(${x}%)`;
 }
 
-// Auto-cycle
+// Auto-cycle every 3 seconds
 setInterval(() => {
   currentPage = (currentPage + 1) % TOTAL_PAGES;
   updatePage();
 }, 3000);
 
 // ------------------------------------------------------------
-// SUBSCRIBE TO STORE
+// STORE SUBSCRIBE
 // ------------------------------------------------------------
 eventStore.subscribe((state) => {
   render(state.events);
