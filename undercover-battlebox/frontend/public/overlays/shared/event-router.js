@@ -1,6 +1,7 @@
 // ============================================================================
-// event-router.js — BattleBox Event Brain v5.1 HARD-RESET EDITION
+// event-router.js — BattleBox Event Brain v5.1 HARD-RESET EDITION (EXTENDED)
 // FULL TWIST PAYLOAD SYNC + QUEUE-SAFE + NAME FIXES + COUNTDOWN SUPPORT
+// + BATTLELOG EVENT FEED (ARENA + TWISTS + ROUND + SNAPSHOT)
 // Compatible with arenaStore v9.0 and arena.js v9.2
 // ============================================================================
 
@@ -130,6 +131,25 @@ const TWIST_KEYS = Object.entries(TWIST_MAP).map(([key, t]) => ({
 }));
 
 // ============================================================================
+// BATTLELOG PUSHER — universal
+// ============================================================================
+function pushBattleEvent(evt) {
+  try {
+    eventStore.pushEvent({
+      timestamp: Date.now(),
+      avatar_url: evt.avatar_url || EMPTY_AVATAR,
+      is_vip: !!evt.is_vip,
+      display_name: evt.display_name || evt.username || "Onbekend",
+      username: evt.username || "unknown",
+      reason: evt.reason || "",
+      type: evt.type || "event"
+    });
+  } catch (err) {
+    console.warn("[BattleLog] Failed to push event:", err, evt);
+  }
+}
+
+// ============================================================================
 // INIT ROUTER
 // ============================================================================
 export async function initEventRouter() {
@@ -137,33 +157,45 @@ export async function initEventRouter() {
   routerStarted = true;
 
   const socket = await getSocket();
-
   console.log("%c[BattleBox] Event Router Ready v5.1 (HARD RESET)", "color:#0fffd7;font-weight:bold;");
 
   // ------------------------------------------------------------------------
-  // INITIAL SNAPSHOT
+  // SNAPSHOT — inject players directly into BattleLog as “arenaJoin”
   // ------------------------------------------------------------------------
   socket.on("overlayInitialSnapshot", (snap) => {
     applySnapshot(snap);
-    if (snap.arena) setArenaSnapshot(snap.arena);
+
+    if (snap.arena) {
+      setArenaSnapshot(snap.arena);
+
+      if (Array.isArray(snap.arena.players)) {
+        snap.arena.players.forEach((p) => {
+          pushBattleEvent({
+            type: "arenaJoin",
+            display_name: p.display_name || p.username,
+            username: p.username,
+            avatar_url: p.avatar_url,
+            reason: "joint de arena."
+          });
+        });
+      }
+    }
 
     twistStore.setTwists(TWIST_KEYS.slice(0, 3));
   });
 
   // ------------------------------------------------------------------------
-  // ARENA UPDATES — PATCHED (HUD + PLAYERS + AVATARS)
+  // ARENA UPDATE — HUD + PLAYERS
   // ------------------------------------------------------------------------
   socket.on("updateArena", (pkt) => {
     if (!pkt) return;
 
     const norm = normalizeArena(pkt);
 
-    // ⭐ NEW — Preserve player list including avatar_url
     if (Array.isArray(pkt.players)) {
       arenaStore.set({ players: pkt.players });
     }
 
-    // HUD + status updates
     if (norm) {
       arenaStore.set({
         round: norm.round,
@@ -177,8 +209,7 @@ export async function initEventRouter() {
         roundCutoff: norm.roundCutoff,
         graceEnd: norm.graceEnd,
 
-        // Preserve existing settings if not included
-        settings: norm.settings ?? arenaStore.get().settings,
+        settings: norm.settings ?? arenaStore.get().settings
       });
     }
 
@@ -186,7 +217,7 @@ export async function initEventRouter() {
   });
 
   // ------------------------------------------------------------------------
-  // ROUND EVENTS
+  // ROUND EVENTS → BattleLog
   // ------------------------------------------------------------------------
   socket.on("round:start", (payload) => {
     arenaTwistStore.resetAll();
@@ -201,6 +232,13 @@ export async function initEventRouter() {
       totalMs: total,
       endsAt,
       remainingMs: total
+    });
+
+    pushBattleEvent({
+      type: "round:start",
+      display_name: "Ronde",
+      username: "system",
+      reason: `Ronde ${payload.round} gestart (${payload.type}).`
     });
 
     document.dispatchEvent(new CustomEvent("arena:roundStart", { detail: payload }));
@@ -221,6 +259,13 @@ export async function initEventRouter() {
       remainingMs: total
     });
 
+    pushBattleEvent({
+      type: "round:grace",
+      display_name: "Grace",
+      username: "system",
+      reason: "Grace periode gestart."
+    });
+
     document.dispatchEvent(new CustomEvent("arena:graceStart", { detail: payload }));
   });
 
@@ -234,85 +279,131 @@ export async function initEventRouter() {
       remainingMs: 0
     });
 
+    pushBattleEvent({
+      type: "round:end",
+      display_name: "Ronde",
+      username: "system",
+      reason: "Ronde beëindigd."
+    });
+
     document.dispatchEvent(new CustomEvent("arena:roundEnd"));
   });
 
   // ========================================================================
-  // ⭐⭐⭐ TWIST TAKEOVER — FULL PAYLOAD, NAME FIXES, CORRUPTION CHECK ⭐⭐⭐
+  // ARENA EVENTS — if backend emits them
   // ========================================================================
-  socket.on("twist:takeover", (raw) => {
-    if (!raw || !raw.type) {
-      console.warn("[Twist] Invalid takeover payload – HARD RESET");
-      arenaTwistStore.resetAll();
-      return;
-    }
+  socket.on("arena:join", (p) => {
+    pushBattleEvent({
+      type: "arenaJoin",
+      display_name: p.display_name || p.username,
+      username: p.username,
+      avatar_url: p.avatar_url,
+      reason: "joint de arena."
+    });
+  });
 
-    const payload = {
-      type: raw.type || null,
-      title: raw.title || "",
+  socket.on("arena:leave", (p) => {
+    pushBattleEvent({
+      type: "arenaLeave",
+      display_name: p.display_name || p.username,
+      username: p.username,
+      avatar_url: p.avatar_url,
+      reason: "verlaat de arena."
+    });
+  });
 
-      by: raw.by || raw.sender || raw.senderName || null,
-      byUsername: raw.byUsername || raw.senderUsername || null,
-      byDisplayName: raw.byDisplayName || raw.senderDisplayName || null,
-      senderName: raw.senderName || raw.by || null,
-
-      targetId: raw.targetId || null,
-      targetName: raw.targetName || null,
-      targetIndex: Number.isFinite(raw.targetIndex) ? raw.targetIndex : null,
-
-      victimIds: Array.isArray(raw.victimIds) ? raw.victimIds : [],
-      victimNames: Array.isArray(raw.victimNames) ? raw.victimNames : [],
-      victimIndices: (raw.victimIndices || []).map(i =>
-        Number.isFinite(i) ? i : null
-      ),
-
-      survivorId: raw.survivorId || null,
-      survivorName: raw.survivorName || null,
-      survivorIndex: Number.isFinite(raw.survivorIndex)
-        ? raw.survivorIndex
-        : null,
-
-      reverse: raw.reverse || false
-    };
-
-    arenaTwistStore.activate(payload);
-
-    document.dispatchEvent(
-      new CustomEvent("arena:twistTakeover", { detail: payload })
-    );
+  socket.on("arena:eliminated", (p) => {
+    pushBattleEvent({
+      type: "eliminated",
+      display_name: p.display_name || p.username,
+      username: p.username,
+      avatar_url: p.avatar_url,
+      reason: "is geëlimineerd."
+    });
   });
 
   // ========================================================================
-  // TWIST CLEAR
+  // TWIST EVENTS → EXACT SAME TEXT LOGIC AS twistMessage.js
   // ========================================================================
-  socket.on("twist:clear", () => {
-    arenaTwistStore.clear();
+  function twistReason(payload) {
+    const sender =
+      payload.byDisplayName ||
+      payload.byUsername ||
+      payload.senderName ||
+      "Onbekend";
 
-    if (arenaTwistStore.resetAll) {
-      arenaTwistStore.resetAll();
+    const target = payload.targetDisplayName || payload.targetUsername;
+    const victims = payload.victimNames?.length
+      ? payload.victimNames.map((x) => `@${x}`).join(", ")
+      : null;
+
+    const survivor = payload.survivorName;
+
+    switch (payload.type) {
+      case "moneygun":
+        return target
+          ? `${sender} markeert @${target} voor ELIMINATIE!`
+          : `${sender} gebruikt MoneyGun!`;
+
+      case "immune":
+        return target
+          ? `${sender} geeft @${target} IMMUNITEIT!`
+          : `${sender} deelt immuniteit uit!`;
+
+      case "heal":
+        return target
+          ? `${sender} herstelt @${target}!`
+          : `${sender} voert een HEAL uit!`;
+
+      case "bomb":
+        return victims
+          ? `${sender} gooit een BOM! Slachtoffer: ${victims}!`
+          : `${sender} laat een BOM ontploffen!`;
+
+      case "galaxy":
+        return `${sender} draait de HELE ranking om! Chaos!`;
+
+      case "breaker":
+        return target
+          ? `${sender} BREKT de immuniteit van @${target}!`
+          : `${sender} gebruikt een Immunity Breaker!`;
+
+      case "diamondpistol":
+        return survivor
+          ? `${sender} vuurt de DIAMOND GUN! @${survivor} overleeft — de rest ligt eruit!`
+          : `${sender} gebruikt de Diamond Gun!`;
+
+      default:
+        return `${sender} activeert een twist.`;
     }
+  }
 
-    document.dispatchEvent(new CustomEvent("arena:twistClear"));
+  // TWIST TAKEOVER
+  socket.on("arena:twistTakeover", (p) => {
+    pushBattleEvent({
+      type: `twist:${p.type}`,
+      display_name: p.byDisplayName || p.byUsername || "Onbekend",
+      username: p.byUsername || "unknown",
+      reason: twistReason(p)
+    });
   });
 
-  // ========================================================================
-  // TWIST COUNTDOWN
-  // ========================================================================
-  socket.on("twist:countdown", (raw) => {
-    const payload = {
-      type: "countdown",
-      step: Number.isFinite(raw.step) ? raw.step : 3,
+  socket.on("arena:twistClear", () => {
+    pushBattleEvent({
+      type: "twist:clear",
+      display_name: "System",
+      username: "system",
+      reason: "Twist-effect beëindigd."
+    });
+  });
 
-      by: raw.by || raw.senderName || null,
-      byUsername: raw.byUsername || null,
-      byDisplayName: raw.byDisplayName || null
-    };
-
-    arenaTwistStore.countdown(payload);
-
-    document.dispatchEvent(
-      new CustomEvent("arena:twistCountdown", { detail: payload })
-    );
+  socket.on("arena:twistCountdown", (p) => {
+    pushBattleEvent({
+      type: "twist:countdown",
+      display_name: p.byDisplayName || p.byUsername || "Twist",
+      username: p.byUsername || "unknown",
+      reason: `Countdown ${p.step}…`
+    });
   });
 
   // ========================================================================
@@ -324,7 +415,7 @@ export async function initEventRouter() {
   });
 
   // ========================================================================
-  // QUEUE EVENTS
+  // QUEUE EVENTS → BattleLog
   // ========================================================================
   socket.on("queueEvent", (evt) => {
     if (!evt || !QUEUE_EVENTS.has(evt.type)) return;
@@ -336,9 +427,8 @@ export async function initEventRouter() {
       evt.username?.trim() ||
       safeDisplay.toLowerCase().replace(/\s+/g, "");
 
-    eventStore.pushEvent({
+    pushBattleEvent({
       type: evt.type,
-      timestamp: evt.timestamp || Date.now(),
       display_name: safeDisplay,
       username: safeUsername,
       is_vip: !!evt.is_vip,
@@ -377,186 +467,6 @@ export async function initEventRouter() {
 
   rotateLegacyTwists();
   setInterval(rotateLegacyTwists, 10000);
-
-  // ========================================================================
-  // ========================================================================
-  // BATTLELOG EVENT INJECTION — FULL ARENA / TWIST / ROUND FEED
-  // ========================================================================
-  // ========================================================================
-
-  function pushBattleEvent(evt) {
-    try {
-      eventStore.pushEvent({
-        timestamp: Date.now(),
-        avatar_url: evt.avatar_url || EMPTY_AVATAR,
-        is_vip: evt.is_vip || false,
-        ...evt
-      });
-    } catch (err) {
-      console.warn("[BattleLog] Failed to push event", err, evt);
-    }
-  }
-
-  // ---------------------------
-  // ARENA JOIN
-  // ---------------------------
-  socket.on("arena:join", (p) => {
-    pushBattleEvent({
-      type: "arenaJoin",
-      display_name: p.display_name || p.username,
-      username: p.username,
-      reason: "joint de arena.",
-      avatar_url: p.avatar_url
-    });
-  });
-
-  // ---------------------------
-  // ARENA LEAVE
-  // ---------------------------
-  socket.on("arena:leave", (p) => {
-    pushBattleEvent({
-      type: "arenaLeave",
-      display_name: p.display_name || p.username,
-      username: p.username,
-      reason: "verlaat de arena.",
-      avatar_url: p.avatar_url
-    });
-  });
-
-  // ---------------------------
-  // ELIMINATION
-  // ---------------------------
-  socket.on("arena:eliminated", (p) => {
-    pushBattleEvent({
-      type: "eliminated",
-      display_name: p.display_name || p.username,
-      username: p.username,
-      reason: "is geëlimineerd.",
-      avatar_url: p.avatar_url
-    });
-  });
-
-  // ========================================================================
-  // TWIST EVENTS — HUMAN READABLE
-  // ========================================================================
-  function twistReason(payload) {
-    const sender =
-      payload.byDisplayName ||
-      payload.byUsername ||
-      payload.senderName ||
-      "Onbekend";
-
-    const target = payload.targetDisplayName || payload.targetUsername;
-    const victims = payload.victimNames?.length
-      ? payload.victimNames.map((v) => `@${v}`).join(", ")
-      : null;
-
-    const survivor = payload.survivorName;
-
-    switch (payload.type) {
-      case "moneygun":
-        return target
-          ? `${sender} markeert @${target} voor eliminatie.`
-          : `${sender} gebruikt MoneyGun.`;
-
-      case "bomb":
-        return victims
-          ? `${sender} gooit een BOM → slachtoffers: ${victims}.`
-          : `${sender} laat een BOM ontploffen.`;
-
-      case "heal":
-        return target
-          ? `${sender} herstelt @${target}.`
-          : `${sender} voert een HEAL uit.`;
-
-      case "immune":
-        return target
-          ? `${sender} geeft @${target} immuniteit.`
-          : `${sender} deelt immuniteit uit.`;
-
-      case "breaker":
-        return target
-          ? `${sender} breekt de immuniteit van @${target}!`
-          : `${sender} gebruikt een Immune Breaker!`;
-
-      case "diamondpistol":
-        return survivor
-          ? `${sender} vuurt de Diamond Gun — @${survivor} overleeft!`
-          : `${sender} gebruikt Diamond Gun!`;
-
-      case "galaxy":
-        return `${sender} draait de HELE ranking om!`;
-
-      default:
-        return `${sender} activeert een twist.`;
-    }
-  }
-
-  // ---------------------------
-  // TWIST TAKEOVER
-  // ---------------------------
-  socket.on("arena:twistTakeover", (p) => {
-    pushBattleEvent({
-      type: `twist:${p.type}`,
-      display_name: p.byDisplayName || p.byUsername || "Onbekend",
-      username: p.byUsername || "unknown",
-      reason: twistReason(p)
-    });
-  });
-
-  // ---------------------------
-  // TWIST CLEARED
-  // ---------------------------
-  socket.on("arena:twistClear", () => {
-    pushBattleEvent({
-      type: "twist:clear",
-      display_name: "System",
-      username: "system",
-      reason: "Twist-effect beëindigd."
-    });
-  });
-
-  // ---------------------------
-  // TWIST COUNTDOWN
-  // ---------------------------
-  socket.on("arena:twistCountdown", (p) => {
-    pushBattleEvent({
-      type: "twist:countdown",
-      display_name: p.byDisplayName || p.byUsername || "Twist",
-      username: p.byUsername || "unknown",
-      reason: `Countdown ${p.step}…`
-    });
-  });
-
-  // ========================================================================
-  // ROUND EVENTS
-  // ========================================================================
-  socket.on("arena:roundStart", (p) => {
-    pushBattleEvent({
-      type: "round:start",
-      display_name: "Ronde",
-      username: "system",
-      reason: `Ronde ${p.round} gestart (${p.type}).`
-    });
-  });
-
-  socket.on("arena:graceStart", () => {
-    pushBattleEvent({
-      type: "round:grace",
-      display_name: "Grace",
-      username: "system",
-      reason: "Grace periode gestart."
-    });
-  });
-
-  socket.on("arena:roundEnd", () => {
-    pushBattleEvent({
-      type: "round:end",
-      display_name: "Ronde",
-      username: "system",
-      reason: "Ronde beëindigd."
-    });
-  });
 
   // ========================================================================
   // DEBUG BRIDGE
