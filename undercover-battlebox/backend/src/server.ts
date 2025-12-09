@@ -29,8 +29,7 @@ import {
   emitArena as emitArenaRaw,
   getArenaSettings,
   startRound,
-  endRound,
-  loadArenaSettingsFromDB
+  endRound
 } from "./engines/5-game-engine";
 
 // Queue Engine v16
