@@ -1,0 +1,62 @@
+/* ====================================================================== */
+/* ARENA QUEUE MINI PANEL 250 × 700                                       */
+/* ====================================================================== */
+
+#arena-queue-panel {
+  width: 250px;
+  height: 700px;
+
+  background: rgba(10, 10, 16, 0.70);
+  border: 2px solid rgba(255,255,255,0.10);
+  padding: 14px 18px;
+
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  box-shadow:
+    0 0 25px rgba(255,77,79,0.45),
+    inset 0 0 40px rgba(255,77,79,0.18);
+
+  backdrop-filter: blur(6px);
+
+  overflow: hidden;
+}
+
+/* Title */
+.queue-title {
+  font-size: 26px;
+  font-weight: 900;
+  color: var(--bb-orange);
+  text-shadow: var(--glow-hard-orange);
+  letter-spacing: 2px;
+
+  margin-bottom: 6px;
+  text-align: center;
+}
+
+/* Each line entry */
+.queue-entry {
+  padding: 6px 4px;
+  color: #fff;
+  font-size: 18px;
+  line-height: 20px;
+
+  border-left: 3px solid transparent;
+  transition: border-color .25s, filter .25s;
+}
+
+.queue-entry.vip {
+  border-color: gold;
+}
+
+.queue-entry.highlight {
+  filter: brightness(2);
+}
+
+/* 2nd line (username) */
+.queue-user {
+  font-size: 14px;
+  opacity: 0.8;
+  margin-left: 4px;
+}
