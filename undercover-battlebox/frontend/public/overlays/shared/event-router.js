@@ -186,7 +186,7 @@ export async function initEventRouter() {
   });
 
   // ------------------------------------------------------------------------
-  // ROUND EVENTS (AUTO QUEUE RESET HERE)
+  // ROUND EVENTS
   // ------------------------------------------------------------------------
   socket.on("round:start", (payload) => {
     arenaTwistStore.resetAll();
@@ -283,7 +283,7 @@ export async function initEventRouter() {
   });
 
   // ========================================================================
-  // ⭐ TWIST CLEAR
+  // TWIST CLEAR
   // ========================================================================
   socket.on("twist:clear", () => {
     arenaTwistStore.clear();
@@ -377,6 +377,186 @@ export async function initEventRouter() {
 
   rotateLegacyTwists();
   setInterval(rotateLegacyTwists, 10000);
+
+  // ========================================================================
+  // ========================================================================
+  // BATTLELOG EVENT INJECTION — FULL ARENA / TWIST / ROUND FEED
+  // ========================================================================
+  // ========================================================================
+
+  function pushBattleEvent(evt) {
+    try {
+      eventStore.pushEvent({
+        timestamp: Date.now(),
+        avatar_url: evt.avatar_url || EMPTY_AVATAR,
+        is_vip: evt.is_vip || false,
+        ...evt
+      });
+    } catch (err) {
+      console.warn("[BattleLog] Failed to push event", err, evt);
+    }
+  }
+
+  // ---------------------------
+  // ARENA JOIN
+  // ---------------------------
+  socket.on("arena:join", (p) => {
+    pushBattleEvent({
+      type: "arenaJoin",
+      display_name: p.display_name || p.username,
+      username: p.username,
+      reason: "joint de arena.",
+      avatar_url: p.avatar_url
+    });
+  });
+
+  // ---------------------------
+  // ARENA LEAVE
+  // ---------------------------
+  socket.on("arena:leave", (p) => {
+    pushBattleEvent({
+      type: "arenaLeave",
+      display_name: p.display_name || p.username,
+      username: p.username,
+      reason: "verlaat de arena.",
+      avatar_url: p.avatar_url
+    });
+  });
+
+  // ---------------------------
+  // ELIMINATION
+  // ---------------------------
+  socket.on("arena:eliminated", (p) => {
+    pushBattleEvent({
+      type: "eliminated",
+      display_name: p.display_name || p.username,
+      username: p.username,
+      reason: "is geëlimineerd.",
+      avatar_url: p.avatar_url
+    });
+  });
+
+  // ========================================================================
+  // TWIST EVENTS — HUMAN READABLE
+  // ========================================================================
+  function twistReason(payload) {
+    const sender =
+      payload.byDisplayName ||
+      payload.byUsername ||
+      payload.senderName ||
+      "Onbekend";
+
+    const target = payload.targetDisplayName || payload.targetUsername;
+    const victims = payload.victimNames?.length
+      ? payload.victimNames.map((v) => `@${v}`).join(", ")
+      : null;
+
+    const survivor = payload.survivorName;
+
+    switch (payload.type) {
+      case "moneygun":
+        return target
+          ? `${sender} markeert @${target} voor eliminatie.`
+          : `${sender} gebruikt MoneyGun.`;
+
+      case "bomb":
+        return victims
+          ? `${sender} gooit een BOM → slachtoffers: ${victims}.`
+          : `${sender} laat een BOM ontploffen.`;
+
+      case "heal":
+        return target
+          ? `${sender} herstelt @${target}.`
+          : `${sender} voert een HEAL uit.`;
+
+      case "immune":
+        return target
+          ? `${sender} geeft @${target} immuniteit.`
+          : `${sender} deelt immuniteit uit.`;
+
+      case "breaker":
+        return target
+          ? `${sender} breekt de immuniteit van @${target}!`
+          : `${sender} gebruikt een Immune Breaker!`;
+
+      case "diamondpistol":
+        return survivor
+          ? `${sender} vuurt de Diamond Gun — @${survivor} overleeft!`
+          : `${sender} gebruikt Diamond Gun!`;
+
+      case "galaxy":
+        return `${sender} draait de HELE ranking om!`;
+
+      default:
+        return `${sender} activeert een twist.`;
+    }
+  }
+
+  // ---------------------------
+  // TWIST TAKEOVER
+  // ---------------------------
+  socket.on("arena:twistTakeover", (p) => {
+    pushBattleEvent({
+      type: `twist:${p.type}`,
+      display_name: p.byDisplayName || p.byUsername || "Onbekend",
+      username: p.byUsername || "unknown",
+      reason: twistReason(p)
+    });
+  });
+
+  // ---------------------------
+  // TWIST CLEARED
+  // ---------------------------
+  socket.on("arena:twistClear", () => {
+    pushBattleEvent({
+      type: "twist:clear",
+      display_name: "System",
+      username: "system",
+      reason: "Twist-effect beëindigd."
+    });
+  });
+
+  // ---------------------------
+  // TWIST COUNTDOWN
+  // ---------------------------
+  socket.on("arena:twistCountdown", (p) => {
+    pushBattleEvent({
+      type: "twist:countdown",
+      display_name: p.byDisplayName || p.byUsername || "Twist",
+      username: p.byUsername || "unknown",
+      reason: `Countdown ${p.step}…`
+    });
+  });
+
+  // ========================================================================
+  // ROUND EVENTS
+  // ========================================================================
+  socket.on("arena:roundStart", (p) => {
+    pushBattleEvent({
+      type: "round:start",
+      display_name: "Ronde",
+      username: "system",
+      reason: `Ronde ${p.round} gestart (${p.type}).`
+    });
+  });
+
+  socket.on("arena:graceStart", () => {
+    pushBattleEvent({
+      type: "round:grace",
+      display_name: "Grace",
+      username: "system",
+      reason: "Grace periode gestart."
+    });
+  });
+
+  socket.on("arena:roundEnd", () => {
+    pushBattleEvent({
+      type: "round:end",
+      display_name: "Ronde",
+      username: "system",
+      reason: "Ronde beëindigd."
+    });
+  });
 
   // ========================================================================
   // DEBUG BRIDGE
