@@ -701,6 +701,16 @@
   to   { opacity: 0; }
 }
 
+#arena-players.fade-out {
+  opacity: 0;
+  transition: opacity .35s ease-out;
+}
+
+#arena-players.fade-in {
+  opacity: 1;
+  transition: opacity .45s ease-out;
+}
+
 /* ========================================================================== */
 /* END arena.css v9.1 NECESSARY BROADCAST UPGRADE FINAL                       */
 /* ========================================================================== */
