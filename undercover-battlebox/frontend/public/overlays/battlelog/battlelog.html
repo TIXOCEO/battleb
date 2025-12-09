@@ -2,10 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>BattleBox BattleLog Carousel</title>
+  <title>BattleBox BattleLog Overlay</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <link rel="stylesheet" href="/overlays/shared/theme.css">
+  <!-- GLOBAL THEME -->
+  <link rel="stylesheet" href="/overlays/shared/theme.css" />
+
+  <!-- BATTLELOG CSS -->
   <link rel="stylesheet" href="/overlays/battlelog/battlelog.css" />
 
   <style>
@@ -19,16 +22,21 @@
 </head>
 
 <body>
-  <div id="battlelog-root" class="bb-battlelog-panel holo-scan">
-    <div id="battlelog-container" class="battlelog-container">
-      <div id="battlelog-list" class="battlelog-list"></div>
+  <!-- PANEL -->
+  <div class="bb-battlelog-panel holo-scan led-sweep">
+    <div class="battlelog-mask">
+      <div id="battlelog-pages" class="battlelog-pages"></div>
     </div>
   </div>
 
+  <!-- REQUIRED SHARED OVERLAY ENGINES -->
   <script type="module" src="/overlays/shared/socket.js"></script>
   <script type="module" src="/overlays/shared/stores.js"></script>
+
+  <!-- ⭐ THIS WAS MISSING — REQUIRED FOR ANY EVENTS TO FLOW ⭐ -->
   <script type="module" src="/overlays/shared/event-router.js"></script>
 
+  <!-- BATTLELOG RENDERER -->
   <script type="module" src="/overlays/battlelog/battlelog.js"></script>
 </body>
 </html>
