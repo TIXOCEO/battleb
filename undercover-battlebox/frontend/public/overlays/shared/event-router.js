@@ -151,11 +151,37 @@ export async function initEventRouter() {
   });
 
   // ------------------------------------------------------------------------
-  // ARENA UPDATES
+  // ARENA UPDATES — PATCHED (HUD + PLAYERS + AVATARS)
   // ------------------------------------------------------------------------
   socket.on("updateArena", (pkt) => {
+    if (!pkt) return;
+
     const norm = normalizeArena(pkt);
-    if (norm) arenaStore.set(norm);
+
+    // ⭐ NEW — Preserve player list including avatar_url
+    if (Array.isArray(pkt.players)) {
+      arenaStore.set({ players: pkt.players });
+    }
+
+    // HUD + status updates
+    if (norm) {
+      arenaStore.set({
+        round: norm.round,
+        type: norm.type,
+        status: norm.status,
+
+        totalMs: norm.totalMs,
+        endsAt: norm.endsAt,
+        remainingMs: norm.remainingMs,
+
+        roundCutoff: norm.roundCutoff,
+        graceEnd: norm.graceEnd,
+
+        // Preserve existing settings if not included
+        settings: norm.settings ?? arenaStore.get().settings,
+      });
+    }
+
     document.dispatchEvent(new CustomEvent("arena:update", { detail: norm }));
   });
 
@@ -163,7 +189,6 @@ export async function initEventRouter() {
   // ROUND EVENTS (AUTO QUEUE RESET HERE)
   // ------------------------------------------------------------------------
   socket.on("round:start", (payload) => {
-    // ⭐ ALWAYS reset twist queue at new round
     arenaTwistStore.resetAll();
 
     const total = (payload.duration || 0) * 1000;
@@ -182,7 +207,6 @@ export async function initEventRouter() {
   });
 
   socket.on("round:grace", (payload) => {
-    // ⭐ reset queue on grace start (safety)
     arenaTwistStore.resetAll();
 
     const total = (payload.grace || 5) * 1000;
@@ -201,7 +225,6 @@ export async function initEventRouter() {
   });
 
   socket.on("round:end", () => {
-    // ⭐ reset queue on round end (cleanup)
     arenaTwistStore.resetAll();
 
     arenaStore.set({
@@ -218,7 +241,6 @@ export async function initEventRouter() {
   // ⭐⭐⭐ TWIST TAKEOVER — FULL PAYLOAD, NAME FIXES, CORRUPTION CHECK ⭐⭐⭐
   // ========================================================================
   socket.on("twist:takeover", (raw) => {
-    // corruption guard
     if (!raw || !raw.type) {
       console.warn("[Twist] Invalid takeover payload – HARD RESET");
       arenaTwistStore.resetAll();
@@ -261,12 +283,11 @@ export async function initEventRouter() {
   });
 
   // ========================================================================
-  // ⭐ TWIST CLEAR (NOW A HARD SYNC POINT)
+  // ⭐ TWIST CLEAR
   // ========================================================================
   socket.on("twist:clear", () => {
     arenaTwistStore.clear();
 
-    // ⭐ Critical safety → also kill old FX + galaxy
     if (arenaTwistStore.resetAll) {
       arenaTwistStore.resetAll();
     }
@@ -349,10 +370,7 @@ export async function initEventRouter() {
   // ========================================================================
   let twistIndex = 0;
   function rotateLegacyTwists() {
-    const slice = TWIST_KEYS.slice(twistIndex, twistIndex + 3);
-    if (slice.length < 3)
-      slice.push(...TWIST_KEYS.slice(0, 3 - slice.length));
-
+    const slice = TWIST_KEYS.slice(0, 3);
     twistStore.setTwists(slice);
     twistIndex = (twistIndex + 3) % TWIST_KEYS.length;
   }
