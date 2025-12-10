@@ -2,7 +2,7 @@
 // event-router.js — BattleBox Event Brain v5.1 HARD-RESET EDITION (EXTENDED)
 // FULL TWIST PAYLOAD SYNC + QUEUE-SAFE + NAME FIXES + COUNTDOWN SUPPORT
 // + BATTLELOG EVENT FEED (ARENA + TWISTS + ROUND + SNAPSHOT)
-// Compatible with arenaStore v9.0 and arena.js v9.2
+// + FIXED: Twist activation routing → arenaTwistStore (LITE MODE READY)
 // ============================================================================
 
 import { getSocket } from "/overlays/shared/socket.js";
@@ -53,7 +53,7 @@ function normalizeArena(pkt) {
 }
 
 // ============================================================================
-// LEGACY TWIST MAP
+// LEGACY TWIST MAP (unchanged)
 // ============================================================================
 const TWIST_MAP = {
   galaxy: {
@@ -131,7 +131,7 @@ const TWIST_KEYS = Object.entries(TWIST_MAP).map(([key, t]) => ({
 }));
 
 // ============================================================================
-// BATTLELOG PUSHER — universal
+// BATTLELOG PUSHER
 // ============================================================================
 function pushBattleEvent(evt) {
   try {
@@ -160,7 +160,7 @@ export async function initEventRouter() {
   console.log("%c[BattleBox] Event Router Ready v5.1 (HARD RESET)", "color:#0fffd7;font-weight:bold;");
 
   // ------------------------------------------------------------------------
-  // SNAPSHOT — inject players directly into BattleLog as “arenaJoin”
+  // SNAPSHOT
   // ------------------------------------------------------------------------
   socket.on("overlayInitialSnapshot", (snap) => {
     applySnapshot(snap);
@@ -185,7 +185,7 @@ export async function initEventRouter() {
   });
 
   // ------------------------------------------------------------------------
-  // ARENA UPDATE — HUD + PLAYERS
+  // ARENA UPDATE
   // ------------------------------------------------------------------------
   socket.on("updateArena", (pkt) => {
     if (!pkt) return;
@@ -217,7 +217,7 @@ export async function initEventRouter() {
   });
 
   // ------------------------------------------------------------------------
-  // ROUND EVENTS → BattleLog
+  // ROUND EVENTS
   // ------------------------------------------------------------------------
   socket.on("round:start", (payload) => {
     arenaTwistStore.resetAll();
@@ -289,9 +289,9 @@ export async function initEventRouter() {
     document.dispatchEvent(new CustomEvent("arena:roundEnd"));
   });
 
-  // ========================================================================
-  // ARENA EVENTS — if backend emits them
-  // ========================================================================
+  // ------------------------------------------------------------------------
+  // ARENA PLAYER EVENTS
+  // ------------------------------------------------------------------------
   socket.on("arena:join", (p) => {
     pushBattleEvent({
       type: "arenaJoin",
@@ -323,8 +323,9 @@ export async function initEventRouter() {
   });
 
   // ========================================================================
-  // TWIST EVENTS → EXACT SAME TEXT LOGIC AS twistMessage.js
+  // ⭐ TWIST EVENT FIX — inject into arenaTwistStore
   // ========================================================================
+
   function twistReason(payload) {
     const sender =
       payload.byDisplayName ||
@@ -378,25 +379,30 @@ export async function initEventRouter() {
     }
   }
 
-  // TWIST TAKEOVER
+  // ⭐⭐⭐ FIX #1 — Activate twist in store
   socket.on("arena:twistTakeover", (p) => {
+    // Log → battlelog
     pushBattleEvent({
       type: `twist:${p.type}`,
       display_name: p.byDisplayName || p.byUsername || "Onbekend",
       username: p.byUsername || "unknown",
+      avatar_url: p.avatar_url,
       reason: twistReason(p)
     });
-  });
 
-  socket.on("arena:twistClear", () => {
-    pushBattleEvent({
-      type: "twist:clear",
-      display_name: "System",
-      username: "system",
-      reason: "Twist-effect beëindigd."
+    // ⭐ Activate twist → LITE MODE reacts in arena.js
+    arenaTwistStore.activate({
+      type: p.type,
+      title: twistReason(p),
+      payload: p
     });
+
+    document.dispatchEvent(new CustomEvent("twist:message", { detail: p }));
+
+    console.log("%c[TWIST ROUTER] Activate", "color:#0f0;", p);
   });
 
+  // ⭐⭐⭐ FIX #2 — Countdown twist
   socket.on("arena:twistCountdown", (p) => {
     pushBattleEvent({
       type: "twist:countdown",
@@ -404,6 +410,24 @@ export async function initEventRouter() {
       username: p.byUsername || "unknown",
       reason: `Countdown ${p.step}…`
     });
+
+    arenaTwistStore.countdown(p);
+
+    console.log("%c[TWIST ROUTER] Countdown", "color:#0f0;", p);
+  });
+
+  // ⭐⭐⭐ FIX #3 — Clear twist
+  socket.on("arena:twistClear", () => {
+    pushBattleEvent({
+      type: "twist:clear",
+      display_name: "System",
+      username: "system",
+      reason: "Twist-effect beëindigd."
+    });
+
+    arenaTwistStore.clear();
+
+    console.log("%c[TWIST ROUTER] Clear", "color:#0f0;");
   });
 
   // ========================================================================
@@ -414,9 +438,6 @@ export async function initEventRouter() {
     queueStore.setQueue(packet.entries);
   });
 
-  // ========================================================================
-  // QUEUE EVENTS → BattleLog
-  // ========================================================================
   socket.on("queueEvent", (evt) => {
     if (!evt || !QUEUE_EVENTS.has(evt.type)) return;
 
