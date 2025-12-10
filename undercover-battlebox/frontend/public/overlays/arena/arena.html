@@ -7,6 +7,7 @@
 
   <!-- THEME -->
   <link rel="stylesheet" href="/overlays/shared/theme.css" />
+
   <!-- ARENA CSS -->
   <link rel="stylesheet" href="/overlays/arena/arena.css" />
 
@@ -45,17 +46,21 @@
 
     <canvas id="fx-canvas" width="1200" height="800"></canvas>
 
-    <!-- ⭐ CORRECT NEW TWIST POPUP STRUCTURE -->
+    <!-- ⭐ NEW WORKING TWIST POPUP -->
     <div id="bb-twist-hud">
       <div id="bb-twist-text"></div>
     </div>
 
+    <!-- Callout (unchanged, optional) -->
     <div id="callout-banner"></div>
 
-    <!-- ONLY ONE OVERLAY IN LITE -->
+    <!-- LITE MODE Overlay -->
     <div id="twist-takeover" class="bb-twist-takeover hidden"></div>
 
-    <!-- HUD -->
+    <!-- ⭐ REQUIRED BY arena.js (previously MISSING, caused full twist crash) -->
+    <div id="twist-target"></div>
+
+    <!-- Central HUD -->
     <div id="arena-hud" class="bb-hud">
       <div class="hud-inner">
         <div id="hud-round" class="hud-round-text">RONDE 0</div>
@@ -69,14 +74,17 @@
       </div>
     </div>
 
+    <!-- Playercards -->
     <div id="arena-players"></div>
 
   </div>
 
-  <!-- ✅ LOAD arena.js FIRST -->
+  <!-- 🔥 IMPORTANT: Correct load order -->
+
+  <!-- 1) arena.js FIRST → creates events + dispatches twist:message -->
   <script type="module" src="/overlays/arena/arena.js"></script>
 
-  <!-- ✅ LOAD twistMessage.js LAST (fixes DOM loading issues) -->
+  <!-- 2) twistMessage.js LAST → binds listeners AFTER DOM exists -->
   <script type="module" src="/overlays/arena/twistMessage.js"></script>
 
 </body>
