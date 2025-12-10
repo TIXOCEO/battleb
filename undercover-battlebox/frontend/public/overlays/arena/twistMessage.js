@@ -35,14 +35,20 @@ export function initTwistMessage() {
     return;
   }
 
-  console.log("%c[TwistMessage] Ready (HUD popup mode)", "color:#00ffaa");
+  console.log(
+    "%c[TwistMessage] Ready (HUD popup mode)",
+    "color:#00ffaa"
+  );
 
   document.addEventListener("twist:message", (e) => {
-    console.log("%c[TwistMessage] Event received:", "color:#0ff", e.detail);
+    console.log(
+      "%c[TwistMessage] Event received:",
+      "color:#0ff",
+      e.detail
+    );
     showMessage(normalizePayload(e.detail));
   });
 }
-
 
 // ============================================================================
 // INTERNAL SHOW FUNCTION — now uses the new HUD popup + color variants
@@ -55,7 +61,7 @@ function show(msg, type = null) {
   // Remove old color classes
   TWIST_COLOR_CLASSES.forEach((cls) => box.classList.remove(cls));
 
-  // Add correct color
+  // Add correct color class
   if (type) {
     const cls = "twist-" + type.toLowerCase();
     box.classList.add(cls);
@@ -68,7 +74,6 @@ function show(msg, type = null) {
     box.classList.remove("show");
   }, 2400);
 }
-
 
 // ============================================================================
 // UNIVERSAL PAYLOAD NORMALIZER
@@ -104,7 +109,6 @@ function normalizePayload(p) {
   };
 }
 
-
 // ============================================================================
 // MAIN MESSAGE BUILDER (backend-proof + color-aware)
 // ============================================================================
@@ -121,7 +125,11 @@ export function showMessage(p) {
     : null;
   const survivor = p.survivor ? `@${p.survivor}` : null;
 
-  console.log("%c[TwistMessage] Parsed:", "color:#ff0", { sender, target, victims, survivor });
+  console.log(
+    "%c[TwistMessage] Parsed:",
+    "color:#ff0",
+    { sender, target, victims, survivor }
+  );
 
   // Colouring works automatically via class twist-<type>
   const t = p.type.toLowerCase();
@@ -159,14 +167,16 @@ export function showMessage(p) {
     case "diamondpistol":
     case "diamond":
       return survivor
-        ? show(`${sender} vuurt de DIAMOND GUN! ${survivor} overleeft — de rest ligt eruit!`, "diamondpistol")
+        ? show(
+            `${sender} vuurt de DIAMOND GUN! ${survivor} overleeft — de rest ligt eruit!`,
+            "diamondpistol"
+          )
         : show(`${sender} gebruikt de Diamond Gun!`, "diamondpistol");
 
     default:
       return show(`${sender} activeert een twist.`, t);
   }
 }
-
 
 // Debug helper
 window.twistMessage = { show: showMessage };
