@@ -28,6 +28,7 @@
       z-index: 999900;
     }
 
+    /* ✔ PATCH — class toegevoegd zodat arena.css LITE mode werkt */
     #arena-root {
       position: relative;
       width: 1200px;
@@ -53,7 +54,9 @@
       pointer-events: none;
       opacity: 0;
       transition: opacity .25s ease-out;
-      z-index: 999999;
+
+      /* ✔ PATCH — z-index boven alle andere LITE elementen */
+      z-index: 1000000;
     }
 
     #twist-message.show { opacity: 1; }
@@ -86,7 +89,7 @@
 
 <body>
 
-  <div id="arena-root">
+  <div id="arena-root" class="bb-arena-root"><!-- ✔ PATCH: class toegevoegd -->
 
     <canvas id="fx-canvas" width="1200" height="800"></canvas>
 
@@ -114,8 +117,9 @@
 
   </div>
 
-  <script type="module" src="/overlays/arena/arena.js"></script>
+  <!-- ✔ PATCH — twistMessage.js moet EERST geladen worden -->
   <script type="module" src="/overlays/arena/twistMessage.js"></script>
+  <script type="module" src="/overlays/arena/arena.js"></script>
 
 </body>
 </html>
