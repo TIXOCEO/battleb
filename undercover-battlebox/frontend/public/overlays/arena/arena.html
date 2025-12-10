@@ -28,7 +28,7 @@
       z-index: 999900;
     }
 
-    /* ✔ PATCH — class toegevoegd zodat arena.css LITE mode werkt */
+    /* Arena root wrapper */
     #arena-root {
       position: relative;
       width: 1200px;
@@ -37,31 +37,45 @@
       isolation: isolate;
     }
 
-    /* SIMPLE MESSAGE */
+
+    /* ======================================================================
+       ⭐ NEW FULLSCREEN TWIST POPUP — ALWAYS VISIBLE, CENTERED
+       ====================================================================== */
     #twist-message {
       position: absolute;
-      bottom: 40px;
-      left: 50%;
-      transform: translateX(-50%);
-      padding: 20px 40px;
+      inset: 0; /* fullscreen */
+      display: flex;
+      justify-content: center;
+      align-items: center;
+
       background: rgba(0,0,0,0.55);
-      border: 2px solid rgba(255,255,255,0.25);
-      border-radius: 10px;
-      font-size: 42px;
-      font-weight: 900;
-      color: var(--bb-orange);
-      text-shadow: 0 0 18px var(--bb-orange);
+
       pointer-events: none;
+
       opacity: 0;
       transition: opacity .25s ease-out;
 
-      /* ✔ PATCH — z-index boven alle andere LITE elementen */
-      z-index: 1000000;
+      z-index: 1000000000; /* highest layer */
     }
 
-    #twist-message.show { opacity: 1; }
+    #twist-message.show {
+      opacity: 1;
+    }
 
-    /* Optional callout */
+    #twist-text {
+      font-size: 62px;
+      font-weight: 900;
+      color: var(--bb-orange);
+      text-shadow: 0 0 20px var(--bb-orange);
+      text-align: center;
+      max-width: 90%;
+      line-height: 1.25;
+    }
+
+
+    /* ======================================================================
+       Optional callout (unchanged)
+       ====================================================================== */
     #callout-banner {
       position: absolute;
       top: 22px;
@@ -89,11 +103,15 @@
 
 <body>
 
-  <div id="arena-root" class="bb-arena-root"><!-- ✔ PATCH: class toegevoegd -->
+  <div id="arena-root" class="bb-arena-root">
 
     <canvas id="fx-canvas" width="1200" height="800"></canvas>
 
-    <div id="twist-message"></div>
+    <!-- ⭐ NEW POPUP STRUCTURE -->
+    <div id="twist-message">
+      <span id="twist-text"></span>
+    </div>
+
     <div id="callout-banner"></div>
 
     <!-- ONLY ONE OVERLAY IN LITE -->
@@ -117,7 +135,7 @@
 
   </div>
 
-  <!-- ✔ PATCH — twistMessage.js moet EERST geladen worden -->
+  <!-- Load order: twistMessage first -->
   <script type="module" src="/overlays/arena/twistMessage.js"></script>
   <script type="module" src="/overlays/arena/arena.js"></script>
 
