@@ -1,10 +1,6 @@
 // ============================================================================
-// twistMessage.js — Broadcast Twist Messaging v3.0
-// Fullscreen Center Popup Edition (2025)
-// ============================================================================
-// ✔ Schrijft naar #twist-text in plaats van #twist-message zelf
-// ✔ OBS-proof fades
-// ✔ Perfect centraal in beeld
+// twistMessage.js — Broadcast Twist Messaging v4.0
+// FULL PAYLOAD COMPAT — accepts ALL backend formats
 // ============================================================================
 
 let box = null;
@@ -27,108 +23,100 @@ export function initTwistMessage() {
 
   document.addEventListener("twist:message", (e) => {
     console.log("%c[TwistMessage] Event received:", "color:#0ff", e.detail);
-    showMessage(e.detail);
+    showMessage(normalizePayload(e.detail));
   });
 }
 
 
 // ============================================================================
-// INTERNAL SHOW FUNCTION — writes to #twist-text
+// INTERNAL SHOW FUNCTION
 // ============================================================================
 
 function show(msg) {
   if (!box || !textEl) return;
 
   textEl.textContent = msg;
-
   box.classList.add("show");
 
-  setTimeout(() => {
-    box.classList.remove("show");
-  }, 2600);
+  setTimeout(() => box.classList.remove("show"), 2600);
 }
 
 
 // ============================================================================
-// NAME RESOLUTION — safe, clean
+// UNIVERSAL PAYLOAD NORMALIZER
 // ============================================================================
 
-function resolveSender(p) {
-  return (
-    p.byDisplayName ||
-    p.byUsername ||
-    p.by ||
-    p.senderName ||
-    "Onbekend"
-  );
-}
+function normalizePayload(p) {
+  if (!p) return { type: "unknown" };
 
-function resolveTarget(p) {
-  return (
-    p.targetDisplayName ||
-    p.targetUsername ||
-    p.targetName ||
-    null
-  );
-}
+  return {
+    type: p.type,
 
-function resolveVictims(p) {
-  if (!Array.isArray(p.victimNames) || !p.victimNames.length) return null;
-  return p.victimNames.map((v) => `@${v}`).join(", ");
-}
+    byDisplayName:
+      p.byDisplayName ||
+      p.senderName ||
+      p.displayName ||
+      p.by ||
+      "Onbekend",
 
-function resolveSurvivor(p) {
-  return (
-    p.survivorName ||
-    p.survivorDisplayName ||
-    null
-  );
+    target:
+      p.targetDisplayName ||
+      p.targetUsername ||
+      p.target ||
+      null,
+
+    victims:
+      p.victimNames ||
+      p.victims ||
+      [],
+
+    survivor:
+      p.survivorName ||
+      p.survivor ||
+      null
+  };
 }
 
 
 // ============================================================================
-// MAIN MESSAGE BUILDER
+// MAIN MESSAGE BUILDER (now backend-proof)
 // ============================================================================
 
-export function showMessage(payload) {
-  if (!payload || !payload.type) {
-    console.warn("[TwistMessage] Empty payload:", payload);
+export function showMessage(p) {
+  if (!p || !p.type) {
+    console.warn("[TwistMessage] Empty payload:", p);
     return;
   }
 
-  const sender = resolveSender(payload);
-  const target = resolveTarget(payload);
-  const victims = resolveVictims(payload);
-  const survivor = resolveSurvivor(payload);
+  const sender = p.byDisplayName;
+  const target = p.target ? `@${p.target}` : null;
+  const victims = Array.isArray(p.victims) && p.victims.length
+    ? p.victims.map(v => `@${v}`).join(", ")
+    : null;
+  const survivor = p.survivor ? `@${p.survivor}` : null;
 
-  const tStr = target ? `@${target}` : "";
-  const vStr = victims || "";
-  const sStr = survivor ? `@${survivor}` : "";
+  console.log("%c[TwistMessage] Parsed:", "color:#ff0", { sender, target, victims, survivor });
 
-  console.log("%c[TwistMessage] Parsed:", "color:#ff0", {
-    sender, target, victims, survivor
-  });
-
-  switch (payload.type) {
+  switch (p.type) {
 
     case "moneygun":
       return target
-        ? show(`${sender} markeert ${tStr} voor ELIMINATIE!`)
+        ? show(`${sender} markeert ${target} voor ELIMINATIE!`)
         : show(`${sender} gebruikt MoneyGun!`);
 
     case "immune":
       return target
-        ? show(`${sender} geeft ${tStr} IMMUNITEIT!`)
+        ? show(`${sender} geeft ${target} IMMUNITEIT!`)
         : show(`${sender} deelt immuniteit uit!`);
 
     case "heal":
       return target
-        ? show(`${sender} herstelt ${tStr}!`)
+        ? show(`${sender} herstelt ${target}!`)
         : show(`${sender} voert een HEAL uit!`);
 
     case "bomb":
       return victims
-        ? show(`${sender} gooit een BOM! Slachtoffer: ${vStr}!`)
+        ? show(`${sender} gooit een BOM! Slachtoffer: ${victims}!`)
         : show(`${sender} laat een BOM ontploffen!`);
 
     case "galaxy":
@@ -136,18 +124,17 @@ export function showMessage(payload) {
 
     case "breaker":
       return target
-        ? show(`${sender} BREKT de immuniteit van ${tStr}!`)
+        ? show(`${sender} BREKT de immuniteit van ${target}!`)
         : show(`${sender} gebruikt een Immunity Breaker!`);
 
-    case "diamond":
     case "diamondpistol":
+    case "diamond":
       return survivor
-        ? show(`${sender} vuurt de DIAMOND GUN! ${sStr} overleeft — de rest ligt eruit!`)
-        : show(`${sender} gebruikt de Diamond Gun op ${tStr}!`);
+        ? show(`${sender} vuurt de DIAMOND GUN! ${survivor} overleeft — de rest ligt eruit!`)
+        : show(`${sender} gebruikt de Diamond Gun!`);
 
     default:
-      console.warn("[TwistMessage] Unknown type:", payload.type);
-      return;
+      return show(`${sender} activeert een twist.`);
   }
 }
 
