@@ -20,7 +20,7 @@ const TWIST_COLOR_CLASSES = [
 ];
 
 // ============================================================================
-// INIT — now targets the new HUD popup
+// INIT — delayed until DOM is fully ready
 // ============================================================================
 export function initTwistMessage() {
   box = document.getElementById("bb-twist-hud");
@@ -46,12 +46,19 @@ export function initTwistMessage() {
       "color:#0ff",
       e.detail
     );
-    showMessage(normalizePayload(e.detail));
+
+    const payload = normalizePayload(e.detail);
+    showMessage(payload);
   });
 }
 
+// FIX: run ONLY after DOM is loaded
+window.addEventListener("DOMContentLoaded", () => {
+  initTwistMessage();
+});
+
 // ============================================================================
-// INTERNAL SHOW FUNCTION — now uses the new HUD popup + color variants
+// INTERNAL SHOW FUNCTION — uses HUD popup + color variants
 // ============================================================================
 function show(msg, type = null) {
   if (!box || !textEl) return;
@@ -131,7 +138,6 @@ export function showMessage(p) {
     { sender, target, victims, survivor }
   );
 
-  // Colouring works automatically via class twist-<type>
   const t = p.type.toLowerCase();
 
   switch (t) {
