@@ -1,7 +1,7 @@
 @import "/overlays/shared/theme.css";
 
 /* ========================================================================== */
-/* ROOT WRAPPER — fixed 1200 × 800  */
+/* ROOT WRAPPER — fixed 1200 × 800  (TRANSPARENT MODE + BROADCAST BOOST)      */
 /* ========================================================================== */
 .bb-arena-root {
   width: 1200px;
@@ -14,12 +14,12 @@
   backdrop-filter: none !important;
   box-shadow: none !important;
 
-  isolation: isolate; /* ← BELANGRIJK EN MOET BLIJVEN */
+  isolation: isolate;
   filter: brightness(1.08);
 }
 
 /* ========================================================================== */
-/* CINEMATIC LAYER */
+/* CINEMATIC ANIMATION LAYER                                                  */
 /* ========================================================================== */
 #bb-animation-layer {
   position: absolute;
@@ -31,18 +31,18 @@
 }
 
 /* ========================================================================== */
-/* TWIST TAKEOVER */
+/* TWIST TAKEOVER (DISABLED IN LITE MODE)                                     */
 /* ========================================================================== */
 .bb-twist-takeover {
   position: absolute;
   inset: 0;
   z-index: 300;
   background: transparent !important;
-  display: none !important;
+  display: none !important; /* LITE MODE */
 }
 
 /* ========================================================================== */
-/* CENTRAL HUD */
+/* CENTRAL HUD                                                                */
 /* ========================================================================== */
 .bb-hud {
   width: 350px;
@@ -67,6 +67,7 @@
   transition: box-shadow 0.35s ease-out;
 }
 
+/* HUD INNER */
 .hud-inner {
   width: 100%;
   height: 100%;
@@ -102,7 +103,7 @@
 }
 
 /* ========================================================================== */
-/* PROGRESS RING */
+/* PROGRESS RING                                                              */
 /* ========================================================================== */
 .hud-ring {
   position: absolute;
@@ -126,7 +127,8 @@
 }
 
 /* ========================================================================== */
-/* PLAYER CARDS */
+/* PLAYER CARDS – LITE MODE UPGRADE                                           */
+/* Smooth transform support (for Galaxy Shuffle & Bomb Roulette)              */
 /* ========================================================================== */
 #arena-players {
   position: absolute;
@@ -136,71 +138,248 @@
   transition: opacity 0.35s ease-out;
 }
 
-/* (rest unchanged — playercard CSS blijft werken) */
-
-/* ========================================================================== */
-/* TWIST POPUP */
-/* ========================================================================== */
-
-#bb-twist-hud {
+.bb-player-card {
+  width: 160px;
+  height: 160px;
   position: absolute;
-  inset: 0;
-  z-index: 2000000000 !important;
+
+  clip-path: polygon(
+    12% 0%, 88% 0%,
+    100% 18%, 100% 82%,
+    88% 100%, 12% 100%,
+    0% 82%, 0% 18%
+  );
+
+  background: rgba(10,10,14,0.45);
+  border: 2px solid rgba(255,255,255,0.22);
+  box-shadow:
+    0 0 22px rgba(0,0,0,0.7),
+    inset 0 0 22px rgba(255,255,255,0.18);
+
+  overflow: hidden;
   display: flex;
   justify-content: center;
-  align-items: center;
+  align-items: flex-end;
+  padding-bottom: 12px;
 
-  background: rgba(0, 0, 0, 0.35);
+  transition:
+    left .35s cubic-bezier(.2,.7,.3,1),
+    top .35s cubic-bezier(.2,.7,.3,1),
+    transform .25s ease-out,
+    border-color .25s ease-out,
+    box-shadow .25s ease-out,
+    opacity .25s ease-out;
 
-  pointer-events: none;
+  will-change: transform, border-color, box-shadow, opacity;
+}
+
+/* ✔ NEW — GALAXY LITE shuffle CSS class */
+.card-shuffle {
+  transform: scale(1.05) rotate(3deg);
+  opacity: 0.85;
+}
+
+/* ✔ NEW — BOMB LITE roulette flash class */
+.card-glow-red {
+  box-shadow: 0 0 35px red, inset 0 0 25px rgba(255,0,0,0.45);
+  border-color: red;
+  filter: brightness(1.4);
+}
+
+/* ========================================================================== */
+/* AVATAR BG                                                                  */
+/* ========================================================================== */
+.bb-player-bgavatar {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  opacity: 0.45;
+  filter: brightness(1.22) saturate(1.15);
+}
+
+.status-alive .bb-player-bgavatar {
+  opacity: 0.60;
+  filter: brightness(1.35) saturate(1.35);
+}
+
+.status-danger .bb-player-bgavatar {
+  opacity: 0.65;
+  filter: brightness(1.25) saturate(1.25)
+    drop-shadow(0 0 12px rgba(255,136,0,0.38));
+}
+
+.status-immune .bb-player-bgavatar {
+  opacity: 0.70;
+  filter: brightness(1.4) saturate(1.4)
+    drop-shadow(0 0 14px rgba(0,255,180,0.45));
+}
+
+.status-immune-broken .bb-player-bgavatar {
+  opacity: 0.55;
+  filter: brightness(1.55) saturate(1.1);
+}
+
+.status-elimination .bb-player-bgavatar {
+  opacity: 0.25;
+  filter: brightness(0.65) saturate(0.6);
+}
+
+/* ========================================================================== */
+/* LABELS                                                                     */
+/* ========================================================================== */
+.bb-player-labels {
+  position: relative;
+  z-index: 2;
+  text-align: center;
+}
+
+.bb-player-name {
+  font-size: 20px;
+  font-weight: 800;
+  color: white;
+  margin-bottom: 4px;
+  text-shadow: 0 0 10px black;
+  max-width: 140px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bb-player-score {
+  font-size: 32px !important;
+  opacity: 0.95;
+  font-weight: 800;
+  text-shadow: 0 0 12px black;
+  transition: transform .25s, color .25s;
+}
+
+.bb-player-pos {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 32px;
+  text-align: center;
+  background: var(--bb-orange);
+  color: black;
+  clip-path: polygon(
+    25% 0%, 75% 0%,
+    100% 50%, 75% 100%,
+    25% 100%, 0% 50%
+  );
+  text-shadow: var(--glow-hard-orange);
+  z-index: 4;
+}
+
+/* ========================================================================== */
+/* STATUS COLOR STATES                                                        */
+/* ========================================================================== */
+
+.status-alive {
+  border-color: rgba(255,255,255,0.85);
+  box-shadow:
+    0 0 22px rgba(255,255,255,0.45),
+    inset 0 0 22px rgba(255,255,255,0.25);
+}
+
+.status-immune {
+  border-color: #00ffb3;
+  box-shadow:
+    0 0 28px rgba(0,255,180,1),
+    inset 0 0 28px rgba(0,255,180,0.55);
+}
+
+.status-immune-broken {
+  border-color: #ffffff;
+  box-shadow: 0 0 28px white;
+}
+
+.status-danger {
+  border-color: #ff8800;
+  box-shadow:
+    0 0 32px rgba(255,136,0,1),
+    inset 0 0 32px rgba(255,136,0,0.65);
+}
+
+.status-elimination {
+  border-color: #ff0033;
+  box-shadow:
+    0 0 38px rgba(255,0,51,1),
+    inset 0 0 38px rgba(255,0,51,0.6);
+}
+
+/* ========================================================================== */
+/* FADE IN / OUT for whole playercard grid                                   */
+/* ========================================================================== */
+
+#arena-players.fade-out {
   opacity: 0;
-  transition: opacity .25s ease-out;
+  transition: opacity .35s ease-out;
 }
 
-#bb-twist-hud.show {
+#arena-players.fade-in {
   opacity: 1;
+  transition: opacity .45s ease-in-out;
 }
 
-#bb-twist-text {
-  font-size: 64px;
+/* ========================================================================== */
+/* END arena.css v9.2 LITE MODE                                               */
+/* ========================================================================== */
+
+/* ========================================================================== */
+/* ========================================================================== */
+/* 🔥🔥 TWIST MESSAGE POPUP — PATCH (FULLSCREEN FIX) 🔥🔥                    */
+/* ========================================================================== */
+/* ========================================================================== */
+
+#twist-message {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max-content;
+  max-width: 900px;
+  padding: 24px 42px;
+
+  transform: translate(-50%, -50%) scale(0.85);
+  opacity: 0;
+
+  background: rgba(0,0,0,0.75);
+  border: 3px solid rgba(255,255,255,0.35);
+  border-radius: 14px;
+
+  font-size: 52px;
   font-weight: 900;
   text-align: center;
-  max-width: 85%;
   line-height: 1.25;
 
   color: var(--bb-orange);
-  padding: 28px 40px;
-
-  background: rgba(10, 10, 15, 0.75);
-  border: 4px solid var(--bb-orange);
-  border-radius: 16px;
+  text-shadow: 0 0 22px var(--bb-orange);
 
   box-shadow:
-    0 0 20px rgba(255, 100, 20, 0.85),
-    0 0 35px rgba(255, 90, 10, 0.65),
-    inset 0 0 18px rgba(255, 150, 70, 0.4);
+    0 0 45px rgba(0,0,0,0.75),
+    inset 0 0 35px rgba(255,120,0,0.35);
 
-  text-shadow: 
-    0 0 25px rgba(255, 120, 20, 0.95),
-    0 0 45px rgba(255, 90, 0, 0.9);
+  pointer-events: none;
+
+  z-index: 999999999 !important;
+
+  transition:
+    opacity 0.25s ease-out,
+    transform 0.25s ease-out;
 }
 
-/* ========================================================================== */
-/* TWIST POPUP COLORS */
-/* ========================================================================== */
+#twist-message.show {
+  opacity: 1 !important;
+  transform: translate(-50%, -50%) scale(1);
+}
 
-#bb-twist-hud.twist-moneygun #bb-twist-text { /* jouw kleurregels */ }
-#bb-twist-hud.twist-bomb #bb-twist-text { /* jouw kleurregels */ }
-#bb-twist-hud.twist-galaxy #bb-twist-text { /* jouw kleurregels */ }
-#bb-twist-hud.twist-immune #bb-twist-text { /* jouw kleurregels */ }
-#bb-twist-hud.twist-breaker #bb-twist-text { /* jouw kleurregels */ }
-#bb-twist-hud.twist-diamondpistol #bb-twist-text { /* jouw kleurregels */ }
-#bb-twist-hud.twist-heal #bb-twist-text { /* jouw kleurregels */ }
-
-/* ========================================================================== */
-/* STACKING FIX — *** ONLY body, NIET arena-root *** */
-/* ========================================================================== */
-
+/* Fix stacking break caused by isolate/filter */
+.bb-arena-root,
 body {
+  isolation: auto !important;
   filter: none !important;
 }
