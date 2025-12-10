@@ -68,7 +68,7 @@ const TWIST_MAP = {
   moneygun: {
     giftName: "Money Gun",
     twistName: "Eliminatie",
-    icon: "https://p16-webcast.tiktokcdn.com/img/maliva/webcast-va/e0589e95a2b41970f0f30f6202f5fce6~tplv-obj.webp",
+    icon: "https://p16-webwebcast.tiktokcdn.com/img/maliva/webcast-va/e0589e95a2b41970f0f30f6202f5fce6~tplv-obj.webp",
     diamonds: 500,
     description: "Markeert target eliminatie.",
     aliases: ["moneygun", "mg"]
@@ -380,7 +380,7 @@ export async function initEventRouter() {
   }
 
   // ========================================================================
-  // ⭐⭐⭐ FIX #1 — Activate + Reliable Dispatch Popup
+  // ⭐⭐⭐ FIX #1 — NEW: Instant HUD popup dispatch (no delay)
   // ========================================================================
   socket.on("arena:twistTakeover", (p) => {
     // Log → battlelog
@@ -392,18 +392,20 @@ export async function initEventRouter() {
       reason: twistReason(p)
     });
 
-    // Send into twist queue
+    // Activate twist store
     arenaTwistStore.activate({
       type: p.type,
       title: twistReason(p),
       payload: p
     });
 
-    // ⭐ PATCH — GUARANTEED popup dispatch
-    setTimeout(() => {
-      console.log("%c[TWIST ROUTER] Dispatch twist:message", "color:#ff0;font-weight:bold;", p);
-      document.dispatchEvent(new CustomEvent("twist:message", { detail: p }));
-    }, 10);
+    // ⭐ PATCH — Direct popup trigger (HUD message)
+    console.log(
+      "%c[TWIST ROUTER] Dispatch twist:message (instant)",
+      "color:#ff0;font-weight:bold;",
+      p
+    );
+    document.dispatchEvent(new CustomEvent("twist:message", { detail: p }));
 
     console.log("%c[TWIST ROUTER] Activate", "color:#0f0;", p);
   });
