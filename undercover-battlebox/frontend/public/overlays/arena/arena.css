@@ -329,3 +329,57 @@
 /* ========================================================================== */
 /* END arena.css v9.2 LITE MODE                                               */
 /* ========================================================================== */
+
+/* ========================================================================== */
+/* ========================================================================== */
+/* 🔥🔥 TWIST MESSAGE POPUP — PATCH (FULLSCREEN FIX) 🔥🔥                    */
+/* ========================================================================== */
+/* ========================================================================== */
+
+#twist-message {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max-content;
+  max-width: 900px;
+  padding: 24px 42px;
+
+  transform: translate(-50%, -50%) scale(0.85);
+  opacity: 0;
+
+  background: rgba(0,0,0,0.75);
+  border: 3px solid rgba(255,255,255,0.35);
+  border-radius: 14px;
+
+  font-size: 52px;
+  font-weight: 900;
+  text-align: center;
+  line-height: 1.25;
+
+  color: var(--bb-orange);
+  text-shadow: 0 0 22px var(--bb-orange);
+
+  box-shadow:
+    0 0 45px rgba(0,0,0,0.75),
+    inset 0 0 35px rgba(255,120,0,0.35);
+
+  pointer-events: none;
+
+  z-index: 999999999 !important;
+
+  transition:
+    opacity 0.25s ease-out,
+    transform 0.25s ease-out;
+}
+
+#twist-message.show {
+  opacity: 1 !important;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+/* Fix stacking break caused by isolate/filter */
+.bb-arena-root,
+body {
+  isolation: auto !important;
+  filter: none !important;
+}
