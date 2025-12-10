@@ -1,27 +1,46 @@
 // ============================================================================
-// twistMessage.js — Broadcast Twist Messaging v2.0 CINEMATIC EDITION
-// Ultra-clean usernames • Punchy messages • OBS-proof fades • No fallbacks
+// twistMessage.js — Broadcast Twist Messaging v3.0
+// Fullscreen Center Popup Edition (2025)
+// ============================================================================
+// ✔ Schrijft naar #twist-text in plaats van #twist-message zelf
+// ✔ OBS-proof fades
+// ✔ Perfect centraal in beeld
 // ============================================================================
 
 let box = null;
+let textEl = null;
 
 export function initTwistMessage() {
   box = document.getElementById("twist-message");
+  textEl = document.getElementById("twist-text");
+
   if (!box) {
-    console.warn("[TwistMessage] message box missing");
+    console.warn("[TwistMessage] ❌ #twist-message not found.");
+    return;
+  }
+  if (!textEl) {
+    console.warn("[TwistMessage] ❌ #twist-text not found.");
     return;
   }
 
+  console.log("%c[TwistMessage] Ready (fullscreen popup mode)", "color:#00ffaa");
+
   document.addEventListener("twist:message", (e) => {
+    console.log("%c[TwistMessage] Event received:", "color:#0ff", e.detail);
     showMessage(e.detail);
   });
 }
 
 
-function show(msg) {
-  if (!box) return;
+// ============================================================================
+// INTERNAL SHOW FUNCTION — writes to #twist-text
+// ============================================================================
 
-  box.textContent = msg;
+function show(msg) {
+  if (!box || !textEl) return;
+
+  textEl.textContent = msg;
+
   box.classList.add("show");
 
   setTimeout(() => {
@@ -31,7 +50,7 @@ function show(msg) {
 
 
 // ============================================================================
-// NAME RESOLUTION — safe, clean, zero fallback garbage
+// NAME RESOLUTION — safe, clean
 // ============================================================================
 
 function resolveSender(p) {
@@ -68,11 +87,14 @@ function resolveSurvivor(p) {
 
 
 // ============================================================================
-// MAIN LOGIC — Cinematic BattleBox messages
+// MAIN MESSAGE BUILDER
 // ============================================================================
 
 export function showMessage(payload) {
-  if (!payload || !payload.type) return;
+  if (!payload || !payload.type) {
+    console.warn("[TwistMessage] Empty payload:", payload);
+    return;
+  }
 
   const sender = resolveSender(payload);
   const target = resolveTarget(payload);
@@ -83,51 +105,52 @@ export function showMessage(payload) {
   const vStr = victims || "";
   const sStr = survivor ? `@${survivor}` : "";
 
+  console.log("%c[TwistMessage] Parsed:", "color:#ff0", {
+    sender, target, victims, survivor
+  });
+
   switch (payload.type) {
 
-    // MONEY GUN
     case "moneygun":
-      if (target)
-        return show(`${sender} markeert ${tStr} voor ELIMINATIE!`);
-      return show(`${sender} gebruikt MoneyGun!`);
+      return target
+        ? show(`${sender} markeert ${tStr} voor ELIMINATIE!`)
+        : show(`${sender} gebruikt MoneyGun!`);
 
-    // IMMUNE
     case "immune":
-      if (target) return show(`${sender} geeft ${tStr} IMMUNITEIT!`);
-      return show(`${sender} deelt immuniteit uit!`);
+      return target
+        ? show(`${sender} geeft ${tStr} IMMUNITEIT!`)
+        : show(`${sender} deelt immuniteit uit!`);
 
-    // HEAL
     case "heal":
-      if (target) return show(`${sender} herstelt ${tStr}!`);
-      return show(`${sender} voert een HEAL uit!`);
+      return target
+        ? show(`${sender} herstelt ${tStr}!`)
+        : show(`${sender} voert een HEAL uit!`);
 
-    // BOMB
     case "bomb":
-      if (victims) return show(`${sender} gooit een BOM! Slachtoffer: ${vStr}!`);
-      return show(`${sender} laat een BOM ontploffen!`);
+      return victims
+        ? show(`${sender} gooit een BOM! Slachtoffer: ${vStr}!`)
+        : show(`${sender} laat een BOM ontploffen!`);
 
-    // GALAXY
     case "galaxy":
       return show(`${sender} draait de HELE ranking om! Chaos!`);
 
-    // BREAKER
     case "breaker":
-      if (target)
-        return show(`${sender} BREKT de immuniteit van ${tStr}!`);
-      return show(`${sender} gebruikt een Immunity Breaker!`);
+      return target
+        ? show(`${sender} BREKT de immuniteit van ${tStr}!`)
+        : show(`${sender} gebruikt een Immunity Breaker!`);
 
-    // DIAMOND PISTOL
     case "diamond":
     case "diamondpistol":
-      if (survivor)
-        return show(`${sender} vuurt de DIAMOND GUN! ${sStr} overleeft — de rest ligt eruit!`);
-      return show(`${sender} gebruikt de Diamond Gun op ${tStr}!`);
+      return survivor
+        ? show(`${sender} vuurt de DIAMOND GUN! ${sStr} overleeft — de rest ligt eruit!`)
+        : show(`${sender} gebruikt de Diamond Gun op ${tStr}!`);
 
-    // NO FALLBACK ANYMORE
     default:
+      console.warn("[TwistMessage] Unknown type:", payload.type);
       return;
   }
 }
 
-// Debug
+
+// Debug helper
 window.twistMessage = { show: showMessage };
