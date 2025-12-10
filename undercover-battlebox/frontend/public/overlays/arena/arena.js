@@ -1,6 +1,7 @@
 // ============================================================================
 // arena.js — BattleBox Arena Overlay
 // BUILD v9.6 — LITE MODE (Galaxy Shuffle + Bomb Roulette) + Fade System
+// + DEBUG LOGGING FOR TWIST MESSAGE PAYLOADS
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -17,7 +18,7 @@ import {
 
 import FX from "/overlays/shared/animation-engine.js";
 
-// OLD FX remain imported but no longer used in LITE mode
+// FX (unused in lite mode but kept)
 import MoneyGunFX from "/overlays/shared/fx/MoneyGunFX.js";
 import DiamondBlastFX from "/overlays/shared/fx/DiamondBlastFX.js";
 import BombFX from "/overlays/shared/fx/BombFX.js";
@@ -33,6 +34,14 @@ import { initTwistMessage } from "/overlays/arena/twistMessage.js";
 
 initEventRouter();
 initTwistMessage();
+
+/* ============================================================================ */
+/* DEBUG LOG #1 — Confirm twist store input                                    */
+/* ============================================================================ */
+arenaTwistStore.subscribe((st) => {
+  if (!st.active) return;
+  console.log("%c[TWIST STORE] incoming twist:", "color:#0af", st);
+});
 
 /* ============================================================================ */
 /* DOM refs */
@@ -260,7 +269,7 @@ function getCardCenter(index) {
 }
 
 /* ============================================================================ */
-/* ⭐ LITE MODE: GALAXY SHUFFLE */
+/* GALAXY SHUFFLE — LITE */
 /* ============================================================================ */
 
 async function runGalaxyShuffle() {
@@ -286,7 +295,7 @@ async function runGalaxyShuffle() {
 }
 
 /* ============================================================================ */
-/* ⭐ LITE MODE: BOMB ROULETTE */
+/* BOMB ROULETTE — LITE */
 /* ============================================================================ */
 
 async function runBombRoulette() {
@@ -306,6 +315,8 @@ async function runBombRoulette() {
 
 arenaTwistStore.subscribe(async (st) => {
   if (!st.active || !st.type) return;
+
+  console.log("%c[TWIST → MESSAGE] Dispatching twist message:", "color:#fa0", st.payload);
 
   hidePlayerCards();
 
@@ -345,7 +356,7 @@ arenaTwistStore.subscribe(async (st) => {
 });
 
 /* ============================================================================ */
-/* Beam colors (unused in LITE but kept for compatibility) */
+/* Beam colors (compatibility) */
 /* ============================================================================ */
 
 function getBeamColor(type) {
