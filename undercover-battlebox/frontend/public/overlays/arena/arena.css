@@ -1,7 +1,7 @@
 @import "/overlays/shared/theme.css";
 
 /* ========================================================================== */
-/* ROOT WRAPPER — fixed 1200 × 800  (TRANSPARENT MODE + BROADCAST BOOST)      */
+/* ROOT WRAPPER — fixed 1200 × 800  */
 /* ========================================================================== */
 .bb-arena-root {
   width: 1200px;
@@ -14,12 +14,12 @@
   backdrop-filter: none !important;
   box-shadow: none !important;
 
-  isolation: isolate; /* ← BELANGRIJK! */
+  isolation: isolate; /* ← BELANGRIJK EN MOET BLIJVEN */
   filter: brightness(1.08);
 }
 
 /* ========================================================================== */
-/* CINEMATIC ANIMATION LAYER                                                  */
+/* CINEMATIC LAYER */
 /* ========================================================================== */
 #bb-animation-layer {
   position: absolute;
@@ -31,7 +31,7 @@
 }
 
 /* ========================================================================== */
-/* TWIST TAKEOVER (DISABLED IN LITE MODE)                                     */
+/* TWIST TAKEOVER */
 /* ========================================================================== */
 .bb-twist-takeover {
   position: absolute;
@@ -42,7 +42,7 @@
 }
 
 /* ========================================================================== */
-/* CENTRAL HUD                                                                */
+/* CENTRAL HUD */
 /* ========================================================================== */
 .bb-hud {
   width: 350px;
@@ -102,7 +102,7 @@
 }
 
 /* ========================================================================== */
-/* PROGRESS RING                                                              */
+/* PROGRESS RING */
 /* ========================================================================== */
 .hud-ring {
   position: absolute;
@@ -126,7 +126,7 @@
 }
 
 /* ========================================================================== */
-/* PLAYER CARDS — LITE MODE                                                   */
+/* PLAYER CARDS */
 /* ========================================================================== */
 #arena-players {
   position: absolute;
@@ -136,10 +136,10 @@
   transition: opacity 0.35s ease-out;
 }
 
-/* (rest van jouw playercard CSS ongewijzigd, intact) */
+/* (rest unchanged — playercard CSS blijft werken) */
 
 /* ========================================================================== */
-/* TWIST POPUP (HUD) — GLOBAL STYLE                                           */
+/* TWIST POPUP */
 /* ========================================================================== */
 
 #bb-twist-hud {
@@ -186,18 +186,19 @@
 }
 
 /* ========================================================================== */
-/* TWIST POPUP COLOR VARIANTS                                                 */
+/* TWIST POPUP COLORS */
 /* ========================================================================== */
-#bb-twist-hud.twist-moneygun #bb-twist-text { ... }
-#bb-twist-hud.twist-bomb #bb-twist-text { ... }
-#bb-twist-hud.twist-galaxy #bb-twist-text { ... }
-#bb-twist-hud.twist-immune #bb-twist-text { ... }
-#bb-twist-hud.twist-breaker #bb-twist-text { ... }
-#bb-twist-hud.twist-diamondpistol #bb-twist-text { ... }
-#bb-twist-hud.twist-heal #bb-twist-text { ... }
+
+#bb-twist-hud.twist-moneygun #bb-twist-text { /* jouw kleurregels */ }
+#bb-twist-hud.twist-bomb #bb-twist-text { /* jouw kleurregels */ }
+#bb-twist-hud.twist-galaxy #bb-twist-text { /* jouw kleurregels */ }
+#bb-twist-hud.twist-immune #bb-twist-text { /* jouw kleurregels */ }
+#bb-twist-hud.twist-breaker #bb-twist-text { /* jouw kleurregels */ }
+#bb-twist-hud.twist-diamondpistol #bb-twist-text { /* jouw kleurregels */ }
+#bb-twist-hud.twist-heal #bb-twist-text { /* jouw kleurregels */ }
 
 /* ========================================================================== */
-/* STACKING FIX — *** ONLY body, NIET arena-root ***                          */
+/* STACKING FIX — *** ONLY body, NIET arena-root *** */
 /* ========================================================================== */
 
 body {
