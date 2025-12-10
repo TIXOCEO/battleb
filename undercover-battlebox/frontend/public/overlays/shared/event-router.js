@@ -379,7 +379,9 @@ export async function initEventRouter() {
     }
   }
 
-  // ⭐⭐⭐ FIX #1 — Activate twist in store
+  // ========================================================================
+  // ⭐⭐⭐ FIX #1 — Activate + Reliable Dispatch Popup
+  // ========================================================================
   socket.on("arena:twistTakeover", (p) => {
     // Log → battlelog
     pushBattleEvent({
@@ -390,19 +392,25 @@ export async function initEventRouter() {
       reason: twistReason(p)
     });
 
-    // ⭐ Activate twist → LITE MODE reacts in arena.js
+    // Send into twist queue
     arenaTwistStore.activate({
       type: p.type,
       title: twistReason(p),
       payload: p
     });
 
-    document.dispatchEvent(new CustomEvent("twist:message", { detail: p }));
+    // ⭐ PATCH — GUARANTEED popup dispatch
+    setTimeout(() => {
+      console.log("%c[TWIST ROUTER] Dispatch twist:message", "color:#ff0;font-weight:bold;", p);
+      document.dispatchEvent(new CustomEvent("twist:message", { detail: p }));
+    }, 10);
 
     console.log("%c[TWIST ROUTER] Activate", "color:#0f0;", p);
   });
 
+  // ========================================================================
   // ⭐⭐⭐ FIX #2 — Countdown twist
+  // ========================================================================
   socket.on("arena:twistCountdown", (p) => {
     pushBattleEvent({
       type: "twist:countdown",
@@ -416,7 +424,9 @@ export async function initEventRouter() {
     console.log("%c[TWIST ROUTER] Countdown", "color:#0f0;", p);
   });
 
+  // ========================================================================
   // ⭐⭐⭐ FIX #3 — Clear twist
+  // ========================================================================
   socket.on("arena:twistClear", () => {
     pushBattleEvent({
       type: "twist:clear",
@@ -432,7 +442,7 @@ export async function initEventRouter() {
 
   // ========================================================================
   // QUEUE UPDATE
-  // ========================================================================
+  // ============================================================================
   socket.on("updateQueue", (packet) => {
     if (!packet || !Array.isArray(packet.entries)) return;
     queueStore.setQueue(packet.entries);
@@ -471,14 +481,14 @@ export async function initEventRouter() {
 
   // ========================================================================
   // HUD TICKER
-  // ========================================================================
+  // ============================================================================
   socket.on("hudTickerUpdate", (text) => {
     tickerStore.setText(text || "");
   });
 
   // ========================================================================
   // LEGACY TWIST ROTATION
-  // ========================================================================
+  // ============================================================================
   let twistIndex = 0;
   function rotateLegacyTwists() {
     const slice = TWIST_KEYS.slice(0, 3);
@@ -491,7 +501,7 @@ export async function initEventRouter() {
 
   // ========================================================================
   // DEBUG BRIDGE
-  // ========================================================================
+  // ============================================================================
   window.bb = { socket, eventStore, arenaStore, arenaTwistStore, twistStore };
   console.log("%c[BB DEBUG] Debug bridge active → window.bb", "color:#0fffd7");
 }
