@@ -1,25 +1,29 @@
 // ============================================================================
-// twistMessage.js — Broadcast Twist Messaging v4.0
+// twistMessage.js — Broadcast Twist Messaging v4.1 (HUD Popup Version)
 // FULL PAYLOAD COMPAT — accepts ALL backend formats
+// Target: #bb-twist-hud + #bb-twist-text
 // ============================================================================
 
 let box = null;
 let textEl = null;
 
+// ============================================================================
+// INIT — now targets the new HUD popup
+// ============================================================================
 export function initTwistMessage() {
-  box = document.getElementById("twist-message");
-  textEl = document.getElementById("twist-text");
+  box = document.getElementById("bb-twist-hud");
+  textEl = document.getElementById("bb-twist-text");
 
   if (!box) {
-    console.warn("[TwistMessage] ❌ #twist-message not found.");
+    console.warn("[TwistMessage] ❌ #bb-twist-hud not found.");
     return;
   }
   if (!textEl) {
-    console.warn("[TwistMessage] ❌ #twist-text not found.");
+    console.warn("[TwistMessage] ❌ #bb-twist-text not found.");
     return;
   }
 
-  console.log("%c[TwistMessage] Ready (fullscreen popup mode)", "color:#00ffaa");
+  console.log("%c[TwistMessage] Ready (HUD popup mode)", "color:#00ffaa");
 
   document.addEventListener("twist:message", (e) => {
     console.log("%c[TwistMessage] Event received:", "color:#0ff", e.detail);
@@ -29,23 +33,25 @@ export function initTwistMessage() {
 
 
 // ============================================================================
-// INTERNAL SHOW FUNCTION
+// INTERNAL SHOW FUNCTION — now uses the new HUD popup
 // ============================================================================
-
 function show(msg) {
   if (!box || !textEl) return;
 
   textEl.textContent = msg;
+
   box.classList.add("show");
 
-  setTimeout(() => box.classList.remove("show"), 2600);
+  clearTimeout(window.__bb_twist_timer);
+  window.__bb_twist_timer = setTimeout(() => {
+    box.classList.remove("show");
+  }, 2400);
 }
 
 
 // ============================================================================
 // UNIVERSAL PAYLOAD NORMALIZER
 // ============================================================================
-
 function normalizePayload(p) {
   if (!p) return { type: "unknown" };
 
@@ -79,9 +85,8 @@ function normalizePayload(p) {
 
 
 // ============================================================================
-// MAIN MESSAGE BUILDER (now backend-proof)
+// MAIN MESSAGE BUILDER (backend-proof)
 // ============================================================================
-
 export function showMessage(p) {
   if (!p || !p.type) {
     console.warn("[TwistMessage] Empty payload:", p);
