@@ -1,11 +1,8 @@
 // ============================================================================
-// event-router.js — BattleBox Event Brain v5.1 FIXED POPUP EDITION
-// ============================================================================
-// ✔ Twist popup werkt ALTIJD vanuit backend
-// ✔ Universele payload normalizer voor twistTakeover
-// ✔ Guaranteed dispatch naar twistMessage.js
-// ✔ Verwijderd: race conditions tijdens arena updates
-// ✔ Verbeterde debug logs
+// event-router.js — BattleBox Event Brain v5.1 HARD-RESET EDITION (EXTENDED)
+// FULL TWIST PAYLOAD SYNC + QUEUE-SAFE + NAME FIXES + COUNTDOWN SUPPORT
+// + BATTLELOG EVENT FEED (ARENA + TWISTS + ROUND + SNAPSHOT)
+// + FIXED: Twist activation routing → arenaTwistStore (LITE MODE READY)
 // ============================================================================
 
 import { getSocket } from "/overlays/shared/socket.js";
@@ -23,7 +20,9 @@ import {
   setArenaSnapshot
 } from "/overlays/arena/arenaStore.js";
 
-const EMPTY_AVATAR = "https://i.imgur.com/x6v5tkX.jpeg";
+const EMPTY_AVATAR =
+  "https://i.imgur.com/x6v5tkX.jpeg";
+
 const QUEUE_EVENTS = new Set(["join", "leave", "promote", "demote"]);
 let routerStarted = false;
 
@@ -54,48 +53,70 @@ function normalizeArena(pkt) {
 }
 
 // ============================================================================
-// LEGACY TWIST MAP
+// LEGACY TWIST MAP (unchanged)
 // ============================================================================
 const TWIST_MAP = {
-  galaxy: { giftName: "Galaxy", twistName: "Galaxy Twist",
+  galaxy: {
+    giftName: "Galaxy",
+    twistName: "Galaxy Twist",
     icon: "https://p16-webcast.tiktokcdn.com/img/maliva/webcast-va/resource/79a02148079526539f7599150da9fd28.png~tplv-obj.webp",
-    diamonds: 1000, description: "Reverse ranking!", aliases: ["galaxy", "gxy"]
+    diamonds: 1000,
+    description: "Reverse ranking!",
+    aliases: ["galaxy", "gxy"]
   },
 
   moneygun: {
-    giftName: "Money Gun", twistName: "Eliminatie",
+    giftName: "Money Gun",
+    twistName: "Eliminatie",
     icon: "https://p16-webcast.tiktokcdn.com/img/maliva/webcast-va/e0589e95a2b41970f0f30f6202f5fce6~tplv-obj.webp",
-    diamonds: 500, description: "Markeert target eliminatie.", aliases: ["moneygun","mg"]
+    diamonds: 500,
+    description: "Markeert target eliminatie.",
+    aliases: ["moneygun", "mg"]
   },
 
   bomb: {
-    giftName: "Space Dog", twistName: "Bomb",
+    giftName: "Space Dog",
+    twistName: "Bomb",
     icon: "https://p16-webcast.tiktokcdn.com/img/alisg/webcast-sg/resource/9154160eb6726193bc51f5007d5853fa.png~tplv-obj.webp",
-    diamonds: 2500, description: "Random BOOM.", aliases: ["bomb"]
+    diamonds: 2500,
+    description: "Random BOOM.",
+    aliases: ["bomb"]
   },
 
   immune: {
-    giftName: "Blooming Heart", twistName: "Immuniteit",
-    icon:"https://p16-webcast.tiktokcdn.com/img/alisg/webcast-sg/resource/ff5453b7569d482c873163ce4b1fb703.png~tplv-obj.webp",
-    diamonds: 1599, description: "Beschermt tegen eliminatie.", aliases: ["immune","save"]
+    giftName: "Blooming Heart",
+    twistName: "Immuniteit",
+    icon: "https://p16-webcast.tiktokcdn.com/img/alisg/webcast-sg/resource/ff5453b7569d482c873163ce4b1fb703.png~tplv-obj.webp",
+    diamonds: 1599,
+    description: "Beschermt tegen eliminatie.",
+    aliases: ["immune", "save"]
   },
 
   heal: {
-    giftName: "Galaxy Globe", twistName: "Heal",
-    icon:"https://p16-webcast.tiktokcdn.com/img/alisg/webcast-sg/resource/1379dd334a16615a8731a3a4f97b932f.png~tplv-obj.webp",
-    diamonds: 1500, description: "Herstelt een eliminatie.", aliases: ["heal"]
+    giftName: "Galaxy Globe",
+    twistName: "Heal",
+    icon: "https://p16-webcast.tiktokcdn.com/img/alisg/webcast-sg/resource/1379dd334a16615a8731a3a4f97b932f.png~tplv-obj.webp",
+    diamonds: 1500,
+    description: "Herstelt een eliminatie.",
+    aliases: ["heal"]
   },
 
   diamondpistol: {
-    giftName: "Diamond Gun", twistName: "Single Survivor",
-    icon:"https://p16-webcast.tiktokcdn.com/img/alisg/webcast-sg/resource/651e705c26b704d03bc9c06d841808f1.png~tplv-obj.webp",
-    diamonds: 5000, description: "Laat één speler over.", aliases: ["dp","pistol"]
+    giftName: "Diamond Gun",
+    twistName: "Single Survivor",
+    icon: "https://p16-webcast.tiktokcdn.com/img/alisg/webcast-sg/resource/651e705c26b704d03bc9c06d841808f1.png~tplv-obj.webp",
+    diamonds: 5000,
+    description: "Laat één speler over.",
+    aliases: ["dp", "pistol"]
   },
 
   breaker: {
-    giftName: "Train", twistName: "Immune Breaker",
-    icon:"https://p16-webcast.tiktokcdn.com/img/maliva/webcast-va/4227ed71f2c494b554f9cbe2147d4899~tplv-obj.webp",
-    diamonds: 899, description: "Breekt immuniteit.", aliases: ["breaker"]
+    giftName: "Train",
+    twistName: "Immune Breaker",
+    icon: "https://p16-webcast.tiktokcdn.com/img/maliva/webcast-va/4227ed71f2c494b554f9cbe2147d4899~tplv-obj.webp",
+    diamonds: 899,
+    description: "Breekt immuniteit.",
+    aliases: ["breaker"]
   }
 };
 
@@ -124,7 +145,7 @@ function pushBattleEvent(evt) {
       type: evt.type || "event"
     });
   } catch (err) {
-    console.warn("[BattleLog] Failed to push:", err, evt);
+    console.warn("[BattleLog] Failed to push event:", err, evt);
   }
 }
 
@@ -136,7 +157,137 @@ export async function initEventRouter() {
   routerStarted = true;
 
   const socket = await getSocket();
-  console.log("%c[BattleBox] Event Router Ready FIXED", "color:#0fffd7;font-weight:bold;");
+  console.log("%c[BattleBox] Event Router Ready v5.1 (HARD RESET)", "color:#0fffd7;font-weight:bold;");
+
+  // ------------------------------------------------------------------------
+  // SNAPSHOT
+  // ------------------------------------------------------------------------
+  socket.on("overlayInitialSnapshot", (snap) => {
+    applySnapshot(snap);
+
+    if (snap.arena) {
+      setArenaSnapshot(snap.arena);
+
+      if (Array.isArray(snap.arena.players)) {
+        snap.arena.players.forEach((p) => {
+          pushBattleEvent({
+            type: "arenaJoin",
+            display_name: p.display_name || p.username,
+            username: p.username,
+            avatar_url: p.avatar_url,
+            reason: "joint de arena."
+          });
+        });
+      }
+    }
+
+    twistStore.setTwists(TWIST_KEYS.slice(0, 3));
+  });
+
+  // ------------------------------------------------------------------------
+  // ARENA UPDATE
+  // ------------------------------------------------------------------------
+  socket.on("updateArena", (pkt) => {
+    if (!pkt) return;
+
+    const norm = normalizeArena(pkt);
+
+    if (Array.isArray(pkt.players)) {
+      arenaStore.set({ players: pkt.players });
+    }
+
+    if (norm) {
+      arenaStore.set({
+        round: norm.round,
+        type: norm.type,
+        status: norm.status,
+
+        totalMs: norm.totalMs,
+        endsAt: norm.endsAt,
+        remainingMs: norm.remainingMs,
+
+        roundCutoff: norm.roundCutoff,
+        graceEnd: norm.graceEnd,
+
+        settings: norm.settings ?? arenaStore.get().settings
+      });
+    }
+
+    document.dispatchEvent(new CustomEvent("arena:update", { detail: norm }));
+  });
+
+  // ------------------------------------------------------------------------
+  // ROUND EVENTS
+  // ------------------------------------------------------------------------
+  socket.on("round:start", (payload) => {
+    arenaTwistStore.resetAll();
+
+    const total = (payload.duration || 0) * 1000;
+    const endsAt = Date.now() + total;
+
+    arenaStore.set({
+      status: "active",
+      round: payload.round || 0,
+      type: payload.type || "quarter",
+      totalMs: total,
+      endsAt,
+      remainingMs: total
+    });
+
+    pushBattleEvent({
+      type: "round:start",
+      display_name: "Ronde",
+      username: "system",
+      reason: `Ronde ${payload.round} gestart (${payload.type}).`
+    });
+
+    document.dispatchEvent(new CustomEvent("arena:roundStart", { detail: payload }));
+  });
+
+  socket.on("round:grace", (payload) => {
+    arenaTwistStore.resetAll();
+
+    const total = (payload.grace || 5) * 1000;
+    const endsAt = Date.now() + total;
+
+    arenaStore.set({
+      status: "grace",
+      round: payload.round || 0,
+      type: payload.type || "quarter",
+      totalMs: total,
+      endsAt,
+      remainingMs: total
+    });
+
+    pushBattleEvent({
+      type: "round:grace",
+      display_name: "Grace",
+      username: "system",
+      reason: "Grace periode gestart."
+    });
+
+    document.dispatchEvent(new CustomEvent("arena:graceStart", { detail: payload }));
+  });
+
+  socket.on("round:end", () => {
+    arenaTwistStore.resetAll();
+
+    arenaStore.set({
+      status: "ended",
+      totalMs: 0,
+      endsAt: 0,
+      remainingMs: 0
+    });
+
+    pushBattleEvent({
+      type: "round:end",
+      display_name: "Ronde",
+      username: "system",
+      reason: "Ronde beëindigd."
+    });
+
+    document.dispatchEvent(new CustomEvent("arena:roundEnd"));
+  });
 
   // ------------------------------------------------------------------------
   // ARENA PLAYER EVENTS
@@ -171,34 +322,22 @@ export async function initEventRouter() {
     });
   });
 
-
-  // ============================================================================
-  // ⭐⭐⭐ TWIST PAYLOAD NORMALIZER
-  // ============================================================================
-  function normalizeTwistPayload(p) {
-    if (!p) return {};
-
-    return {
-      type: p.type,
-      byDisplayName: p.byDisplayName || p.byUsername || p.senderName || "Onbekend",
-      byUsername: p.byUsername || null,
-
-      targetDisplayName: p.targetDisplayName || null,
-      targetUsername: p.targetUsername || null,
-
-      victimNames: Array.isArray(p.victimNames) ? p.victimNames : [],
-      survivorName: p.survivorName || null,
-
-      avatar_url: p.avatar_url || EMPTY_AVATAR
-    };
-  }
+  // ========================================================================
+  // ⭐ TWIST EVENT FIX — inject into arenaTwistStore
+  // ========================================================================
 
   function twistReason(payload) {
-    const sender = payload.byDisplayName || "Onbekend";
-    const target = payload.targetDisplayName || payload.targetUsername || null;
+    const sender =
+      payload.byDisplayName ||
+      payload.byUsername ||
+      payload.senderName ||
+      "Onbekend";
+
+    const target = payload.targetDisplayName || payload.targetUsername;
     const victims = payload.victimNames?.length
-      ? payload.victimNames.map(x => `@${x}`).join(", ")
+      ? payload.victimNames.map((x) => `@${x}`).join(", ")
       : null;
+
     const survivor = payload.survivorName;
 
     switch (payload.type) {
@@ -231,7 +370,6 @@ export async function initEventRouter() {
           : `${sender} gebruikt een Immunity Breaker!`;
 
       case "diamondpistol":
-      case "diamond":
         return survivor
           ? `${sender} vuurt de DIAMOND GUN! @${survivor} overleeft — de rest ligt eruit!`
           : `${sender} gebruikt de Diamond Gun!`;
@@ -241,63 +379,54 @@ export async function initEventRouter() {
     }
   }
 
-
-
-  // ============================================================================
-  // ⭐⭐⭐ FIX #1 — TWIST TAKEOVER → guaranteed popup dispatch
-  // ============================================================================
-  socket.on("arena:twistTakeover", (raw) => {
-    const p = normalizeTwistPayload(raw);
-
-    console.log("%c[TWIST ROUTER] TAKEOVER RAW:", "color:#ff0", raw);
-    console.log("%c[TWIST ROUTER] TAKEOVER NORMALIZED:", "color:#0ff", p);
-
-    const reason = twistReason(p);
-
-    // → Battlelog
+  // ========================================================================
+  // ⭐⭐⭐ FIX #1 — Activate + Reliable Dispatch Popup
+  // ========================================================================
+  socket.on("arena:twistTakeover", (p) => {
+    // Log → battlelog
     pushBattleEvent({
       type: `twist:${p.type}`,
-      display_name: p.byDisplayName,
+      display_name: p.byDisplayName || p.byUsername || "Onbekend",
       username: p.byUsername || "unknown",
       avatar_url: p.avatar_url,
-      reason
+      reason: twistReason(p)
     });
 
-    // → Activate twist visual engine
+    // Send into twist queue
     arenaTwistStore.activate({
       type: p.type,
-      title: reason,
+      title: twistReason(p),
       payload: p
     });
 
-    // → ⭐ POPUP: always dispatched AFTER state settles
+    // ⭐ PATCH — GUARANTEED popup dispatch
     setTimeout(() => {
-      console.log("%c[TWIST ROUTER] Dispatch twist:message", "color:#0f0;font-weight:bold;", p);
+      console.log("%c[TWIST ROUTER] Dispatch twist:message", "color:#ff0;font-weight:bold;", p);
       document.dispatchEvent(new CustomEvent("twist:message", { detail: p }));
-    }, 25);
+    }, 10);
+
+    console.log("%c[TWIST ROUTER] Activate", "color:#0f0;", p);
   });
 
-
-
-  // ============================================================================
-  // ⭐⭐⭐ FIX #2 — COUNTDOWN
-  // ============================================================================
+  // ========================================================================
+  // ⭐⭐⭐ FIX #2 — Countdown twist
+  // ========================================================================
   socket.on("arena:twistCountdown", (p) => {
     pushBattleEvent({
       type: "twist:countdown",
-      display_name: p.byDisplayName || "Twist",
+      display_name: p.byDisplayName || p.byUsername || "Twist",
       username: p.byUsername || "unknown",
       reason: `Countdown ${p.step}…`
     });
 
     arenaTwistStore.countdown(p);
+
+    console.log("%c[TWIST ROUTER] Countdown", "color:#0f0;", p);
   });
 
-
-
-  // ============================================================================
-  // ⭐⭐⭐ FIX #3 — CLEAR
-  // ============================================================================
+  // ========================================================================
+  // ⭐⭐⭐ FIX #3 — Clear twist
+  // ========================================================================
   socket.on("arena:twistClear", () => {
     pushBattleEvent({
       type: "twist:clear",
@@ -307,11 +436,11 @@ export async function initEventRouter() {
     });
 
     arenaTwistStore.clear();
+
+    console.log("%c[TWIST ROUTER] Clear", "color:#0f0;");
   });
 
-
-
-  // ============================================================================
+  // ========================================================================
   // QUEUE UPDATE
   // ============================================================================
   socket.on("updateQueue", (packet) => {
@@ -322,15 +451,19 @@ export async function initEventRouter() {
   socket.on("queueEvent", (evt) => {
     if (!evt || !QUEUE_EVENTS.has(evt.type)) return;
 
-    const safeDisplay = evt.display_name || evt.username || "Onbekend";
-    const safeUsername = evt.username || safeDisplay.toLowerCase().replace(/\s+/g, "");
+    const safeDisplay =
+      evt.display_name?.trim() || evt.username?.trim() || "Onbekend";
+
+    const safeUsername =
+      evt.username?.trim() ||
+      safeDisplay.toLowerCase().replace(/\s+/g, "");
 
     pushBattleEvent({
       type: evt.type,
       display_name: safeDisplay,
       username: safeUsername,
-      avatar_url: evt.avatar_url || EMPTY_AVATAR,
       is_vip: !!evt.is_vip,
+      avatar_url: evt.avatar_url || EMPTY_AVATAR,
       reason:
         evt.reason ||
         (evt.type === "join"
@@ -346,18 +479,14 @@ export async function initEventRouter() {
     setTimeout(() => queueStore.clearHighlight(), 900);
   });
 
-
-
-  // ============================================================================
+  // ========================================================================
   // HUD TICKER
   // ============================================================================
   socket.on("hudTickerUpdate", (text) => {
     tickerStore.setText(text || "");
   });
 
-
-
-  // ============================================================================
+  // ========================================================================
   // LEGACY TWIST ROTATION
   // ============================================================================
   let twistIndex = 0;
@@ -370,8 +499,7 @@ export async function initEventRouter() {
   rotateLegacyTwists();
   setInterval(rotateLegacyTwists, 10000);
 
-
-  // ============================================================================
+  // ========================================================================
   // DEBUG BRIDGE
   // ============================================================================
   window.bb = { socket, eventStore, arenaStore, arenaTwistStore, twistStore };
