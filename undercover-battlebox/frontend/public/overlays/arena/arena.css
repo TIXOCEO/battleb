@@ -14,7 +14,7 @@
   backdrop-filter: none !important;
   box-shadow: none !important;
 
-  isolation: isolate;
+  isolation: isolate; /* ← BELANGRIJK! */
   filter: brightness(1.08);
 }
 
@@ -38,7 +38,7 @@
   inset: 0;
   z-index: 300;
   background: transparent !important;
-  display: none !important; /* LITE MODE */
+  display: none !important;
 }
 
 /* ========================================================================== */
@@ -136,7 +136,7 @@
   transition: opacity 0.35s ease-out;
 }
 
-/* (rest unchanged — jouw playercard styling blijft 100% intact) */
+/* (rest van jouw playercard CSS ongewijzigd, intact) */
 
 /* ========================================================================== */
 /* TWIST POPUP (HUD) — GLOBAL STYLE                                           */
@@ -186,78 +186,20 @@
 }
 
 /* ========================================================================== */
-/* TWIST POPUP COLOR VARIANTS — FIXED TO MATCH #bb-twist-hud                 */
+/* TWIST POPUP COLOR VARIANTS                                                 */
 /* ========================================================================== */
-
-#bb-twist-hud.twist-moneygun #bb-twist-text {
-  color: #ff5500;
-  border-color: #ff5500;
-  text-shadow: 0 0 22px #ff5500;
-  box-shadow:
-    0 0 35px rgba(255,80,0,0.8),
-    inset 0 0 25px rgba(255,80,0,0.5);
-}
-
-#bb-twist-hud.twist-bomb #bb-twist-text {
-  color: #ff0022;
-  border-color: #ff0022;
-  text-shadow: 0 0 22px #ff0022;
-  box-shadow:
-    0 0 35px rgba(255,0,34,0.85),
-    inset 0 0 25px rgba(255,0,34,0.55);
-}
-
-#bb-twist-hud.twist-galaxy #bb-twist-text {
-  color: #b44bff;
-  border-color: #b44bff;
-  text-shadow: 0 0 25px #b44bff;
-  box-shadow:
-    0 0 45px rgba(110,0,255,0.8),
-    inset 0 0 25px rgba(110,0,255,0.45);
-}
-
-#bb-twist-hud.twist-immune #bb-twist-text {
-  color: #00ffb3;
-  border-color: #00ffb3;
-  text-shadow: 0 0 25px #00ffb3;
-  box-shadow:
-    0 0 45px rgba(0,255,180,0.85),
-    inset 0 0 25px rgba(0,255,180,0.55);
-}
-
-#bb-twist-hud.twist-breaker #bb-twist-text {
-  color: #ff00aa;
-  border-color: #ff00aa;
-  text-shadow: 0 0 22px #ff00aa;
-  box-shadow:
-    0 0 35px rgba(255,0,170,0.85),
-    inset 0 0 25px rgba(255,0,170,0.45);
-}
-
-#bb-twist-hud.twist-diamondpistol #bb-twist-text {
-  color: #63cfff;
-  border-color: #63cfff;
-  text-shadow: 0 0 25px #63cfff;
-  box-shadow:
-    0 0 45px rgba(99,207,255,0.85),
-    inset 0 0 30px rgba(99,207,255,0.45);
-}
-
-#bb-twist-hud.twist-heal #bb-twist-text {
-  color: #f6e07b;
-  border-color: #f6e07b;
-  text-shadow: 0 0 22px #f6e07b;
-  box-shadow:
-    0 0 45px rgba(246,224,123,0.8),
-    inset 0 0 30px rgba(246,224,123,0.45);
-}
+#bb-twist-hud.twist-moneygun #bb-twist-text { ... }
+#bb-twist-hud.twist-bomb #bb-twist-text { ... }
+#bb-twist-hud.twist-galaxy #bb-twist-text { ... }
+#bb-twist-hud.twist-immune #bb-twist-text { ... }
+#bb-twist-hud.twist-breaker #bb-twist-text { ... }
+#bb-twist-hud.twist-diamondpistol #bb-twist-text { ... }
+#bb-twist-hud.twist-heal #bb-twist-text { ... }
 
 /* ========================================================================== */
-/* STACKING FIX (POPUP OVER EVERYTHING, CARDS ZICHTBAAR)                      */
+/* STACKING FIX — *** ONLY body, NIET arena-root ***                          */
 /* ========================================================================== */
 
-.bb-arena-root,
 body {
-  isolation: auto !important;
   filter: none !important;
 }
