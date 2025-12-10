@@ -33,7 +33,11 @@ import { enableGalaxyChaos, disableGalaxyChaos } from "/overlays/shared/galaxy-c
 import { initTwistMessage } from "/overlays/arena/twistMessage.js";
 
 initEventRouter();
-initTwistMessage();
+
+// FIX: init twist message AFTER DOM is ready
+window.addEventListener("DOMContentLoaded", () => {
+  initTwistMessage();
+});
 
 /* ============================================================================ */
 /* DEBUG LOG #1 — Confirm twist store input                                    */
@@ -54,10 +58,12 @@ const hudTimer = document.getElementById("hud-timer");
 const hudRing = document.getElementById("hud-ring-progress");
 const playersContainer = document.getElementById("arena-players");
 const twistOverlay = document.getElementById("twist-takeover");
-const twistTargetLayer = document.getElementById("twist-target");
 
-const EMPTY_AVATAR =
-  "https://i.imgur.com/x6v5tkX.jpeg";
+// FIX: element exists niet → crash → twist-message stopt → geen popup
+const twistTargetLayer =
+  document.getElementById("twist-target") || document.createElement("div");
+
+const EMPTY_AVATAR = "https://i.imgur.com/x6v5tkX.jpeg";
 
 /* ============================================================================ */
 /* PlayerCard Fade Controls */
@@ -316,11 +322,18 @@ async function runBombRoulette() {
 arenaTwistStore.subscribe(async (st) => {
   if (!st.active || !st.type) return;
 
-  console.log("%c[TWIST → MESSAGE] Dispatching twist message:", "color:#fa0", st.payload);
+  console.log(
+    "%c[TWIST → MESSAGE] Dispatching twist message:",
+    "color:#fa0",
+    st.payload
+  );
 
   hidePlayerCards();
 
-  document.dispatchEvent(new CustomEvent("twist:message", { detail: st.payload }));
+  // Dispatch popup event
+  document.dispatchEvent(
+    new CustomEvent("twist:message", { detail: st.payload })
+  );
 
   FX.clear();
   twistTargetLayer.innerHTML = "";
