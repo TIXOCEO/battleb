@@ -10,7 +10,7 @@ initEventRouter();
 const grid = document.getElementById("queue-grid");
 
 const EMPTY_AVATAR =
-  "https://cdn.vectorstock.com/i/1000v/43/93/default-avatar-photo-placeholder-icon-grey-vector-38594393.jpg";
+  "https://i.imgur.com/x6v5tkX.jpeg";
 
 const TOTAL = 15;
 
