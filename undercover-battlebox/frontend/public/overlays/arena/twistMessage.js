@@ -1,11 +1,23 @@
 // ============================================================================
-// twistMessage.js — Broadcast Twist Messaging v4.1 (HUD Popup Version)
+// twistMessage.js — Broadcast Twist Messaging v4.2 (HUD Popup Version)
 // FULL PAYLOAD COMPAT — accepts ALL backend formats
 // Target: #bb-twist-hud + #bb-twist-text
+// With Color Variants (twist-moneygun, twist-bomb, etc.)
 // ============================================================================
 
 let box = null;
 let textEl = null;
+
+// All possible color classes
+const TWIST_COLOR_CLASSES = [
+  "twist-moneygun",
+  "twist-bomb",
+  "twist-galaxy",
+  "twist-immune",
+  "twist-breaker",
+  "twist-diamondpistol",
+  "twist-heal"
+];
 
 // ============================================================================
 // INIT — now targets the new HUD popup
@@ -33,12 +45,21 @@ export function initTwistMessage() {
 
 
 // ============================================================================
-// INTERNAL SHOW FUNCTION — now uses the new HUD popup
+// INTERNAL SHOW FUNCTION — now uses the new HUD popup + color variants
 // ============================================================================
-function show(msg) {
+function show(msg, type = null) {
   if (!box || !textEl) return;
 
   textEl.textContent = msg;
+
+  // Remove old color classes
+  TWIST_COLOR_CLASSES.forEach((cls) => box.classList.remove(cls));
+
+  // Add correct color
+  if (type) {
+    const cls = "twist-" + type.toLowerCase();
+    box.classList.add(cls);
+  }
 
   box.classList.add("show");
 
@@ -85,7 +106,7 @@ function normalizePayload(p) {
 
 
 // ============================================================================
-// MAIN MESSAGE BUILDER (backend-proof)
+// MAIN MESSAGE BUILDER (backend-proof + color-aware)
 // ============================================================================
 export function showMessage(p) {
   if (!p || !p.type) {
@@ -102,44 +123,47 @@ export function showMessage(p) {
 
   console.log("%c[TwistMessage] Parsed:", "color:#ff0", { sender, target, victims, survivor });
 
-  switch (p.type) {
+  // Colouring works automatically via class twist-<type>
+  const t = p.type.toLowerCase();
+
+  switch (t) {
 
     case "moneygun":
       return target
-        ? show(`${sender} markeert ${target} voor ELIMINATIE!`)
-        : show(`${sender} gebruikt MoneyGun!`);
+        ? show(`${sender} markeert ${target} voor ELIMINATIE!`, t)
+        : show(`${sender} gebruikt MoneyGun!`, t);
 
     case "immune":
       return target
-        ? show(`${sender} geeft ${target} IMMUNITEIT!`)
-        : show(`${sender} deelt immuniteit uit!`);
+        ? show(`${sender} geeft ${target} IMMUNITEIT!`, t)
+        : show(`${sender} deelt immuniteit uit!`, t);
 
     case "heal":
       return target
-        ? show(`${sender} herstelt ${target}!`)
-        : show(`${sender} voert een HEAL uit!`);
+        ? show(`${sender} herstelt ${target}!`, t)
+        : show(`${sender} voert een HEAL uit!`, t);
 
     case "bomb":
       return victims
-        ? show(`${sender} gooit een BOM! Slachtoffer: ${victims}!`)
-        : show(`${sender} laat een BOM ontploffen!`);
+        ? show(`${sender} gooit een BOM! Slachtoffer: ${victims}!`, t)
+        : show(`${sender} laat een BOM ontploffen!`, t);
 
     case "galaxy":
-      return show(`${sender} draait de HELE ranking om! Chaos!`);
+      return show(`${sender} draait de HELE ranking om! Chaos!`, t);
 
     case "breaker":
       return target
-        ? show(`${sender} BREKT de immuniteit van ${target}!`)
-        : show(`${sender} gebruikt een Immunity Breaker!`);
+        ? show(`${sender} BREKT de immuniteit van ${target}!`, t)
+        : show(`${sender} gebruikt een Immunity Breaker!`, t);
 
     case "diamondpistol":
     case "diamond":
       return survivor
-        ? show(`${sender} vuurt de DIAMOND GUN! ${survivor} overleeft — de rest ligt eruit!`)
-        : show(`${sender} gebruikt de Diamond Gun!`);
+        ? show(`${sender} vuurt de DIAMOND GUN! ${survivor} overleeft — de rest ligt eruit!`, "diamondpistol")
+        : show(`${sender} gebruikt de Diamond Gun!`, "diamondpistol");
 
     default:
-      return show(`${sender} activeert een twist.`);
+      return show(`${sender} activeert een twist.`, t);
   }
 }
 
