@@ -34,42 +34,57 @@
       width: 1200px;
       height: 800px;
       overflow: hidden;
-      isolation: isolate;
+      isolation: auto; /* FIX z-index conflicts */
     }
 
 
     /* ======================================================================
-       ⭐ NEW FULLSCREEN TWIST POPUP — ALWAYS VISIBLE, CENTERED
+       ⭐ NEW FULLSCREEN TWIST POPUP (HUD NOTIFICATION)
        ====================================================================== */
-    #twist-message {
+    #bb-twist-hud {
       position: absolute;
-      inset: 0; /* fullscreen */
+      inset: 0;
       display: flex;
       justify-content: center;
       align-items: center;
 
-      background: rgba(0,0,0,0.55);
+      background: rgba(0, 0, 0, 0.35);
 
       pointer-events: none;
 
       opacity: 0;
       transition: opacity .25s ease-out;
 
-      z-index: 1000000000; /* highest layer */
+      z-index: 2000000000; /* absolute top */
     }
 
-    #twist-message.show {
+    #bb-twist-hud.show {
       opacity: 1;
     }
 
-    #twist-text {
-      font-size: 62px;
+    #bb-twist-text {
+      font-size: 64px;
       font-weight: 900;
-      color: var(--bb-orange);
-      text-shadow: 0 0 20px var(--bb-orange);
       text-align: center;
-      max-width: 90%;
+      max-width: 85%;
       line-height: 1.25;
+
+      /* BattleBox neon glow */
+      color: var(--bb-orange);
+      padding: 28px 40px;
+
+      background: rgba(10, 10, 15, 0.75);
+      border: 4px solid var(--bb-orange);
+      border-radius: 16px;
+
+      box-shadow:
+        0 0 20px rgba(255, 100, 20, 0.85),
+        0 0 35px rgba(255, 90, 10, 0.65),
+        inset 0 0 18px rgba(255, 150, 70, 0.4);
+
+      text-shadow: 
+        0 0 25px rgba(255, 120, 20, 0.95),
+        0 0 45px rgba(255, 90, 0, 0.9);
     }
 
 
@@ -107,9 +122,169 @@
 
     <canvas id="fx-canvas" width="1200" height="800"></canvas>
 
-    <!-- ⭐ NEW POPUP STRUCTURE -->
-    <div id="twist-message">
-      <span id="twist-text"></span>
+    <!-- ⭐ NEW POPUP STRUCTURE (glow + frame)">
+         Old #twist-message removed to prevent CSS conflicts -->
+    <div id="bb-twist-hud">
+      <div id="bb-twist-text"></div>
+    </div>
+
+    <div id="callout-banner"></div>
+
+    <!-- ONLY ONE OVERLAY IN LITE -->
+    <div id="twist-takeover" class="bb-twist-takeover hidden"></div>
+
+    <!-- HUD -->
+    <div id="arena-hud" class="bb-hud">
+      <div class="hud-inner">
+        <div id="hud-round" class="hud-round-text">RONDE 0</div>
+        <div id="hud-type" class="hud-type-text">KWARTFINALE</div>
+        <div id="hud-timer" class="hud-timer">00:00</div>
+
+        <svg class="hud-ring" width="360" height="360">
+          <circle cx="180" cy="180" r="170" stroke-width="12" class="hud-ring-bg"></circle>
+          <circle cx="180" cy="180" r="170" stroke-width="12" class="hud-ring-progress" id="hud-ring-progress"></circle>
+        </svg>
+      </div>
+    </div>
+
+    <div id="arena-players"></div>
+
+  </div>
+
+  <!-- Load order: twistMessage first -->
+  <script type="module" src="/overlays/arena/twistMessage.js"></script>
+  <script type="module" src="/overlays/arena/arena.js"></script>
+
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>BattleBox Arena Overlay</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- THEME -->
+  <link rel="stylesheet" href="/overlays/shared/theme.css" />
+  <!-- ARENA CSS -->
+  <link rel="stylesheet" href="/overlays/arena/arena.css" />
+
+  <style>
+    body {
+      margin: 0;
+      background: transparent !important;
+      overflow: hidden;
+      font-family: "Rajdhani", sans-serif;
+    }
+
+    /* FX CANVAS */
+    #fx-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 999900;
+    }
+
+    /* Arena root wrapper */
+    #arena-root {
+      position: relative;
+      width: 1200px;
+      height: 800px;
+      overflow: hidden;
+      isolation: auto; /* FIX z-index conflicts */
+    }
+
+
+    /* ======================================================================
+       ⭐ NEW FULLSCREEN TWIST POPUP (HUD NOTIFICATION)
+       ====================================================================== */
+    #bb-twist-hud {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+
+      background: rgba(0, 0, 0, 0.35);
+
+      pointer-events: none;
+
+      opacity: 0;
+      transition: opacity .25s ease-out;
+
+      z-index: 2000000000; /* absolute top */
+    }
+
+    #bb-twist-hud.show {
+      opacity: 1;
+    }
+
+    #bb-twist-text {
+      font-size: 64px;
+      font-weight: 900;
+      text-align: center;
+      max-width: 85%;
+      line-height: 1.25;
+
+      /* BattleBox neon glow */
+      color: var(--bb-orange);
+      padding: 28px 40px;
+
+      background: rgba(10, 10, 15, 0.75);
+      border: 4px solid var(--bb-orange);
+      border-radius: 16px;
+
+      box-shadow:
+        0 0 20px rgba(255, 100, 20, 0.85),
+        0 0 35px rgba(255, 90, 10, 0.65),
+        inset 0 0 18px rgba(255, 150, 70, 0.4);
+
+      text-shadow: 
+        0 0 25px rgba(255, 120, 20, 0.95),
+        0 0 45px rgba(255, 90, 0, 0.9);
+    }
+
+
+    /* ======================================================================
+       Optional callout (unchanged)
+       ====================================================================== */
+    #callout-banner {
+      position: absolute;
+      top: 22px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 900px;
+      padding: 14px 28px;
+      background: rgba(0, 0, 0, 0.55);
+      border: 2px solid rgba(255,255,255,0.25);
+      border-radius: 10px;
+      font-size: 42px;
+      font-weight: 900;
+      text-align: center;
+      color: var(--bb-orange);
+      text-shadow: 0 0 18px var(--bb-orange);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .35s ease-out;
+      z-index: 999998;
+    }
+
+    #callout-banner.show { opacity: 1; }
+  </style>
+</head>
+
+<body>
+
+  <div id="arena-root" class="bb-arena-root">
+
+    <canvas id="fx-canvas" width="1200" height="800"></canvas>
+
+    <!-- ⭐ NEW POPUP STRUCTURE (glow + frame)">
+         Old #twist-message removed to prevent CSS conflicts -->
+    <div id="bb-twist-hud">
+      <div id="bb-twist-text"></div>
     </div>
 
     <div id="callout-banner"></div>
