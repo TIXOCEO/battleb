@@ -59,7 +59,7 @@ const hudRing = document.getElementById("hud-ring-progress");
 const playersContainer = document.getElementById("arena-players");
 const twistOverlay = document.getElementById("twist-takeover");
 
-// FIX: element exists niet → crash → twist-message stopt → geen popup
+// FIX: element bestaat niet → crash voorkomen
 const twistTargetLayer =
   document.getElementById("twist-target") || document.createElement("div");
 
@@ -115,10 +115,14 @@ function animateOnce(el, className) {
 function waitForAnimation(el) {
   return new Promise((resolve) => {
     let t = setTimeout(resolve, 500);
-    el.addEventListener("animationend", () => {
-      clearTimeout(t);
-      resolve();
-    }, { once: true });
+    el.addEventListener(
+      "animationend",
+      () => {
+        clearTimeout(t);
+        resolve();
+      },
+      { once: true }
+    );
   });
 }
 
@@ -251,7 +255,9 @@ setInterval(() => {
 
   const sec = Math.floor(remaining / 1000);
   hudTimer.textContent =
-    `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
+    `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(
+      sec % 60
+    ).padStart(2, "0")}`;
 
   renderHudProgress(st, hudRing);
 }, 100);
@@ -330,7 +336,6 @@ arenaTwistStore.subscribe(async (st) => {
 
   hidePlayerCards();
 
-  // Dispatch popup event
   document.dispatchEvent(
     new CustomEvent("twist:message", { detail: st.payload })
   );
@@ -369,34 +374,36 @@ arenaTwistStore.subscribe(async (st) => {
 });
 
 /* ============================================================================ */
-/* Beam colors (compatibility) */
+/* GLOBAL TWIST POPUP FALLBACK (ALWAYS WORKS) */
 /* ============================================================================ */
 
-function getBeamColor(type) {
-  switch (type) {
-    case "moneygun": return "#00FF80";
-    case "diamond": return "#00CFFF";
-    case "immune": return "#00FFE5";
-    case "heal": return "#FFD84A";
-    default: return "#FFFFFF";
-  }
+if (!window.__bb_twistFallback) {
+  window.__bb_twistFallback = true;
+
+  document.addEventListener("twist:message", (ev) => {
+    console.log("%c[FALLBACK TWIST] Triggered:", "color:#f0f", ev.detail);
+
+    const hud = document.getElementById("bb-twist-hud");
+    const text = document.getElementById("bb-twist-text");
+
+    if (!hud || !text) {
+      console.warn("HUD not ready, retry fallback…");
+      return setTimeout(() => {
+        const h = document.getElementById("bb-twist-hud");
+        const t = document.getElementById("bb-twist-text");
+        if (h && t) {
+          t.textContent = ev.detail?.byDisplayName || "Twist!";
+          h.classList.add("show");
+          setTimeout(() => h.classList.remove("show"), 2400);
+        }
+      }, 250);
+    }
+
+    text.textContent = ev.detail?.byDisplayName || "Twist!";
+    hud.classList.add("show");
+    setTimeout(() => hud.classList.remove("show"), 2400);
+  });
 }
-
-/* ============================================================================ */
-/* Round events */
-/* ============================================================================ */
-
-document.addEventListener("arena:roundStart", () => {
-  animateOnce(root, "bb-round-start-shockwave");
-});
-
-document.addEventListener("arena:graceStart", () => {
-  animateOnce(root, "bb-grace-pulse");
-});
-
-document.addEventListener("arena:roundEnd", () => {
-  animateOnce(root, "bb-round-end-flash");
-});
 
 /* ============================================================================ */
 /* EXPORT */
