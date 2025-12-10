@@ -1,5 +1,5 @@
 // ============================================================================
-// battlelog.js — BattleBox BattleLog v2.2
+// battlelog.js — BattleBox BattleLog v2.2 (PATCHED FOR LIVE CYCLING)
 // 2 PAGES × 3 EVENTS • Twist aware • Arena-aware • Queue-aware
 // Fully patched for extended event-router.js
 // ============================================================================
@@ -61,8 +61,8 @@ function iconFor(type) {
 function render(events) {
   if (!Array.isArray(events)) return;
 
-  // Only newest 6 items
-  const sliced = events.slice(0, PAGE_SIZE * TOTAL_PAGES);
+  // PATCH ✔ take the *newest* 6 entries, newest first
+  const sliced = events.slice(-PAGE_SIZE * TOTAL_PAGES).reverse();
 
   root.innerHTML = "";
 
