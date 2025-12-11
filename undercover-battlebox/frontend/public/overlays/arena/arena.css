@@ -427,6 +427,31 @@ body.twist-galaxy-spin .bb-player-card {
   100% { transform: rotate(1080deg); }
 }
 
+#roulette-beam {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 99999;
+  border-radius: 50%;
+  opacity: 0;
+  transform-origin: center;
+  mix-blend-mode: screen;
+
+  background: conic-gradient(
+    rgba(255,50,50,0) 0deg,
+    rgba(255,60,60,0.75) 40deg,
+    rgba(255,30,30,0) 80deg,
+    rgba(255,20,20,0) 360deg
+  );
+
+  filter: blur(18px);
+  transition: opacity .35s ease-out;
+}
+
+#roulette-beam.active {
+  opacity: 1;
+}
+
 /* ========================================================================== */
 /* FADE */
 /* ========================================================================== */
