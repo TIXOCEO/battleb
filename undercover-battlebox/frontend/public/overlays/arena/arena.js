@@ -2,6 +2,7 @@
 // arena.js — BattleBox Arena Overlay
 // BUILD v9.6 — LITE MODE (Galaxy Shuffle + Bomb Roulette) + Fade System
 // + DEBUG LOGGING FOR TWIST MESSAGE PAYLOADS
+// + SOCKET BRIDGE PATCH (twist:takeover → twist:message)
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -32,16 +33,51 @@ import { enableGalaxyChaos, disableGalaxyChaos } from "/overlays/shared/galaxy-c
 
 import { initTwistMessage } from "/overlays/arena/twistMessage.js";
 
+// ⭐ SOCKET BRIDGE IMPORT
+import { getSocket } from "/overlays/shared/socket.js";
+
 initEventRouter();
 
-// FIX: init twist message AFTER DOM is ready
+/* ============================================================================ */
+/* INIT TWIST MESSAGE AFTER DOM READY                                          */
+/* ============================================================================ */
+
 window.addEventListener("DOMContentLoaded", () => {
   initTwistMessage();
 });
 
 /* ============================================================================ */
+/* ⭐ SOCKET EVENT → DOM EVENT BRIDGE (THE FIX)                                */
+/* ============================================================================ */
+
+const socket = getSocket();
+
+// Backend sends twist:takeover → overlay must translate to twist:message
+socket.on("twist:takeover", (p) => {
+  console.log("%c[BRIDGE] twist:takeover → twist:message", "color:#0f0", p);
+
+  document.dispatchEvent(
+    new CustomEvent("twist:message", {
+      detail: {
+        type: p.type || "",
+        byDisplayName: p.by || p.byDisplayName || "Onbekend",
+        target: p.targetName || null,
+        victims: p.victimNames || [],
+        survivor: p.survivorName || null
+      }
+    })
+  );
+});
+
+// Clear event
+socket.on("twist:clear", () => {
+  document.dispatchEvent(new Event("twist:clear"));
+});
+
+/* ============================================================================ */
 /* DEBUG LOG #1 — Confirm twist store input                                    */
 /* ============================================================================ */
+
 arenaTwistStore.subscribe((st) => {
   if (!st.active) return;
   console.log("%c[TWIST STORE] incoming twist:", "color:#0af", st);
