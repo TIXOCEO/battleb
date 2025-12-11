@@ -158,7 +158,7 @@ const POSITIONS = [
 
 const CENTER_X = 600;
 const CENTER_Y = 400;
-const RADIUS = 300;
+const RADIUS = 400;
 
 /* ============================================================================ */
 /* PLAYER CARDS                                                                  */
@@ -433,11 +433,9 @@ arenaTwistStore.subscribe(async (st) => {
 
   // ===== SPECIAL HANDLING =====================================================
   if (st.type === "galaxy") {
-    fadeOutCards();
     triggerGalaxyEffect();
     await runGalaxyShuffle();
     arenaTwistStore.clear();
-    fadeInCards();
     return;
   }
 
