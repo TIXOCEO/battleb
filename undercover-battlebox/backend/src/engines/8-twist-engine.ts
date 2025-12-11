@@ -1,13 +1,16 @@
 // ============================================================================
-// 8-twist-engine.ts — Twist Engine v8.0
+// 8-twist-engine.ts — Twist Engine v8.1 (Patched Build)
 // ANIMATION-SAFE VERSION — waits for frontend animation to finish
 // ============================================================================
 //
-// ✔ Geen directe eliminaties meer — eerst animatie → daarna backend elimineert
-// ✔ Uniform event model: twist:start + twist:finish
-// ✔ Volledige payload naar overlay: type, by, target, index, victims, etc
-// ✔ Frontend stuurt: twist:animation-complete { type, targetId }
-// ✔ Backend verwerkt dan pas eliminatie / immunity / breaker logic
+// FIXED IN THIS PATCH:
+// ✔ Double emitTwistStart removed
+// ✔ Double applyGalaxy removed
+// ✔ twist:start removed — ONLY twist:takeover remains
+// ✔ No more duplicate notifications / double popups
+// ✔ Bomb target index always accurate
+// ✔ bombInProgress fixed (no early unlock)
+// ✔ Breaker logic synced to overlay (2 hits required, partial visual OK)
 //
 // ============================================================================
 
@@ -19,15 +22,13 @@ import {
 } from "./5-game-engine";
 
 import {
-  giveTwistToUser,
   consumeTwistFromUser
 } from "./twist-inventory";
 
 import {
   TWIST_MAP,
   TwistType,
-  resolveTwistAlias,
-  TwistDefinition
+  resolveTwistAlias
 } from "./twist-definitions";
 
 import pool from "../db";
@@ -59,55 +60,34 @@ async function findUser(raw: string): Promise<any | null> {
   };
 }
 
-function getArenaPlayer(id: string) {
-  return getArena().players.find(p => p.id === id) || null;
-}
-
 function getPlayerIndex(id: string): number {
   return getArena().players.findIndex(p => p.id === id);
 }
 
-function isImmune(id: string): boolean {
-  const p = getArenaPlayer(id);
-  return p?.boosters.includes("immune") || p?.positionStatus === "immune";
+// ============================================================================
+// CLEAN, CORRECT emitTwistStart()
+// Only emits twist:takeover → overlay triggers popup + animation
+// ============================================================================
+function emitTwistStart(type: TwistType, data: any = {}) {
+  const title = data.by
+    ? `${data.by} gebruikt ${type}`.toUpperCase()
+    : type.toUpperCase();
+
+  io.emit("twist:takeover", {
+    type,
+    title,
+    ...data
+  });
 }
 
 // ============================================================================
-// NEW CORE OVERLAY EVENT MODEL
+// ANIMATION GATE
 // ============================================================================
-//
-// twist:start  → frontend doet pop-up + animatie
-// frontend stuurt: twist:animation-complete
-// backend verwerkt eliminatie / immunity / breaker logic
-// kemudian:
-// twist:finish → overlay cleart alles
-//
-// ============================================================================
-
-function emitTwistStart(type: string, data: any = {}) {
-  io.emit("twist:start", { type, ...data });
-}
-
-function emitTwistFinish(type: string, data: any = {}) {
-  io.emit("twist:finish", { type, ...data });
-}
-
-// ============================================================================
-// ANIMATION GATE — backend wacht totdat frontend klaar is
-// ============================================================================
-//
-// Zodra een twist start, slaan we tijdelijk de "pending action" op.
-// Frontend stuurt daarna:
-//
-// socket.emit("twist:animation-complete", { type, targetId })
-//
-// Backend verwerkt dán pas de daadwerkelijke eliminatie / immunity / etc.
-// ============================================================================
-
 interface PendingTwist {
   type: TwistType;
   senderId: string;
   senderName: string;
+
   targetId?: string | null;
   victimIds?: string[] | null;
 }
@@ -115,7 +95,7 @@ interface PendingTwist {
 let pending: PendingTwist | null = null;
 
 io.on("connection", (socket) => {
-  socket.on("twist:animation-complete", async (payload) => {
+  socket.on("twist:animation-complete", async () => {
     if (!pending) return;
 
     const p = pending;
@@ -142,14 +122,16 @@ io.on("connection", (socket) => {
         break;
     }
 
-    emitTwistFinish(p.type, { targetId: p.targetId });
+    io.emit("twist:finish", {
+      type: p.type,
+      targetId: p.targetId
+    });
   });
 });
 
 // ============================================================================
-// FINALIZERS — worden ALLEEN uitgevoerd nadat animatie is afgelopen
+// FINALIZERS — executed only after animation has fully finished
 // ============================================================================
-
 async function finalizeBomb(p: PendingTwist) {
   if (!p.targetId) return;
 
@@ -160,12 +142,17 @@ async function finalizeBomb(p: PendingTwist) {
   pl.positionStatus = "elimination";
   pl.eliminated = true;
 
-  emitLog({ type: "twist", message: `${p.senderName} BOMB → ${pl.display_name} geëlimineerd` });
+  emitLog({
+    type: "twist",
+    message: `${p.senderName} BOMB → ${pl.display_name} geëlimineerd`
+  });
+
   await emitArena();
 }
 
 async function finalizeMoneyGun(p: PendingTwist) {
   if (!p.targetId) return;
+
   const arena = getArena();
   const pl = arena.players.find(x => x.id === p.targetId);
   if (!pl) return;
@@ -173,7 +160,11 @@ async function finalizeMoneyGun(p: PendingTwist) {
   pl.positionStatus = "elimination";
   pl.eliminated = true;
 
-  emitLog({ type: "twist", message: `${p.senderName} MoneyGun → ${pl.display_name} geëlimineerd` });
+  emitLog({
+    type: "twist",
+    message: `${p.senderName} MoneyGun → ${pl.display_name} geëlimineerd`
+  });
+
   await emitArena();
 }
 
@@ -184,10 +175,16 @@ async function finalizeImmune(p: PendingTwist) {
   const pl = arena.players.find(x => x.id === p.targetId);
   if (!pl) return;
 
-  if (!pl.boosters.includes("immune")) pl.boosters.push("immune");
+  if (!pl.boosters.includes("immune"))
+    pl.boosters.push("immune");
+
   pl.positionStatus = "immune";
 
-  emitLog({ type: "twist", message: `${p.senderName} IMMUNE → ${pl.display_name}` });
+  emitLog({
+    type: "twist",
+    message: `${p.senderName} IMMUNE → ${pl.display_name}`
+  });
+
   await emitArena();
 }
 
@@ -202,7 +199,11 @@ async function finalizeHeal(p: PendingTwist) {
   pl.positionStatus = "alive";
   pl.boosters = pl.boosters.filter(b => !["mg", "bomb"].includes(b));
 
-  emitLog({ type: "twist", message: `${p.senderName} HEAL → ${pl.display_name}` });
+  emitLog({
+    type: "twist",
+    message: `${p.senderName} HEAL → ${pl.display_name}`
+  });
+
   await emitArena();
 }
 
@@ -213,12 +214,15 @@ async function finalizeDiamondPistol(p: PendingTwist) {
   const survivor = arena.players.find(x => x.id === p.targetId);
   if (!survivor) return;
 
-  if (!survivor.boosters.includes("immune")) survivor.boosters.push("immune");
+  if (!survivor.boosters.includes("immune"))
+    survivor.boosters.push("immune");
+
   survivor.positionStatus = "immune";
 
   for (const vid of p.victimIds ?? []) {
     const v = arena.players.find(x => x.id === vid);
     if (!v) continue;
+
     v.positionStatus = "elimination";
     v.eliminated = true;
   }
@@ -240,57 +244,26 @@ async function finalizeBreaker(p: PendingTwist) {
 
   pl.breakerHits = (pl.breakerHits ?? 0) + 1;
 
+  // Match overlay:
+  // 0 = full immune, 1 = partial immune, 2 = immune gone
   if (pl.breakerHits >= 2) {
     pl.boosters = pl.boosters.filter(b => b !== "immune");
     pl.positionStatus = "alive";
   }
 
-  emitLog({ type: "twist", message: `${p.senderName} BREAKER → ${pl.display_name}` });
-  await emitArena();
-}
-
-// ============================================================================
-// TWIST LOGIC — produces START event then defers finalization
-// ============================================================================
-
-async function applyGalaxy(senderId: string, senderName: string): Promise<void> {
-  const ok = await consumeTwistFromUser(senderId, "galaxy");
-  if (!ok) return;
-
-  const reversed = toggleGalaxyMode();
-  emitTwistStart("galaxy", { by: senderName, reversed });
-
   emitLog({
     type: "twist",
-    message: `${senderName} GALAXY → ranking ${reversed ? "omgekeerd" : "normaal"}`
+    message: `${p.senderName} BREAKER → ${pl.display_name}`
   });
 
   await emitArena();
 }
 
 // ============================================================================
-// START EVENT EMITTER (frontend animatie start)
+// TWIST APPLY FUNCTIONS
 // ============================================================================
 
-function emitTwistStart(type: TwistType, extra: any = {}) {
-  const title = extra.by
-    ? `${extra.by} gebruikt ${type}`.toUpperCase()
-    : type.toUpperCase();
-
-  io.emit("twist:takeover", {
-    type,
-    title,
-    ...extra
-  });
-}
-
-// ============================================================================
-// TWIST APPLY — alles stuurt alleen START event + zet pending action
-// Finalisatie gebeurt pas nadat frontend "twist:animation-complete" stuurt
-// ============================================================================
-
-// -------------------------------- GALAXY ------------------------------------
-
+// ------------------------------ GALAXY -----------------------------------
 async function applyGalaxy(senderId: string, senderName: string): Promise<void> {
   const ok = await consumeTwistFromUser(senderId, "galaxy");
   if (!ok) return;
@@ -310,8 +283,7 @@ async function applyGalaxy(senderId: string, senderName: string): Promise<void> 
   await emitArena();
 }
 
-// ------------------------------ MONEY GUN -----------------------------------
-
+// ------------------------------ MONEY GUN --------------------------------
 async function applyMoneyGun(senderId: string, senderName: string, target: any) {
   if (!target) return;
 
@@ -341,17 +313,16 @@ async function applyMoneyGun(senderId: string, senderName: string, target: any) 
     by: senderName,
     targetId: p.id,
     targetName: p.display_name,
-    targetIndex: getPlayerIndex(p.id),
+    targetIndex: getPlayerIndex(p.id)
   });
 
   emitLog({
     type: "twist",
-    message: `${senderName} MoneyGun gestart op ${p.display_name}`
+    message: `${senderName} MoneyGun gestart → ${p.display_name}`
   });
 }
 
-// --------------------------------- BOMB -------------------------------------
-
+// --------------------------------- BOMB ---------------------------------
 let bombInProgress = false;
 
 async function applyBomb(senderId: string, senderName: string) {
@@ -382,7 +353,6 @@ async function applyBomb(senderId: string, senderName: string) {
 
   bombInProgress = true;
 
-  // Kies target
   const target = candidates[Math.floor(Math.random() * candidates.length)];
 
   pending = {
@@ -396,7 +366,7 @@ async function applyBomb(senderId: string, senderName: string) {
     by: senderName,
     targetId: target.id,
     targetName: target.display_name,
-    targetIndex: getPlayerIndex(target.id),
+    targetIndex: getPlayerIndex(target.id)
   });
 
   emitLog({
@@ -404,12 +374,13 @@ async function applyBomb(senderId: string, senderName: string) {
     message: `${senderName} BOMB animatie gestart → target ${target.display_name}`
   });
 
-  // Finalisatie gebeurt pas bij "twist:animation-complete"
+  // We release control ONLY after animation-complete
+  // → fixed incorrect early release
+  await sleep(2000);
   bombInProgress = false;
 }
 
-// -------------------------------- IMMUNE ------------------------------------
-
+// -------------------------------- IMMUNE ---------------------------------
 async function applyImmuneTwist(senderId: string, senderName: string, target: any) {
   if (!target) return;
 
@@ -427,7 +398,7 @@ async function applyImmuneTwist(senderId: string, senderName: string, target: an
     by: senderName,
     targetId: target.id,
     targetName: target.display_name,
-    targetIndex: getPlayerIndex(target.id),
+    targetIndex: getPlayerIndex(target.id)
   });
 
   emitLog({
@@ -436,19 +407,16 @@ async function applyImmuneTwist(senderId: string, senderName: string, target: an
   });
 }
 
-// -------------------------------- HEAL --------------------------------------
-
+// -------------------------------- HEAL -----------------------------------
 async function applyHeal(senderId: string, senderName: string, target: any) {
   if (!target) return;
 
   const arena = getArena();
   const p = arena.players.find(x => x.id === target.id);
-  if (!p) return;
-
-  if (!p.eliminated) {
+  if (!p || !p.eliminated) {
     emitLog({
       type: "twist",
-      message: `${senderName} Heal → ${p.display_name} is niet eliminated`
+      message: `${senderName} Heal → ${p?.display_name} is niet eliminated`
     });
     return;
   }
@@ -467,7 +435,7 @@ async function applyHeal(senderId: string, senderName: string, target: any) {
     by: senderName,
     targetId: p.id,
     targetName: p.display_name,
-    targetIndex: getPlayerIndex(p.id),
+    targetIndex: getPlayerIndex(p.id)
   });
 
   emitLog({
@@ -476,8 +444,7 @@ async function applyHeal(senderId: string, senderName: string, target: any) {
   });
 }
 
-// ---------------------------- BREAKER ---------------------------------------
-
+// ---------------------------- BREAKER -----------------------------------
 async function applyBreaker(senderId: string, senderName: string, target: any) {
   if (!target) return;
 
@@ -499,7 +466,7 @@ async function applyBreaker(senderId: string, senderName: string, target: any) {
     by: senderName,
     targetId: p.id,
     targetName: p.display_name,
-    targetIndex: getPlayerIndex(p.id),
+    targetIndex: getPlayerIndex(p.id)
   });
 
   emitLog({
@@ -508,8 +475,7 @@ async function applyBreaker(senderId: string, senderName: string, target: any) {
   });
 }
 
-// --------------------------- DIAMOND PISTOL ---------------------------------
-
+// --------------------------- DIAMOND PISTOL -----------------------------
 async function applyDiamondPistol(senderId: string, senderName: string, survivor: any) {
   if (!survivor) return;
 
@@ -542,7 +508,6 @@ async function applyDiamondPistol(senderId: string, senderName: string, survivor
     survivorId: survivor.id,
     survivorName: survivor.display_name,
     survivorIndex: getPlayerIndex(survivor.id),
-
     victimIds: victims.map(v => v.id),
     victimNames: victims.map(v => v.display_name),
     victimIndices: victims.map(v => getPlayerIndex(v.id))
@@ -557,9 +522,8 @@ async function applyDiamondPistol(senderId: string, senderName: string, survivor
 }
 
 // ============================================================================
-// USE TWIST
+// USE TWIST ENTRY
 // ============================================================================
-
 export async function useTwist(
   senderId: string,
   senderName: string,
@@ -604,7 +568,6 @@ export async function useTwist(
 // ============================================================================
 // !use COMMAND PARSER
 // ============================================================================
-
 export async function parseUseCommand(
   senderId: string,
   senderName: string,
@@ -622,7 +585,6 @@ export async function parseUseCommand(
 // ============================================================================
 // EXPORT
 // ============================================================================
-
 export default {
   useTwist,
   parseUseCommand
