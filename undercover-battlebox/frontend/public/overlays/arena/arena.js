@@ -1,9 +1,8 @@
 // ============================================================================
 // arena.js — BattleBox Arena Overlay
-// BUILD v10.2 — Galaxy Blur/Spin + TRUE Bomb Roulette + Immune Logic
-// + FIX: Animations also trigger from twist:message (admin dashboard support)
-// + DEBUG LOGGING
-// + SOCKET BRIDGE PATCH (takeover → twist:message)
+// BUILD v10.3 — Adds twist:animation-complete backend sync
+// Galaxy Blur/Spin + TRUE Bomb Roulette + Immune Logic
+// + socket bridge patches
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -20,7 +19,7 @@ import {
 
 import FX from "/overlays/shared/animation-engine.js";
 
-// FX imports (kept)
+// FX imports (existing)
 import MoneyGunFX from "/overlays/shared/fx/MoneyGunFX.js";
 import DiamondBlastFX from "/overlays/shared/fx/DiamondBlastFX.js";
 import BombFX from "/overlays/shared/fx/BombFX.js";
@@ -32,8 +31,6 @@ import GalaxyFX from "/overlays/shared/fx/GalaxyFX.js";
 import BeamFX from "/overlays/shared/fx/BeamFX.js";
 
 import { initTwistMessage } from "/overlays/arena/twistMessage.js";
-
-// SOCKET BRIDGE
 import { getSocket } from "/overlays/shared/socket.js";
 
 initEventRouter();
@@ -43,14 +40,12 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 /* ============================================================================ */
-/* SOCKET → DOM EVENT BRIDGE                                                   */
+/* SOCKET BRIDGE                                                                 */
 /* ============================================================================ */
 
 const socket = getSocket();
 
 socket.on("twist:takeover", (p) => {
-  console.log("%c[BRIDGE] takeover → twist:message", "color:#0f0", p);
-
   document.dispatchEvent(
     new CustomEvent("twist:message", {
       detail: {
@@ -68,6 +63,24 @@ socket.on("twist:takeover", (p) => {
 socket.on("twist:clear", () => {
   document.dispatchEvent(new Event("twist:clear"));
 });
+
+/* ============================================================================ */
+/* 🔥 PATCH — UNIVERSAL ANIMATION COMPLETE HELPERS                              */
+/* ============================================================================ */
+
+function emitAnimationDone(type, targetIndex) {
+  const player = arenaStore.get().players[targetIndex];
+  if (!player) return;
+
+  socket.emit("twist:animation-complete", {
+    type,
+    targetId: player.id
+  });
+}
+
+function emitAnimationDoneDirect(type, targetId) {
+  socket.emit("twist:animation-complete", { type, targetId });
+}
 
 /* ============================================================================ */
 /* DOM refs                                                                     */
@@ -271,59 +284,50 @@ function triggerGalaxyBlurSpin() {
     document.body.classList.remove("twist-galaxy-blur");
     document.body.classList.remove("twist-galaxy-spin");
   }, 2000);
+
+  // 🔥 Optional: later add animation-complete for galaxy
 }
 
-/*  
-  ============================================================================  
-  TRUE ROULETTE BOMB EFFECT (NEW v10.2)
-  - No overlay
-  - 1-by-1 red glow
-  - 4 fast rounds
-  - Stops perfectly on targetIndex
-  ============================================================================  
-*/
+/* ============================================================================ */
+/* TRUE BOMB ROULETTE — 🔥 PATCHED WITH ANIMATION COMPLETE                      */
+/* ============================================================================ */
+
 async function triggerBombEffects(targetIndex) {
   const total = cardRefs.length;
   const rounds = 4;
   const delay = 120;
   let cur = 0;
 
-  console.log("[BOMB] Running roulette… target:", targetIndex);
-
-  // 4 full cycles
   for (let r = 0; r < rounds; r++) {
     for (let i = 0; i < total; i++) {
-      // Reset all glows
       cardRefs.forEach(ref => ref.el.classList.remove("card-glow-red"));
-
-      // Highlight current
       cardRefs[cur].el.classList.add("card-glow-red");
-
       await new Promise(res => setTimeout(res, delay));
-
       cur = (cur + 1) % total;
     }
   }
 
-  // STOP EXACT OP TARGET
+  // Final stop
   if (targetIndex != null && cardRefs[targetIndex]) {
-    console.log("[BOMB] Stopped at target:", targetIndex);
+    const target = cardRefs[targetIndex].el;
 
     cardRefs.forEach(ref => ref.el.classList.remove("card-glow-red"));
-
-    const target = cardRefs[targetIndex].el;
     target.classList.add("card-glow-red");
     target.classList.add("bomb-hit");
 
     setTimeout(() => {
       target.classList.remove("bomb-hit");
       target.classList.remove("card-glow-red");
+
+      // 🔥 PATCH — Bomb finished → backend may eliminate
+      emitAnimationDone("bomb", targetIndex);
+
     }, 1500);
   }
 }
 
 /* ============================================================================ */
-/* Galaxy shuffle (existing lite mode)                                          */
+/* Galaxy shuffle                                                                */
 /* ============================================================================ */
 
 async function runGalaxyShuffle() {
@@ -349,13 +353,11 @@ async function runGalaxyShuffle() {
 }
 
 /* ============================================================================ */
-/* MAIN TWIST HANDLER                                                           */
+/* MAIN TWIST HANDLER — 🔥 Patches inserted                                      */
 /* ============================================================================ */
 
 arenaTwistStore.subscribe(async (st) => {
   if (!st.active || !st.type) return;
-
-  console.log("%c[ARENA TWIST]", "color:#fa0", st.payload);
 
   hidePlayerCards();
 
@@ -374,7 +376,9 @@ arenaTwistStore.subscribe(async (st) => {
   }
 
   if (st.type === "galaxy") triggerGalaxyBlurSpin();
-  if (st.type === "bomb") await triggerBombEffects(st.payload?.targetIndex ?? null);
+
+  if (st.type === "bomb")
+    await triggerBombEffects(st.payload?.targetIndex ?? null);
 
   switch (st.type) {
     case "galaxy":
@@ -394,14 +398,12 @@ arenaTwistStore.subscribe(async (st) => {
 });
 
 /* ============================================================================ */
-/* GLOBAL twist:message LISTENER                                                */
+/* twist:message (fallback popups & extra triggers)                                */
 /* ============================================================================ */
 
 document.addEventListener("twist:message", async (ev) => {
   const t = ev.detail;
   if (!t || !t.type) return;
-
-  console.log("%c[GLOBAL TWIST TRIGGER]", "color:#0af", t);
 
   if (t.type === "galaxy") triggerGalaxyBlurSpin();
   if (t.type === "bomb") await triggerBombEffects(t.targetIndex ?? null);
