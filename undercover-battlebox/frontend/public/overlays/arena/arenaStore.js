@@ -1,6 +1,7 @@
 // ============================================================================
-// arenaStore.js — BattleBox Arena Overlay Store (v9.0 NO-RACE QUEUE EDITION)
+// arenaStore.js — BattleBox Arena Overlay Store (v9.1 DUPLICATE-PROOF EDITION)
 // FULL TWIST QUEUE REWRITE — 100% ORDER GUARANTEED + HARD RESET SYSTEM
+// + NEW: Duplicate protection + processing lock
 // ============================================================================
 
 import { createStore } from "/overlays/shared/stores.js";
@@ -94,7 +95,7 @@ export function renderHudProgress(state, ringEl) {
 }
 
 // ============================================================================
-// TWIST STORE — v9.0 (ULTRA-STABLE QUEUE ENGINE + HARD RESET SYSTEM)
+// TWIST STORE — v9.1 (ULTRA-STABLE + NO DUPLICATES)
 // ============================================================================
 export const arenaTwistStore = createStore({
   active: false,
@@ -104,8 +105,14 @@ export const arenaTwistStore = createStore({
   payload: null,
   queue: [],
 
-  lock: false, // prevents race conditions
+  lock: false,
+  processing: false, // NEW: internal twist guard
 });
+
+// ============================================================================
+// NEW — Duplicate twist prevention
+// ============================================================================
+let lastArenaTwistHash = null;
 
 // ============================================================================
 // HARD RESET — NEVER allow lingering Galaxy / stuck queue
@@ -119,7 +126,10 @@ arenaTwistStore.resetAll = () => {
     payload: null,
     queue: [],
     lock: false,
+    processing: false,
   });
+
+  lastArenaTwistHash = null; // wipe duplicate memory
 
   // SAFETY: Clear FX engine + galaxy chaos if available
   try {
@@ -142,9 +152,12 @@ arenaTwistStore.resetAll = () => {
 function processNextTwist() {
   const st = arenaTwistStore.get();
 
+  if (st.processing) return;
   if (st.lock) return;
   if (st.active) return;
   if (!st.queue.length) return;
+
+  arenaTwistStore.set({ processing: true });
 
   const next = st.queue[0];
   arenaTwistStore.set({ lock: true });
@@ -162,6 +175,7 @@ function processNextTwist() {
   arenaTwistStore.set({
     queue: st.queue.slice(1),
     lock: false,
+    processing: false,
   });
 }
 
@@ -181,6 +195,14 @@ function enqueue(entry) {
 // ============================================================================
 arenaTwistStore.activate = (payload) => {
   if (!payload) return;
+
+  // NEW: Duplicate twist hash blocker
+  const hash = `${payload.type}|${payload.title}|${Math.floor(Date.now() / 900)}`;
+  if (hash === lastArenaTwistHash) {
+    console.warn("[ARENA TWIST] Duplicate activate blocked:", hash);
+    return;
+  }
+  lastArenaTwistHash = hash;
 
   enqueue({
     type: payload.type ?? null,
