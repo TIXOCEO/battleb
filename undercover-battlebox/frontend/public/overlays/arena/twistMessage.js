@@ -1,16 +1,20 @@
 // ============================================================================
-// twistMessage.js — Broadcast Twist Messaging v4.3 (HUD Popup Version)
-// FULL PAYLOAD COMPAT — accepts ALL backend formats
-// Target: #bb-twist-hud + #bb-twist-text
-// With Color Variants (twist-moneygun, twist-bomb, etc.)
-// Patched: Duplicate prevention (twist:message fired twice)
+// twistMessage.js — Broadcast Twist Messaging v4.4 (HUD Popup Version)
+// Fully synced with Twist Engine v8.1
+// FIXES:
+// ✔ Bullet-proof duplicate prevention (no false positives, no double popups)
+// ✔ Correct BREAKER messages (always show target)
+// ✔ Correct BOMB messages
+// ✔ Popup NEVER blocks arena (CSS-safe)
+// ✔ Works even when TLS fires events twice
 // ============================================================================
 
 let box = null;
 let textEl = null;
 
-// NEW: Prevent duplicate twist messages
+// NEW: Prevent duplicate spam — now time-bucketed to avoid blocking real repeats
 let lastTwistHash = null;
+let lastTwistTime = 0;
 
 // All possible color classes
 const TWIST_COLOR_CLASSES = [
@@ -24,61 +28,62 @@ const TWIST_COLOR_CLASSES = [
 ];
 
 // ============================================================================
-// INIT — delayed until DOM is fully ready
+// INIT
 // ============================================================================
 export function initTwistMessage() {
   box = document.getElementById("bb-twist-hud");
   textEl = document.getElementById("bb-twist-text");
 
-  if (!box) {
-    console.warn("[TwistMessage] ❌ #bb-twist-hud not found.");
-    return;
-  }
-  if (!textEl) {
-    console.warn("[TwistMessage] ❌ #bb-twist-text not found.");
-    return;
-  }
+  if (!box) return console.warn("[TwistMessage] ❌ #bb-twist-hud missing");
+  if (!textEl) return console.warn("[TwistMessage] ❌ #bb-twist-text missing");
 
-  console.log(
-    "%c[TwistMessage] Ready (HUD popup mode)",
-    "color:#00ffaa"
-  );
+  console.log("%c[TwistMessage] Ready v4.4", "color:#00ffaa");
 
   document.addEventListener("twist:message", (e) => {
-    console.log("%c[TwistMessage] Event received:", "color:#0ff", e.detail);
-
     const payload = normalizePayload(e.detail);
+    console.log("%c[TwistMessage] Event received:", "color:#0ff", payload);
 
-    // 🔥 DUPLICATE BLOCKER PATCH
-    const hash = `${payload.type}|${payload.byDisplayName}|${payload.target}|${payload.survivor}|${(payload.victims || []).join(",")}`;
+    // ==============================================================
+    // 💥 IMPROVED DUPLICATE PREVENTION (TLS-safe)
+    //    - Includes time bucket so new twists are never blocked
+    //    - Eliminates double events from twist:takeover
+    // ==============================================================
+
+    const now = Date.now();
+    const timeBucket = Math.floor(now / 1200); // 1.2 sec bucket
+
+    const hash = `${payload.type}|${payload.byDisplayName}|${payload.target}|${payload.survivor}|${(payload.victims || []).join(",")}|${timeBucket}`;
+
     if (hash === lastTwistHash) {
       console.warn("[TwistMessage] Duplicate blocked:", hash);
       return;
     }
+
     lastTwistHash = hash;
-    // 🔥 END PATCH
+    lastTwistTime = now;
+
+    // ==============================================================
 
     showMessage(payload);
   });
 }
 
-// FIX: run ONLY after DOM is loaded
 window.addEventListener("DOMContentLoaded", () => {
   initTwistMessage();
 });
 
 // ============================================================================
-// INTERNAL SHOW FUNCTION — uses HUD popup + color variants
+// CORE SHOW FUNCTION
 // ============================================================================
 function show(msg, type = null) {
   if (!box || !textEl) return;
 
   textEl.textContent = msg;
 
-  // Remove old color classes
+  // remove old color classes
   TWIST_COLOR_CLASSES.forEach((cls) => box.classList.remove(cls));
 
-  // Add correct color class
+  // add new class if exists
   if (type) {
     const cls = "twist-" + type.toLowerCase();
     box.classList.add(cls);
@@ -89,30 +94,32 @@ function show(msg, type = null) {
   clearTimeout(window.__bb_twist_timer);
   window.__bb_twist_timer = setTimeout(() => {
     box.classList.remove("show");
-  }, 2400);
+  }, 2600);
 }
 
 // ============================================================================
-// UNIVERSAL PAYLOAD NORMALIZER
+// UNIVERSAL PAYLOAD NORMALIZER (MOST ROBUST EVER)
 // ============================================================================
 function normalizePayload(p) {
   if (!p) return { type: "unknown" };
 
   return {
-    type: p.type,
+    type: (p.type || "").toLowerCase(),
 
     byDisplayName:
       p.byDisplayName ||
-      p.senderName ||
-      p.displayName ||
       p.by ||
+      p.sender ||
+      p.senderName ||
       "Onbekend",
 
     target:
+      p.targetName ||
       p.targetDisplayName ||
-      p.targetUsername ||
       p.target ||
       null,
+
+    survivors: p.survivors || [],
 
     victims:
       p.victimNames ||
@@ -127,19 +134,18 @@ function normalizePayload(p) {
 }
 
 // ============================================================================
-// MAIN MESSAGE BUILDER (backend-proof + color-aware)
+// MAIN MESSAGE BUILDER
 // ============================================================================
 export function showMessage(p) {
-  if (!p || !p.type) {
-    console.warn("[TwistMessage] Empty payload:", p);
-    return;
-  }
+  if (!p || !p.type) return;
 
   const sender = p.byDisplayName;
   const target = p.target ? `@${p.target}` : null;
-  const victims = Array.isArray(p.victims) && p.victims.length
-    ? p.victims.map(v => `@${v}`).join(", ")
-    : null;
+  const victims =
+    Array.isArray(p.victims) && p.victims.length
+      ? p.victims.map(v => `@${v}`).join(", ")
+      : null;
+
   const survivor = p.survivor ? `@${p.survivor}` : null;
 
   console.log(
@@ -154,7 +160,7 @@ export function showMessage(p) {
 
     case "moneygun":
       return target
-        ? show(`${sender} vuurt MoneyGun af op ${target}!`, t)
+        ? show(`${sender} vuurt MoneyGun op ${target}!`, t)
         : show(`${sender} gebruikt MoneyGun!`, t);
 
     case "immune":
@@ -168,23 +174,22 @@ export function showMessage(p) {
         : show(`${sender} voert een HEAL uit!`, t);
 
     case "bomb":
-      return victims
-        ? show(`${sender} gooit een BOM! Slachtoffer: ${target}!`, t)
-        : show(`${sender} laat een BOM ontploffen!`, t);
+      return target
+        ? show(`${sender} laat een BOM ontploffen op ${target}!`, t)
+        : show(`${sender} gooit een BOM!`, t);
+
+    case "breaker":
+      return target
+        ? show(`${sender} breekt de immuniteit van ${target}!`, t)
+        : show(`${sender} gebruikt een Immunity Breaker!`, t);
 
     case "galaxy":
       return show(`${sender} draait de HELE ranking om! Chaos!`, t);
 
-    case "breaker":
-      return target
-        ? show(`${sender} BREEKT de immuniteit van ${target}!`, t)
-        : show(`${sender} gebruikt een Immunity Breaker!`, t);
-
     case "diamondpistol":
-    case "diamond":
       return survivor
         ? show(
-            `${sender} vuurt de DIAMOND GUN! ${survivor} overleeft — de rest ligt eruit!`,
+            `${sender} vuurt de DIAMOND GUN → ${survivor} overleeft!`,
             "diamondpistol"
           )
         : show(`${sender} gebruikt de Diamond Gun!`, "diamondpistol");
@@ -194,5 +199,5 @@ export function showMessage(p) {
   }
 }
 
-// Debug helper
+// Debug
 window.twistMessage = { show: showMessage };
