@@ -1,12 +1,16 @@
 // ============================================================================
-// twistMessage.js — Broadcast Twist Messaging v4.2 (HUD Popup Version)
+// twistMessage.js — Broadcast Twist Messaging v4.3 (HUD Popup Version)
 // FULL PAYLOAD COMPAT — accepts ALL backend formats
 // Target: #bb-twist-hud + #bb-twist-text
 // With Color Variants (twist-moneygun, twist-bomb, etc.)
+// Patched: Duplicate prevention (twist:message fired twice)
 // ============================================================================
 
 let box = null;
 let textEl = null;
+
+// NEW: Prevent duplicate twist messages
+let lastTwistHash = null;
 
 // All possible color classes
 const TWIST_COLOR_CLASSES = [
@@ -41,13 +45,19 @@ export function initTwistMessage() {
   );
 
   document.addEventListener("twist:message", (e) => {
-    console.log(
-      "%c[TwistMessage] Event received:",
-      "color:#0ff",
-      e.detail
-    );
+    console.log("%c[TwistMessage] Event received:", "color:#0ff", e.detail);
 
     const payload = normalizePayload(e.detail);
+
+    // 🔥 DUPLICATE BLOCKER PATCH
+    const hash = `${payload.type}|${payload.byDisplayName}|${payload.target}|${payload.survivor}|${(payload.victims || []).join(",")}`;
+    if (hash === lastTwistHash) {
+      console.warn("[TwistMessage] Duplicate blocked:", hash);
+      return;
+    }
+    lastTwistHash = hash;
+    // 🔥 END PATCH
+
     showMessage(payload);
   });
 }
@@ -144,7 +154,7 @@ export function showMessage(p) {
 
     case "moneygun":
       return target
-        ? show(`${sender} markeert ${target} voor ELIMINATIE!`, t)
+        ? show(`${sender} vuurt MoneyGun af op ${target}!`, t)
         : show(`${sender} gebruikt MoneyGun!`, t);
 
     case "immune":
@@ -159,7 +169,7 @@ export function showMessage(p) {
 
     case "bomb":
       return victims
-        ? show(`${sender} gooit een BOM! Slachtoffer: ${victims}!`, t)
+        ? show(`${sender} gooit een BOM! Slachtoffer: ${target}!`, t)
         : show(`${sender} laat een BOM ontploffen!`, t);
 
     case "galaxy":
@@ -167,7 +177,7 @@ export function showMessage(p) {
 
     case "breaker":
       return target
-        ? show(`${sender} BREKT de immuniteit van ${target}!`, t)
+        ? show(`${sender} BREEKT de immuniteit van ${target}!`, t)
         : show(`${sender} gebruikt een Immunity Breaker!`, t);
 
     case "diamondpistol":
