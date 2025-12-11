@@ -38,9 +38,7 @@
   inset: 0;
   z-index: 300;
 
-  /* MUST stay transparent — prevents grey overlay */
   background: transparent !important;
-
   display: none !important;
   pointer-events: none !important;
 }
@@ -208,6 +206,7 @@
 /* ========================================================================== */
 /* BREAKER HIT */
 /* ========================================================================== */
+
 .breaker-hit {
   animation: breakerFlash 0.9s ease-out forwards;
   position: relative;
@@ -319,18 +318,30 @@
 }
 
 /* ========================================================================== */
-/* BOMB HIT */
+/* BOMB FAST-SCAN — NEW */
 /* ========================================================================== */
 
-.bomb-hit {
-  animation: bombCardFlash 1.4s ease-out forwards;
+/* QUICK RED FLASH FOR EACH CARD */
+.bomb-scan {
+  animation: bombScanFlash 0.1s ease-out forwards;
 }
 
-@keyframes bombCardFlash {
-  0%   { filter:brightness(2.5) saturate(2.2); }
-  25%  { filter:brightness(3.2) saturate(2.8); transform:scale(1.05); }
-  80%  { filter:brightness(0.5) saturate(0.4); opacity:0.4; }
-  100% { filter:brightness(0.5) saturate(0.4); opacity:0.3; }
+@keyframes bombScanFlash {
+  0%   { filter:brightness(2.2) saturate(2.2); opacity:1; }
+  50%  { filter:brightness(3.5) saturate(3.0); opacity:0.9; transform:scale(1.05); }
+  100% { filter:brightness(1) saturate(1); opacity:1; transform:scale(1); }
+}
+
+/* FINAL IMPACT ON TARGET */
+.bomb-final-hit {
+  animation: bombFinalHit 0.9s ease-out forwards;
+}
+
+@keyframes bombFinalHit {
+  0%   { filter:brightness(3.5) saturate(3.2); opacity:1; transform:scale(1.1); }
+  40%  { filter:brightness(4) saturate(3.5); opacity:0.7; transform:scale(1.15); }
+  80%  { filter:brightness(0.5) saturate(0.4); opacity:0.35; transform:scale(0.95); }
+  100% { filter:brightness(0.5) saturate(0.4); opacity:0.3; transform:scale(0.9); }
 }
 
 /* ========================================================================== */
@@ -408,74 +419,22 @@ body.twist-galaxy-spin .bb-player-card {
 }
 
 /* ========================================================================== */
-/* BOMB ROULETTE */
+/* BEAM — DISABLED (legacy kept for compatibility) */
 /* ========================================================================== */
 
-#bomb-roulette {
-  position: absolute;
-  inset: 0;
-  z-index: 50000;
-  pointer-events: none;
-  opacity: 0;
-
-  background: radial-gradient(circle,
-    rgba(255,0,0,0.35),
-    rgba(60,0,0,0.8)
-  );
-
-  transition: opacity 0.2s ease-out;
-}
-
-#bomb-roulette.active {
-  opacity: 1;
-}
-
 #roulette-beam {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 99999;
-  border-radius: 50%;
-  opacity: 0;
-  transform-origin: center;
-  mix-blend-mode: screen;
-
-  background: conic-gradient(
-    rgba(255,50,50,0) 0deg,
-    rgba(255,60,60,0.75) 40deg,
-    rgba(255,30,30,0) 80deg,
-    rgba(255,20,20,0) 360deg
-  );
-
-  filter: blur(18px);
-  transition: opacity .35s ease-out,
-    transform .12s linear;
-}
-
-/* active beam */
-#roulette-beam.active {
-  opacity: 1;
-}
-
-/* final reset state */
-#roulette-beam.done,
-#roulette-beam.reset {
-  opacity: 0 !important;
-  transform: rotate(0deg) !important;
-  transition: opacity .2s ease-out,
-    transform .2s ease-out;
+  display:none !important;
+  opacity:0 !important;
+  pointer-events:none !important;
+  transform:none !important;
 }
 
 /* ========================================================================== */
 /* FADE */
 /* ========================================================================== */
 
-#arena-players.fade-out {
-  opacity: 0;
-}
-#arena-players.fade-in {
-  opacity: 1;
-}
+#arena-players.fade-out { opacity: 0; }
+#arena-players.fade-in  { opacity: 1; }
 
 /* ========================================================================== */
 /* TWIST POPUP */
@@ -486,7 +445,6 @@ body.twist-galaxy-spin .bb-player-card {
   inset: 0;
   z-index: 2000000000;
 
-  /* PATCH: NO DARK BACKGROUND */
   background: transparent !important;
 
   display: flex;
