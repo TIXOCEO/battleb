@@ -49,8 +49,8 @@
 /* CENTRAL HUD */
 /* ========================================================================== */
 .bb-hud {
-  width: 350px;
-  height: 350px;
+  width: 300px;
+  height: 300px;
   position: absolute;
   z-index: 100;
   top: 50%;
