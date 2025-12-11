@@ -182,7 +182,6 @@ async function recomputePositions() {
 
   if (arena.type === "quarter") {
     if (arena.players.length < 6) {
-      // No danger if < 6
       for (const p of arena.players) {
         if (p.eliminated) p.positionStatus = "elimination";
         else if (p.tempImmune || p.survivorImmune || p.boosters.includes("immune"))
@@ -206,7 +205,6 @@ async function recomputePositions() {
         continue;
       }
 
-      // FIXED danger logic
       if (arena.reverseMode) {
         p.positionStatus = p.score >= threshold ? "danger" : "alive";
       } else {
@@ -541,7 +539,6 @@ export async function endRound(forceEnd: boolean = false) {
         return;
       }
 
-      // Tie logic
       const index = arena.reverseMode ? 0 : total - 1;
       const lowest = arena.players[index].score;
       const doomedTie = arena.players.filter((p) => p.score === lowest);
@@ -575,7 +572,6 @@ export async function endRound(forceEnd: boolean = false) {
         ? arena.players.filter((p) => p.positionStatus === "danger")
         : [];
 
-    // Apply elimination immediately
     for (const p of doomedDanger) {
       p.positionStatus = "elimination";
       p.eliminated = true;
@@ -794,6 +790,20 @@ setInterval(async () => {
 }, 1000);
 
 /* ============================================================================ */
+/*                          FINALIZE ELIMINATION (NEW)                          */
+/* ============================================================================ */
+
+export function finalizeElimination(id: string) {
+  const p = arena.players.find(x => x.id === id);
+  if (!p) return false;
+
+  p.positionStatus = "elimination";
+  p.eliminated = true;
+
+  return true;
+}
+
+/* ============================================================================ */
 /*                                   EXPORT                                     */
 /* ============================================================================ */
 
@@ -813,4 +823,7 @@ export default {
   resetArena: arenaClear,
   forceSort,
   toggleGalaxyMode,
+
+  // ⭐ Nieuw toegevoegd
+  finalizeElimination,
 };
