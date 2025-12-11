@@ -57,8 +57,11 @@
     <!-- LITE MODE Overlay -->
     <div id="twist-takeover" class="bb-twist-takeover hidden"></div>
 
-    <!-- ⭐ REQUIRED BY arena.js (previously MISSING, caused full twist crash) -->
+    <!-- ⭐ REQUIRED BY arena.js -->
     <div id="twist-target"></div>
+
+    <!-- ⭐ NEW: Bomb roulette overlay (required for simple bomb effect) -->
+    <div id="bomb-roulette"></div>
 
     <!-- Central HUD -->
     <div id="arena-hud" class="bb-hud">
@@ -81,7 +84,7 @@
 
   <!-- 🔥 IMPORTANT: Correct load order -->
 
-  <!-- 1) arena.js FIRST → creates events + dispatches twist:message -->
+  <!-- 1) arena.js FIRST → dispatches twist events -->
   <script type="module" src="/overlays/arena/arena.js"></script>
 
   <!-- 2) twistMessage.js LAST → binds listeners AFTER DOM exists -->
