@@ -199,9 +199,8 @@
 }
 
 /* ========================================================================== */
-/* BREAKER HIT (REPLACES crack.png) */
+/* BREAKER HIT */
 /* ========================================================================== */
-
 .breaker-hit {
   animation: breakerFlash 0.9s ease-out forwards;
   position: relative;
@@ -315,7 +314,6 @@
 /* ========================================================================== */
 /* BOMB HIT */
 /* ========================================================================== */
-
 .bomb-hit {
   animation: bombCardFlash 1.4s ease-out forwards;
 }
@@ -434,16 +432,19 @@ body.twist-galaxy-spin .bb-player-card {
   );
 
   filter: blur(18px);
-  transition: opacity .35s ease-out, transform .1s linear;
+  transition: opacity .35s ease-out, transform .12s linear;
 }
 
 #roulette-beam.active {
   opacity: 1;
 }
 
+/* NEW PATCH — reset state */
+#roulette-beam.done,
 #roulette-beam.reset {
-  opacity:0 !important;
+  opacity: 0 !important;
   transform: rotate(0deg) !important;
+  transition: opacity .2s ease-out, transform .2s ease-out;
 }
 
 /* ========================================================================== */
@@ -466,11 +467,13 @@ body.twist-galaxy-spin .bb-player-card {
   position: absolute;
   inset: 0;
   z-index: 2000000000;
+
+  /* PATCH — remove dark overlay */
+  background: transparent !important;
+
   display: flex;
   justify-content: center;
   align-items: center;
-
-  background: rgba(0, 0, 0, 0.35);
 
   pointer-events: none !important;
   opacity: 0;
@@ -491,6 +494,7 @@ body.twist-galaxy-spin .bb-player-card {
   color: var(--bb-orange);
   padding: 28px 40px;
 
+  /* The ONLY visible popup background */
   background: rgba(10, 10, 15, 0.75);
   border: 4px solid var(--bb-orange);
   border-radius: 16px;
