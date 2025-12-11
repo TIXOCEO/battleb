@@ -69,24 +69,13 @@ function resetArenaRuntime() {
   });
 }
 
-// Twist events DO NOT reset → prevents bomb breaking
-socket.on("twist:takeover", (p) => {
-  document.dispatchEvent(new CustomEvent("twist:message", {
-    detail: {
-      type: p.type || "",
-      byDisplayName: p.by || p.byDisplayName || "Onbekend",
-      target: p.targetName || null,
-      victims: p.victimNames || [],
-      survivor: p.survivorName || null,
-      targetIndex: p.targetIndex ?? null
-    }
-  }));
+// ============================================================================
+// ⭐ FIX: DISABLE LEGACY twist:takeover (CAUSE OF DOUBLE SCANS)
+// event-router.js already handles ALL twist activation
+// ============================================================================
 
-  arenaTwistStore.activate({
-    type: p.type,
-    title: p.title,
-    payload: p
-  });
+socket.on("twist:takeover", (p) => {
+  console.log("[ARENA] twist:takeover ignored (handled by event-router)", p);
 });
 
 socket.on("round:start", () => resetArenaRuntime());
