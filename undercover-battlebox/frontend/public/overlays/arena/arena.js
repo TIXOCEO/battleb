@@ -1,9 +1,8 @@
 // ============================================================================
 // arena.js — BattleBox Arena Overlay
-// BUILD v9.6 — LITE MODE (Galaxy Shuffle + Bomb Roulette) + Fade System
+// BUILD v10.0 — GALAXY SPIN/BLUR + BOMB ROULETTE + IMMUNE LOGIC
 // + DEBUG LOGGING FOR TWIST MESSAGE PAYLOADS
 // + SOCKET BRIDGE PATCH (twist:takeover → twist:message)
-// + SIMPLE NOTIFICATION TRIGGERS (galaxy blur + bomb roulette + immune status)
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -20,7 +19,7 @@ import {
 
 import FX from "/overlays/shared/animation-engine.js";
 
-// FX (unused in lite mode but kept)
+// FX imports (unused but kept)
 import MoneyGunFX from "/overlays/shared/fx/MoneyGunFX.js";
 import DiamondBlastFX from "/overlays/shared/fx/DiamondBlastFX.js";
 import BombFX from "/overlays/shared/fx/BombFX.js";
@@ -30,27 +29,21 @@ import VictimBlastFX from "/overlays/shared/fx/VictimBlastFX.js";
 import SurvivorShieldFX from "/overlays/shared/fx/SurvivorShieldFX.js";
 import GalaxyFX from "/overlays/shared/fx/GalaxyFX.js";
 import BeamFX from "/overlays/shared/fx/BeamFX.js";
-import { enableGalaxyChaos, disableGalaxyChaos } from "/overlays/shared/galaxy-chaos.js";
 
 import { initTwistMessage } from "/overlays/arena/twistMessage.js";
 
-// ⭐ SOCKET BRIDGE IMPORT
+// ⭐ SOCKET BRIDGE
 import { getSocket } from "/overlays/shared/socket.js";
 
 initEventRouter();
-
-/* ============================================================================ */
-/* INIT TWIST MESSAGE AFTER DOM READY                                          */
-/* ============================================================================ */
 
 window.addEventListener("DOMContentLoaded", () => {
   initTwistMessage();
 });
 
 /* ============================================================================ */
-/* ⭐ SOCKET EVENT → DOM EVENT BRIDGE (THE FIX)                                */
+/* SOCKET BRIDGE: twist → DOM                                                  */
 /* ============================================================================ */
-
 const socket = getSocket();
 
 socket.on("twist:takeover", (p) => {
@@ -75,16 +68,7 @@ socket.on("twist:clear", () => {
 });
 
 /* ============================================================================ */
-/* DEBUG LOG #1 — Confirm twist store input                                    */
-/* ============================================================================ */
-
-arenaTwistStore.subscribe((st) => {
-  if (!st.active) return;
-  console.log("%c[TWIST STORE] incoming twist:", "color:#0af", st);
-});
-
-/* ============================================================================ */
-/* DOM refs */
+/* DOM references */
 /* ============================================================================ */
 
 const root = document.getElementById("arena-root");
@@ -95,17 +79,20 @@ const hudRing = document.getElementById("hud-ring-progress");
 const playersContainer = document.getElementById("arena-players");
 const twistOverlay = document.getElementById("twist-takeover");
 
-// NEW: Bomb roulette overlay
-const bombRoulette = document.getElementById("bomb-roulette");
+let bombRoulette = document.getElementById("bomb-roulette");
+if (!bombRoulette) {
+  bombRoulette = document.createElement("div");
+  bombRoulette.id = "bomb-roulette";
+  root.appendChild(bombRoulette);
+}
 
-// FIX: element bestaat niet → crash voorkomen
 const twistTargetLayer =
   document.getElementById("twist-target") || document.createElement("div");
 
 const EMPTY_AVATAR = "https://i.imgur.com/x6v5tkX.jpeg";
 
 /* ============================================================================ */
-/* PlayerCard Fade Controls */
+/* Fade playercards */
 /* ============================================================================ */
 
 function hidePlayerCards() {
@@ -115,10 +102,7 @@ function hidePlayerCards() {
 function showPlayerCards() {
   playersContainer.classList.remove("fade-out");
   playersContainer.classList.add("fade-in");
-
-  setTimeout(() => {
-    playersContainer.classList.remove("fade-in");
-  }, 450);
+  setTimeout(() => playersContainer.classList.remove("fade-in"), 450);
 }
 
 /* ============================================================================ */
@@ -141,19 +125,12 @@ const CENTER_Y = 400;
 const RADIUS = 300;
 
 /* ============================================================================ */
-/* OBS-SAFE Animation Helper */
+/* Animation helpers */
 /* ============================================================================ */
-
-function animateOnce(el, className) {
-  if (!el) return;
-  el.classList.remove(className);
-  void el.offsetWidth;
-  requestAnimationFrame(() => el.classList.add(className));
-}
 
 function waitForAnimation(el) {
   return new Promise((resolve) => {
-    let t = setTimeout(resolve, 500);
+    let t = setTimeout(resolve, 600);
     el.addEventListener(
       "animationend",
       () => {
@@ -166,7 +143,7 @@ function waitForAnimation(el) {
 }
 
 /* ============================================================================ */
-/* Player cards */
+/* Playercards */
 /* ============================================================================ */
 
 const cardRefs = [];
@@ -243,7 +220,7 @@ arenaStore.subscribe((state) => {
 });
 
 /* ============================================================================ */
-/* Status */
+/* Status logic */
 /* ============================================================================ */
 
 function resetStatus(el) {
@@ -253,36 +230,32 @@ function resetStatus(el) {
     "status-immune",
     "status-immune-broken",
     "status-elimination",
-    "immune-full",
-    "immune-broken-half"
+    "status-immune-full",
+    "status-immune-partial"
   );
 }
 
 function applyStatus(el, p) {
   resetStatus(el);
 
-  // elimination
   if (p.eliminated) return el.classList.add("status-elimination");
 
-  // danger
   if (p.positionStatus === "danger") return el.classList.add("status-danger");
 
-  // immune types
   if (p.positionStatus === "immune") {
     if ((p.breakerHits ?? 0) === 0) {
-      return el.classList.add("immune-full");
+      return el.classList.add("status-immune-full");
     }
     if ((p.breakerHits ?? 0) > 0) {
-      return el.classList.add("immune-broken-half");
+      return el.classList.add("status-immune-partial");
     }
   }
 
-  // normal alive
   el.classList.add("status-alive");
 }
 
 /* ============================================================================ */
-/* Card positioning */
+/* Position cards */
 /* ============================================================================ */
 
 function positionCard(el, pos) {
@@ -304,57 +277,96 @@ setInterval(() => {
 
   const sec = Math.floor(remaining / 1000);
   hudTimer.textContent =
-    `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(
-      sec % 60
-    ).padStart(2, "0")}`;
+    `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
 
   renderHudProgress(st, hudRing);
 }, 100);
 
 /* ============================================================================ */
-/* GALAXY SIMPLE BLUR + SPIN */
+/* GALAXY BLUR + SPIN */
 /* ============================================================================ */
 
-function triggerGalaxyBlur() {
-  cardRefs.forEach(ref => ref.el.classList.add("spin-blur"));
+function triggerGalaxyBlurSpin() {
+  document.body.classList.add("twist-galaxy-blur");
+  document.body.classList.add("twist-galaxy-spin");
+
   setTimeout(() => {
-    cardRefs.forEach(ref => ref.el.classList.remove("spin-blur"));
+    document.body.classList.remove("twist-galaxy-blur");
+    document.body.classList.remove("twist-galaxy-spin");
   }, 2000);
 }
 
 /* ============================================================================ */
-/* BOMB: Roulette overlay + explosion on target */
+/* BOMB ROULETTE + TARGET HIT */
 /* ============================================================================ */
 
 function triggerBombEffects(targetIndex) {
-  if (bombRoulette) {
-    bombRoulette.classList.add("active");
-    setTimeout(() => {
-      bombRoulette.classList.remove("active");
+  bombRoulette.classList.add("active");
 
-      if (targetIndex != null && cardRefs[targetIndex]) {
-        const el = cardRefs[targetIndex].el;
-        el.classList.add("exploded");
-        setTimeout(() => el.classList.remove("exploded"), 1600);
-      }
-    }, 2000);
+  setTimeout(() => {
+    bombRoulette.classList.remove("active");
+
+    if (targetIndex != null && cardRefs[targetIndex]) {
+      const card = cardRefs[targetIndex].el;
+      card.classList.add("bomb-hit");
+      setTimeout(() => card.classList.remove("bomb-hit"), 1500);
+    }
+  }, 2000);
+}
+
+/* ============================================================================ */
+/* Galaxy shuffle (existing lite mode) */
+/* ============================================================================ */
+
+async function runGalaxyShuffle() {
+  const duration = 2600;
+  const steps = 14;
+  const interval = duration / steps;
+
+  for (let i = 0; i < steps; i++) {
+    let shuffled = [...POSITIONS].sort(() => Math.random() - 0.5);
+
+    shuffled.forEach((pos, idx) => {
+      positionCard(cardRefs[idx].el, pos);
+      cardRefs[idx].el.classList.add("card-shuffle");
+    });
+
+    await new Promise((res) => setTimeout(res, interval));
+  }
+
+  POSITIONS.forEach((pos, idx) => {
+    positionCard(cardRefs[idx].el, pos);
+    cardRefs[idx].el.classList.remove("card-shuffle");
+  });
+}
+
+/* ============================================================================ */
+/* Bomb roulette (existing lite mode) */
+/* ============================================================================ */
+
+async function runBombRoulette() {
+  const order = [...Array(8).keys(), ...Array(8).keys()];
+
+  for (let idx of order) {
+    let el = cardRefs[idx].el;
+    el.classList.add("card-glow-red");
+    await new Promise((res) => setTimeout(res, 85));
+    el.classList.remove("card-glow-red");
   }
 }
 
 /* ============================================================================ */
-/* MAIN TWIST HANDLER — LITE */
+/* MAIN TWIST HANDLER */
 /* ============================================================================ */
 
 arenaTwistStore.subscribe(async (st) => {
   if (!st.active || !st.type) return;
 
-  console.log("%c[TWIST → MESSAGE] Dispatching twist message:", "color:#fa0", st.payload);
+  console.log("%c[TWIST MESSAGE]", "color:#fa0", st.payload);
 
   hidePlayerCards();
 
-  document.dispatchEvent(
-    new CustomEvent("twist:message", { detail: st.payload })
-  );
+  document.dispatchEvent(new CustomEvent("twist:message", { detail: st.payload }));
 
   FX.clear();
   twistTargetLayer.innerHTML = "";
@@ -368,20 +380,14 @@ arenaTwistStore.subscribe(async (st) => {
     return;
   }
 
-  // SIMPLE EFFECT TRIGGERS
-  if (st.type === "galaxy") {
-    triggerGalaxyBlur();
-  }
-
-  if (st.type === "bomb") {
-    triggerBombEffects(st.payload?.targetIndex ?? null);
-  }
+  // SIMPLE TRIGGERS
+  if (st.type === "galaxy") triggerGalaxyBlurSpin();
+  if (st.type === "bomb") triggerBombEffects(st.payload?.targetIndex ?? null);
 
   switch (st.type) {
     case "galaxy":
       await runGalaxyShuffle();
       break;
-
     case "bomb":
       await runBombRoulette();
       break;
@@ -399,14 +405,14 @@ arenaTwistStore.subscribe(async (st) => {
 });
 
 /* ============================================================================ */
-/* GLOBAL TWIST POPUP FALLBACK */
+/* TWIST POPUP FALLBACK */
 /* ============================================================================ */
 
 if (!window.__bb_twistFallback) {
   window.__bb_twistFallback = true;
 
   document.addEventListener("twist:message", (ev) => {
-    console.log("%c[FALLBACK TWIST] Triggered:", "color:#f0f", ev.detail);
+    console.log("%c[FALLBACK TWIST]", "color:#f0f", ev.detail);
 
     const hud = document.getElementById("bb-twist-hud");
     const text = document.getElementById("bb-twist-text");
@@ -431,10 +437,4 @@ if (!window.__bb_twistFallback) {
 }
 
 /* ============================================================================ */
-/* EXPORT */
-/* ============================================================================ */
-
-export default {
-  positionCard,
-  applyStatus,
-};
+export default { positionCard, applyStatus };
