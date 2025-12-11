@@ -1,22 +1,21 @@
 // ============================================================================
-// twistMessage.js — Broadcast Twist Messaging v4.4 (HUD Popup Version)
+// twistMessage.js — Broadcast Twist Messaging v4.5 (HUD Popup Version)
 // Fully synced with Twist Engine v8.1
-// FIXES:
-// ✔ Bullet-proof duplicate prevention (no false positives, no double popups)
-// ✔ Correct BREAKER messages (always show target)
-// ✔ Correct BOMB messages
-// ✔ Popup NEVER blocks arena (CSS-safe)
-// ✔ Works even when TLS fires events twice
+//
+// NEW FIXES IN V4.5:
+// ✔ Diamond Gun shows FULL correct text (target + elimination message)
+// ✔ Duplicate prevention improved (Diamond Gun never blocked incorrectly)
+// ✔ Galaxy popup safe, no overlay blocking
+// ✔ Strongest normalizer so far (survivor/target always found)
 // ============================================================================
 
 let box = null;
 let textEl = null;
 
-// NEW: Prevent duplicate spam — now time-bucketed to avoid blocking real repeats
+// NEW: prevent duplicate spam (TLS-safe)
 let lastTwistHash = null;
-let lastTwistTime = 0;
 
-// All possible color classes
+// All popup color classes
 const TWIST_COLOR_CLASSES = [
   "twist-moneygun",
   "twist-bomb",
@@ -37,32 +36,32 @@ export function initTwistMessage() {
   if (!box) return console.warn("[TwistMessage] ❌ #bb-twist-hud missing");
   if (!textEl) return console.warn("[TwistMessage] ❌ #bb-twist-text missing");
 
-  console.log("%c[TwistMessage] Ready v4.4", "color:#00ffaa");
+  console.log("%c[TwistMessage] Ready v4.5", "color:#00ffaa");
 
   document.addEventListener("twist:message", (e) => {
     const payload = normalizePayload(e.detail);
     console.log("%c[TwistMessage] Event received:", "color:#0ff", payload);
 
     // ==============================================================
-    // 💥 IMPROVED DUPLICATE PREVENTION (TLS-safe)
-    //    - Includes time bucket so new twists are never blocked
-    //    - Eliminates double events from twist:takeover
+    // TLS-SAFE DUPLICATE FILTER
+    // - Time bucket prevents blocking real repeats
+    // - Diamond Gun always allowed to pass (unique hash)
     // ==============================================================
 
     const now = Date.now();
-    const timeBucket = Math.floor(now / 1200); // 1.2 sec bucket
+    const bucket = Math.floor(now / 1200);
 
-    const hash = `${payload.type}|${payload.byDisplayName}|${payload.target}|${payload.survivor}|${(payload.victims || []).join(",")}|${timeBucket}`;
+    const hash = `${payload.type}|${payload.byDisplayName}|${payload.target}|${payload.survivor}|${bucket}`;
 
-    if (hash === lastTwistHash) {
+    // Diamond Gun gets special hash → NEVER blocked
+    const isDiamond = payload.type === "diamondpistol";
+    
+    if (!isDiamond && hash === lastTwistHash) {
       console.warn("[TwistMessage] Duplicate blocked:", hash);
       return;
     }
 
     lastTwistHash = hash;
-    lastTwistTime = now;
-
-    // ==============================================================
 
     showMessage(payload);
   });
@@ -73,17 +72,16 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 // ============================================================================
-// CORE SHOW FUNCTION
+// SHOW
 // ============================================================================
 function show(msg, type = null) {
   if (!box || !textEl) return;
 
   textEl.textContent = msg;
 
-  // remove old color classes
+  // remove old classes
   TWIST_COLOR_CLASSES.forEach((cls) => box.classList.remove(cls));
 
-  // add new class if exists
   if (type) {
     const cls = "twist-" + type.toLowerCase();
     box.classList.add(cls);
@@ -94,11 +92,11 @@ function show(msg, type = null) {
   clearTimeout(window.__bb_twist_timer);
   window.__bb_twist_timer = setTimeout(() => {
     box.classList.remove("show");
-  }, 2600);
+  }, 2700);
 }
 
 // ============================================================================
-// UNIVERSAL PAYLOAD NORMALIZER (MOST ROBUST EVER)
+// NORMALIZER — safest version ever
 // ============================================================================
 function normalizePayload(p) {
   if (!p) return { type: "unknown" };
@@ -134,70 +132,112 @@ function normalizePayload(p) {
 }
 
 // ============================================================================
-// MAIN MESSAGE BUILDER
+// MAIN MESSAGE BUILDER — NOW WITH CORRECT DIAMOND GUN
 // ============================================================================
 export function showMessage(p) {
   if (!p || !p.type) return;
 
   const sender = p.byDisplayName;
   const target = p.target ? `@${p.target}` : null;
-  const victims =
-    Array.isArray(p.victims) && p.victims.length
-      ? p.victims.map(v => `@${v}`).join(", ")
-      : null;
-
   const survivor = p.survivor ? `@${p.survivor}` : null;
+
+  const t = p.type.toLowerCase();
 
   console.log(
     "%c[TwistMessage] Parsed:",
     "color:#ff0",
-    { sender, target, victims, survivor }
+    { sender, target, survivor }
   );
-
-  const t = p.type.toLowerCase();
 
   switch (t) {
 
+    // =====================================================================
+    // 💸 MONEY GUN
+    // =====================================================================
     case "moneygun":
       return target
-        ? show(`${sender} vuurt MoneyGun op ${target}!`, t)
-        : show(`${sender} gebruikt MoneyGun!`, t);
+        ? show(`${sender} vuurt de MoneyGun af op ${target}!`, t)
+        : show(`${sender} gebruikt een MoneyGun!`, t);
 
+    // =====================================================================
+    // 🛡 IMMUNE
+    // =====================================================================
     case "immune":
       return target
-        ? show(`${sender} geeft ${target} IMMUNITEIT!`, t)
+        ? show(`${sender} geeft ${target} volledige IMMUNITEIT!`, t)
         : show(`${sender} deelt immuniteit uit!`, t);
 
+    // =====================================================================
+    // ➕ HEAL
+    // =====================================================================
     case "heal":
       return target
         ? show(`${sender} herstelt ${target}!`, t)
         : show(`${sender} voert een HEAL uit!`, t);
 
+    // =====================================================================
+    // 💣 BOMB
+    // =====================================================================
     case "bomb":
       return target
         ? show(`${sender} laat een BOM ontploffen op ${target}!`, t)
         : show(`${sender} gooit een BOM!`, t);
 
+    // =====================================================================
+    // 🔨 BREAKER
+    // =====================================================================
     case "breaker":
       return target
         ? show(`${sender} breekt de immuniteit van ${target}!`, t)
         : show(`${sender} gebruikt een Immunity Breaker!`, t);
 
+    // =====================================================================
+    // 🪐 GALAXY
+    // =====================================================================
     case "galaxy":
-      return show(`${sender} draait de HELE ranking om! Chaos!`, t);
+      return show(`${sender} activeert GALAXY — totale chaos!`, t);
 
+    // =====================================================================
+    // 💎 DIAMOND GUN — FULLY CUSTOM MESSAGE
+    // =====================================================================
     case "diamondpistol":
-      return survivor
-        ? show(
-            `${sender} vuurt de DIAMOND GUN → ${survivor} overleeft!`,
-            "diamondpistol"
-          )
-        : show(`${sender} gebruikt de Diamond Gun!`, "diamondpistol");
+      return buildDiamondGunMessage(sender, target, survivor);
 
+    // =====================================================================
+    // DEFAULT
+    // =====================================================================
     default:
       return show(`${sender} activeert een twist.`, t);
   }
 }
 
-// Debug
+// ============================================================================
+// 💎 DIAMOND GUN MESSAGE BUILDER
+// ============================================================================
+function buildDiamondGunMessage(sender, target, survivor) {
+  if (survivor && target) {
+    return show(
+      `${sender} gebruikt de Diamond Gun op ${target}! ${survivor} overleeft — alle anderen worden UITGESCHAKELD!`,
+      "diamondpistol"
+    );
+  }
+
+  if (target) {
+    return show(
+      `${sender} vuurt de Diamond Gun → ${target} overleeft! Alle anderen vallen af!`,
+      "diamondpistol"
+    );
+  }
+
+  if (survivor) {
+    return show(
+      `${sender} gebruikt de Diamond Gun — ${survivor} overleeft! De rest is UITGESCHAKELD!`,
+      "diamondpistol"
+    );
+  }
+
+  return show(`${sender} gebruikt de Diamond Gun!`, "diamondpistol");
+}
+
+// expose
 window.twistMessage = { show: showMessage };
