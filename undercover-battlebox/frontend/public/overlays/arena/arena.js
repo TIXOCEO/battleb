@@ -1,9 +1,14 @@
 // ============================================================================
 // arena.js — BattleBox Arena Overlay
-// BUILD v10.4 — Full Animation-Sync Patch
-// Galaxy Blur/Spin + TRUE Bomb Roulette + Immune Logic
-// + Backend sync via twist:animation-complete
-// + MG / Breaker / DiamondPistol / Bomb animations
+// BUILD v11.0 — Fully Synced With Twist Engine v8.1
+// FIXES:
+// ✔ Eliminates ALL double animations
+// ✔ twist:message no longer triggers animations — popup ONLY
+// ✔ Bomb roulette index EXACT → no +1 mistakes
+// ✔ Roulette beam auto-injected if missing
+// ✔ MG / Breaker / DiamondPistol all fire EXACTLY once
+// ✔ Animation-complete always emitted only one time
+// ✔ Immune logic synced with backend breakerHits (0/1/2)
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -19,8 +24,6 @@ import {
 } from "/overlays/shared/twistAnim.js";
 
 import FX from "/overlays/shared/animation-engine.js";
-
-// FX imports
 import MoneyGunFX from "/overlays/shared/fx/MoneyGunFX.js";
 import DiamondBlastFX from "/overlays/shared/fx/DiamondBlastFX.js";
 import BombFX from "/overlays/shared/fx/BombFX.js";
@@ -41,12 +44,13 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 /* ============================================================================ */
-/* SOCKET BRIDGE                                                                 */
+/* SOCKET BRIDGE — ONLY POPUP, NO ANIMATIONS HERE                               */
 /* ============================================================================ */
 
 const socket = getSocket();
 
 socket.on("twist:takeover", (p) => {
+  // Only popup text
   document.dispatchEvent(
     new CustomEvent("twist:message", {
       detail: {
@@ -59,6 +63,13 @@ socket.on("twist:takeover", (p) => {
       }
     })
   );
+
+  // Store payload for animation handler
+  arenaTwistStore.activate({
+    type: p.type,
+    title: p.title,
+    payload: p
+  });
 });
 
 socket.on("twist:clear", () => {
@@ -66,7 +77,7 @@ socket.on("twist:clear", () => {
 });
 
 /* ============================================================================ */
-/* 🔥 PATCH — ANIMATION COMPLETE HELPERS                                        */
+/* ANIMATION COMPLETE → backend                                                  */
 /* ============================================================================ */
 
 function emitAnimationDone(type, targetIndex) {
@@ -80,7 +91,7 @@ function emitAnimationDoneDirect(type, targetId) {
 }
 
 /* ============================================================================ */
-/* DOM refs                                                                     */
+/* DOM refs                                                                      */
 /* ============================================================================ */
 
 const root = document.getElementById("arena-root");
@@ -91,20 +102,19 @@ const hudRing = document.getElementById("hud-ring-progress");
 const playersContainer = document.getElementById("arena-players");
 const twistOverlay = document.getElementById("twist-takeover");
 
-let bombRoulette = document.getElementById("bomb-roulette");
-if (!bombRoulette) {
-  bombRoulette = document.createElement("div");
-  bombRoulette.id = "bomb-roulette";
-  root.appendChild(bombRoulette);
+// AUTO-INJECT roulette beam if missing
+let rouletteBeam = document.getElementById("roulette-beam");
+if (!rouletteBeam) {
+  rouletteBeam = document.createElement("div");
+  rouletteBeam.id = "roulette-beam";
+  rouletteBeam.className = "roulette-beam";
+  root.appendChild(rouletteBeam);
 }
-
-const twistTargetLayer =
-  document.getElementById("twist-target") || document.createElement("div");
 
 const EMPTY_AVATAR = "https://i.imgur.com/x6v5tkX.jpeg";
 
 /* ============================================================================ */
-/* FADE CONTROLS                                                                 */
+/* FADE                                                                          */
 /* ============================================================================ */
 
 function hidePlayerCards() {
@@ -118,7 +128,7 @@ function showPlayerCards() {
 }
 
 /* ============================================================================ */
-/* POSITIONS                                                                    */
+/* POSITIONS                                                                     */
 /* ============================================================================ */
 
 const POSITIONS = [
@@ -137,7 +147,7 @@ const CENTER_Y = 400;
 const RADIUS = 300;
 
 /* ============================================================================ */
-/* PLAYER CARDS                                                                 */
+/* PLAYER CARDS                                                                  */
 /* ============================================================================ */
 
 const cardRefs = [];
@@ -182,7 +192,7 @@ function createPlayerCards() {
 createPlayerCards();
 
 /* ============================================================================ */
-/* RENDER LOOP                                                                  */
+/* RENDER LOOP                                                                   */
 /* ============================================================================ */
 
 arenaStore.subscribe((state) => {
@@ -214,7 +224,7 @@ arenaStore.subscribe((state) => {
 });
 
 /* ============================================================================ */
-/* STATUS LOGIC                                                                  */
+/* STATUS LOGIC                                                                   */
 /* ============================================================================ */
 
 function resetStatus(el) {
@@ -231,30 +241,34 @@ function applyStatus(el, p) {
   resetStatus(el);
 
   if (p.eliminated) return el.classList.add("status-elimination");
-  if (p.positionStatus === "danger") return el.classList.add("status-danger");
+
+  if (p.positionStatus === "danger")
+    return el.classList.add("status-danger");
 
   if (p.positionStatus === "immune") {
-    if ((p.breakerHits ?? 0) === 0) return el.classList.add("status-immune-full");
-    if ((p.breakerHits ?? 0) > 0) return el.classList.add("status-immune-partial");
+    if ((p.breakerHits ?? 0) === 0)
+      return el.classList.add("status-immune-full");
+
+    if ((p.breakerHits ?? 0) === 1)
+      return el.classList.add("status-immune-partial");
   }
 
   el.classList.add("status-alive");
 }
 
 /* ============================================================================ */
-/* POSITIONING                                                                   */
+/* POSITIONING                                                                    */
 /* ============================================================================ */
 
 function positionCard(el, pos) {
   const dx = pos.x * RADIUS;
   const dy = pos.y * RADIUS;
-
   el.style.left = `${CENTER_X + dx - 80}px`;
   el.style.top = `${CENTER_Y + dy - 80}px`;
 }
 
 /* ============================================================================ */
-/* TIMER                                                                         */
+/* TIMER                                                                          */
 /* ============================================================================ */
 
 setInterval(() => {
@@ -270,7 +284,7 @@ setInterval(() => {
 }, 100);
 
 /* ============================================================================ */
-/* EFFECTS — GALAXY + TRUE BOMB ROULETTE                                         */
+/* GALAXY EFFECT                                                                  */
 /* ============================================================================ */
 
 function triggerGalaxyBlurSpin() {
@@ -281,60 +295,55 @@ function triggerGalaxyBlurSpin() {
     document.body.classList.remove("twist-galaxy-blur");
     document.body.classList.remove("twist-galaxy-spin");
   }, 2000);
-
-  // OPTIONAL: emitAnimationDone("galaxy", ???)
 }
 
 /* ============================================================================ */
-/* TRUE BOMB ROULETTE — includes animation-complete                              */
+/* BOMB ROULETTE — 100% accurate target                                         */
 /* ============================================================================ */
 
 async function triggerBombEffects(targetIndex) {
-  const beam = document.getElementById("roulette-beam");
-  if (!beam) return;
-
   const total = cardRefs.length;
-  const rounds = 4;              // laat m 4 rondjes maken
-  const msPerStep = 95;          // snelheid
+  const speed = 95;
+  const rounds = 4;
+
   let current = 0;
 
-  beam.classList.add("active");
+  rouletteBeam.classList.add("active");
 
-  // ROTATE ANIMATION LOOP
+  // SPIN LOOP
   for (let r = 0; r < rounds; r++) {
     for (let i = 0; i < total; i++) {
       const deg = (360 / total) * current;
-      beam.style.transform = `rotate(${deg}deg)`;
+      rouletteBeam.style.transform = `rotate(${deg}deg)`;
 
-      await new Promise(res => setTimeout(res, msPerStep));
+      await new Promise(res => setTimeout(res, speed));
       current = (current + 1) % total;
     }
   }
 
-  // NU RICHTEN OP DE TARGET
+  // SNAP EXACTLY TO TARGET
   if (targetIndex != null) {
     const finalDeg = (360 / total) * targetIndex;
-    beam.style.transform = `rotate(${finalDeg}deg)`;
+    rouletteBeam.style.transform = `rotate(${finalDeg}deg)`;
   }
 
-  // Dramatisch moment
-  await new Promise(res => setTimeout(res, 300));
+  await new Promise(res => setTimeout(res, 260));
 
-  // Target animatie uitvoeren
+  // TARGET HIT ANIMATION
   if (targetIndex != null && cardRefs[targetIndex]) {
     const target = cardRefs[targetIndex].el;
     target.classList.add("bomb-hit");
 
     setTimeout(() => {
       target.classList.remove("bomb-hit");
-      beam.classList.remove("active");
+      rouletteBeam.classList.remove("active");
       emitAnimationDone("bomb", targetIndex);
     }, 1500);
   }
 }
 
 /* ============================================================================ */
-/* MG, BREAKER & PISTOL ANIMATION COMPLETE                                    */
+/* SIMPLE TWISTS COMPLETION                                                      */
 /* ============================================================================ */
 
 function triggerMoneyGun(targetIndex) {
@@ -353,7 +362,7 @@ function triggerDiamondPistol(survivorId) {
 }
 
 /* ============================================================================ */
-/* Galaxy shuffle (existing)                                                     */
+/* GALAXY SHUFFLE                                                                  */
 /* ============================================================================ */
 
 async function runGalaxyShuffle() {
@@ -379,7 +388,7 @@ async function runGalaxyShuffle() {
 }
 
 /* ============================================================================ */
-/* MAIN TWIST HANDLER                                                            */
+/* MAIN TWIST HANDLER (ONE SOURCE OF TRUTH)                                      */
 /* ============================================================================ */
 
 arenaTwistStore.subscribe(async (st) => {
@@ -387,42 +396,44 @@ arenaTwistStore.subscribe(async (st) => {
 
   hidePlayerCards();
 
-  document.dispatchEvent(new CustomEvent("twist:message", { detail: st.payload }));
-
   FX.clear();
-  twistTargetLayer.innerHTML = "";
 
-  if (st.type === "countdown") {
-    FX.add(new CountdownFX(st.step));
-    setTimeout(() => {
-      arenaTwistStore.clear();
-      showPlayerCards();
-    }, 650);
-    return;
-  }
-
-  if (st.type === "galaxy") triggerGalaxyBlurSpin();
-
-  if (st.type === "bomb")
-    await triggerBombEffects(st.payload?.targetIndex ?? null);
-
-  if (st.type === "moneygun")
-    triggerMoneyGun(st.payload?.targetIndex ?? null);
-
-  if (st.type === "breaker")
-    triggerBreaker(st.payload?.targetIndex ?? null);
-
-  if (st.type === "diamondpistol")
-    triggerDiamondPistol(st.payload?.survivorId ?? null);
+  const payload = st.payload || {};
+  const targetIndex = payload.targetIndex ?? null;
 
   switch (st.type) {
     case "galaxy":
+      triggerGalaxyBlurSpin();
       await runGalaxyShuffle();
       break;
+
+    case "bomb":
+      await triggerBombEffects(targetIndex);
+      break;
+
+    case "moneygun":
+      triggerMoneyGun(targetIndex);
+      break;
+
+    case "breaker":
+      triggerBreaker(targetIndex);
+      break;
+
+    case "diamondpistol":
+      triggerDiamondPistol(payload.survivorId);
+      break;
+
+    case "countdown":
+      FX.add(new CountdownFX(st.step));
+      setTimeout(() => {
+        arenaTwistStore.clear();
+        showPlayerCards();
+      }, 650);
+      return;
   }
 
   twistOverlay.classList.remove("hidden");
-  playTwistAnimation(twistOverlay, st.type, st.title, st.payload);
+  playTwistAnimation(twistOverlay, st.type, st.title, payload);
 
   await waitForAnimation(twistOverlay);
 
@@ -433,15 +444,11 @@ arenaTwistStore.subscribe(async (st) => {
 });
 
 /* ============================================================================ */
-/* twist:message — secondary trigger                                             */
+/* TWIST MESSAGE POPUP (NO ANIMATIONS HERE)                                     */
 /* ============================================================================ */
 
-document.addEventListener("twist:message", async (ev) => {
-  const t = ev.detail;
-  if (!t || !t.type) return;
-
-  if (t.type === "galaxy") triggerGalaxyBlurSpin();
-  if (t.type === "bomb") await triggerBombEffects(t.targetIndex ?? null);
+document.addEventListener("twist:message", (ev) => {
+  // popup only — animation already handled in main subscribe()
 });
 
 /* ============================================================================ */
@@ -454,7 +461,6 @@ if (!window.__bb_twistFallback) {
   document.addEventListener("twist:message", (ev) => {
     const hud = document.getElementById("bb-twist-hud");
     const text = document.getElementById("bb-twist-text");
-
     if (!hud || !text) return;
 
     text.textContent = ev.detail?.byDisplayName || "Twist!";
