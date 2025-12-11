@@ -1,15 +1,14 @@
 // ============================================================================
 // arena.js — BattleBox Arena Overlay
-// BUILD v12.0 — Bomb FAST-SCAN Fixed + No Runtime Reset on Event 1
-//
+// BUILD v12.2 — Bomb FAST-SCAN (Beamless Final Version)
+// 
 // FIXES:
-// ✔ Verwijderd: resetArenaRuntime op twist:takeover (brak BOM volledig!)
-// ✔ Runtime reset NU alleen bij round:start en arena:reset
-// ✔ Bomb dual-event werkt gegarandeerd (scan 1×, hit 1×, nooit dubbel)
-// ✔ Scan start NOOIT opnieuw bij target-event
-// ✔ Tweede bomb in dezelfde ronde werkt perfect
-// ✔ Playercards refreshen altijd correct
-// ✔ Alle bestaande features en code 100% behouden
+// ✔ Scan start slechts 1× (event #1)
+// ✔ Scan stopt DIRECT bij event #2 (targetIndex known)
+// ✔ Nooit dubbele scan (TLS duplicate-safe)
+// ✔ Tweede bom in dezelfde ronde werkt perfect
+// ✔ Geen visual beam nodig — gebruikt enkel card highlights
+// ✔ Bestaande functionaliteit 100% intact
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -37,27 +36,26 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 /* ============================================================================ */
-/* SOCKET + RUNTIME RESET                                                       */
+/* SOCKET + RESET                                                                */
 /* ============================================================================ */
 
 const socket = getSocket();
 
-// Bomb event flags
+// BOMB Flags — final model
 let bombScanActive = false;
-let bombScanStopRequested = false;
+let bombResolveHit = null;
 
-// RESET ONLY ON ROUND or FULL ARENA RESET (NOT twist:takeover)
+/** FULL reset only at round or arena reset */
 function resetArenaRuntime() {
   console.warn("[ARENA RESET] Runtime flags cleared");
 
   bombScanActive = false;
-  bombScanStopRequested = false;
+  bombResolveHit = null;
 
   cardRefs.forEach(ref => {
     ref.el.classList.remove(
       "bomb-scan",
       "bomb-final-hit",
-      "card-shuffle",
       "status-elimination",
       "status-danger",
       "status-immune-full",
@@ -68,10 +66,8 @@ function resetArenaRuntime() {
   });
 }
 
-// ---- REMOVE OLD BEHAVIOR: NO RESET ON TWIST ----
+// Twist events DO NOT reset → prevents bomb breaking
 socket.on("twist:takeover", (p) => {
-  // NO RESET HERE ANYMORE — FIXES BOMBEVENT BREAKAGE
-
   document.dispatchEvent(new CustomEvent("twist:message", {
     detail: {
       type: p.type || "",
@@ -90,23 +86,15 @@ socket.on("twist:takeover", (p) => {
   });
 });
 
-// Proper resets
-socket.on("round:start", () => {
-  console.warn("[ARENA] round:start → runtime reset");
-  resetArenaRuntime();
-});
-
-socket.on("arena:reset", () => {
-  console.warn("[ARENA] arena:reset → runtime reset");
-  resetArenaRuntime();
-});
+socket.on("round:start", () => resetArenaRuntime());
+socket.on("arena:reset", () => resetArenaRuntime());
 
 socket.on("twist:clear", () => {
   document.dispatchEvent(new Event("twist:clear"));
 });
 
 /* ============================================================================ */
-/* ANIMATION COMPLETE → backend                                                  */
+/* ANIMATION COMPLETE → BACKEND                                                  */
 /* ============================================================================ */
 
 function emitAnimationDone(type, targetIndex) {
@@ -120,7 +108,7 @@ function emitAnimationDoneDirect(type, targetId) {
 }
 
 /* ============================================================================ */
-/* DOM REFS                                                                      */
+/* DOM REFS & CARD CREATION                                                      */
 /* ============================================================================ */
 
 const root = document.getElementById("arena-root");
@@ -132,39 +120,6 @@ const playersContainer = document.getElementById("arena-players");
 const twistOverlay = document.getElementById("twist-takeover");
 
 const EMPTY_AVATAR = "https://i.imgur.com/x6v5tkX.jpeg";
-
-/* ============================================================================ */
-/* FADE                                                                          */
-/* ============================================================================ */
-
-function fadeOutCards() { playersContainer.classList.add("fade-out"); }
-function fadeInCards() {
-  playersContainer.classList.remove("fade-out");
-  playersContainer.classList.add("fade-in");
-  setTimeout(() => playersContainer.classList.remove("fade-in"), 450);
-}
-
-/* ============================================================================ */
-/* waitForAnimation                                                              */
-/* ============================================================================ */
-
-function waitForAnimation(el) {
-  return new Promise((resolve) => {
-    let ended = false;
-    const end = () => {
-      if (ended) return;
-      ended = true;
-      el.removeEventListener("animationend", end);
-      resolve();
-    };
-    el.addEventListener("animationend", end, { once: true });
-    setTimeout(end, 1500); // TLS fallback
-  });
-}
-
-/* ============================================================================ */
-/* POSITIONS / CARDS                                                             */
-/* ============================================================================ */
 
 const POSITIONS = [
   { x: 0.0, y: -1.0 },
@@ -222,7 +177,7 @@ function createPlayerCards() {
 createPlayerCards();
 
 /* ============================================================================ */
-/* RENDER LOOP                                                                  */
+/* RENDER LOOP                                                                    */
 /* ============================================================================ */
 
 arenaStore.subscribe((state) => {
@@ -313,44 +268,71 @@ function triggerGalaxyEffect() {
 }
 
 /* ============================================================================ */
-/* BOMB — FAST SCAN (Dual Event)                                                 */
+/* BOMB — FINAL BEAMLESS FAST-SCAN ENGINE                                        */
 /* ============================================================================ */
 
+/**
+ * Starts the fast-scan highlight loop.
+ * Runs 3 rounds × 8 cards, UNLESS event #2 interrupts.
+ */
 async function startBombScan() {
+  console.log("[BOMB] Scan STARTED");
+
   bombScanActive = true;
-  bombScanStopRequested = false;
 
   const cards = cardRefs.map(ref => ref.el);
   const delay = 100;
   const rounds = 3;
 
-  console.log("[BOMB] Scan STARTED");
+  bombResolveHit = null;
 
-  for (let r = 0; r < rounds; r++) {
-    for (let i = 0; i < cards.length; i++) {
+  // Define resolver for event #2
+  const waitForHit = new Promise(resolve => {
+    bombResolveHit = resolve;
+  });
 
-      if (bombScanStopRequested) {
-        console.log("[BOMB] Scan interrupted → finishing");
-        return;
+  // SCAN LOOP
+  async function scanLoop() {
+    for (let r = 0; r < rounds; r++) {
+      for (let i = 0; i < cards.length; i++) {
+        if (!bombScanActive) return;
+
+        cards[i].classList.add("bomb-scan");
+        await new Promise(res => setTimeout(res, delay));
+        cards[i].classList.remove("bomb-scan");
       }
-
-      cards[i].classList.add("bomb-scan");
-      await new Promise(res => setTimeout(res, delay));
-      cards[i].classList.remove("bomb-scan");
     }
   }
 
-  console.log("[BOMB] Scan finished → waiting on target...");
+  // Run scan + wait for hit
+  await Promise.race([
+    scanLoop(),
+    waitForHit
+  ]);
+
+  console.log("[BOMB] Scan COMPLETE (either natural or interrupted)");
 }
 
+/**
+ * Ends scanning immediately + processes hit.
+ */
 async function finishBombScan(targetIndex) {
-  bombScanStopRequested = true;
+  console.log("[BOMB] Target EVENT received:", targetIndex);
+
+  if (!bombScanActive && !bombResolveHit) {
+    console.warn("[BOMB] Target ignored — no active scan");
+    return;
+  }
+
+  // Stop scanning
   bombScanActive = false;
 
+  // Resolve scan loop (interrupt)
+  bombResolveHit?.();
+
+  // Hit animation
   const target = cardRefs[targetIndex]?.el;
   if (!target) return;
-
-  console.log("[BOMB] Target HIT:", targetIndex);
 
   target.classList.add("bomb-final-hit");
 
@@ -360,13 +342,13 @@ async function finishBombScan(targetIndex) {
 
     emitAnimationDone("bomb", targetIndex);
 
+    bombResolveHit = null;
     bombScanActive = false;
-    bombScanStopRequested = false;
   }, 900);
 }
 
 /* ============================================================================ */
-/* SIMPLE TWISTS                                                                 */
+/* SIMPLE TWISTS AND MAIN ENGINE                                                 */
 /* ============================================================================ */
 
 function triggerMoneyGun(targetIndex) {
@@ -386,31 +368,6 @@ function triggerDiamondPistol(survivorId, targetIndex) {
   if (p)
     setTimeout(() =>
       emitAnimationDoneDirect("diamondpistol", p.id), 900);
-}
-
-/* ============================================================================ */
-/* GALAXY SHUFFLE                                                                 */
-/* ============================================================================ */
-
-async function runGalaxyShuffle() {
-  const steps = 14;
-  const interval = 2600 / steps;
-
-  for (let i = 0; i < steps; i++) {
-    const shuffled = [...POSITIONS].sort(() => Math.random() - 0.5);
-
-    shuffled.forEach((pos, idx) => {
-      positionCard(cardRefs[idx].el, pos);
-      cardRefs[idx].el.classList.add("card-shuffle");
-    });
-
-    await new Promise(r => setTimeout(r, interval));
-  }
-
-  POSITIONS.forEach((pos, idx) => {
-    positionCard(cardRefs[idx].el, pos);
-    cardRefs[idx].el.classList.remove("card-shuffle");
-  });
 }
 
 /* ============================================================================ */
