@@ -176,29 +176,23 @@
   opacity: 0.85;
 }
 
-.card-glow-red {
-  box-shadow: 0 0 35px red, inset 0 0 25px rgba(255,0,0,0.45);
-  border-color: red;
-  filter: brightness(1.4);
+/* ============================================================= */
+/* 🔥 BOMB HIT FLASH (target player) */
+/* ============================================================= */
+.bomb-hit {
+  animation: bombCardFlash 1.4s ease-out forwards;
 }
 
-/* 🔥 NEW: Galaxy spin + blur */
-.spin-blur {
-  filter: blur(4px) brightness(1.2);
-  transform: rotate(360deg) scale(1.15);
-  transition: transform 2s ease-out, filter 2s ease-out;
+@keyframes bombCardFlash {
+  0%   { filter: brightness(2.5) saturate(2.2); }
+  25%  { filter: brightness(3.2) saturate(2.8); transform: scale(1.05); }
+  80%  { filter: brightness(0.5) saturate(0.4); opacity: 0.4; }
+  100% { filter: brightness(0.5) saturate(0.4); opacity: 0.3; }
 }
 
-/* 🔥 NEW: Bomb target explosion */
-.exploded {
-  animation: explodeFlash 1.6s ease-out forwards;
-}
-
-@keyframes explodeFlash {
-  0% { filter: brightness(2) saturate(2); transform: scale(1.05); }
-  50% { filter: brightness(3); transform: scale(0.95); }
-  100% { filter: brightness(0.7); transform: scale(1); }
-}
+/* ============================================================= */
+/* ORIGINAL BG + STATUS */
+/* ============================================================= */
 
 .bb-player-bgavatar {
   position: absolute;
@@ -236,6 +230,7 @@
   filter: brightness(0.65) saturate(0.6);
 }
 
+/* TEXT */
 .bb-player-labels {
   position: relative;
   z-index: 2;
@@ -317,45 +312,72 @@
 }
 
 /* ========================================================================== */
-/* 🔥 NEW: IMMUNE FULL + BROKEN HALF */
+/* 🔥 NEW: IMMUNE FULL + IMMUNE PARTIAL */
 /* ========================================================================== */
 
-.immune-full {
-  border-color: #00ffb3 !important;
-  box-shadow: 0 0 35px rgba(0,255,180,1), inset 0 0 32px rgba(0,255,180,0.5) !important;
+.status-immune-full {
+  border-color:#00ffc3 !important;
+  box-shadow:0 0 40px #00ffc3, inset 0 0 30px rgba(0,255,195,0.55) !important;
 }
 
-.immune-broken-half {
-  border-color: #88ffc8 !important;
-  background: linear-gradient(
-    to bottom,
-    rgba(0,255,180,0.35) 50%,
-    rgba(10,10,14,0.45) 50%
-  );
+.status-immune-full .bb-player-bgavatar {
+  opacity:0.9 !important;
+  filter:brightness(1.7) saturate(1.4) drop-shadow(0 0 18px #00ffc3) !important;
+}
+
+.status-immune-partial {
+  border-color:#88ffcc !important;
+  box-shadow:
+    0 0 25px rgba(0,255,180,0.45),
+    inset 0 0 18px rgba(0,255,180,0.35) !important;
+}
+
+.status-immune-partial .bb-player-bgavatar {
+  filter:brightness(1.2) saturate(1.15);
+  opacity:0.75;
 }
 
 /* ========================================================================== */
-/* 🔥 NEW: BOMB ROULETTE OVERLAY */
+/* 🔥 GALAXY BLUR + SPIN BODY CLASSES */
+/* ========================================================================== */
+
+body.twist-galaxy-blur #arena-players {
+  filter: blur(6px) brightness(0.6);
+  transition: filter 0.3s ease-out;
+}
+
+body.twist-galaxy-spin .bb-player-card {
+  animation: galaxySpin 2s ease-out forwards;
+}
+
+@keyframes galaxySpin {
+  0% { transform: scale(1) rotate(0deg); }
+  40% { transform: scale(1.15) rotate(180deg); }
+  100% { transform: scale(1) rotate(360deg); }
+}
+
+/* ========================================================================== */
+/* 🔥 BOMB ROULETTE FULL OVERLAY */
 /* ========================================================================== */
 
 #bomb-roulette {
-  position: absolute;
-  inset: 0;
-  z-index: 5000;
-  background: radial-gradient(circle, rgba(255,0,0,0.25), transparent 70%);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.3s;
+  position:absolute;
+  inset:0;
+  z-index:50000;
+  pointer-events:none;
+  background: radial-gradient(circle, rgba(255,0,0,0.35), rgba(60,0,0,0.8));
+  opacity:0;
+  transition:opacity 0.2s ease-out;
 }
 
 #bomb-roulette.active {
-  opacity: 1;
-  animation: bombSpin 2s linear;
+  opacity:1;
+  animation:bombRouletteSpin 2.2s linear forwards;
 }
 
-@keyframes bombSpin {
-  0% { transform: rotate(0deg); opacity: .3; }
-  100% { transform: rotate(720deg); opacity: 1; }
+@keyframes bombRouletteSpin {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(1080deg); }
 }
 
 /* ========================================================================== */
@@ -371,7 +393,7 @@
 }
 
 /* ========================================================================== */
-/* TWIST POPUP — NEW */
+/* TWIST POPUP */
 /* ========================================================================== */
 
 #bb-twist-hud {
@@ -412,7 +434,7 @@
     0 0 35px rgba(255, 90, 10, 0.65),
     inset 0 0 18px rgba(255, 150, 70, 0.4);
 
-  text-shadow: 
+  text-shadow:
     0 0 25px rgba(255, 120, 20, 0.95),
     0 0 45px rgba(255, 90, 0, 0.9);
 }
