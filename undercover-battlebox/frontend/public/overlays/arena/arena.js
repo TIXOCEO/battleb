@@ -1,8 +1,9 @@
 // ============================================================================
 // arena.js — BattleBox Arena Overlay
-// BUILD v10.3 — Adds twist:animation-complete backend sync
+// BUILD v10.4 — Full Animation-Sync Patch
 // Galaxy Blur/Spin + TRUE Bomb Roulette + Immune Logic
-// + socket bridge patches
+// + Backend sync via twist:animation-complete
+// + MG / Breaker / DiamondPistol / Bomb animations
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -19,7 +20,7 @@ import {
 
 import FX from "/overlays/shared/animation-engine.js";
 
-// FX imports (existing)
+// FX imports
 import MoneyGunFX from "/overlays/shared/fx/MoneyGunFX.js";
 import DiamondBlastFX from "/overlays/shared/fx/DiamondBlastFX.js";
 import BombFX from "/overlays/shared/fx/BombFX.js";
@@ -65,17 +66,13 @@ socket.on("twist:clear", () => {
 });
 
 /* ============================================================================ */
-/* 🔥 PATCH — UNIVERSAL ANIMATION COMPLETE HELPERS                              */
+/* 🔥 PATCH — ANIMATION COMPLETE HELPERS                                        */
 /* ============================================================================ */
 
 function emitAnimationDone(type, targetIndex) {
   const player = arenaStore.get().players[targetIndex];
   if (!player) return;
-
-  socket.emit("twist:animation-complete", {
-    type,
-    targetId: player.id
-  });
+  socket.emit("twist:animation-complete", { type, targetId: player.id });
 }
 
 function emitAnimationDoneDirect(type, targetId) {
@@ -285,11 +282,11 @@ function triggerGalaxyBlurSpin() {
     document.body.classList.remove("twist-galaxy-spin");
   }, 2000);
 
-  // 🔥 Optional: later add animation-complete for galaxy
+  // OPTIONAL: emitAnimationDone("galaxy", ???)
 }
 
 /* ============================================================================ */
-/* TRUE BOMB ROULETTE — 🔥 PATCHED WITH ANIMATION COMPLETE                      */
+/* TRUE BOMB ROULETTE — includes animation-complete                              */
 /* ============================================================================ */
 
 async function triggerBombEffects(targetIndex) {
@@ -319,15 +316,32 @@ async function triggerBombEffects(targetIndex) {
       target.classList.remove("bomb-hit");
       target.classList.remove("card-glow-red");
 
-      // 🔥 PATCH — Bomb finished → backend may eliminate
       emitAnimationDone("bomb", targetIndex);
-
     }, 1500);
   }
 }
 
 /* ============================================================================ */
-/* Galaxy shuffle                                                                */
+/* MG, BREAKER & PISTOL ANIMATION COMPLETE                                    */
+/* ============================================================================ */
+
+function triggerMoneyGun(targetIndex) {
+  if (targetIndex == null) return;
+  setTimeout(() => emitAnimationDone("moneygun", targetIndex), 900);
+}
+
+function triggerBreaker(targetIndex) {
+  if (targetIndex == null) return;
+  setTimeout(() => emitAnimationDone("breaker", targetIndex), 900);
+}
+
+function triggerDiamondPistol(survivorId) {
+  if (!survivorId) return;
+  setTimeout(() => emitAnimationDoneDirect("diamondpistol", survivorId), 900);
+}
+
+/* ============================================================================ */
+/* Galaxy shuffle (existing)                                                     */
 /* ============================================================================ */
 
 async function runGalaxyShuffle() {
@@ -353,7 +367,7 @@ async function runGalaxyShuffle() {
 }
 
 /* ============================================================================ */
-/* MAIN TWIST HANDLER — 🔥 Patches inserted                                      */
+/* MAIN TWIST HANDLER                                                            */
 /* ============================================================================ */
 
 arenaTwistStore.subscribe(async (st) => {
@@ -380,6 +394,15 @@ arenaTwistStore.subscribe(async (st) => {
   if (st.type === "bomb")
     await triggerBombEffects(st.payload?.targetIndex ?? null);
 
+  if (st.type === "moneygun")
+    triggerMoneyGun(st.payload?.targetIndex ?? null);
+
+  if (st.type === "breaker")
+    triggerBreaker(st.payload?.targetIndex ?? null);
+
+  if (st.type === "diamondpistol")
+    triggerDiamondPistol(st.payload?.survivorId ?? null);
+
   switch (st.type) {
     case "galaxy":
       await runGalaxyShuffle();
@@ -398,7 +421,7 @@ arenaTwistStore.subscribe(async (st) => {
 });
 
 /* ============================================================================ */
-/* twist:message (fallback popups & extra triggers)                                */
+/* twist:message — secondary trigger                                             */
 /* ============================================================================ */
 
 document.addEventListener("twist:message", async (ev) => {
