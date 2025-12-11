@@ -143,7 +143,7 @@ const POSITIONS = [
 
 const CENTER_X = 600;
 const CENTER_Y = 400;
-const RADIUS = 30;
+const RADIUS = 300;
 
 /* ============================================================================ */
 /* PLAYER CARDS                                                                  */
