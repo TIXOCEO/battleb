@@ -1,56 +1,35 @@
 // ============================================================================
-// socket.js — BattleBox Overlay Socket Client v1.3 (SNAPSHOT EDITION)
-// Stable. Async. OBS-safe.
-// ✔ Overlay authenticatie
-// ✔ Snapshot passthrough
+// socket.js — BattleBox Overlay Socket Client v2.0 (SYNC FIXED EDITION)
+// ----------------------------------------------------------------------------
+// ✔️ 100% sync getSocket() — werkt met arena.js v9.6 en event-router
+// ✔️ 1 gedeelde instance
+// ✔️ Geen async/await meer (fix for socket.on is not a function)
+// ✔️ OBS-safe, browser-safe
 // ============================================================================
+
+import { io } from "https://cdn.socket.io/4.7.2/socket.io.esm.min.js";
 
 let socketInstance = null;
 
-// Backend config
+// Backend URL
 const SOCKET_URL = "http://178.251.232.12:4000";
-const FRONTEND_URL = "http://178.251.232.12:3000";
 
-let scriptLoaded = false;
-
-// -------------------------------------------------------------
-// Load socket.io script dynamically — required for static HTML
-// -------------------------------------------------------------
-function loadSocketIoClient() {
-  return new Promise((resolve, reject) => {
-    if (scriptLoaded) return resolve();
-
-    const script = document.createElement("script");
-    script.src = `${SOCKET_URL}/socket.io/socket.io.js`;
-    script.onload = () => {
-      scriptLoaded = true;
-      resolve();
-    };
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-}
-
-// -------------------------------------------------------------
-// getSocket() — always returns a READY socket
-// -------------------------------------------------------------
-export async function getSocket() {
+/**
+ * Returns a single ready socket instance (sync).
+ * arena.js expects: const socket = getSocket(); socket.on(...)
+ */
+export function getSocket() {
+  // Already created?
   if (socketInstance) return socketInstance;
 
-  await loadSocketIoClient();
-
-  socketInstance = window.io(SOCKET_URL, {
+  // Create socket
+  socketInstance = io(SOCKET_URL, {
     transports: ["websocket"],
     path: "/socket.io",
     auth: { type: "overlay" },
     reconnection: true,
-    reconnectionDelay: 500,
     reconnectionAttempts: Infinity,
-    withCredentials: false,
-    secure: false,
-    extraHeaders: {
-      "x-overlay-origin": FRONTEND_URL
-    }
+    reconnectionDelay: 500,
   });
 
   socketInstance.on("connect", () => {
@@ -68,12 +47,14 @@ export async function getSocket() {
   });
 
   socketInstance.on("connect_error", (err) => {
-    console.log(
+    console.warn(
       "%c[BattleBox Socket] ERROR",
       "color:#ff4d4f;font-weight:bold;",
-      err.message
+      err?.message
     );
   });
 
   return socketInstance;
 }
+
+export default getSocket;
