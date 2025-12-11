@@ -126,9 +126,8 @@
 }
 
 /* ========================================================================== */
-/* PLAYER CARDS — ORIGINAL WORKING VERSION                                    */
+/* PLAYER CARDS */
 /* ========================================================================== */
-
 #arena-players {
   position: absolute;
   inset: 0;
@@ -181,6 +180,24 @@
   box-shadow: 0 0 35px red, inset 0 0 25px rgba(255,0,0,0.45);
   border-color: red;
   filter: brightness(1.4);
+}
+
+/* 🔥 NEW: Galaxy spin + blur */
+.spin-blur {
+  filter: blur(4px) brightness(1.2);
+  transform: rotate(360deg) scale(1.15);
+  transition: transform 2s ease-out, filter 2s ease-out;
+}
+
+/* 🔥 NEW: Bomb target explosion */
+.exploded {
+  animation: explodeFlash 1.6s ease-out forwards;
+}
+
+@keyframes explodeFlash {
+  0% { filter: brightness(2) saturate(2); transform: scale(1.05); }
+  50% { filter: brightness(3); transform: scale(0.95); }
+  100% { filter: brightness(0.7); transform: scale(1); }
 }
 
 .bb-player-bgavatar {
@@ -297,6 +314,48 @@
   box-shadow:
     0 0 38px rgba(255,0,51,1),
     inset 0 0 38px rgba(255,0,51,0.6);
+}
+
+/* ========================================================================== */
+/* 🔥 NEW: IMMUNE FULL + BROKEN HALF */
+/* ========================================================================== */
+
+.immune-full {
+  border-color: #00ffb3 !important;
+  box-shadow: 0 0 35px rgba(0,255,180,1), inset 0 0 32px rgba(0,255,180,0.5) !important;
+}
+
+.immune-broken-half {
+  border-color: #88ffc8 !important;
+  background: linear-gradient(
+    to bottom,
+    rgba(0,255,180,0.35) 50%,
+    rgba(10,10,14,0.45) 50%
+  );
+}
+
+/* ========================================================================== */
+/* 🔥 NEW: BOMB ROULETTE OVERLAY */
+/* ========================================================================== */
+
+#bomb-roulette {
+  position: absolute;
+  inset: 0;
+  z-index: 5000;
+  background: radial-gradient(circle, rgba(255,0,0,0.25), transparent 70%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+
+#bomb-roulette.active {
+  opacity: 1;
+  animation: bombSpin 2s linear;
+}
+
+@keyframes bombSpin {
+  0% { transform: rotate(0deg); opacity: .3; }
+  100% { transform: rotate(720deg); opacity: 1; }
 }
 
 /* ========================================================================== */
