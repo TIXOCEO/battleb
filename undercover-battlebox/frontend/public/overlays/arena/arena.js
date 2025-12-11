@@ -290,32 +290,44 @@ function triggerGalaxyBlurSpin() {
 /* ============================================================================ */
 
 async function triggerBombEffects(targetIndex) {
-  const total = cardRefs.length;
-  const rounds = 4;
-  const delay = 120;
-  let cur = 0;
+  const beam = document.getElementById("roulette-beam");
+  if (!beam) return;
 
+  const total = cardRefs.length;
+  const rounds = 4;              // laat m 4 rondjes maken
+  const msPerStep = 95;          // snelheid
+  let current = 0;
+
+  beam.classList.add("active");
+
+  // ROTATE ANIMATION LOOP
   for (let r = 0; r < rounds; r++) {
     for (let i = 0; i < total; i++) {
-      cardRefs.forEach(ref => ref.el.classList.remove("card-glow-red"));
-      cardRefs[cur].el.classList.add("card-glow-red");
-      await new Promise(res => setTimeout(res, delay));
-      cur = (cur + 1) % total;
+      const deg = (360 / total) * current;
+      beam.style.transform = `rotate(${deg}deg)`;
+
+      await new Promise(res => setTimeout(res, msPerStep));
+      current = (current + 1) % total;
     }
   }
 
-  // Final stop
+  // NU RICHTEN OP DE TARGET
+  if (targetIndex != null) {
+    const finalDeg = (360 / total) * targetIndex;
+    beam.style.transform = `rotate(${finalDeg}deg)`;
+  }
+
+  // Dramatisch moment
+  await new Promise(res => setTimeout(res, 300));
+
+  // Target animatie uitvoeren
   if (targetIndex != null && cardRefs[targetIndex]) {
     const target = cardRefs[targetIndex].el;
-
-    cardRefs.forEach(ref => ref.el.classList.remove("card-glow-red"));
-    target.classList.add("card-glow-red");
     target.classList.add("bomb-hit");
 
     setTimeout(() => {
       target.classList.remove("bomb-hit");
-      target.classList.remove("card-glow-red");
-
+      beam.classList.remove("active");
       emitAnimationDone("bomb", targetIndex);
     }, 1500);
   }
