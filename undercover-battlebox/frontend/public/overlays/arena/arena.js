@@ -1,15 +1,16 @@
 // ============================================================================
 // arena.js — BattleBox Arena Overlay
-// BUILD v11.5 — Galaxy Overlay Fix + Bomb HardStop + DiamondPistol Fix
+// BUILD v11.6 — Bomb FAST-SCAN Edition + Galaxy Overlay Fix
 //
-// NEW FIXES IN THIS BUILD:
-// ✔ Galaxy NEVER triggers twistOverlay (popup layer stays hidden)
-// ✔ No dark/grey overlay during ANY twist
-// ✔ Bomb beam hard-stop WITH failsafe (never loops forever)
-// ✔ DiamondPistol emits correct event + no double-firing
+// NEW FIXES / FEATURES IN THIS BUILD:
+// ✔ Bomb beam COMPLETELY removed — no more loops, no glitches
+// ✔ Bomb now uses FAST-SCAN (0.1s per card × 3 rounds)
+// ✔ Massive red flash per player during scan
+// ✔ Final-hit flash on target + elimination tint
+// ✔ DiamondPistol correct survivor → no duplicates
+// ✔ Galaxy never shows overlay
 // ✔ Playercards always visible except during blur/shuffle
-// ✔ twistOverlay shown ONLY for MG / Breaker / Bomb / DP
-// ✔ TLS-safe animation timers everywhere
+// ✔ TLS-safe timers everywhere
 //
 // ============================================================================
 
@@ -44,7 +45,6 @@ window.addEventListener("DOMContentLoaded", () => {
 const socket = getSocket();
 
 socket.on("twist:takeover", (p) => {
-  // popup only
   document.dispatchEvent(
     new CustomEvent("twist:message", {
       detail: {
@@ -70,7 +70,7 @@ socket.on("twist:clear", () => {
 });
 
 /* ============================================================================ */
-/* ANIMATION COMPLETE TO BACKEND                                                */
+/* ANIMATION COMPLETE → backend                                                  */
 /* ============================================================================ */
 
 function emitAnimationDone(type, targetIndex) {
@@ -84,7 +84,7 @@ function emitAnimationDoneDirect(type, targetId) {
 }
 
 /* ============================================================================ */
-/* DOM refs                                                                      */
+/* DOM REFS                                                                      */
 /* ============================================================================ */
 
 const root = document.getElementById("arena-root");
@@ -95,24 +95,13 @@ const hudRing = document.getElementById("hud-ring-progress");
 const playersContainer = document.getElementById("arena-players");
 const twistOverlay = document.getElementById("twist-takeover");
 
-// roulette beam auto inject
-let rouletteBeam = document.getElementById("roulette-beam");
-if (!rouletteBeam) {
-  rouletteBeam = document.createElement("div");
-  rouletteBeam.id = "roulette-beam";
-  rouletteBeam.className = "roulette-beam";
-  root.appendChild(rouletteBeam);
-}
-
 const EMPTY_AVATAR = "https://i.imgur.com/x6v5tkX.jpeg";
 
 /* ============================================================================ */
-/* FADE                                                                          */
+/* FADE FUNCTIONS                                                                */
 /* ============================================================================ */
 
-function fadeOutCards() {
-  playersContainer.classList.add("fade-out");
-}
+function fadeOutCards() { playersContainer.classList.add("fade-out"); }
 function fadeInCards() {
   playersContainer.classList.remove("fade-out");
   playersContainer.classList.add("fade-in");
@@ -126,18 +115,14 @@ function fadeInCards() {
 function waitForAnimation(el) {
   return new Promise((resolve) => {
     let ended = false;
-
-    const done = () => {
+    const end = () => {
       if (ended) return;
       ended = true;
-      el.removeEventListener("animationend", done);
+      el.removeEventListener("animationend", end);
       resolve();
     };
-
-    el.addEventListener("animationend", done, { once: true });
-
-    // TLS fallback
-    setTimeout(done, 1500);
+    el.addEventListener("animationend", end, { once: true });
+    setTimeout(end, 1500); // TLS fallback
   });
 }
 
@@ -213,11 +198,9 @@ arenaStore.subscribe((state) => {
   hudRound.textContent = `RONDE ${state.round}`;
   hudType.textContent = state.type === "finale" ? "FINALE" : "VOORRONDE";
 
-  const players = state.players;
-
   for (let i = 0; i < 8; i++) {
     const ref = cardRefs[i];
-    const p = players[i];
+    const p = state.players[i];
 
     if (!p) {
       ref.name.textContent = "LEEG";
@@ -242,18 +225,10 @@ arenaStore.subscribe((state) => {
 /* ============================================================================ */
 
 function resetStatus(el) {
-  el.classList.remove(
-    "status-alive",
-    "status-danger",
-    "status-immune-full",
-    "status-immune-partial",
-    "status-elimination"
-  );
+  el.className = "bb-player-card";
 }
 
 function applyStatus(el, p) {
-  resetStatus(el);
-
   if (p.eliminated) return el.classList.add("status-elimination");
 
   if (p.positionStatus === "danger")
@@ -277,7 +252,6 @@ function applyStatus(el, p) {
 function positionCard(el, pos) {
   const dx = pos.x * RADIUS;
   const dy = pos.y * RADIUS;
-
   el.style.left = `${CENTER_X + dx - 80}px`;
   el.style.top = `${CENTER_Y + dy - 80}px`;
 }
@@ -313,50 +287,34 @@ function triggerGalaxyEffect() {
 }
 
 /* ============================================================================ */
-/* BOMB — HARD STOP + FAILSAFE                                                   */
+/* BOMB — FAST-SCAN (0.1s × 3 rounds)                                            */
 /* ============================================================================ */
 
 async function triggerBombEffects(targetIndex) {
-  const total = cardRefs.length;
-  const speed = 95;
-  let current = 0;
-  let safety = 0;
+  const cards = cardRefs.map(ref => ref.el);
+  const scanDelay = 100; // 0.1s
+  const rounds = 3;
 
-  rouletteBeam.classList.remove("done");
-  rouletteBeam.classList.add("active");
-
-  // chase to target (NEVER infinite)
-  while (current !== targetIndex) {
-    const deg = (360 / total) * current;
-    rouletteBeam.style.transform = `rotate(${deg}deg)`;
-
-    await new Promise(r => setTimeout(r, speed));
-    current = (current + 1) % total;
-
-    if (safety++ > 200) break; // TLS safety
+  // FAST SCAN
+  for (let r = 0; r < rounds; r++) {
+    for (let i = 0; i < cards.length; i++) {
+      const card = cards[i];
+      card.classList.add("bomb-scan");
+      await new Promise(res => setTimeout(res, scanDelay));
+      card.classList.remove("bomb-scan");
+    }
   }
 
-  // snap to final
-  rouletteBeam.style.transform = `rotate(${(360 / total) * targetIndex}deg)`;
-  await new Promise(r => setTimeout(r, 250));
+  // FINAL HIT
+  if (targetIndex != null && cards[targetIndex]) {
+    const target = cards[targetIndex];
+    target.classList.add("bomb-final-hit");
 
-  // hit
-  if (targetIndex != null) {
-    const card = cardRefs[targetIndex]?.el;
-    if (card) {
-      card.classList.add("bomb-hit");
-
-      setTimeout(() => {
-        card.classList.remove("bomb-hit");
-
-        // FULL RESET
-        rouletteBeam.classList.remove("active");
-        rouletteBeam.classList.add("done");
-
-        setTimeout(() => rouletteBeam.classList.remove("done"), 250);
-        emitAnimationDone("bomb", targetIndex);
-      }, 1500);
-    }
+    setTimeout(() => {
+      target.classList.remove("bomb-final-hit");
+      target.classList.add("status-elimination");
+      emitAnimationDone("bomb", targetIndex);
+    }, 900);
   }
 }
 
@@ -365,32 +323,22 @@ async function triggerBombEffects(targetIndex) {
 /* ============================================================================ */
 
 function triggerMoneyGun(targetIndex) {
-  if (targetIndex == null) return;
   setTimeout(() => emitAnimationDone("moneygun", targetIndex), 900);
 }
 
 function triggerBreaker(targetIndex) {
-  if (targetIndex == null) return;
   setTimeout(() => emitAnimationDone("breaker", targetIndex), 900);
 }
 
 function triggerDiamondPistol(survivorId, targetIndex) {
-  // survivorId = player who survives
-  if (survivorId) {
-    setTimeout(() => emitAnimationDoneDirect("diamondpistol", survivorId), 900);
-    return;
-  }
+  if (survivorId)
+    return setTimeout(() =>
+      emitAnimationDoneDirect("diamondpistol", survivorId), 900);
 
-  // fallback on targetIndex
-  if (targetIndex != null) {
-    const player = arenaStore.get().players[targetIndex];
-    if (player) {
-      setTimeout(
-        () => emitAnimationDoneDirect("diamondpistol", player.id),
-        900
-      );
-    }
-  }
+  const p = arenaStore.get().players[targetIndex];
+  if (p)
+    setTimeout(() =>
+      emitAnimationDoneDirect("diamondpistol", p.id), 900);
 }
 
 /* ============================================================================ */
@@ -399,8 +347,7 @@ function triggerDiamondPistol(survivorId, targetIndex) {
 
 async function runGalaxyShuffle() {
   const steps = 14;
-  const duration = 2600;
-  const interval = duration / steps;
+  const interval = 2600 / steps;
 
   for (let i = 0; i < steps; i++) {
     const shuffled = [...POSITIONS].sort(() => Math.random() - 0.5);
@@ -431,7 +378,7 @@ arenaTwistStore.subscribe(async (st) => {
 
   FX.clear();
 
-  // ===== SPECIAL HANDLING =====================================================
+  // SPECIAL — GALAXY
   if (st.type === "galaxy") {
     triggerGalaxyEffect();
     await runGalaxyShuffle();
@@ -439,6 +386,7 @@ arenaTwistStore.subscribe(async (st) => {
     return;
   }
 
+  // SPECIAL — COUNTDOWN
   if (st.type === "countdown") {
     fadeOutCards();
     FX.add(new CountdownFX(st.step));
@@ -449,9 +397,7 @@ arenaTwistStore.subscribe(async (st) => {
     return;
   }
 
-  // ===== NORMAL TWISTS ========================================================
-
-  // playercards stay visible
+  // NORMAL TWISTS
   fadeInCards();
 
   switch (st.type) {
@@ -472,7 +418,7 @@ arenaTwistStore.subscribe(async (st) => {
       break;
   }
 
-  // DO NOT SHOW OVERLAY FOR GALAXY
+  // Only MG / Breaker / Bomb / DP show overlay
   twistOverlay.classList.remove("hidden");
   playTwistAnimation(twistOverlay, st.type, st.title, payload);
 
