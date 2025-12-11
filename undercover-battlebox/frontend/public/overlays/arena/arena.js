@@ -1,6 +1,6 @@
 // ============================================================================
 // arena.js — BattleBox Arena Overlay
-// BUILD v11.1 — Fully Synced With Twist Engine v8.1
+// BUILD v11.2 — Fully Synced With Twist Engine v8.1
 // FIXES:
 // ✔ Eliminates ALL double animations
 // ✔ waitForAnimation added (fix crash)
@@ -51,7 +51,7 @@ window.addEventListener("DOMContentLoaded", () => {
 const socket = getSocket();
 
 socket.on("twist:takeover", (p) => {
-  // Only popup text
+  // TWIST POPUP — NO ANIMATIONS HERE
   document.dispatchEvent(
     new CustomEvent("twist:message", {
       detail: {
@@ -65,7 +65,7 @@ socket.on("twist:takeover", (p) => {
     })
   );
 
-  // ANIMATION STARTS HERE — ONE SOURCE OF TRUTH
+  // ANIMATION STARTS ONLY HERE
   arenaTwistStore.activate({
     type: p.type,
     title: p.title,
@@ -129,7 +129,7 @@ function showPlayerCards() {
 }
 
 /* ============================================================================ */
-/* WAIT FOR ANIMATION — FIX                                                     */
+/* WAIT FOR ANIMATION                                                            */
 /* ============================================================================ */
 
 function waitForAnimation(el) {
@@ -146,7 +146,7 @@ function waitForAnimation(el) {
 
     el.addEventListener("animationend", handler, { once: true });
 
-    // Safety fallback (TLS sometimes doesn't fire animationend)
+    // TLS Fallback
     setTimeout(() => {
       if (!ended) {
         ended = true;
@@ -473,11 +473,11 @@ arenaTwistStore.subscribe(async (st) => {
 });
 
 /* ============================================================================ */
-/* TWIST MESSAGE POPUP (NO ANIMATIONS)                                           */
+/* TWIST MESSAGE POPUP (NO ANIMATIONS HERE)                                      */
 /* ============================================================================ */
 
 document.addEventListener("twist:message", (ev) => {
-  // popup only
+  // popup only — animation already handled via arenaTwistStore
 });
 
 /* ============================================================================ */
