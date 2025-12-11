@@ -29,7 +29,8 @@ import {
   emitArena as emitArenaRaw,
   getArenaSettings,
   startRound,
-  endRound
+  endRound,
+  finalizeElimination
 } from "./engines/5-game-engine";
 
 // Queue Engine v16
@@ -498,6 +499,28 @@ io.on("connection", async (socket: AdminSocket) => {
   // OVERLAY CONNECT
   if (socket.isOverlay) {
     socket.join("overlays");
+
+    // ⬇⬇ PATCH: luister naar animatie-complete events ⬇⬇
+    socket.on("twist:animation-complete", async (payload) => {
+      const { type, targetId } = payload;
+      if (!targetId) return;
+
+      // Alleen twists die elimineren
+      if (["bomb", "moneygun", "breaker", "diamondpistol"].includes(type)) {
+        const ok = finalizeElimination(targetId);
+
+        if (ok) {
+          emitLog({
+            type: "twist",
+            message: `Eliminatie uitgevoerd na animatie → ${targetId}`
+          });
+        }
+
+        await emitArena();
+      }
+    });
+    // ⬆⬆ EINDE PATCH ⬆⬆
+
     const snap = await buildInitialSnapshot();
     socket.emit("overlayInitialSnapshot", snap);
     return;
