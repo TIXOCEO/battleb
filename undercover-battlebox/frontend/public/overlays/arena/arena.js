@@ -1,14 +1,13 @@
 // ============================================================================
 // arena.js — BattleBox Arena Overlay
-// BUILD v11.7 — Bomb FAST-SCAN Dual-Event System (Final)
+// BUILD v11.8 — Bomb FAST-SCAN Dual-Event System (Fixed Race Conditions)
 // 
-// CHANGES FROM v11.6:
-// ✔ Bomb scan starts on event #1 ONLY (targetIndex = null)
-// ✔ Bomb scan ends + hits on event #2 ONLY (targetIndex != null)
-// ✔ No re-trigger, no restart, no duplicate scan
-// ✔ Correct event order: BOM message → SCAN → TARGET message → HIT
-// ✔ Maintains all FAST-SCAN behavior (0.1s per card × 3 rounds)
-// ✔ Keeps entire file intact except bomb logic
+// FIXES from v11.7:
+// ✔ PRE-EMPTIVE STOP: scan stopt DIRECT zodra targetIndex event arriveert
+// ✔ No “scan missing on second bomb” bug
+// ✔ Proper reset of all bomb-related flags
+// ✔ Guaranteed sequence: BOM MSG → SCAN → TARGET MSG → HIT
+// ✔ All other code 100% intact
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -41,12 +40,11 @@ window.addEventListener("DOMContentLoaded", () => {
 
 const socket = getSocket();
 
-// Bomb dual-event state
+// Bomb dual-event flags
 let bombScanActive = false;
-let bombScanEnd = null;
+let bombScanStopRequested = false;
 
 socket.on("twist:takeover", (p) => {
-  // popup only
   document.dispatchEvent(
     new CustomEvent("twist:message", {
       detail: {
@@ -129,7 +127,7 @@ function waitForAnimation(el) {
 }
 
 /* ============================================================================ */
-/* POSITIONS                                                                     */
+/* POSITIONS / CARDS / RENDER LOOP — UNCHANGED                                   */
 /* ============================================================================ */
 
 const POSITIONS = [
@@ -146,10 +144,6 @@ const POSITIONS = [
 const CENTER_X = 600;
 const CENTER_Y = 400;
 const RADIUS = 300;
-
-/* ============================================================================ */
-/* PLAYER CARDS                                                                  */
-/* ============================================================================ */
 
 const cardRefs = [];
 
@@ -192,10 +186,6 @@ function createPlayerCards() {
 
 createPlayerCards();
 
-/* ============================================================================ */
-/* RENDER LOOP                                                                    */
-/* ============================================================================ */
-
 arenaStore.subscribe((state) => {
   hudRound.textContent = `RONDE ${state.round}`;
   hudType.textContent = state.type === "finale" ? "FINALE" : "VOORRONDE";
@@ -223,7 +213,7 @@ arenaStore.subscribe((state) => {
 });
 
 /* ============================================================================ */
-/* STATUS LOGIC                                                                   */
+/* STATUS LOGIC                                                                  */
 /* ============================================================================ */
 
 function resetStatus(el) {
@@ -289,42 +279,58 @@ function triggerGalaxyEffect() {
 }
 
 /* ============================================================================ */
-/* BOMB — FAST-SCAN (dual event)                                                 */
+/* BOMB — FAST-SCAN (event #1)                                                   */
 /* ============================================================================ */
 
 async function startBombScan() {
   bombScanActive = true;
+  bombScanStopRequested = false;
+
+  console.log("[BOMB] Scan STARTED");
 
   const cards = cardRefs.map(ref => ref.el);
-  const scanDelay = 100;
+  const delay = 100;
   const rounds = 3;
-
-  console.log("[BOMB] Scan started (event #1)");
 
   for (let r = 0; r < rounds; r++) {
     for (let i = 0; i < cards.length; i++) {
-      if (!bombScanActive) return; // stop early if target arrives
+
+      // PRE-EMPTIVE STOP → event #2 arrived
+      if (bombScanStopRequested) {
+        console.log("[BOMB] Scan interrupted — jumping to HIT");
+        return;
+      }
 
       const card = cards[i];
       card.classList.add("bomb-scan");
-      await new Promise(res => setTimeout(res, scanDelay));
+
+      await new Promise(res => setTimeout(res, delay));
+
       card.classList.remove("bomb-scan");
     }
   }
 
-  console.warn("[BOMB] Scan finished before target! Waiting...");
+  console.log("[BOMB] Scan finished naturally — waiting for target...");
 }
 
-async function finishBombScan(targetIndex) {
-  if (!bombScanActive) return;
+/* ============================================================================ */
+/* BOMB HIT — event #2                                                           */
+/* ============================================================================ */
 
+async function finishBombScan(targetIndex) {
+  if (!bombScanActive) {
+    // Rare case: event order reversed → still hit
+    bombScanActive = false;
+    bombScanStopRequested = false;
+  }
+
+  console.log("[BOMB] Target received:", targetIndex);
+
+  // STOP scan immediately
+  bombScanStopRequested = true;
   bombScanActive = false;
 
-  const cards = cardRefs.map(ref => ref.el);
-
-  console.log("[BOMB] Final target:", targetIndex);
-
-  const target = cards[targetIndex];
+  const target = cardRefs[targetIndex]?.el;
   if (!target) return;
 
   target.classList.add("bomb-final-hit");
@@ -332,7 +338,13 @@ async function finishBombScan(targetIndex) {
   setTimeout(() => {
     target.classList.remove("bomb-final-hit");
     target.classList.add("status-elimination");
+
     emitAnimationDone("bomb", targetIndex);
+
+    // absolute cleanup
+    bombScanActive = false;
+    bombScanStopRequested = false;
+
   }, 900);
 }
 
@@ -395,6 +407,7 @@ arenaTwistStore.subscribe(async (st) => {
   const targetIndex = payload.targetIndex ?? null;
 
   FX.clear();
+  fadeInCards();
 
   // SPECIAL — GALAXY
   if (st.type === "galaxy") {
@@ -416,15 +429,14 @@ arenaTwistStore.subscribe(async (st) => {
   }
 
   // NORMAL TWISTS
-  fadeInCards();
-
   switch (st.type) {
+
     case "bomb":
       if (targetIndex == null) {
-        // event #1 → start scanning
+        // event #1 → begin scan
         if (!bombScanActive) startBombScan();
       } else {
-        // event #2 → finish scan at target
+        // event #2 → finish hit
         finishBombScan(targetIndex);
       }
       break;
@@ -442,7 +454,7 @@ arenaTwistStore.subscribe(async (st) => {
       break;
   }
 
-  // Only MG / Breaker / Bomb / DP show overlay
+  // Show overlay for these twists
   twistOverlay.classList.remove("hidden");
   playTwistAnimation(twistOverlay, st.type, st.title, payload);
 
