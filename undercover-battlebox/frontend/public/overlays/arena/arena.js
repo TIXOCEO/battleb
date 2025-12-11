@@ -1,8 +1,9 @@
 // ============================================================================
 // arena.js — BattleBox Arena Overlay
-// BUILD v11.0 — Fully Synced With Twist Engine v8.1
+// BUILD v11.1 — Fully Synced With Twist Engine v8.1
 // FIXES:
 // ✔ Eliminates ALL double animations
+// ✔ waitForAnimation added (fix crash)
 // ✔ twist:message no longer triggers animations — popup ONLY
 // ✔ Bomb roulette index EXACT → no +1 mistakes
 // ✔ Roulette beam auto-injected if missing
@@ -64,7 +65,7 @@ socket.on("twist:takeover", (p) => {
     })
   );
 
-  // Store payload for animation handler
+  // ANIMATION STARTS HERE — ONE SOURCE OF TRUTH
   arenaTwistStore.activate({
     type: p.type,
     title: p.title,
@@ -77,7 +78,7 @@ socket.on("twist:clear", () => {
 });
 
 /* ============================================================================ */
-/* ANIMATION COMPLETE → backend                                                  */
+/* ANIMATION COMPLETE → BACKEND                                                  */
 /* ============================================================================ */
 
 function emitAnimationDone(type, targetIndex) {
@@ -125,6 +126,35 @@ function showPlayerCards() {
   playersContainer.classList.remove("fade-out");
   playersContainer.classList.add("fade-in");
   setTimeout(() => playersContainer.classList.remove("fade-in"), 450);
+}
+
+/* ============================================================================ */
+/* WAIT FOR ANIMATION — FIX                                                     */
+/* ============================================================================ */
+
+function waitForAnimation(el) {
+  return new Promise((resolve) => {
+    let ended = false;
+
+    const handler = () => {
+      if (!ended) {
+        ended = true;
+        el.removeEventListener("animationend", handler);
+        resolve();
+      }
+    };
+
+    el.addEventListener("animationend", handler, { once: true });
+
+    // Safety fallback (TLS sometimes doesn't fire animationend)
+    setTimeout(() => {
+      if (!ended) {
+        ended = true;
+        el.removeEventListener("animationend", handler);
+        resolve();
+      }
+    }, 1800);
+  });
 }
 
 /* ============================================================================ */
@@ -263,6 +293,7 @@ function applyStatus(el, p) {
 function positionCard(el, pos) {
   const dx = pos.x * RADIUS;
   const dy = pos.y * RADIUS;
+
   el.style.left = `${CENTER_X + dx - 80}px`;
   el.style.top = `${CENTER_Y + dy - 80}px`;
 }
@@ -298,14 +329,13 @@ function triggerGalaxyBlurSpin() {
 }
 
 /* ============================================================================ */
-/* BOMB ROULETTE — 100% accurate target                                         */
+/* BOMB ROULETTE — EXACT TARGET                                                */
 /* ============================================================================ */
 
 async function triggerBombEffects(targetIndex) {
   const total = cardRefs.length;
   const speed = 95;
   const rounds = 4;
-
   let current = 0;
 
   rouletteBeam.classList.add("active");
@@ -321,7 +351,7 @@ async function triggerBombEffects(targetIndex) {
     }
   }
 
-  // SNAP EXACTLY TO TARGET
+  // SNAP EXACT TO TARGET
   if (targetIndex != null) {
     const finalDeg = (360 / total) * targetIndex;
     rouletteBeam.style.transform = `rotate(${finalDeg}deg)`;
@@ -329,7 +359,7 @@ async function triggerBombEffects(targetIndex) {
 
   await new Promise(res => setTimeout(res, 260));
 
-  // TARGET HIT ANIMATION
+  // TARGET HIT
   if (targetIndex != null && cardRefs[targetIndex]) {
     const target = cardRefs[targetIndex].el;
     target.classList.add("bomb-hit");
@@ -362,7 +392,7 @@ function triggerDiamondPistol(survivorId) {
 }
 
 /* ============================================================================ */
-/* GALAXY SHUFFLE                                                                  */
+/* GALAXY SHUFFLE                                                                 */
 /* ============================================================================ */
 
 async function runGalaxyShuffle() {
@@ -388,14 +418,13 @@ async function runGalaxyShuffle() {
 }
 
 /* ============================================================================ */
-/* MAIN TWIST HANDLER (ONE SOURCE OF TRUTH)                                      */
+/* MAIN TWIST HANDLER — THE SINGLE SOURCE OF ANIMATIONS                          */
 /* ============================================================================ */
 
 arenaTwistStore.subscribe(async (st) => {
   if (!st.active || !st.type) return;
 
   hidePlayerCards();
-
   FX.clear();
 
   const payload = st.payload || {};
@@ -444,11 +473,11 @@ arenaTwistStore.subscribe(async (st) => {
 });
 
 /* ============================================================================ */
-/* TWIST MESSAGE POPUP (NO ANIMATIONS HERE)                                     */
+/* TWIST MESSAGE POPUP (NO ANIMATIONS)                                           */
 /* ============================================================================ */
 
 document.addEventListener("twist:message", (ev) => {
-  // popup only — animation already handled in main subscribe()
+  // popup only
 });
 
 /* ============================================================================ */
