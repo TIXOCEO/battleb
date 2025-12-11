@@ -288,10 +288,12 @@ async function triggerBombEffects(targetIndex) {
   const delay = 120;
   let cur = 0;
 
+  console.log("[BOMB] Running roulette… target:", targetIndex);
+
+  // 4 full cycles
   for (let r = 0; r < rounds; r++) {
     for (let i = 0; i < total; i++) {
-
-      // Reset all
+      // Reset all glows
       cardRefs.forEach(ref => ref.el.classList.remove("card-glow-red"));
 
       // Highlight current
@@ -303,8 +305,10 @@ async function triggerBombEffects(targetIndex) {
     }
   }
 
-  // STOP ON TARGET
+  // STOP EXACT OP TARGET
   if (targetIndex != null && cardRefs[targetIndex]) {
+    console.log("[BOMB] Stopped at target:", targetIndex);
+
     cardRefs.forEach(ref => ref.el.classList.remove("card-glow-red"));
 
     const target = cardRefs[targetIndex].el;
