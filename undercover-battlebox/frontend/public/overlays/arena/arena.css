@@ -176,23 +176,99 @@
   opacity: 0.85;
 }
 
-/* ============================================================= */
-/* 🔥 BOMB HIT FLASH (target player) */
-/* ============================================================= */
-.bomb-hit {
-  animation: bombCardFlash 1.4s ease-out forwards;
+/* ========================================================================== */
+/* 🔥 NEW: IMMUNE FULL + PARTIAL */
+/* ========================================================================== */
+
+.status-immune-full {
+  border-color:#00ffc3 !important;
+  box-shadow:0 0 40px #00ffc3, inset 0 0 30px rgba(0,255,195,0.55) !important;
 }
 
-@keyframes bombCardFlash {
-  0%   { filter: brightness(2.5) saturate(2.2); }
-  25%  { filter: brightness(3.2) saturate(2.8); transform: scale(1.05); }
-  80%  { filter: brightness(0.5) saturate(0.4); opacity: 0.4; }
-  100% { filter: brightness(0.5) saturate(0.4); opacity: 0.3; }
+.status-immune-full .bb-player-bgavatar {
+  opacity:0.9 !important;
+  filter:brightness(1.7) saturate(1.4) drop-shadow(0 0 18px #00ffc3) !important;
 }
 
-/* ============================================================= */
-/* ORIGINAL BG + STATUS */
-/* ============================================================= */
+.status-immune-partial {
+  border-color:#88ffcc !important;
+  box-shadow:
+    0 0 25px rgba(0,255,180,0.45),
+    inset 0 0 18px rgba(0,255,180,0.35) !important;
+}
+
+.status-immune-partial .bb-player-bgavatar {
+  filter:brightness(1.2) saturate(1.15);
+  opacity:0.75;
+}
+
+/* ========================================================================== */
+/* 🔥 BREAKER HIT (CSS replacement for crack.png) */
+/* ========================================================================== */
+
+.breaker-hit {
+  animation: breakerFlash 0.9s ease-out forwards;
+  position: relative;
+}
+
+.breaker-hit::after {
+  content:"";
+  position:absolute;
+  inset:0;
+  background:
+    repeating-linear-gradient(
+      45deg,
+      rgba(255,0,150,0.8) 0 4px,
+      rgba(255,255,255,0.0) 4px 8px
+    );
+  opacity:0;
+  animation: breakerCrack 0.9s ease-out forwards;
+  mix-blend-mode: screen;
+}
+
+@keyframes breakerFlash {
+  0%   { transform:scale(1); filter:brightness(2); }
+  35%  { transform:scale(1.08); filter:brightness(3); }
+  100% { transform:scale(1); filter:brightness(1); }
+}
+
+@keyframes breakerCrack {
+  0%   { opacity:1; }
+  80%  { opacity:0.4; }
+  100% { opacity:0; }
+}
+
+/* ========================================================================== */
+/* 🔥 MONEYGUN HIT */
+/* ========================================================================== */
+
+.mg-hit {
+  animation: mgPulse 0.8s ease-out forwards;
+}
+
+@keyframes mgPulse {
+  0%   { filter:brightness(2) saturate(2); transform:scale(1.05); }
+  50%  { filter:brightness(2.5) saturate(2.5); transform:scale(1.1); }
+  100% { filter:brightness(1) saturate(1); transform:scale(1); }
+}
+
+/* ========================================================================== */
+/* 🔥 DIAMOND PISTOL HIT */
+/* ========================================================================== */
+
+.pistol-hit {
+  animation: pistolFlash 0.75s ease-out forwards;
+}
+
+@keyframes pistolFlash {
+  0%   { filter:brightness(3) hue-rotate(180deg); opacity:1; }
+  50%  { filter:brightness(2); opacity:0.7; }
+  100% { filter:brightness(1); opacity:1; }
+}
+
+/* ========================================================================== */
+/* 🔥 ORIGINAL STATUS / DANGER / ELIMINATION */
+/* ========================================================================== */
 
 .bb-player-bgavatar {
   position: absolute;
@@ -214,23 +290,51 @@
     drop-shadow(0 0 12px rgba(255,136,0,0.38));
 }
 
-.status-immune .bb-player-bgavatar {
-  opacity: 0.70;
-  filter: brightness(1.4) saturate(1.4)
-    drop-shadow(0 0 14px rgba(0,255,180,0.45));
-}
-
-.status-immune-broken .bb-player-bgavatar {
-  opacity: 0.55;
-  filter: brightness(1.55) saturate(1.1);
-}
-
 .status-elimination .bb-player-bgavatar {
   opacity: 0.25;
   filter: brightness(0.65) saturate(0.6);
 }
 
-/* TEXT */
+.status-alive {
+  border-color: rgba(255,255,255,0.85);
+  box-shadow:
+    0 0 22px rgba(255,255,255,0.45),
+    inset 0 0 22px rgba(255,255,255,0.25);
+}
+
+.status-danger {
+  border-color: #ff8800;
+  box-shadow:
+    0 0 32px rgba(255,136,0,1),
+    inset 0 0 32px rgba(255,136,0,0.65);
+}
+
+.status-elimination {
+  border-color: #ff0033;
+  box-shadow:
+    0 0 38px rgba(255,0,51,1),
+    inset 0 0 38px rgba(255,0,51,0.6);
+}
+
+/* ========================================================================== */
+/* 🔥 BOMB HIT (bestond al, houden zo) */
+/* ========================================================================== */
+
+.bomb-hit {
+  animation: bombCardFlash 1.4s ease-out forwards;
+}
+
+@keyframes bombCardFlash {
+  0%   { filter: brightness(2.5) saturate(2.2); }
+  25%  { filter: brightness(3.2) saturate(2.8); transform: scale(1.05); }
+  80%  { filter: brightness(0.5) saturate(0.4); opacity: 0.4; }
+  100% { filter: brightness(0.5) saturate(0.4); opacity: 0.3; }
+}
+
+/* ========================================================================== */
+/* POSITION NUMBERS / LABEL TEXT */
+/* ========================================================================== */
+
 .bb-player-labels {
   position: relative;
   z-index: 2;
@@ -278,67 +382,8 @@
   z-index: 4;
 }
 
-.status-alive {
-  border-color: rgba(255,255,255,0.85);
-  box-shadow:
-    0 0 22px rgba(255,255,255,0.45),
-    inset 0 0 22px rgba(255,255,255,0.25);
-}
-
-.status-immune {
-  border-color: #00ffb3;
-  box-shadow:
-    0 0 28px rgba(0,255,180,1),
-    inset 0 0 28px rgba(0,255,180,0.55);
-}
-
-.status-immune-broken {
-  border-color: #ffffff;
-  box-shadow: 0 0 28px white;
-}
-
-.status-danger {
-  border-color: #ff8800;
-  box-shadow:
-    0 0 32px rgba(255,136,0,1),
-    inset 0 0 32px rgba(255,136,0,0.65);
-}
-
-.status-elimination {
-  border-color: #ff0033;
-  box-shadow:
-    0 0 38px rgba(255,0,51,1),
-    inset 0 0 38px rgba(255,0,51,0.6);
-}
-
 /* ========================================================================== */
-/* 🔥 NEW: IMMUNE FULL + IMMUNE PARTIAL */
-/* ========================================================================== */
-
-.status-immune-full {
-  border-color:#00ffc3 !important;
-  box-shadow:0 0 40px #00ffc3, inset 0 0 30px rgba(0,255,195,0.55) !important;
-}
-
-.status-immune-full .bb-player-bgavatar {
-  opacity:0.9 !important;
-  filter:brightness(1.7) saturate(1.4) drop-shadow(0 0 18px #00ffc3) !important;
-}
-
-.status-immune-partial {
-  border-color:#88ffcc !important;
-  box-shadow:
-    0 0 25px rgba(0,255,180,0.45),
-    inset 0 0 18px rgba(0,255,180,0.35) !important;
-}
-
-.status-immune-partial .bb-player-bgavatar {
-  filter:brightness(1.2) saturate(1.15);
-  opacity:0.75;
-}
-
-/* ========================================================================== */
-/* 🔥 GALAXY BLUR + SPIN BODY CLASSES */
+/* 🔥 GALAXY EFFECTS */
 /* ========================================================================== */
 
 body.twist-galaxy-blur #arena-players {
@@ -352,14 +397,14 @@ body.twist-galaxy-spin .bb-player-card {
 
 @keyframes galaxySpin {
   0% { transform: scale(1) rotate(0deg); }
-  25% { transform: scale(1) rotate(180deg); } 
+  25% { transform: scale(1) rotate(180deg); }
   50% { transform: scale(1.15) rotate(360deg); }
   80% { transform: scale(1.15) rotate(180deg); }
   100% { transform: scale(1) rotate(360deg); }
 }
 
 /* ========================================================================== */
-/* 🔥 BOMB ROULETTE FULL OVERLAY */
+/* 🔥 BOMB ROULETTE OVERLAY */
 /* ========================================================================== */
 
 #bomb-roulette {
@@ -450,7 +495,10 @@ body.twist-galaxy-spin .bb-player-card {
 #bb-twist-hud.twist-diamondpistol #bb-twist-text { color:#63cfff; border-color:#63cfff; }
 #bb-twist-hud.twist-heal #bb-twist-text { color:#f6e07b; border-color:#f6e07b; }
 
+/* ========================================================================== */
 /* STACK FIX */
+/* ========================================================================== */
+
 body {
   filter: none !important;
 }
