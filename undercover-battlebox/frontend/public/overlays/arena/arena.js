@@ -1,17 +1,14 @@
 // ============================================================================
 // arena.js — BattleBox Arena Overlay
-// BUILD v11.6 — Bomb FAST-SCAN Edition + Galaxy Overlay Fix
-//
-// NEW FIXES / FEATURES IN THIS BUILD:
-// ✔ Bomb beam COMPLETELY removed — no more loops, no glitches
-// ✔ Bomb now uses FAST-SCAN (0.1s per card × 3 rounds)
-// ✔ Massive red flash per player during scan
-// ✔ Final-hit flash on target + elimination tint
-// ✔ DiamondPistol correct survivor → no duplicates
-// ✔ Galaxy never shows overlay
-// ✔ Playercards always visible except during blur/shuffle
-// ✔ TLS-safe timers everywhere
-//
+// BUILD v11.7 — Bomb FAST-SCAN Dual-Event System (Final)
+// 
+// CHANGES FROM v11.6:
+// ✔ Bomb scan starts on event #1 ONLY (targetIndex = null)
+// ✔ Bomb scan ends + hits on event #2 ONLY (targetIndex != null)
+// ✔ No re-trigger, no restart, no duplicate scan
+// ✔ Correct event order: BOM message → SCAN → TARGET message → HIT
+// ✔ Maintains all FAST-SCAN behavior (0.1s per card × 3 rounds)
+// ✔ Keeps entire file intact except bomb logic
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -44,7 +41,12 @@ window.addEventListener("DOMContentLoaded", () => {
 
 const socket = getSocket();
 
+// Bomb dual-event state
+let bombScanActive = false;
+let bombScanEnd = null;
+
 socket.on("twist:takeover", (p) => {
+  // popup only
   document.dispatchEvent(
     new CustomEvent("twist:message", {
       detail: {
@@ -122,7 +124,7 @@ function waitForAnimation(el) {
       resolve();
     };
     el.addEventListener("animationend", end, { once: true });
-    setTimeout(end, 1500); // TLS fallback
+    setTimeout(end, 1500);
   });
 }
 
@@ -287,17 +289,22 @@ function triggerGalaxyEffect() {
 }
 
 /* ============================================================================ */
-/* BOMB — FAST-SCAN (0.1s × 3 rounds)                                            */
+/* BOMB — FAST-SCAN (dual event)                                                 */
 /* ============================================================================ */
 
-async function triggerBombEffects(targetIndex) {
+async function startBombScan() {
+  bombScanActive = true;
+
   const cards = cardRefs.map(ref => ref.el);
-  const scanDelay = 100; // 0.1s
+  const scanDelay = 100;
   const rounds = 3;
 
-  // FAST SCAN
+  console.log("[BOMB] Scan started (event #1)");
+
   for (let r = 0; r < rounds; r++) {
     for (let i = 0; i < cards.length; i++) {
+      if (!bombScanActive) return; // stop early if target arrives
+
       const card = cards[i];
       card.classList.add("bomb-scan");
       await new Promise(res => setTimeout(res, scanDelay));
@@ -305,17 +312,28 @@ async function triggerBombEffects(targetIndex) {
     }
   }
 
-  // FINAL HIT
-  if (targetIndex != null && cards[targetIndex]) {
-    const target = cards[targetIndex];
-    target.classList.add("bomb-final-hit");
+  console.warn("[BOMB] Scan finished before target! Waiting...");
+}
 
-    setTimeout(() => {
-      target.classList.remove("bomb-final-hit");
-      target.classList.add("status-elimination");
-      emitAnimationDone("bomb", targetIndex);
-    }, 900);
-  }
+async function finishBombScan(targetIndex) {
+  if (!bombScanActive) return;
+
+  bombScanActive = false;
+
+  const cards = cardRefs.map(ref => ref.el);
+
+  console.log("[BOMB] Final target:", targetIndex);
+
+  const target = cards[targetIndex];
+  if (!target) return;
+
+  target.classList.add("bomb-final-hit");
+
+  setTimeout(() => {
+    target.classList.remove("bomb-final-hit");
+    target.classList.add("status-elimination");
+    emitAnimationDone("bomb", targetIndex);
+  }, 900);
 }
 
 /* ============================================================================ */
@@ -402,7 +420,13 @@ arenaTwistStore.subscribe(async (st) => {
 
   switch (st.type) {
     case "bomb":
-      await triggerBombEffects(targetIndex);
+      if (targetIndex == null) {
+        // event #1 → start scanning
+        if (!bombScanActive) startBombScan();
+      } else {
+        // event #2 → finish scan at target
+        finishBombScan(targetIndex);
+      }
       break;
 
     case "moneygun":
