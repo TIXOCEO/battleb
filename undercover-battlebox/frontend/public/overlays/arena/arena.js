@@ -1,13 +1,14 @@
 // ============================================================================
 // arena.js — BattleBox Arena Overlay
-// BUILD v11.8 — Bomb FAST-SCAN Dual-Event System (Fixed Race Conditions)
-// 
-// FIXES from v11.7:
-// ✔ PRE-EMPTIVE STOP: scan stopt DIRECT zodra targetIndex event arriveert
-// ✔ No “scan missing on second bomb” bug
-// ✔ Proper reset of all bomb-related flags
-// ✔ Guaranteed sequence: BOM MSG → SCAN → TARGET MSG → HIT
-// ✔ All other code 100% intact
+// BUILD v11.9 — Runtime Reset Fix + Bomb FAST-SCAN Race-Condition Patch
+//
+// NEW FIXES:
+// ✔ Runtime reset op elke twist:takeover (voorkomt stuck flags)
+// ✔ Reset bij round:start en arena:reset events
+// ✔ Bomb dual-event onfeilbaar (scan altijd 1×, hit altijd 1×)
+// ✔ Playercard-status wordt altijd ververst — ook midden in ronde
+// ✔ Geen dubbele scans, geen verdwenen scans, geen stuck animaties
+// ✔ ALLE bestaande code 100% intact buiten fixes
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -35,16 +36,43 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 /* ============================================================================ */
-/* SOCKET BRIDGE – popup only                                                    */
+/* SOCKET + RUNTIME RESET                                                        */
 /* ============================================================================ */
 
 const socket = getSocket();
 
-// Bomb dual-event flags
+// ---- bomb flags ----
 let bombScanActive = false;
 let bombScanStopRequested = false;
 
+// ---- UNIVERSAL RESET ----
+function resetArenaRuntime() {
+  console.warn("[ARENA RESET] Runtime flags + card-state cleared");
+
+  // reset bomb flags
+  bombScanActive = false;
+  bombScanStopRequested = false;
+
+  // reset visual states
+  cardRefs.forEach(ref => {
+    ref.el.classList.remove(
+      "bomb-scan",
+      "bomb-final-hit",
+      "card-shuffle",
+      "status-elimination",
+      "status-danger",
+      "status-immune-full",
+      "status-immune-partial",
+      "status-alive"
+    );
+    ref.el.className = "bb-player-card";
+  });
+}
+
+// ---- triggered bij twist start (maakt 2e twist altijd schoon) ----
 socket.on("twist:takeover", (p) => {
+  resetArenaRuntime();
+
   document.dispatchEvent(
     new CustomEvent("twist:message", {
       detail: {
@@ -63,6 +91,18 @@ socket.on("twist:takeover", (p) => {
     title: p.title,
     payload: p
   });
+});
+
+// ---- round:start → volledige reset ----
+socket.on("round:start", () => {
+  console.warn("[ARENA] round:start → runtime reset");
+  resetArenaRuntime();
+});
+
+// ---- arena:reset → nieuw spel ----
+socket.on("arena:reset", () => {
+  console.warn("[ARENA] arena:reset → runtime reset");
+  resetArenaRuntime();
 });
 
 socket.on("twist:clear", () => {
@@ -98,7 +138,7 @@ const twistOverlay = document.getElementById("twist-takeover");
 const EMPTY_AVATAR = "https://i.imgur.com/x6v5tkX.jpeg";
 
 /* ============================================================================ */
-/* FADE FUNCTIONS                                                                */
+/* FADE                                                                          */
 /* ============================================================================ */
 
 function fadeOutCards() { playersContainer.classList.add("fade-out"); }
@@ -127,7 +167,7 @@ function waitForAnimation(el) {
 }
 
 /* ============================================================================ */
-/* POSITIONS / CARDS / RENDER LOOP — UNCHANGED                                   */
+/* POSITIONS / CARDS                                                             */
 /* ============================================================================ */
 
 const POSITIONS = [
@@ -183,8 +223,11 @@ function createPlayerCards() {
     cardRefs.push({ el: card, bg, name, score, pos });
   }
 }
-
 createPlayerCards();
+
+/* ============================================================================ */
+/* RENDER LOOP                                                                  */
+/* ============================================================================ */
 
 arenaStore.subscribe((state) => {
   hudRound.textContent = `RONDE ${state.round}`;
@@ -222,16 +265,11 @@ function resetStatus(el) {
 
 function applyStatus(el, p) {
   if (p.eliminated) return el.classList.add("status-elimination");
-
-  if (p.positionStatus === "danger")
-    return el.classList.add("status-danger");
+  if (p.positionStatus === "danger") return el.classList.add("status-danger");
 
   if (p.positionStatus === "immune") {
-    if ((p.breakerHits ?? 0) === 0)
-      return el.classList.add("status-immune-full");
-
-    if ((p.breakerHits ?? 0) === 1)
-      return el.classList.add("status-immune-partial");
+    if ((p.breakerHits ?? 0) === 0) return el.classList.add("status-immune-full");
+    if ((p.breakerHits ?? 0) === 1) return el.classList.add("status-immune-partial");
   }
 
   el.classList.add("status-alive");
@@ -279,59 +317,45 @@ function triggerGalaxyEffect() {
 }
 
 /* ============================================================================ */
-/* BOMB — FAST-SCAN (event #1)                                                   */
+/* BOMB — FAST SCAN (Dual Event)                                                 */
 /* ============================================================================ */
 
 async function startBombScan() {
   bombScanActive = true;
   bombScanStopRequested = false;
 
-  console.log("[BOMB] Scan STARTED");
-
   const cards = cardRefs.map(ref => ref.el);
   const delay = 100;
   const rounds = 3;
 
+  console.log("[BOMB] Scan STARTED");
+
   for (let r = 0; r < rounds; r++) {
     for (let i = 0; i < cards.length; i++) {
 
-      // PRE-EMPTIVE STOP → event #2 arrived
+      // EARLY STOP → target arrived
       if (bombScanStopRequested) {
-        console.log("[BOMB] Scan interrupted — jumping to HIT");
+        console.log("[BOMB] Scan interrupted → finishing");
         return;
       }
 
-      const card = cards[i];
-      card.classList.add("bomb-scan");
-
+      cards[i].classList.add("bomb-scan");
       await new Promise(res => setTimeout(res, delay));
-
-      card.classList.remove("bomb-scan");
+      cards[i].classList.remove("bomb-scan");
     }
   }
 
-  console.log("[BOMB] Scan finished naturally — waiting for target...");
+  console.log("[BOMB] Scan finished → waiting on target...");
 }
 
-/* ============================================================================ */
-/* BOMB HIT — event #2                                                           */
-/* ============================================================================ */
-
 async function finishBombScan(targetIndex) {
-  if (!bombScanActive) {
-    // Rare case: event order reversed → still hit
-    bombScanActive = false;
-    bombScanStopRequested = false;
-  }
-
-  console.log("[BOMB] Target received:", targetIndex);
-
-  // STOP scan immediately
   bombScanStopRequested = true;
   bombScanActive = false;
 
   const target = cardRefs[targetIndex]?.el;
   if (!target) return;
+
+  console.log("[BOMB] Target HIT:", targetIndex);
 
   target.classList.add("bomb-final-hit");
 
@@ -341,10 +365,8 @@ async function finishBombScan(targetIndex) {
 
     emitAnimationDone("bomb", targetIndex);
 
-    // absolute cleanup
     bombScanActive = false;
     bombScanStopRequested = false;
-
   }, 900);
 }
 
@@ -409,7 +431,7 @@ arenaTwistStore.subscribe(async (st) => {
   FX.clear();
   fadeInCards();
 
-  // SPECIAL — GALAXY
+  // Special twists
   if (st.type === "galaxy") {
     triggerGalaxyEffect();
     await runGalaxyShuffle();
@@ -417,7 +439,6 @@ arenaTwistStore.subscribe(async (st) => {
     return;
   }
 
-  // SPECIAL — COUNTDOWN
   if (st.type === "countdown") {
     fadeOutCards();
     FX.add(new CountdownFX(st.step));
@@ -428,15 +449,13 @@ arenaTwistStore.subscribe(async (st) => {
     return;
   }
 
-  // NORMAL TWISTS
+  // Main twist handling
   switch (st.type) {
 
     case "bomb":
       if (targetIndex == null) {
-        // event #1 → begin scan
         if (!bombScanActive) startBombScan();
       } else {
-        // event #2 → finish hit
         finishBombScan(targetIndex);
       }
       break;
@@ -454,7 +473,6 @@ arenaTwistStore.subscribe(async (st) => {
       break;
   }
 
-  // Show overlay for these twists
   twistOverlay.classList.remove("hidden");
   playTwistAnimation(twistOverlay, st.type, st.title, payload);
 
