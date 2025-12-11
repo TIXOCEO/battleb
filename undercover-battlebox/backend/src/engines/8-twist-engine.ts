@@ -1,11 +1,13 @@
 // ============================================================================
-// 8-twist-engine.ts — Twist Engine v7.3 FINAL (TYPES PATCHED)
+// 8-twist-engine.ts — Twist Engine v8.0
+// ANIMATION-SAFE VERSION — waits for frontend animation to finish
 // ============================================================================
 //
-// ✔ Full support for new overlay payload (target/victims/survivor/index)
-// ✔ Fixed ALL TS implicit-any errors
-// ✔ Added proper TwistType typing for TWIST_MAP lookups
-// ✔ No game logic changed
+// ✔ Geen directe eliminaties meer — eerst animatie → daarna backend elimineert
+// ✔ Uniform event model: twist:start + twist:finish
+// ✔ Volledige payload naar overlay: type, by, target, index, victims, etc
+// ✔ Frontend stuurt: twist:animation-complete { type, targetId }
+// ✔ Backend verwerkt dan pas eliminatie / immunity / breaker logic
 //
 // ============================================================================
 
@@ -70,86 +72,193 @@ function isImmune(id: string): boolean {
   return p?.boosters.includes("immune") || p?.positionStatus === "immune";
 }
 
-async function applyImmune(id: string): Promise<void> {
+// ============================================================================
+// NEW CORE OVERLAY EVENT MODEL
+// ============================================================================
+//
+// twist:start  → frontend doet pop-up + animatie
+// frontend stuurt: twist:animation-complete
+// backend verwerkt eliminatie / immunity / breaker logic
+// kemudian:
+// twist:finish → overlay cleart alles
+//
+// ============================================================================
+
+function emitTwistStart(type: string, data: any = {}) {
+  io.emit("twist:start", { type, ...data });
+}
+
+function emitTwistFinish(type: string, data: any = {}) {
+  io.emit("twist:finish", { type, ...data });
+}
+
+// ============================================================================
+// ANIMATION GATE — backend wacht totdat frontend klaar is
+// ============================================================================
+//
+// Zodra een twist start, slaan we tijdelijk de "pending action" op.
+// Frontend stuurt daarna:
+//
+// socket.emit("twist:animation-complete", { type, targetId })
+//
+// Backend verwerkt dán pas de daadwerkelijke eliminatie / immunity / etc.
+// ============================================================================
+
+interface PendingTwist {
+  type: TwistType;
+  senderId: string;
+  senderName: string;
+  targetId?: string | null;
+  victimIds?: string[] | null;
+}
+
+let pending: PendingTwist | null = null;
+
+io.on("connection", (socket) => {
+  socket.on("twist:animation-complete", async (payload) => {
+    if (!pending) return;
+
+    const p = pending;
+    pending = null;
+
+    switch (p.type) {
+      case "bomb":
+        await finalizeBomb(p);
+        break;
+      case "moneygun":
+        await finalizeMoneyGun(p);
+        break;
+      case "immune":
+        await finalizeImmune(p);
+        break;
+      case "heal":
+        await finalizeHeal(p);
+        break;
+      case "diamondpistol":
+        await finalizeDiamondPistol(p);
+        break;
+      case "breaker":
+        await finalizeBreaker(p);
+        break;
+    }
+
+    emitTwistFinish(p.type, { targetId: p.targetId });
+  });
+});
+
+// ============================================================================
+// FINALIZERS — worden ALLEEN uitgevoerd nadat animatie is afgelopen
+// ============================================================================
+
+async function finalizeBomb(p: PendingTwist) {
+  if (!p.targetId) return;
+
   const arena = getArena();
-  const p = arena.players.find(x => x.id === id);
-  if (!p) return;
+  const pl = arena.players.find(x => x.id === p.targetId);
+  if (!pl) return;
 
-  if (!p.boosters.includes("immune")) p.boosters.push("immune");
-  p.positionStatus = "immune";
+  pl.positionStatus = "elimination";
+  pl.eliminated = true;
 
-  emitLog({ type: "twist", message: `${p.display_name} kreeg IMMUNE` });
+  emitLog({ type: "twist", message: `${p.senderName} BOMB → ${pl.display_name} geëlimineerd` });
   await emitArena();
 }
 
-function markEliminated(id: string): boolean {
+async function finalizeMoneyGun(p: PendingTwist) {
+  if (!p.targetId) return;
   const arena = getArena();
-  const p = arena.players.find(x => x.id === id);
-  if (!p) return false;
+  const pl = arena.players.find(x => x.id === p.targetId);
+  if (!pl) return;
 
-  p.positionStatus = "elimination";
-  p.eliminated = true;
-  return true;
+  pl.positionStatus = "elimination";
+  pl.eliminated = true;
+
+  emitLog({ type: "twist", message: `${p.senderName} MoneyGun → ${pl.display_name} geëlimineerd` });
+  await emitArena();
 }
 
-function clearEliminationMark(id: string): boolean {
+async function finalizeImmune(p: PendingTwist) {
+  if (!p.targetId) return;
+
   const arena = getArena();
-  const p = arena.players.find(x => x.id === id);
-  if (!p) return false;
+  const pl = arena.players.find(x => x.id === p.targetId);
+  if (!pl) return;
 
-  p.positionStatus = "alive";
-  p.eliminated = false;
-  return true;
+  if (!pl.boosters.includes("immune")) pl.boosters.push("immune");
+  pl.positionStatus = "immune";
+
+  emitLog({ type: "twist", message: `${p.senderName} IMMUNE → ${pl.display_name}` });
+  await emitArena();
 }
 
-// ============================================================================
-// UNIFORM OVERLAY EMITTER (FULL PAYLOAD)
-// ============================================================================
-function emitOverlay(name: string, data: any = {}) {
-  const MAP: Record<string, string> = {
-    moneygun: "moneygun",
-    bomb_start: "bomb",
-    bomb: "bomb",
-    immune: "immune",
-    heal: "heal",
-    diamondpistol: "diamond",
-    breaker_cracked: "breaker",
-    breaker_broken: "breaker",
-    galaxy: "galaxy"
-  };
+async function finalizeHeal(p: PendingTwist) {
+  if (!p.targetId) return;
 
-  const type = MAP[name];
-  if (!type) return;
+  const arena = getArena();
+  const pl = arena.players.find(x => x.id === p.targetId);
+  if (!pl) return;
 
-  const title = data.by
-    ? `${data.by} gebruikt ${type}`.toUpperCase()
-    : type.toUpperCase();
+  pl.eliminated = false;
+  pl.positionStatus = "alive";
+  pl.boosters = pl.boosters.filter(b => !["mg", "bomb"].includes(b));
 
-  io.emit("twist:takeover", {
-    type,
-    title,
-    ...data
-  });
-
-  setTimeout(() => io.emit("twist:clear"), 1800);
+  emitLog({ type: "twist", message: `${p.senderName} HEAL → ${pl.display_name}` });
+  await emitArena();
 }
 
-// ============================================================================
-// TWISTS
-// ============================================================================
+async function finalizeDiamondPistol(p: PendingTwist) {
+  const arena = getArena();
+  if (!p.targetId) return;
 
+  const survivor = arena.players.find(x => x.id === p.targetId);
+  if (!survivor) return;
 
-// --------------------------------- GALAXY -----------------------------------
-async function applyGalaxy(senderId: string, senderName: string): Promise<void> {
-  const ok = await consumeTwistFromUser(senderId, "galaxy");
-  if (!ok) {
-    emitLog({ type: "twist", message: `${senderName} probeerde Galaxy zonder twist` });
-    return;
+  if (!survivor.boosters.includes("immune")) survivor.boosters.push("immune");
+  survivor.positionStatus = "immune";
+
+  for (const vid of p.victimIds ?? []) {
+    const v = arena.players.find(x => x.id === vid);
+    if (!v) continue;
+    v.positionStatus = "elimination";
+    v.eliminated = true;
   }
 
-  const reversed = toggleGalaxyMode();
+  emitLog({
+    type: "twist",
+    message: `${p.senderName} DIAMOND PISTOL → ${survivor.display_name} overleeft`
+  });
 
-  emitOverlay("galaxy", { by: senderName, reversed });
+  await emitArena();
+}
+
+async function finalizeBreaker(p: PendingTwist) {
+  if (!p.targetId) return;
+
+  const arena = getArena();
+  const pl = arena.players.find(x => x.id === p.targetId);
+  if (!pl) return;
+
+  pl.breakerHits = (pl.breakerHits ?? 0) + 1;
+
+  if (pl.breakerHits >= 2) {
+    pl.boosters = pl.boosters.filter(b => b !== "immune");
+    pl.positionStatus = "alive";
+  }
+
+  emitLog({ type: "twist", message: `${p.senderName} BREAKER → ${pl.display_name}` });
+  await emitArena();
+}
+
+// ============================================================================
+// TWIST LOGIC — produces START event then defers finalization
+// ============================================================================
+
+async function applyGalaxy(senderId: string, senderName: string): Promise<void> {
+  const ok = await consumeTwistFromUser(senderId, "galaxy");
+  if (!ok) return;
+
+  const reversed = toggleGalaxyMode();
+  emitTwistStart("galaxy", { by: senderName, reversed });
 
   emitLog({
     type: "twist",
@@ -159,149 +268,177 @@ async function applyGalaxy(senderId: string, senderName: string): Promise<void> 
   await emitArena();
 }
 
+// ============================================================================
+// START EVENT EMITTER (frontend animatie start)
+// ============================================================================
 
-// ------------------------------- MONEYGUN -----------------------------------
-async function applyMoneyGun(
-  senderId: string,
-  senderName: string,
-  target: any
-) {
+function emitTwistStart(type: TwistType, extra: any = {}) {
+  const title = extra.by
+    ? `${extra.by} gebruikt ${type}`.toUpperCase()
+    : type.toUpperCase();
+
+  io.emit("twist:takeover", {
+    type,
+    title,
+    ...extra
+  });
+}
+
+// ============================================================================
+// TWIST APPLY — alles stuurt alleen START event + zet pending action
+// Finalisatie gebeurt pas nadat frontend "twist:animation-complete" stuurt
+// ============================================================================
+
+// -------------------------------- GALAXY ------------------------------------
+
+async function applyGalaxy(senderId: string, senderName: string): Promise<void> {
+  const ok = await consumeTwistFromUser(senderId, "galaxy");
+  if (!ok) return;
+
+  const reversed = toggleGalaxyMode();
+
+  emitTwistStart("galaxy", {
+    by: senderName,
+    reversed
+  });
+
+  emitLog({
+    type: "twist",
+    message: `${senderName} GALAXY → ranking ${reversed ? "omgekeerd" : "normaal"}`
+  });
+
+  await emitArena();
+}
+
+// ------------------------------ MONEY GUN -----------------------------------
+
+async function applyMoneyGun(senderId: string, senderName: string, target: any) {
   if (!target) return;
 
   const arena = getArena();
   const p = arena.players.find(x => x.id === target.id);
   if (!p) return;
 
-  if (isImmune(target.id)) {
+  if (p.boosters.includes("immune")) {
     emitLog({
       type: "twist",
-      message: `${senderName} MoneyGun → ${target.display_name} is IMMUNE`
+      message: `${senderName} MoneyGun → ${p.display_name} is IMMUNE`
     });
     return;
   }
 
   const ok = await consumeTwistFromUser(senderId, "moneygun");
-  if (!ok) {
-    emitLog({ type: "twist", message: `${senderName} probeerde MoneyGun zonder twist` });
-    return;
-  }
+  if (!ok) return;
 
-  markEliminated(target.id);
+  pending = {
+    type: "moneygun",
+    senderId,
+    senderName,
+    targetId: p.id
+  };
 
-  emitOverlay("moneygun", {
+  emitTwistStart("moneygun", {
     by: senderName,
-    targetId: target.id,
-    targetName: target.display_name,
-    targetIndex: getPlayerIndex(target.id)
+    targetId: p.id,
+    targetName: p.display_name,
+    targetIndex: getPlayerIndex(p.id),
   });
 
-  emitLog({ type: "twist", message: `${senderName} MoneyGun → ${target.display_name} ELIM` });
-
-  await emitArena();
+  emitLog({
+    type: "twist",
+    message: `${senderName} MoneyGun gestart op ${p.display_name}`
+  });
 }
 
-
 // --------------------------------- BOMB -------------------------------------
+
 let bombInProgress = false;
 
-async function applyBomb(
-  senderId: string,
-  senderName: string
-) {
-  const arena = getArena();
-
+async function applyBomb(senderId: string, senderName: string) {
   if (bombInProgress) {
-    emitLog({ type: "twist", message: `${senderName} Bomb → bezig…` });
+    emitLog({
+      type: "twist",
+      message: `${senderName} Bomb → bezig…`
+    });
     return;
   }
+
+  const arena = getArena();
 
   const candidates = arena.players.filter(
     p => !p.boosters.includes("immune") && !p.eliminated
   );
 
   if (!candidates.length) {
-    emitLog({ type: "twist", message: `${senderName} Bomb → geen targets` });
+    emitLog({
+      type: "twist",
+      message: `${senderName} Bomb → geen geldige targets`
+    });
     return;
   }
 
   const ok = await consumeTwistFromUser(senderId, "bomb");
-  if (!ok) {
-    emitLog({ type: "twist", message: `${senderName} probeerde Bomb zonder twist` });
-    return;
-  }
+  if (!ok) return;
 
   bombInProgress = true;
 
-  emitOverlay("bomb_start", { by: senderName });
+  // Kies target
+  const target = candidates[Math.floor(Math.random() * candidates.length)];
 
-  for (let i = 3; i >= 1; i--) {
-    io.emit("twist:countdown", { type: "countdown", step: i, by: senderName });
-    await sleep(1000);
-  }
+  pending = {
+    type: "bomb",
+    senderId,
+    senderName,
+    targetId: target.id
+  };
 
-  const updated = getArena();
-  const valid = updated.players.filter(
-    p => !p.boosters.includes("immune") && !p.eliminated
-  );
-
-  if (!valid.length) {
-    bombInProgress = false;
-    return;
-  }
-
-  const chosen = valid[Math.floor(Math.random() * valid.length)];
-  markEliminated(chosen.id);
-
-  emitOverlay("bomb", {
+  emitTwistStart("bomb", {
     by: senderName,
-    targetId: chosen.id,
-    targetName: chosen.display_name,
-    targetIndex: getPlayerIndex(chosen.id)
+    targetId: target.id,
+    targetName: target.display_name,
+    targetIndex: getPlayerIndex(target.id),
   });
 
   emitLog({
     type: "twist",
-    message: `${senderName} BOMB → ${chosen.display_name} geraakt`
+    message: `${senderName} BOMB animatie gestart → target ${target.display_name}`
   });
 
-  await emitArena();
+  // Finalisatie gebeurt pas bij "twist:animation-complete"
   bombInProgress = false;
 }
 
+// -------------------------------- IMMUNE ------------------------------------
 
-// ------------------------------- IMMUNE -------------------------------------
-async function applyImmuneTwist(
-  senderId: string,
-  senderName: string,
-  target: any
-) {
+async function applyImmuneTwist(senderId: string, senderName: string, target: any) {
   if (!target) return;
 
   const ok = await consumeTwistFromUser(senderId, "immune");
-  if (!ok) {
-    emitLog({ type: "twist", message: `${senderName} probeerde Immune zonder twist` });
-    return;
-  }
+  if (!ok) return;
 
-  await applyImmune(target.id);
+  pending = {
+    type: "immune",
+    senderId,
+    senderName,
+    targetId: target.id
+  };
 
-  emitOverlay("immune", {
+  emitTwistStart("immune", {
     by: senderName,
     targetId: target.id,
     targetName: target.display_name,
-    targetIndex: getPlayerIndex(target.id)
+    targetIndex: getPlayerIndex(target.id),
   });
 
-  await emitArena();
+  emitLog({
+    type: "twist",
+    message: `${senderName} IMMUNE gestart → ${target.display_name}`
+  });
 }
 
+// -------------------------------- HEAL --------------------------------------
 
-// --------------------------------- HEAL -------------------------------------
-async function applyHeal(
-  senderId: string,
-  senderName: string,
-  target: any
-) {
+async function applyHeal(senderId: string, senderName: string, target: any) {
   if (!target) return;
 
   const arena = getArena();
@@ -309,36 +446,39 @@ async function applyHeal(
   if (!p) return;
 
   if (!p.eliminated) {
-    emitLog({ type: "twist", message: `${senderName} Heal → ${target.display_name} is niet gemarkeerd` });
+    emitLog({
+      type: "twist",
+      message: `${senderName} Heal → ${p.display_name} is niet eliminated`
+    });
     return;
   }
 
   const ok = await consumeTwistFromUser(senderId, "heal");
-  if (!ok) {
-    emitLog({ type: "twist", message: `${senderName} probeerde Heal zonder twist` });
-    return;
-  }
+  if (!ok) return;
 
-  p.boosters = p.boosters.filter(b => !["mg", "bomb"].includes(b));
-  clearEliminationMark(target.id);
+  pending = {
+    type: "heal",
+    senderId,
+    senderName,
+    targetId: p.id
+  };
 
-  emitOverlay("heal", {
+  emitTwistStart("heal", {
     by: senderName,
-    targetId: target.id,
-    targetName: target.display_name,
-    targetIndex: getPlayerIndex(target.id)
+    targetId: p.id,
+    targetName: p.display_name,
+    targetIndex: getPlayerIndex(p.id),
   });
 
-  emitArena();
+  emitLog({
+    type: "twist",
+    message: `${senderName} HEAL gestart → ${p.display_name}`
+  });
 }
 
+// ---------------------------- BREAKER ---------------------------------------
 
-// ------------------------------- BREAKER ------------------------------------
-async function applyBreaker(
-  senderId: string,
-  senderName: string,
-  target: any
-) {
+async function applyBreaker(senderId: string, senderName: string, target: any) {
   if (!target) return;
 
   const arena = getArena();
@@ -346,72 +486,58 @@ async function applyBreaker(
   if (!p) return;
 
   const ok = await consumeTwistFromUser(senderId, "breaker");
-  if (!ok) {
-    emitLog({ type: "twist", message: `${senderName} probeerde Breaker zonder twist` });
-    return;
-  }
+  if (!ok) return;
 
-  p.breakerHits = (p.breakerHits ?? 0) + 1;
+  pending = {
+    type: "breaker",
+    senderId,
+    senderName,
+    targetId: p.id
+  };
 
-  const idx = getPlayerIndex(p.id);
+  emitTwistStart("breaker", {
+    by: senderName,
+    targetId: p.id,
+    targetName: p.display_name,
+    targetIndex: getPlayerIndex(p.id),
+  });
 
-  if (p.breakerHits === 1) {
-    emitOverlay("breaker_cracked", {
-      by: senderName,
-      targetId: p.id,
-      targetName: p.display_name,
-      targetIndex: idx
-    });
-  } else {
-    p.boosters = p.boosters.filter(b => b !== "immune");
-    p.positionStatus = "alive";
-
-    emitOverlay("breaker_broken", {
-      by: senderName,
-      targetId: p.id,
-      targetName: p.display_name,
-      targetIndex: idx
-    });
-  }
-
-  emitArena();
+  emitLog({
+    type: "twist",
+    message: `${senderName} BREAKER gestart → ${p.display_name}`
+  });
 }
 
-
 // --------------------------- DIAMOND PISTOL ---------------------------------
-async function applyDiamondPistol(
-  senderId: string,
-  senderName: string,
-  survivor: any
-) {
+
+async function applyDiamondPistol(senderId: string, senderName: string, survivor: any) {
   if (!survivor) return;
 
   const arena = getArena();
-
   if (arena.diamondPistolUsed) {
-    emitLog({ type: "twist", message: `${senderName} DiamondPistol → al gebruikt` });
+    emitLog({
+      type: "twist",
+      message: `${senderName} DiamondPistol → al gebruikt`
+    });
     return;
   }
 
   const ok = await consumeTwistFromUser(senderId, "diamondpistol");
-  if (!ok) {
-    emitLog({ type: "twist", message: `${senderName} probeerde DiamondPistol zonder twist` });
-    return;
-  }
+  if (!ok) return;
 
   const victims = arena.players.filter(
     p => p.id !== survivor.id && !p.boosters.includes("immune")
   );
 
-  victims.forEach(v => markEliminated(v.id));
+  pending = {
+    type: "diamondpistol",
+    senderId,
+    senderName,
+    targetId: survivor.id,
+    victimIds: victims.map(v => v.id)
+  };
 
-  const surv = arena.players.find(p => p.id === survivor.id);
-  if (surv && !surv.boosters.includes("immune")) surv.boosters.push("immune");
-  if (surv) surv.positionStatus = "immune";
-
-  arena.diamondPistolUsed = true;
-
-  emitOverlay("diamondpistol", {
+  emitTwistStart("diamondpistol", {
     by: senderName,
     survivorId: survivor.id,
     survivorName: survivor.display_name,
@@ -424,16 +550,16 @@ async function applyDiamondPistol(
 
   emitLog({
     type: "twist",
-    message: `${senderName} DIAMOND PISTOL → ${survivor.display_name} overleeft`
+    message: `${senderName} DIAMOND PISTOL animatie gestart`
   });
 
-  await emitArena();
+  arena.diamondPistolUsed = true;
 }
-
 
 // ============================================================================
 // USE TWIST
 // ============================================================================
+
 export async function useTwist(
   senderId: string,
   senderName: string,
@@ -450,10 +576,9 @@ export async function useTwist(
     return;
   }
 
-  const def: TwistDefinition = TWIST_MAP[twist];
+  const def = TWIST_MAP[twist];
 
-  let target: any = null;
-
+  let target = null;
   if (def.requiresTarget) {
     target = await findUser(rawTarget || "");
     if (!target) {
@@ -476,28 +601,10 @@ export async function useTwist(
   }
 }
 
-
-// ============================================================================
-// ADD TWIST FROM GIFT
-// ============================================================================
-export async function addTwistByGift(
-  userId: string,
-  twist: TwistType
-) {
-  await giveTwistToUser(userId, twist);
-
-  const def: TwistDefinition = TWIST_MAP[twist];
-
-  emitLog({
-    type: "twist",
-    message: `Twist ontvangen: ${def.giftName}`
-  });
-}
-
-
 // ============================================================================
 // !use COMMAND PARSER
 // ============================================================================
+
 export async function parseUseCommand(
   senderId: string,
   senderName: string,
@@ -512,12 +619,11 @@ export async function parseUseCommand(
   await useTwist(senderId, senderName, twist, parts[2]?.replace("@", ""));
 }
 
-
 // ============================================================================
 // EXPORT
 // ============================================================================
+
 export default {
   useTwist,
-  addTwistByGift,
   parseUseCommand
 };
