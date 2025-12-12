@@ -1,14 +1,11 @@
 // ============================================================================
 // arena.js — BattleBox Arena Overlay
-// BUILD v12.2 — Bomb FAST-SCAN (Beamless Final Version)
-// 
-// FIXES:
-// ✔ Scan start slechts 1× (event #1)
-// ✔ Scan stopt DIRECT bij event #2 (targetIndex known)
-// ✔ Nooit dubbele scan (TLS duplicate-safe)
-// ✔ Tweede bom in dezelfde ronde werkt perfect
-// ✔ Geen visual beam nodig — gebruikt enkel card highlights
-// ✔ Bestaande functionaliteit 100% intact
+// BUILD v12.3 — Bomb FAST-SCAN (Beamless Final + Duplicate-Null Fix)
+//
+// FIXES ADDED IN THIS PATCH:
+// ✔ Extra null-target events worden genegeerd (nooit 2e scan!)
+// ✔ bombScanStarted voorkomt dubbele start
+// ✔ resetArenaRuntime reset nu ook bombScanStarted
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -45,12 +42,18 @@ const socket = getSocket();
 let bombScanActive = false;
 let bombResolveHit = null;
 
+// ⭐ NEW FLAG — prevents duplicate null-target scans
+let bombScanStarted = false;
+
 /** FULL reset only at round or arena reset */
 function resetArenaRuntime() {
   console.warn("[ARENA RESET] Runtime flags cleared");
 
   bombScanActive = false;
   bombResolveHit = null;
+
+  // ⭐ RESET OUR NEW FLAG
+  bombScanStarted = false;
 
   cardRefs.forEach(ref => {
     ref.el.classList.remove(
@@ -271,27 +274,20 @@ function triggerGalaxyEffect() {
 /* BOMB — FINAL BEAMLESS FAST-SCAN ENGINE                                        */
 /* ============================================================================ */
 
-/**
- * Starts the fast-scan highlight loop.
- * Runs 3 rounds × 8 cards, UNLESS event #2 interrupts.
- */
 async function startBombScan() {
   console.log("[BOMB] Scan STARTED");
 
   bombScanActive = true;
+  bombResolveHit = null;
 
   const cards = cardRefs.map(ref => ref.el);
   const delay = 100;
   const rounds = 3;
 
-  bombResolveHit = null;
-
-  // Define resolver for event #2
   const waitForHit = new Promise(resolve => {
     bombResolveHit = resolve;
   });
 
-  // SCAN LOOP
   async function scanLoop() {
     for (let r = 0; r < rounds; r++) {
       for (let i = 0; i < cards.length; i++) {
@@ -304,7 +300,6 @@ async function startBombScan() {
     }
   }
 
-  // Run scan + wait for hit
   await Promise.race([
     scanLoop(),
     waitForHit
@@ -313,9 +308,6 @@ async function startBombScan() {
   console.log("[BOMB] Scan COMPLETE (either natural or interrupted)");
 }
 
-/**
- * Ends scanning immediately + processes hit.
- */
 async function finishBombScan(targetIndex) {
   console.log("[BOMB] Target EVENT received:", targetIndex);
 
@@ -324,13 +316,9 @@ async function finishBombScan(targetIndex) {
     return;
   }
 
-  // Stop scanning
   bombScanActive = false;
-
-  // Resolve scan loop (interrupt)
   bombResolveHit?.();
 
-  // Hit animation
   const target = cardRefs[targetIndex]?.el;
   if (!target) return;
 
@@ -348,30 +336,7 @@ async function finishBombScan(targetIndex) {
 }
 
 /* ============================================================================ */
-/* SIMPLE TWISTS AND MAIN ENGINE                                                 */
-/* ============================================================================ */
-
-function triggerMoneyGun(targetIndex) {
-  setTimeout(() => emitAnimationDone("moneygun", targetIndex), 900);
-}
-
-function triggerBreaker(targetIndex) {
-  setTimeout(() => emitAnimationDone("breaker", targetIndex), 900);
-}
-
-function triggerDiamondPistol(survivorId, targetIndex) {
-  if (survivorId)
-    return setTimeout(() =>
-      emitAnimationDoneDirect("diamondpistol", survivorId), 900);
-
-  const p = arenaStore.get().players[targetIndex];
-  if (p)
-    setTimeout(() =>
-      emitAnimationDoneDirect("diamondpistol", p.id), 900);
-}
-
-/* ============================================================================ */
-/* MAIN TWIST ENGINE                                                             */
+/* MAIN TWIST ENGINE WITH PATCHED BOMB CASE                                      */
 /* ============================================================================ */
 
 arenaTwistStore.subscribe(async (st) => {
@@ -403,11 +368,23 @@ arenaTwistStore.subscribe(async (st) => {
   switch (st.type) {
 
     case "bomb":
+
+      // ⭐ FIX: Prevent duplicate null-target scans
       if (targetIndex == null) {
+
+        if (bombScanStarted) {
+          console.log("[BOMB] Duplicate null event ignored");
+          break;
+        }
+
+        bombScanStarted = true;
+
         if (!bombScanActive) startBombScan();
-      } else {
-        finishBombScan(targetIndex);
+        break;
       }
+
+      // Target event → finish scan
+      finishBombScan(targetIndex);
       break;
 
     case "moneygun":
