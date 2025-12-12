@@ -22,7 +22,8 @@ import {
 } from "./5-game-engine";
 
 import {
-  consumeTwistFromUser
+  consumeTwistFromUser,
+  giveTwistToUser
 } from "./twist-inventory";
 
 import {
@@ -87,7 +88,6 @@ interface PendingTwist {
   type: TwistType;
   senderId: string;
   senderName: string;
-
   targetId?: string | null;
   victimIds?: string[] | null;
 }
@@ -102,24 +102,12 @@ io.on("connection", (socket) => {
     pending = null;
 
     switch (p.type) {
-      case "bomb":
-        await finalizeBomb(p);
-        break;
-      case "moneygun":
-        await finalizeMoneyGun(p);
-        break;
-      case "immune":
-        await finalizeImmune(p);
-        break;
-      case "heal":
-        await finalizeHeal(p);
-        break;
-      case "diamondpistol":
-        await finalizeDiamondPistol(p);
-        break;
-      case "breaker":
-        await finalizeBreaker(p);
-        break;
+      case "bomb": await finalizeBomb(p); break;
+      case "moneygun": await finalizeMoneyGun(p); break;
+      case "immune": await finalizeImmune(p); break;
+      case "heal": await finalizeHeal(p); break;
+      case "diamondpistol": await finalizeDiamondPistol(p); break;
+      case "breaker": await finalizeBreaker(p); break;
     }
 
     io.emit("twist:finish", {
@@ -175,8 +163,9 @@ async function finalizeImmune(p: PendingTwist) {
   const pl = arena.players.find(x => x.id === p.targetId);
   if (!pl) return;
 
-  if (!pl.boosters.includes("immune"))
+  if (!pl.boosters.includes("immune")) {
     pl.boosters.push("immune");
+  }
 
   pl.positionStatus = "immune";
 
@@ -208,14 +197,15 @@ async function finalizeHeal(p: PendingTwist) {
 }
 
 async function finalizeDiamondPistol(p: PendingTwist) {
-  const arena = getArena();
   if (!p.targetId) return;
 
+  const arena = getArena();
   const survivor = arena.players.find(x => x.id === p.targetId);
   if (!survivor) return;
 
-  if (!survivor.boosters.includes("immune"))
+  if (!survivor.boosters.includes("immune")) {
     survivor.boosters.push("immune");
+  }
 
   survivor.positionStatus = "immune";
 
@@ -244,8 +234,6 @@ async function finalizeBreaker(p: PendingTwist) {
 
   pl.breakerHits = (pl.breakerHits ?? 0) + 1;
 
-  // Match overlay:
-  // 0 = full immune, 1 = partial immune, 2 = immune gone
   if (pl.breakerHits >= 2) {
     pl.boosters = pl.boosters.filter(b => b !== "immune");
     pl.positionStatus = "alive";
@@ -374,8 +362,7 @@ async function applyBomb(senderId: string, senderName: string) {
     message: `${senderName} BOMB animatie gestart → target ${target.display_name}`
   });
 
-  // We release control ONLY after animation-complete
-  // → fixed incorrect early release
+  // Release only after animation-complete (safety delay)
   await sleep(2000);
   bombInProgress = false;
 }
@@ -476,10 +463,15 @@ async function applyBreaker(senderId: string, senderName: string, target: any) {
 }
 
 // --------------------------- DIAMOND PISTOL -----------------------------
-async function applyDiamondPistol(senderId: string, senderName: string, survivor: any) {
+async function applyDiamondPistol(
+  senderId: string,
+  senderName: string,
+  survivor: any
+) {
   if (!survivor) return;
 
   const arena = getArena();
+
   if (arena.diamondPistolUsed) {
     emitLog({
       type: "twist",
@@ -519,6 +511,23 @@ async function applyDiamondPistol(senderId: string, senderName: string, survivor
   });
 
   arena.diamondPistolUsed = true;
+}
+
+// ============================================================================
+// ADD TWIST FROM GIFT  ✅ HERSTELD (ONGEWIJZIGD)
+// ============================================================================
+export async function addTwistByGift(
+  userId: string,
+  twist: TwistType
+) {
+  await giveTwistToUser(userId, twist);
+
+  const def = TWIST_MAP[twist];
+
+  emitLog({
+    type: "twist",
+    message: `Twist ontvangen: ${def.giftName}`
+  });
 }
 
 // ============================================================================
@@ -579,7 +588,12 @@ export async function parseUseCommand(
   const twist = resolveTwistAlias(parts[1]?.toLowerCase());
   if (!twist) return;
 
-  await useTwist(senderId, senderName, twist, parts[2]?.replace("@", ""));
+  await useTwist(
+    senderId,
+    senderName,
+    twist,
+    parts[2]?.replace("@", "")
+  );
 }
 
 // ============================================================================
@@ -587,5 +601,6 @@ export async function parseUseCommand(
 // ============================================================================
 export default {
   useTwist,
+  addTwistByGift,
   parseUseCommand
 };
