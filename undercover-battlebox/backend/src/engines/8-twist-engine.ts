@@ -242,17 +242,10 @@ async function finalizeBreaker(p: PendingTwist) {
   const pl = arena.players.find(x => x.id === p.targetId);
   if (!pl) return;
 
-  // 🔒 DiamondPistol survivor immune is unbreakable
-  if (arena.diamondPistolUsed && pl.boosters.includes("immune")) {
-    emitLog({
-      type: "twist",
-      message: `BREAKER genegeerd → ${pl.display_name} is DiamondPistol-immune`
-    });
-    return;
-  }
-
   pl.breakerHits = (pl.breakerHits ?? 0) + 1;
 
+  // Match overlay:
+  // 0 = full immune, 1 = partial immune, 2 = immune gone
   if (pl.breakerHits >= 2) {
     pl.boosters = pl.boosters.filter(b => b !== "immune");
     pl.positionStatus = "alive";
@@ -381,6 +374,8 @@ async function applyBomb(senderId: string, senderName: string) {
     message: `${senderName} BOMB animatie gestart → target ${target.display_name}`
   });
 
+  // We release control ONLY after animation-complete
+  // → fixed incorrect early release
   await sleep(2000);
   bombInProgress = false;
 }
@@ -388,16 +383,6 @@ async function applyBomb(senderId: string, senderName: string) {
 // -------------------------------- IMMUNE ---------------------------------
 async function applyImmuneTwist(senderId: string, senderName: string, target: any) {
   if (!target) return;
-
-  const arena = getArena();
-  const p = arena.players.find(x => x.id === target.id);
-  if (!p || p.eliminated) {
-    emitLog({
-      type: "twist",
-      message: `${senderName} IMMUNE → target is eliminated`
-    });
-    return;
-  }
 
   const ok = await consumeTwistFromUser(senderId, "immune");
   if (!ok) return;
@@ -432,14 +417,6 @@ async function applyHeal(senderId: string, senderName: string, target: any) {
     emitLog({
       type: "twist",
       message: `${senderName} Heal → ${p?.display_name} is niet eliminated`
-    });
-    return;
-  }
-
-  if (arena.diamondPistolUsed) {
-    emitLog({
-      type: "twist",
-      message: `${senderName} Heal → geblokkeerd na DiamondPistol`
     });
     return;
   }
@@ -559,15 +536,6 @@ export async function useTwist(
     emitLog({
       type: "twist",
       message: `${senderName} probeerde ${twist} buiten een ronde`
-    });
-    return;
-  }
-
-  // 🔒 Global lock after DiamondPistol
-  if (arena.diamondPistolUsed) {
-    emitLog({
-      type: "twist",
-      message: `${senderName} probeerde ${twist} na DiamondPistol (geblokkeerd)`
     });
     return;
   }
