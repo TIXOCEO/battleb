@@ -4,13 +4,8 @@
 // ============================================================================
 //
 // FIXED IN THIS PATCH:
-// ✔ Double emitTwistStart removed
-// ✔ Double applyGalaxy removed
-// ✔ twist:start removed — ONLY twist:takeover remains
-// ✔ No more duplicate notifications / double popups
-// ✔ Bomb target index always accurate
-// ✔ bombInProgress fixed (no early unlock)
-// ✔ Breaker logic synced to overlay (2 hits required, partial visual OK)
+// ✔ Immune cannot be used on eliminated players
+// ✔ Immune no longer acts as revive
 //
 // ============================================================================
 
@@ -67,7 +62,6 @@ function getPlayerIndex(id: string): number {
 
 // ============================================================================
 // CLEAN, CORRECT emitTwistStart()
-// Only emits twist:takeover → overlay triggers popup + animation
 // ============================================================================
 function emitTwistStart(type: TwistType, data: any = {}) {
   const title = data.by
@@ -118,7 +112,7 @@ io.on("connection", (socket) => {
 });
 
 // ============================================================================
-// FINALIZERS — executed only after animation has fully finished
+// FINALIZERS
 // ============================================================================
 async function finalizeBomb(p: PendingTwist) {
   if (!p.targetId) return;
@@ -162,6 +156,15 @@ async function finalizeImmune(p: PendingTwist) {
   const arena = getArena();
   const pl = arena.players.find(x => x.id === p.targetId);
   if (!pl) return;
+
+  // ❌ Immune may NEVER revive an eliminated player
+  if (pl.eliminated) {
+    emitLog({
+      type: "twist",
+      message: `IMMUNE genegeerd → ${pl.display_name} is eliminated`
+    });
+    return;
+  }
 
   if (!pl.boosters.includes("immune")) {
     pl.boosters.push("immune");
@@ -362,7 +365,6 @@ async function applyBomb(senderId: string, senderName: string) {
     message: `${senderName} BOMB animatie gestart → target ${target.display_name}`
   });
 
-  // Release only after animation-complete (safety delay)
   await sleep(2000);
   bombInProgress = false;
 }
@@ -370,6 +372,19 @@ async function applyBomb(senderId: string, senderName: string) {
 // -------------------------------- IMMUNE ---------------------------------
 async function applyImmuneTwist(senderId: string, senderName: string, target: any) {
   if (!target) return;
+
+  const arena = getArena();
+  const p = arena.players.find(x => x.id === target.id);
+  if (!p) return;
+
+  // ❌ Immune is PREVENTIVE ONLY
+  if (p.eliminated) {
+    emitLog({
+      type: "twist",
+      message: `${senderName} IMMUNE geblokkeerd → ${p.display_name} is eliminated`
+    });
+    return;
+  }
 
   const ok = await consumeTwistFromUser(senderId, "immune");
   if (!ok) return;
@@ -514,7 +529,7 @@ async function applyDiamondPistol(
 }
 
 // ============================================================================
-// ADD TWIST FROM GIFT  ✅ HERSTELD (ONGEWIJZIGD)
+// ADD TWIST FROM GIFT
 // ============================================================================
 export async function addTwistByGift(
   userId: string,
