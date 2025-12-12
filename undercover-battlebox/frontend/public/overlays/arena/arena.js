@@ -26,6 +26,14 @@ import CountdownFX from "/overlays/shared/fx/CountdownFX.js";
 import { initTwistMessage } from "/overlays/arena/twistMessage.js";
 import { getSocket } from "/overlays/shared/socket.js";
 
+function fadeInCards() {
+  // noop fallback – voorkomt errors
+}
+
+function fadeOutCards() {
+  // noop fallback – sommige builds roepen dit ook aan
+}
+
 initEventRouter();
 
 window.addEventListener("DOMContentLoaded", () => {
