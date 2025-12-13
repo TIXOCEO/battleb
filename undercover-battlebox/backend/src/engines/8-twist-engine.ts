@@ -6,6 +6,7 @@
 // FIXED IN THIS PATCH:
 // ✔ Immune cannot be used on eliminated players
 // ✔ Immune no longer acts as revive
+// ✔ Websocket crash fixed (io.on guarded)
 //
 // ============================================================================
 
@@ -88,28 +89,33 @@ interface PendingTwist {
 
 let pending: PendingTwist | null = null;
 
-io.on("connection", (socket) => {
-  socket.on("twist:animation-complete", async () => {
-    if (!pending) return;
+// ============================================================================
+// SOCKET LISTENER (GUARDED — FIX)
+// ============================================================================
+if (io && typeof io.on === "function") {
+  io.on("connection", (socket) => {
+    socket.on("twist:animation-complete", async () => {
+      if (!pending) return;
 
-    const p = pending;
-    pending = null;
+      const p = pending;
+      pending = null;
 
-    switch (p.type) {
-      case "bomb": await finalizeBomb(p); break;
-      case "moneygun": await finalizeMoneyGun(p); break;
-      case "immune": await finalizeImmune(p); break;
-      case "heal": await finalizeHeal(p); break;
-      case "diamondpistol": await finalizeDiamondPistol(p); break;
-      case "breaker": await finalizeBreaker(p); break;
-    }
+      switch (p.type) {
+        case "bomb": await finalizeBomb(p); break;
+        case "moneygun": await finalizeMoneyGun(p); break;
+        case "immune": await finalizeImmune(p); break;
+        case "heal": await finalizeHeal(p); break;
+        case "diamondpistol": await finalizeDiamondPistol(p); break;
+        case "breaker": await finalizeBreaker(p); break;
+      }
 
-    io.emit("twist:finish", {
-      type: p.type,
-      targetId: p.targetId
+      io.emit("twist:finish", {
+        type: p.type,
+        targetId: p.targetId
+      });
     });
   });
-});
+}
 
 // ============================================================================
 // FINALIZERS
@@ -157,7 +163,6 @@ async function finalizeImmune(p: PendingTwist) {
   const pl = arena.players.find(x => x.id === p.targetId);
   if (!pl) return;
 
-  // ❌ Immune may NEVER revive an eliminated player
   if (pl.eliminated) {
     emitLog({
       type: "twist",
@@ -377,7 +382,6 @@ async function applyImmuneTwist(senderId: string, senderName: string, target: an
   const p = arena.players.find(x => x.id === target.id);
   if (!p) return;
 
-  // ❌ Immune is PREVENTIVE ONLY
   if (p.eliminated) {
     emitLog({
       type: "twist",
