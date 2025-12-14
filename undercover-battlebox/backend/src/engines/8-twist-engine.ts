@@ -6,7 +6,7 @@
 // FIXED IN THIS PATCH:
 // ✔ Immune cannot be used on eliminated players
 // ✔ Immune no longer acts as revive
-// ✔ Websocket crash fixed (io.on guarded)
+// ✔ Websocket crash fixed (io listener moved to init)
 //
 // ============================================================================
 
@@ -90,9 +90,9 @@ interface PendingTwist {
 let pending: PendingTwist | null = null;
 
 // ============================================================================
-// SOCKET LISTENER (GUARDED — FIX)
+// SOCKET INIT (SAFE — NO TOP-LEVEL io.on)
 // ============================================================================
-if (io && typeof io.on === "function") {
+export function initTwistEngine() {
   io.on("connection", (socket) => {
     socket.on("twist:animation-complete", async () => {
       if (!pending) return;
@@ -266,10 +266,7 @@ async function applyGalaxy(senderId: string, senderName: string): Promise<void> 
 
   const reversed = toggleGalaxyMode();
 
-  emitTwistStart("galaxy", {
-    by: senderName,
-    reversed
-  });
+  emitTwistStart("galaxy", { by: senderName, reversed });
 
   emitLog({
     type: "twist",
@@ -323,24 +320,17 @@ let bombInProgress = false;
 
 async function applyBomb(senderId: string, senderName: string) {
   if (bombInProgress) {
-    emitLog({
-      type: "twist",
-      message: `${senderName} Bomb → bezig…`
-    });
+    emitLog({ type: "twist", message: `${senderName} Bomb → bezig…` });
     return;
   }
 
   const arena = getArena();
-
   const candidates = arena.players.filter(
     p => !p.boosters.includes("immune") && !p.eliminated
   );
 
   if (!candidates.length) {
-    emitLog({
-      type: "twist",
-      message: `${senderName} Bomb → geen geldige targets`
-    });
+    emitLog({ type: "twist", message: `${senderName} Bomb → geen geldige targets` });
     return;
   }
 
@@ -367,7 +357,7 @@ async function applyBomb(senderId: string, senderName: string) {
 
   emitLog({
     type: "twist",
-    message: `${senderName} BOMB animatie gestart → target ${target.display_name}`
+    message: `${senderName} BOMB animatie gestart → ${target.display_name}`
   });
 
   await sleep(2000);
@@ -397,19 +387,19 @@ async function applyImmuneTwist(senderId: string, senderName: string, target: an
     type: "immune",
     senderId,
     senderName,
-    targetId: target.id
+    targetId: p.id
   };
 
   emitTwistStart("immune", {
     by: senderName,
-    targetId: target.id,
-    targetName: target.display_name,
-    targetIndex: getPlayerIndex(target.id)
+    targetId: p.id,
+    targetName: p.display_name,
+    targetIndex: getPlayerIndex(p.id)
   });
 
   emitLog({
     type: "twist",
-    message: `${senderName} IMMUNE gestart → ${target.display_name}`
+    message: `${senderName} IMMUNE gestart → ${p.display_name}`
   });
 }
 
@@ -535,18 +525,11 @@ async function applyDiamondPistol(
 // ============================================================================
 // ADD TWIST FROM GIFT
 // ============================================================================
-export async function addTwistByGift(
-  userId: string,
-  twist: TwistType
-) {
+export async function addTwistByGift(userId: string, twist: TwistType) {
   await giveTwistToUser(userId, twist);
 
   const def = TWIST_MAP[twist];
-
-  emitLog({
-    type: "twist",
-    message: `Twist ontvangen: ${def.giftName}`
-  });
+  emitLog({ type: "twist", message: `Twist ontvangen: ${def.giftName}` });
 }
 
 // ============================================================================
@@ -607,18 +590,14 @@ export async function parseUseCommand(
   const twist = resolveTwistAlias(parts[1]?.toLowerCase());
   if (!twist) return;
 
-  await useTwist(
-    senderId,
-    senderName,
-    twist,
-    parts[2]?.replace("@", "")
-  );
+  await useTwist(senderId, senderName, twist, parts[2]?.replace("@", ""));
 }
 
 // ============================================================================
 // EXPORT
 // ============================================================================
 export default {
+  initTwistEngine,
   useTwist,
   addTwistByGift,
   parseUseCommand
