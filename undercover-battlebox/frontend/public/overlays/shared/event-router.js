@@ -220,6 +220,7 @@ export async function initEventRouter() {
   // ROUND EVENTS
   // ------------------------------------------------------------------------
   socket.on("round:start", (payload) => {
+    // ✅ resetAll mag hier (en alleen hier)
     arenaTwistStore.resetAll();
 
     const total = (payload.duration || 0) * 1000;
@@ -245,7 +246,7 @@ export async function initEventRouter() {
   });
 
   socket.on("round:grace", (payload) => {
-    arenaTwistStore.resetAll();
+    // ❌ GEEN resetAll hier (fix: nooit resetten tijdens actieve twist flow)
 
     const total = (payload.grace || 5) * 1000;
     const endsAt = Date.now() + total;
@@ -270,7 +271,7 @@ export async function initEventRouter() {
   });
 
   socket.on("round:end", () => {
-    arenaTwistStore.resetAll();
+    // ❌ GEEN resetAll hier (fix: nooit resetten tijdens twist animaties)
 
     arenaStore.set({
       status: "ended",
@@ -323,124 +324,39 @@ export async function initEventRouter() {
   });
 
   // ========================================================================
-  // ⭐ TWIST EVENT FIX — inject into arenaTwistStore
+  // ⭐ TWIST EVENT FIX — SINGLE SOURCE: twist:takeover ONLY
   // ========================================================================
 
-  function twistReason(payload) {
-    const sender =
-      payload.byDisplayName ||
-      payload.byUsername ||
-      payload.senderName ||
-      "Onbekend";
-
-    const target = payload.targetDisplayName || payload.targetUsername;
-    const victims = payload.victimNames?.length
-      ? payload.victimNames.map((x) => `@${x}`).join(", ")
-      : null;
-
-    const survivor = payload.survivorName;
-
-    switch (payload.type) {
-      case "moneygun":
-        return target
-          ? `${sender} markeert @${target} voor ELIMINATIE!`
-          : `${sender} gebruikt MoneyGun!`;
-
-      case "immune":
-        return target
-          ? `${sender} geeft @${target} IMMUNITEIT!`
-          : `${sender} deelt immuniteit uit!`;
-
-      case "heal":
-        return target
-          ? `${sender} herstelt @${target}!`
-          : `${sender} voert een HEAL uit!`;
-
-      case "bomb":
-        return victims
-          ? `${sender} gooit een BOM! Slachtoffer: ${victims}!`
-          : `${sender} laat een BOM ontploffen!`;
-
-      case "galaxy":
-        return `${sender} draait de HELE ranking om! Chaos!`;
-
-      case "breaker":
-        return target
-          ? `${sender} BREKT de immuniteit van @${target}!`
-          : `${sender} gebruikt een Immunity Breaker!`;
-
-      case "diamondpistol":
-        return survivor
-          ? `${sender} vuurt de DIAMOND GUN! @${survivor} overleeft — de rest ligt eruit!`
-          : `${sender} gebruikt de Diamond Gun!`;
-
-      default:
-        return `${sender} activeert een twist.`;
-    }
-  }
-
-  // ========================================================================
-  // ⭐⭐⭐ FIX #1 — NEW: Instant HUD popup dispatch (no delay)
-  // ========================================================================
-  socket.on("arena:twistTakeover", (p) => {
-    // Log → battlelog
+  // ✅ Gebruik uitsluitend bestaande backend event: twist:takeover
+  socket.on("twist:takeover", (p) => {
+    // battlelog
     pushBattleEvent({
       type: `twist:${p.type}`,
-      display_name: p.byDisplayName || p.byUsername || "Onbekend",
+      display_name: p.byDisplayName || p.by || p.byUsername || "Onbekend",
       username: p.byUsername || "unknown",
       avatar_url: p.avatar_url,
-      reason: twistReason(p)
+      reason: p.title || "Twist geactiveerd."
     });
 
-    // Activate twist store
+    // Activate twist store (payload unchanged)
     arenaTwistStore.activate({
       type: p.type,
-      title: twistReason(p),
+      title: p.title,
       payload: p
     });
 
-    // ⭐ PATCH — Direct popup trigger (HUD message)
-    console.log(
-      "%c[TWIST ROUTER] Dispatch twist:message (instant)",
-      "color:#ff0;font-weight:bold;",
-      p
-    );
-    document.dispatchEvent(new CustomEvent("twist:message", { detail: p }));
-
-    console.log("%c[TWIST ROUTER] Activate", "color:#0f0;", p);
+    // ⚠️ GEEN frontend-only dispatch routes hier (geen extra events toevoegen)
   });
 
   // ========================================================================
-  // ⭐⭐⭐ FIX #2 — Countdown twist
+  // Frontend-only twist routes (legacy) — GENEUTRALISEERD
+  // - Geen nieuwe events toegevoegd
+  // - Alleen voorkomen dat deze routes nog state/timers/twists beïnvloeden
   // ========================================================================
-  socket.on("arena:twistCountdown", (p) => {
-    pushBattleEvent({
-      type: "twist:countdown",
-      display_name: p.byDisplayName || p.byUsername || "Twist",
-      username: p.byUsername || "unknown",
-      reason: `Countdown ${p.step}…`
-    });
 
-    arenaTwistStore.countdown(p);
-
-    console.log("%c[TWIST ROUTER] Countdown", "color:#0f0;", p);
-  });
-
-  // ========================================================================
-  // ⭐⭐⭐ FIX #3 — Clear twist
-  // ========================================================================
-  socket.on("arena:twistClear", () => {
-    pushBattleEvent({
-      type: "twist:clear",
-      display_name: "System",
-      username: "system",
-      reason: "Twist-effect beëindigd."
-    });
-
-    arenaTwistStore.clear();
-
-    console.log("%c[TWIST ROUTER] Clear", "color:#0f0;");
-  });
+  // socket.on("arena:twistTakeover", ...)  ❌ verwijderd / geneutraliseerd
+  // socket.on("arena:twistCountdown", ...) ❌ verwijderd / geneutraliseerd
+  // socket.on("arena:twistClear", ...)     ❌ verwijderd / geneutraliseerd
 
   // ========================================================================
   // QUEUE UPDATE
