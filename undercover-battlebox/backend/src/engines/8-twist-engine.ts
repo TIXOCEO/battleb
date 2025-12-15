@@ -90,30 +90,43 @@ interface PendingTwist {
 let pending: PendingTwist | null = null;
 
 // ============================================================================
-// SOCKET INIT (SAFE — NO TOP-LEVEL io.on)
+// SOCKET INIT (SAFE — PAYLOAD-AWARE FINALIZE)
 // ============================================================================
 export function initTwistEngine() {
   io.on("connection", (socket) => {
-    socket.on("twist:animation-complete", async () => {
-      if (!pending) return;
+    socket.on(
+      "twist:animation-complete",
+      async (payload?: { type?: TwistType; targetId?: string }) => {
+        if (!pending) return;
 
-      const p = pending;
-      pending = null;
+        // 🛡️ Bescherm tegen duplicate / verkeerde completes
+        if (payload?.type && payload.type !== pending.type) return;
+        if (
+          payload?.targetId &&
+          pending.targetId &&
+          payload.targetId !== pending.targetId
+        ) {
+          return;
+        }
 
-      switch (p.type) {
-        case "bomb": await finalizeBomb(p); break;
-        case "moneygun": await finalizeMoneyGun(p); break;
-        case "immune": await finalizeImmune(p); break;
-        case "heal": await finalizeHeal(p); break;
-        case "diamondpistol": await finalizeDiamondPistol(p); break;
-        case "breaker": await finalizeBreaker(p); break;
+        const p = pending;
+        pending = null;
+
+        switch (p.type) {
+          case "bomb": await finalizeBomb(p); break;
+          case "moneygun": await finalizeMoneyGun(p); break;
+          case "immune": await finalizeImmune(p); break;
+          case "heal": await finalizeHeal(p); break;
+          case "diamondpistol": await finalizeDiamondPistol(p); break;
+          case "breaker": await finalizeBreaker(p); break;
+        }
+
+        io.emit("twist:finish", {
+          type: p.type,
+          targetId: p.targetId
+        });
       }
-
-      io.emit("twist:finish", {
-        type: p.type,
-        targetId: p.targetId
-      });
-    });
+    );
   });
 }
 
