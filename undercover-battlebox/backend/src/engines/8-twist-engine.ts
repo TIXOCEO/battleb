@@ -297,6 +297,7 @@ async function applyMoneyGun(senderId: string, senderName: string, target: any) 
   const p = arena.players.find(x => x.id === target.id);
   if (!p) return;
 
+  // mark-only → immune blokkeert
   if (p.boosters.includes("immune")) {
     emitLog({
       type: "twist",
@@ -343,7 +344,10 @@ async function applyBomb(senderId: string, senderName: string) {
   );
 
   if (!candidates.length) {
-    emitLog({ type: "twist", message: `${senderName} Bomb → geen geldige targets` });
+    emitLog({
+      type: "twist",
+      message: `${senderName} Bomb → geen geldige targets`
+    });
     return;
   }
 
@@ -385,6 +389,7 @@ async function applyImmuneTwist(senderId: string, senderName: string, target: an
   const p = arena.players.find(x => x.id === target.id);
   if (!p) return;
 
+  // ❌ immune mag NOOIT revive zijn
   if (p.eliminated) {
     emitLog({
       type: "twist",
@@ -505,8 +510,9 @@ async function applyDiamondPistol(
   const ok = await consumeTwistFromUser(senderId, "diamondpistol");
   if (!ok) return;
 
+  // ✅ immune wordt GENEGEERD bij DiamondPistol
   const victims = arena.players.filter(
-    p => p.id !== survivor.id && !p.boosters.includes("immune")
+    p => p.id !== survivor.id
   );
 
   pending = {
@@ -560,6 +566,15 @@ export async function useTwist(
     emitLog({
       type: "twist",
       message: `${senderName} probeerde ${twist} buiten een ronde`
+    });
+    return;
+  }
+
+  // 🛡️ voorkom pending-race (1 twist tegelijk)
+  if (pending) {
+    emitLog({
+      type: "twist",
+      message: `${senderName} probeerde ${twist} terwijl een twist nog bezig is`
     });
     return;
   }
