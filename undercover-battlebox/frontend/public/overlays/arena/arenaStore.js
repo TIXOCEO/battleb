@@ -8,6 +8,7 @@ import { createStore } from "/overlays/shared/stores.js";
 // ============================================================================
 // ARENA STATE (HUD-MODEL v3 — stabiel)
 // ============================================================================
+
 export const arenaStore = createStore({
   round: 0,
   type: "quarter",
@@ -29,40 +30,58 @@ export const arenaStore = createStore({
 });
 
 // ============================================================================
-// SNAPSHOT HANDLING
+// SNAPSHOT HANDLING  (BACKEND IS LEIDEND)
 // ============================================================================
+
 export function setArenaSnapshot(snap) {
   if (!snap) return;
+
   const now = Date.now();
+  const current = arenaStore.get();
 
   const hud = snap.hud ?? snap;
-  const totalMs = hud.totalMs ?? 0;
-  const remainingMs = hud.remainingMs ?? Math.max(0, (hud.endsAt ?? 0) - now);
+
+  // 🔒 Alleen overschrijven als backend waarden levert
+  const hasTotal = typeof hud.totalMs === "number";
+  const hasEndsAt = typeof hud.endsAt === "number";
+
+  const totalMs = hasTotal ? hud.totalMs : current.totalMs;
+  const endsAt = hasEndsAt
+    ? hud.endsAt
+    : current.endsAt || (hasTotal ? now + totalMs : 0);
+
+  const remainingMs =
+    typeof hud.remainingMs === "number"
+      ? hud.remainingMs
+      : Math.max(0, endsAt - now);
 
   arenaStore.set({
-    round: hud.round ?? 0,
-    type: hud.type ?? "quarter",
-    status: hud.status ?? "idle",
+    round: hud.round ?? current.round,
+    type: hud.type ?? current.type,
+    status: hud.status ?? current.status,
 
-    players: snap.players ?? [],
+    players: Array.isArray(snap.players) ? snap.players : current.players,
 
-    settings: snap.settings || arenaStore.get().settings,
+    settings: snap.settings || current.settings,
 
     totalMs,
-    endsAt: hud.endsAt ?? now + totalMs,
+    endsAt,
     remainingMs,
-    roundCutoff: snap.roundCutoff ?? 0,
-    graceEnd: snap.graceEnd ?? 0,
+
+    roundCutoff: snap.roundCutoff ?? current.roundCutoff,
+    graceEnd: snap.graceEnd ?? current.graceEnd,
   });
 }
 
 export function updatePlayers(players) {
+  if (!Array.isArray(players)) return;
   arenaStore.set({ players });
 }
 
 // ============================================================================
-// HUD RING RENDER
+// HUD RING RENDER — TIMER IS ALWAYS DERIVED
 // ============================================================================
+
 export function renderHudProgress(state, ringEl) {
   if (!ringEl) return;
 
@@ -73,19 +92,13 @@ export function renderHudProgress(state, ringEl) {
   const now = Date.now();
 
   let total = (state.totalMs || 0) / 1000;
-  let remaining = (state.remainingMs || 0) / 1000;
-
-  if (!remaining || remaining <= 0) {
-    remaining = Math.max(0, (state.endsAt - now) / 1000);
-  }
+  let remaining = Math.max(0, (state.endsAt || 0) - now) / 1000;
 
   if (!total || total <= 0) {
     if (state.status === "active") {
       total = state.settings.roundDurationPre;
-      remaining = Math.max(0, (state.roundCutoff - now) / 1000);
     } else if (state.status === "grace") {
       total = 5;
-      remaining = Math.max(0, (state.graceEnd - now) / 1000);
     }
   }
 
@@ -94,8 +107,9 @@ export function renderHudProgress(state, ringEl) {
 }
 
 // ============================================================================
-// TWIST STORE — v9.0 (ULTRA-STABLE QUEUE ENGINE + HARD RESET SYSTEM)
+// TWIST STORE — v9.0 (QUEUE ONLY, NO ARENA SIDE EFFECTS)
 // ============================================================================
+
 export const arenaTwistStore = createStore({
   active: false,
   type: null,
@@ -103,13 +117,13 @@ export const arenaTwistStore = createStore({
   step: null,
   payload: null,
   queue: [],
-
-  lock: false, // prevents race conditions
+  lock: false,
 });
 
 // ============================================================================
-// HARD RESET — NEVER allow lingering Galaxy / stuck queue
+// HARD RESET — TWIST QUEUE ONLY
 // ============================================================================
+
 arenaTwistStore.resetAll = () => {
   arenaTwistStore.set({
     active: false,
@@ -121,17 +135,16 @@ arenaTwistStore.resetAll = () => {
     lock: false,
   });
 
-  // SAFETY: Clear FX engine + galaxy chaos if available
   try {
     if (window.FX && window.FX.clear) window.FX.clear();
-  } catch (e) {}
+  } catch {}
 
   try {
     if (window.disableGalaxyChaos) {
       const refs = window.cardRefs || [];
       window.disableGalaxyChaos(refs);
     }
-  } catch (e) {}
+  } catch {}
 
   console.log("%c[TWIST] Hard reset executed", "color:#ff4f4f");
 };
@@ -139,17 +152,14 @@ arenaTwistStore.resetAll = () => {
 // ============================================================================
 // INTERNAL — PROCESS NEXT QUEUED TWIST
 // ============================================================================
+
 function processNextTwist() {
   const st = arenaTwistStore.get();
-
-  if (st.lock) return;
-  if (st.active) return;
-  if (!st.queue.length) return;
+  if (st.lock || st.active || !st.queue.length) return;
 
   const next = st.queue[0];
   arenaTwistStore.set({ lock: true });
 
-  // start twist
   arenaTwistStore.set({
     active: true,
     type: next.type,
@@ -158,7 +168,6 @@ function processNextTwist() {
     payload: next.payload,
   });
 
-  // remove from queue
   arenaTwistStore.set({
     queue: st.queue.slice(1),
     lock: false,
@@ -168,20 +177,19 @@ function processNextTwist() {
 // ============================================================================
 // PUBLIC — ADD A TWIST TO QUEUE
 // ============================================================================
+
 function enqueue(entry) {
   const st = arenaTwistStore.get();
-  const nextQueue = [...st.queue, entry];
-
-  arenaTwistStore.set({ queue: nextQueue });
+  arenaTwistStore.set({ queue: [...st.queue, entry] });
   processNextTwist();
 }
 
 // ============================================================================
 // PUBLIC API — ACTIVATE
 // ============================================================================
+
 arenaTwistStore.activate = (payload) => {
   if (!payload) return;
-
   enqueue({
     type: payload.type ?? null,
     title: payload.title ?? "",
@@ -193,9 +201,9 @@ arenaTwistStore.activate = (payload) => {
 // ============================================================================
 // PUBLIC API — COUNTDOWN
 // ============================================================================
+
 arenaTwistStore.countdown = (payload) => {
   if (!payload) return;
-
   enqueue({
     type: "countdown",
     title: "",
@@ -207,6 +215,7 @@ arenaTwistStore.countdown = (payload) => {
 // ============================================================================
 // CLEAR — END CURRENT & PROCESS NEXT
 // ============================================================================
+
 arenaTwistStore.clear = () => {
   arenaTwistStore.set({
     active: false,
@@ -222,6 +231,7 @@ arenaTwistStore.clear = () => {
 // ============================================================================
 // OPTIONAL — FORCE FLUSH (Admin/Debug)
 // ============================================================================
+
 arenaTwistStore.forceFlush = () => {
   arenaTwistStore.resetAll();
   console.log("%c[TWIST] Force-flush executed (manual)", "color:#ff9f00");
@@ -230,6 +240,7 @@ arenaTwistStore.forceFlush = () => {
 // ============================================================================
 // EXPORT
 // ============================================================================
+
 export default {
   arenaStore,
   arenaTwistStore,
