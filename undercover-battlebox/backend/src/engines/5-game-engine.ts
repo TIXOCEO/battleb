@@ -147,11 +147,22 @@ async function recomputePositions() {
   if (status === "idle") {
     for (const p of arena.players) {
       p.score = 0;
-      if (p.eliminated) p.positionStatus = "elimination";
-      else if (p.tempImmune || p.survivorImmune || p.boosters.includes("immune"))
+
+      // ✅ eliminated absolute priority
+      if (p.eliminated) {
+        p.positionStatus = "elimination";
+        continue;
+      }
+
+      // ✅ immune only if not eliminated
+      if (p.tempImmune || p.survivorImmune || p.boosters.includes("immune")) {
         p.positionStatus = "immune";
-      else p.positionStatus = "alive";
+        continue;
+      }
+
+      p.positionStatus = "alive";
     }
+
     arena.lastSortedAt = Date.now();
     return;
   }
@@ -167,13 +178,25 @@ async function recomputePositions() {
   else
     arena.players.sort((a, b) => b.score - a.score);
 
-  // ENDED state → only reflect elimination/immunity
+  // ENDED state → only reflect elimination/immunity (but never overwrite)
   if (status === "ended") {
     for (const p of arena.players) {
-      if (p.eliminated) p.positionStatus = "elimination";
-      else if (p.tempImmune || p.survivorImmune || p.boosters.includes("immune"))
+      // ✅ eliminated absolute priority
+      if (p.eliminated) {
+        p.positionStatus = "elimination";
+        continue;
+      }
+
+      // ✅ immune only if not eliminated
+      if (p.tempImmune || p.survivorImmune || p.boosters.includes("immune")) {
         p.positionStatus = "immune";
+        continue;
+      }
+
+      // keep deterministic baseline
+      p.positionStatus = "alive";
     }
+
     arena.lastSortedAt = Date.now();
     return;
   }
@@ -183,11 +206,21 @@ async function recomputePositions() {
   if (arena.type === "quarter") {
     if (arena.players.length < 6) {
       for (const p of arena.players) {
-        if (p.eliminated) p.positionStatus = "elimination";
-        else if (p.tempImmune || p.survivorImmune || p.boosters.includes("immune"))
+        // ✅ eliminated absolute priority
+        if (p.eliminated) {
+          p.positionStatus = "elimination";
+          continue;
+        }
+
+        // ✅ immune only if not eliminated
+        if (p.tempImmune || p.survivorImmune || p.boosters.includes("immune")) {
           p.positionStatus = "immune";
-        else p.positionStatus = "alive";
+          continue;
+        }
+
+        p.positionStatus = "alive";
       }
+
       arena.lastSortedAt = Date.now();
       return;
     }
@@ -195,16 +228,19 @@ async function recomputePositions() {
     const threshold = arena.players[5].score;
 
     for (const p of arena.players) {
+      // ✅ eliminated absolute priority
       if (p.eliminated) {
         p.positionStatus = "elimination";
         continue;
       }
 
+      // ✅ immune only if not eliminated
       if (p.tempImmune || p.survivorImmune || p.boosters.includes("immune")) {
         p.positionStatus = "immune";
         continue;
       }
 
+      // ✅ only compute danger/alive for non-eliminated non-immune
       if (arena.reverseMode) {
         p.positionStatus = p.score >= threshold ? "danger" : "alive";
       } else {
@@ -223,16 +259,19 @@ async function recomputePositions() {
   for (let i = 0; i < totalFinal; i++) {
     const p = arena.players[i];
 
+    // ✅ eliminated absolute priority
     if (p.eliminated) {
       p.positionStatus = "elimination";
       continue;
     }
 
+    // ✅ immune only if not eliminated
     if (p.tempImmune || p.survivorImmune || p.boosters.includes("immune")) {
       p.positionStatus = "immune";
       continue;
     }
 
+    // ✅ danger/alive only for non-eliminated non-immune
     if (arena.reverseMode)
       p.positionStatus = i === 0 ? "danger" : "alive";
     else
