@@ -1,15 +1,6 @@
 // ============================================================================
 // arena.js — BattleBox Arena Overlay
 // BUILD v12.0 — Bomb FAST-SCAN Fixed + No Runtime Reset on Event 1
-//
-// FIXES:
-// ✔ Verwijderd: resetArenaRuntime op twist:takeover (brak BOM volledig!)
-// ✔ Runtime reset NU alleen bij round:start en arena:reset
-// ✔ Bomb dual-event werkt gegarandeerd (scan 1×, hit 1×, nooit dubbel)
-// ✔ Scan start NOOIT opnieuw bij target-event
-// ✔ Tweede bomb in dezelfde ronde werkt perfect
-// ✔ Playercards refreshen altijd correct
-// ✔ Alle bestaande features en code 100% behouden
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -46,7 +37,7 @@ const socket = getSocket();
 let bombScanActive = false;
 let bombScanStopRequested = false;
 
-// RESET ONLY ON ROUND or FULL ARENA RESET (NOT twist:takeover)
+// RESET ONLY ON ROUND or FULL ARENA RESET
 function resetArenaRuntime() {
   console.warn("[ARENA RESET] Runtime flags cleared");
 
@@ -68,29 +59,7 @@ function resetArenaRuntime() {
   });
 }
 
-// ---- REMOVE OLD BEHAVIOR: NO RESET ON TWIST ----
-socket.on("twist:takeover", (p) => {
-  // NO RESET HERE ANYMORE — FIXES BOMBEVENT BREAKAGE
-
-  document.dispatchEvent(new CustomEvent("twist:message", {
-    detail: {
-      type: p.type || "",
-      byDisplayName: p.by || p.byDisplayName || "Onbekend",
-      target: p.targetName || null,
-      victims: p.victimNames || [],
-      survivor: p.survivorName || null,
-      targetIndex: p.targetIndex ?? null
-    }
-  }));
-
-  arenaTwistStore.activate({
-    type: p.type,
-    title: p.title,
-    payload: p
-  });
-});
-
-// Proper resets
+// ✅ ONLY valid reset triggers
 socket.on("round:start", () => {
   console.warn("[ARENA] round:start → runtime reset");
   resetArenaRuntime();
@@ -101,12 +70,8 @@ socket.on("arena:reset", () => {
   resetArenaRuntime();
 });
 
-socket.on("twist:clear", () => {
-  document.dispatchEvent(new Event("twist:clear"));
-});
-
 /* ============================================================================ */
-/* ANIMATION COMPLETE → backend                                                  */
+/* ANIMATION COMPLETE → backend                                                 */
 /* ============================================================================ */
 
 function emitAnimationDone(type, targetIndex) {
@@ -120,10 +85,9 @@ function emitAnimationDoneDirect(type, targetId) {
 }
 
 /* ============================================================================ */
-/* DOM REFS                                                                      */
+/* DOM REFS                                                                     */
 /* ============================================================================ */
 
-const root = document.getElementById("arena-root");
 const hudRound = document.getElementById("hud-round");
 const hudType = document.getElementById("hud-type");
 const hudTimer = document.getElementById("hud-timer");
@@ -134,7 +98,7 @@ const twistOverlay = document.getElementById("twist-takeover");
 const EMPTY_AVATAR = "https://i.imgur.com/x6v5tkX.jpeg";
 
 /* ============================================================================ */
-/* FADE                                                                          */
+/* FADE                                                                         */
 /* ============================================================================ */
 
 function fadeOutCards() { playersContainer.classList.add("fade-out"); }
@@ -145,7 +109,7 @@ function fadeInCards() {
 }
 
 /* ============================================================================ */
-/* waitForAnimation                                                              */
+/* waitForAnimation                                                             */
 /* ============================================================================ */
 
 function waitForAnimation(el) {
@@ -158,12 +122,12 @@ function waitForAnimation(el) {
       resolve();
     };
     el.addEventListener("animationend", end, { once: true });
-    setTimeout(end, 1500); // TLS fallback
+    setTimeout(end, 1500);
   });
 }
 
 /* ============================================================================ */
-/* POSITIONS / CARDS                                                             */
+/* POSITIONS / CARDS                                                            */
 /* ============================================================================ */
 
 const POSITIONS = [
@@ -215,7 +179,6 @@ function createPlayerCards() {
     card.appendChild(labels);
 
     playersContainer.appendChild(card);
-
     cardRefs.push({ el: card, bg, name, score, pos });
   }
 }
@@ -237,7 +200,7 @@ arenaStore.subscribe((state) => {
       ref.name.textContent = "LEEG";
       ref.score.textContent = "0";
       ref.bg.style.backgroundImage = `url(${EMPTY_AVATAR})`;
-      resetStatus(ref.el);
+      ref.el.className = "bb-player-card";
       positionCard(ref.el, POSITIONS[i]);
       continue;
     }
@@ -252,27 +215,27 @@ arenaStore.subscribe((state) => {
 });
 
 /* ============================================================================ */
-/* STATUS LOGIC                                                                  */
+/* STATUS LOGIC                                                                 */
 /* ============================================================================ */
 
-function resetStatus(el) {
-  el.className = "bb-player-card";
-}
-
 function applyStatus(el, p) {
+  el.className = "bb-player-card";
+
   if (p.eliminated) return el.classList.add("status-elimination");
   if (p.positionStatus === "danger") return el.classList.add("status-danger");
 
   if (p.positionStatus === "immune") {
-    if ((p.breakerHits ?? 0) === 0) return el.classList.add("status-immune-full");
-    if ((p.breakerHits ?? 0) === 1) return el.classList.add("status-immune-partial");
+    if ((p.breakerHits ?? 0) === 0)
+      return el.classList.add("status-immune-full");
+    if ((p.breakerHits ?? 0) === 1)
+      return el.classList.add("status-immune-partial");
   }
 
   el.classList.add("status-alive");
 }
 
 /* ============================================================================ */
-/* POSITIONING                                                                    */
+/* POSITIONING                                                                  */
 /* ============================================================================ */
 
 function positionCard(el, pos) {
@@ -283,7 +246,7 @@ function positionCard(el, pos) {
 }
 
 /* ============================================================================ */
-/* TIMER                                                                          */
+/* TIMER                                                                        */
 /* ============================================================================ */
 
 setInterval(() => {
@@ -299,24 +262,23 @@ setInterval(() => {
 }, 100);
 
 /* ============================================================================ */
-/* GALAXY EFFECT                                                                  */
+/* GALAXY EFFECT                                                                */
 /* ============================================================================ */
 
 function triggerGalaxyEffect() {
-  document.body.classList.add("twist-galaxy-blur");
-  document.body.classList.add("twist-galaxy-spin");
-
+  document.body.classList.add("twist-galaxy-blur", "twist-galaxy-spin");
   setTimeout(() => {
-    document.body.classList.remove("twist-galaxy-blur");
-    document.body.classList.remove("twist-galaxy-spin");
+    document.body.classList.remove("twist-galaxy-blur", "twist-galaxy-spin");
   }, 2000);
 }
 
 /* ============================================================================ */
-/* BOMB — FAST SCAN (Dual Event)                                                 */
+/* BOMB — FAST SCAN (DUAL PHASE)                                                */
 /* ============================================================================ */
 
 async function startBombScan() {
+  if (bombScanActive) return;
+
   bombScanActive = true;
   bombScanStopRequested = false;
 
@@ -328,12 +290,7 @@ async function startBombScan() {
 
   for (let r = 0; r < rounds; r++) {
     for (let i = 0; i < cards.length; i++) {
-
-      if (bombScanStopRequested) {
-        console.log("[BOMB] Scan interrupted → finishing");
-        return;
-      }
-
+      if (bombScanStopRequested) return;
       cards[i].classList.add("bomb-scan");
       await new Promise(res => setTimeout(res, delay));
       cards[i].classList.remove("bomb-scan");
@@ -343,7 +300,7 @@ async function startBombScan() {
   console.log("[BOMB] Scan finished → waiting on target...");
 }
 
-async function finishBombScan(targetIndex) {
+function finishBombScan(targetIndex) {
   bombScanStopRequested = true;
   bombScanActive = false;
 
@@ -357,16 +314,12 @@ async function finishBombScan(targetIndex) {
   setTimeout(() => {
     target.classList.remove("bomb-final-hit");
     target.classList.add("status-elimination");
-
     emitAnimationDone("bomb", targetIndex);
-
-    bombScanActive = false;
-    bombScanStopRequested = false;
   }, 900);
 }
 
 /* ============================================================================ */
-/* SIMPLE TWISTS                                                                 */
+/* SIMPLE TWISTS                                                                */
 /* ============================================================================ */
 
 function triggerMoneyGun(targetIndex) {
@@ -379,17 +332,21 @@ function triggerBreaker(targetIndex) {
 
 function triggerDiamondPistol(survivorId, targetIndex) {
   if (survivorId)
-    return setTimeout(() =>
-      emitAnimationDoneDirect("diamondpistol", survivorId), 900);
+    return setTimeout(
+      () => emitAnimationDoneDirect("diamondpistol", survivorId),
+      900
+    );
 
   const p = arenaStore.get().players[targetIndex];
   if (p)
-    setTimeout(() =>
-      emitAnimationDoneDirect("diamondpistol", p.id), 900);
+    setTimeout(
+      () => emitAnimationDoneDirect("diamondpistol", p.id),
+      900
+    );
 }
 
 /* ============================================================================ */
-/* GALAXY SHUFFLE                                                                 */
+/* GALAXY SHUFFLE                                                               */
 /* ============================================================================ */
 
 async function runGalaxyShuffle() {
@@ -414,7 +371,7 @@ async function runGalaxyShuffle() {
 }
 
 /* ============================================================================ */
-/* MAIN TWIST ENGINE                                                             */
+/* MAIN TWIST ENGINE                                                            */
 /* ============================================================================ */
 
 arenaTwistStore.subscribe(async (st) => {
@@ -444,13 +401,9 @@ arenaTwistStore.subscribe(async (st) => {
   }
 
   switch (st.type) {
-
     case "bomb":
-      if (targetIndex == null) {
-        if (!bombScanActive) startBombScan();
-      } else {
-        finishBombScan(targetIndex);
-      }
+      if (targetIndex == null) startBombScan();
+      else finishBombScan(targetIndex);
       break;
 
     case "moneygun":
@@ -474,25 +427,6 @@ arenaTwistStore.subscribe(async (st) => {
   clearTwistAnimation(twistOverlay);
   arenaTwistStore.clear();
 });
-
-/* ============================================================================ */
-/* FALLBACK POPUP                                                                 */
-/* ============================================================================ */
-
-if (!window.__bb_twistFallback) {
-  window.__bb_twistFallback = true;
-
-  document.addEventListener("twist:message", (ev) => {
-    const hud = document.getElementById("bb-twist-hud");
-    const text = document.getElementById("bb-twist-text");
-    if (!hud || !text) return;
-
-    text.textContent = ev.detail?.byDisplayName || "Twist!";
-    hud.classList.add("show");
-
-    setTimeout(() => hud.classList.remove("show"), 2400);
-  });
-}
 
 /* ============================================================================ */
 export default { positionCard, applyStatus };
