@@ -661,6 +661,24 @@ export async function parseUseCommand(
 }
 
 // ============================================================================
+// ADD TWIST FROM GIFT — RESTORED (1-op-1 uit v7.3)
+// ============================================================================
+
+export async function addTwistByGift(
+  userId: string,
+  twist: TwistType
+) {
+  await giveTwistToUser(userId, twist);
+
+  const def = TWIST_MAP[twist];
+
+  emitLog({
+    type: "twist",
+    message: `Twist ontvangen: ${def.giftName}`
+  });
+}
+
+// ============================================================================
 // EXPORT
 // ============================================================================
 
