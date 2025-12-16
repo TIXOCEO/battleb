@@ -160,6 +160,9 @@ function pushBattleEvent(evt) {
 // ✅ NEW: helpers for TwistMessage bridge
 // - twistMessage.js luistert ALLEEN naar document event "twist:message"
 // ============================================================================
+
+let lastBombSender = null;
+
 function getArenaPlayerNameById(id) {
   if (!id) return null;
   const st = arenaStore.get();
@@ -222,7 +225,8 @@ function bridgeTwistFinishToTwistMessage(finish) {
 
   const targetName =
     finish.targetName ||
-    (finish.targetId ? getArenaPlayerNameById(finish.targetId) : null);
+    (finish.targetId ? getArenaPlayerNameById(finish.targetId) : null) ||
+    null;
 
   // 🔧 FIX: gebruik bewaarde bomb-sender
   const byDisplayName =
