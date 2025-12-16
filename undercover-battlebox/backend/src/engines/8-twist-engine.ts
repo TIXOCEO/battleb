@@ -63,6 +63,34 @@ function getPlayerIndex(id: string): number {
   return getArena().players.findIndex(p => p.id === id);
 }
 
+function schedulePendingFallback(
+  type: string,
+  targetId: string | null,
+  finalizeFn: (snap: any) => Promise<void>,
+  delay = 3500
+) {
+  setTimeout(async () => {
+    if (!pending) return;
+    if (pending.type !== type) return;
+    if (targetId && pending.targetId !== targetId) return;
+
+    emitLog({
+      type: "twist",
+      message: `${type} fallback finalize (no animation-complete)`
+    });
+
+    const snap = pending;
+    pending = null;
+
+    await finalizeFn(snap);
+
+    io.emit("twist:finish", {
+      type,
+      targetId: snap.targetId ?? null
+    });
+  }, delay);
+}
+
 // ============================================================================
 // CLEAN emitTwistStart (UNCHANGED)
 // ============================================================================
@@ -291,7 +319,6 @@ async function applyMoneyGun(senderId: string, senderName: string, target: any) 
   const p = arena.players.find(x => x.id === target.id);
   if (!p) return;
 
-  // mark-only → immune blocks
   if (p.boosters.includes("immune")) {
     emitLog({
       type: "twist",
@@ -322,34 +349,14 @@ async function applyMoneyGun(senderId: string, senderName: string, target: any) 
     message: `${senderName} MoneyGun gestart → ${p.display_name}`
   });
 
-  // -----------------------------------------------------------------------
-  // ⛑️ SAFETY FALLBACK — voorkomt permanente pending-lock
-  // -----------------------------------------------------------------------
-  setTimeout(async () => {
-    if (!pending) return;
-    if (pending.type !== "moneygun") return;
-    if (pending.targetId !== p.id) return;
-
-    emitLog({
-      type: "twist",
-      message: `MoneyGun fallback finalize (no animation-complete)`
-    });
-
-    const snap = pending;
-    pending = null;
-
-    await finalizeMoneyGun(snap);
-
-    io.emit("twist:finish", {
-      type: "moneygun",
-      targetId: snap.targetId
-    });
-  }, 3500); // > animatieduur
+  schedulePendingFallback(
+    "moneygun",
+    p.id,
+    finalizeMoneyGun
+  );
 }
 
 // --------------------------------- BOMB ---------------------------------
-let bombInProgress = false;
-
 async function applyBomb(senderId: string, senderName: string) {
   if (bombInProgress) {
     emitLog({ type: "twist", message: `${senderName} Bomb → bezig…` });
@@ -392,11 +399,18 @@ async function applyBomb(senderId: string, senderName: string) {
 
   emitLog({
     type: "twist",
-    message: `${senderName} BOMB animatie gestart → ${target.display_name}`
+    message: `${senderName} BOMB gestart → ${target.display_name}`
   });
 
-  await sleep(2000);
-  bombInProgress = false;
+  schedulePendingFallback(
+    "bomb",
+    target.id,
+    finalizeBomb
+  );
+
+  setTimeout(() => {
+    bombInProgress = false;
+  }, 2000);
 }
 
 // -------------------------------- IMMUNE ---------------------------------
@@ -407,7 +421,6 @@ async function applyImmuneTwist(senderId: string, senderName: string, target: an
   const p = arena.players.find(x => x.id === target.id);
   if (!p) return;
 
-  // ❌ immune mag NOOIT revive zijn
   if (p.eliminated) {
     emitLog({
       type: "twist",
@@ -438,29 +451,11 @@ async function applyImmuneTwist(senderId: string, senderName: string, target: an
     message: `${senderName} IMMUNE gestart → ${p.display_name}`
   });
 
-  // -----------------------------------------------------------------------
-  // 🛡️ SAFETY FALLBACK — voorkomt permanente pending-lock
-  // -----------------------------------------------------------------------
-  setTimeout(async () => {
-    if (!pending) return;
-    if (pending.type !== "immune") return;
-    if (pending.targetId !== p.id) return;
-
-    emitLog({
-      type: "twist",
-      message: `Immune fallback finalize (no animation-complete)`
-    });
-
-    const snap = pending;
-    pending = null;
-
-    await finalizeImmune(snap);
-
-    io.emit("twist:finish", {
-      type: "immune",
-      targetId: snap.targetId
-    });
-  }, 3500); // > animatieduur
+  schedulePendingFallback(
+    "immune",
+    p.id,
+    finalizeImmune
+  );
 }
 
 // -------------------------------- HEAL -----------------------------------
@@ -499,29 +494,11 @@ async function applyHeal(senderId: string, senderName: string, target: any) {
     message: `${senderName} HEAL gestart → ${p.display_name}`
   });
 
-  // -----------------------------------------------------------------------
-  // ⛑️ SAFETY FALLBACK — voorkomt permanente pending-lock
-  // -----------------------------------------------------------------------
-  setTimeout(async () => {
-    if (!pending) return;
-    if (pending.type !== "heal") return;
-    if (pending.targetId !== p.id) return;
-
-    emitLog({
-      type: "twist",
-      message: `Heal fallback finalize (no animation-complete)`
-    });
-
-    const snap = pending;
-    pending = null;
-
-    await finalizeHeal(snap);
-
-    io.emit("twist:finish", {
-      type: "heal",
-      targetId: snap.targetId
-    });
-  }, 3500); // > animatieduur
+  schedulePendingFallback(
+    "heal",
+    p.id,
+    finalizeHeal
+  );
 }
 
 // ---------------------------- BREAKER -----------------------------------
@@ -553,6 +530,12 @@ async function applyBreaker(senderId: string, senderName: string, target: any) {
     type: "twist",
     message: `${senderName} BREAKER gestart → ${p.display_name}`
   });
+
+  schedulePendingFallback(
+    "breaker",
+    p.id,
+    finalizeBreaker
+  );
 }
 
 // --------------------------- DIAMOND PISTOL -----------------------------
@@ -576,10 +559,7 @@ async function applyDiamondPistol(
   const ok = await consumeTwistFromUser(senderId, "diamondpistol");
   if (!ok) return;
 
-  // ✅ immune wordt genegeerd bij DiamondPistol
-  const victims = arena.players.filter(
-    p => p.id !== survivor.id
-  );
+  const victims = arena.players.filter(p => p.id !== survivor.id);
 
   pending = {
     type: "diamondpistol",
@@ -601,10 +581,17 @@ async function applyDiamondPistol(
 
   emitLog({
     type: "twist",
-    message: `${senderName} DIAMOND PISTOL animatie gestart`
+    message: `${senderName} DIAMOND PISTOL gestart`
   });
 
   arena.diamondPistolUsed = true;
+
+  schedulePendingFallback(
+    "diamondpistol",
+    survivor.id,
+    finalizeDiamondPistol,
+    4500 // iets langer
+  );
 }
 
 // ============================================================================
