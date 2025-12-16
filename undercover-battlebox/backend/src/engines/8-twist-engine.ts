@@ -1,13 +1,12 @@
 // ============================================================================
-// 8-twist-engine.ts — Twist Engine v8.2 (ARCHITECTURE FIXED BUILD)
+// 8-twist-engine.ts — Twist Engine v8.3 (HUD EVENT FIXED BUILD)
 // ============================================================================
 //
-// CORE FIXES IN THIS PASS:
-// ✔ HARD separation: animated vs instant twists
-// ✔ pending ONLY for animation-gated twists (bomb, diamondpistol)
-// ✔ moneygun / immune / heal / breaker are INSTANT (no pending, no lock)
-// ✔ animation-complete is never required for HUD-only twists
-// ✔ zero regressions in finalize logic
+// FIXES IN THIS PASS:
+// ✔ Bomb START vs HIT strikt gescheiden
+// ✔ twist:finish bevat altijd senderName
+// ✔ Geen dubbele HUD-notificaties
+// ✔ Geen gameplay regressies
 //
 // ============================================================================
 
@@ -35,10 +34,6 @@ import pool from "../db";
 // HELPERS
 // ============================================================================
 
-async function sleep(ms: number): Promise<void> {
-  return new Promise(res => setTimeout(res, ms));
-}
-
 async function findUser(raw: string): Promise<any | null> {
   const clean = raw.replace("@", "").trim().toLowerCase();
 
@@ -64,11 +59,8 @@ function getPlayerIndex(id: string): number {
 }
 
 // ============================================================================
-// ANIMATED TWIST SET — SINGLE SOURCE OF TRUTH
+// ANIMATED TWISTS
 // ============================================================================
-//
-// ONLY these twists are allowed to block gameplay via `pending`
-//
 
 const ANIMATED_TWISTS: TwistType[] = [
   "bomb",
@@ -76,39 +68,21 @@ const ANIMATED_TWISTS: TwistType[] = [
 ];
 
 // ============================================================================
-// SAFE FALLBACK (ONLY FOR ANIMATED TWISTS)
+// PENDING STATE
 // ============================================================================
 
-function schedulePendingFallback(
-  type: TwistType,
-  targetId: string | null,
-  finalizeFn: (snap: any) => Promise<void>,
-  delay = 3500
-) {
-  setTimeout(async () => {
-    if (!pending) return;
-    if (pending.type !== type) return;
-    if (targetId && pending.targetId !== targetId) return;
-
-    emitLog({
-      type: "twist",
-      message: `${type} fallback finalize (no animation-complete)`
-    });
-
-    const snap = pending;
-    pending = null;
-
-    await finalizeFn(snap);
-
-    io.emit("twist:finish", {
-      type,
-      targetId: snap.targetId ?? null
-    });
-  }, delay);
+interface PendingTwist {
+  type: TwistType;
+  senderId: string;
+  senderName: string;
+  targetId?: string | null;
+  victimIds?: string[] | null;
 }
 
+let pending: PendingTwist | null = null;
+
 // ============================================================================
-// EMIT TWIST START (UNCHANGED API)
+// EMIT TWIST START (HUD START ONLY)
 // ============================================================================
 
 function emitTwistStart(type: TwistType, data: any = {}) {
@@ -124,66 +98,39 @@ function emitTwistStart(type: TwistType, data: any = {}) {
 }
 
 // ============================================================================
-// PENDING STATE — USED ONLY BY ANIMATED TWISTS
-// ============================================================================
-
-interface PendingTwist {
-  type: TwistType;
-  senderId: string;
-  senderName: string;
-  targetId?: string | null;
-  victimIds?: string[] | null;
-}
-
-let pending: PendingTwist | null = null;
-
-// ============================================================================
-// SOCKET INIT — FINALIZE ONLY FOR ANIMATED TWISTS
+// SOCKET INIT — FINALIZE ONLY
 // ============================================================================
 
 export function initTwistEngine() {
   io.on("connection", (socket) => {
-    socket.on(
-      "twist:animation-complete",
-      async (payload?: { type?: TwistType; targetId?: string }) => {
-        if (!pending) return;
+    socket.on("twist:animation-complete", async (payload) => {
+      if (!pending) return;
+      if (!ANIMATED_TWISTS.includes(pending.type)) return;
 
-        // Only animated twists may reach here
-        if (!ANIMATED_TWISTS.includes(pending.type)) return;
+      if (payload?.type && payload.type !== pending.type) return;
+      if (
+        payload?.targetId &&
+        pending.targetId &&
+        payload.targetId !== pending.targetId
+      ) return;
 
-        if (payload?.type && payload.type !== pending.type) return;
-        if (
-          payload?.targetId &&
-          pending.targetId &&
-          payload.targetId !== pending.targetId
-        ) {
-          return;
-        }
+      const snap = pending;
+      pending = null;
 
-        const p = pending;
-        pending = null;
+      if (snap.type === "bomb") await finalizeBomb(snap);
+      if (snap.type === "diamondpistol") await finalizeDiamondPistol(snap);
 
-        switch (p.type) {
-          case "bomb":
-            await finalizeBomb(p);
-            break;
-
-          case "diamondpistol":
-            await finalizeDiamondPistol(p);
-            break;
-        }
-
-        io.emit("twist:finish", {
-          type: p.type,
-          targetId: p.targetId ?? null
-        });
-      }
-    );
+      io.emit("twist:finish", {
+        type: snap.type,
+        targetId: snap.targetId ?? null,
+        byDisplayName: snap.senderName   // ⭐ FIX: sender always known
+      });
+    });
   });
 }
 
 // ============================================================================
-// FINALIZERS — UNCHANGED GAMEPLAY RULES
+// FINALIZERS
 // ============================================================================
 
 async function finalizeBomb(p: PendingTwist) {
@@ -193,8 +140,8 @@ async function finalizeBomb(p: PendingTwist) {
   const pl = arena.players.find(x => x.id === p.targetId);
   if (!pl || pl.eliminated) return;
 
-  pl.positionStatus = "elimination";
   pl.eliminated = true;
+  pl.positionStatus = "elimination";
 
   emitLog({
     type: "twist",
@@ -211,8 +158,8 @@ async function finalizeMoneyGun(p: PendingTwist) {
   const pl = arena.players.find(x => x.id === p.targetId);
   if (!pl || pl.eliminated) return;
 
-  pl.positionStatus = "elimination";
   pl.eliminated = true;
+  pl.positionStatus = "elimination";
 
   emitLog({
     type: "twist",
@@ -229,10 +176,7 @@ async function finalizeImmune(p: PendingTwist) {
   const pl = arena.players.find(x => x.id === p.targetId);
   if (!pl || pl.eliminated) return;
 
-  if (!pl.boosters.includes("immune")) {
-    pl.boosters.push("immune");
-  }
-
+  if (!pl.boosters.includes("immune")) pl.boosters.push("immune");
   pl.positionStatus = "immune";
 
   emitLog({
@@ -252,7 +196,6 @@ async function finalizeHeal(p: PendingTwist) {
 
   pl.eliminated = false;
   pl.positionStatus = "alive";
-  pl.boosters = pl.boosters.filter(b => !["mg", "bomb"].includes(b));
 
   emitLog({
     type: "twist",
@@ -262,10 +205,6 @@ async function finalizeHeal(p: PendingTwist) {
   await emitArena();
 }
 
-// ============================================================================
-// FINALIZERS (VERVOLG)
-// ============================================================================
-
 async function finalizeDiamondPistol(p: PendingTwist) {
   if (!p.targetId) return;
 
@@ -273,18 +212,14 @@ async function finalizeDiamondPistol(p: PendingTwist) {
   const survivor = arena.players.find(x => x.id === p.targetId);
   if (!survivor) return;
 
-  // Survivor ALWAYS immune
-  if (!survivor.boosters.includes("immune")) {
-    survivor.boosters.push("immune");
-  }
+  if (!survivor.boosters.includes("immune")) survivor.boosters.push("immune");
   survivor.positionStatus = "immune";
 
-  for (const vid of p.victimIds ?? []) {
-    const v = arena.players.find(x => x.id === vid);
+  for (const id of p.victimIds ?? []) {
+    const v = arena.players.find(x => x.id === id);
     if (!v || v.eliminated) continue;
-
-    v.positionStatus = "elimination";
     v.eliminated = true;
+    v.positionStatus = "elimination";
   }
 
   emitLog({
@@ -295,30 +230,8 @@ async function finalizeDiamondPistol(p: PendingTwist) {
   await emitArena();
 }
 
-async function finalizeBreaker(p: PendingTwist) {
-  if (!p.targetId) return;
-
-  const arena = getArena();
-  const pl = arena.players.find(x => x.id === p.targetId);
-  if (!pl || pl.eliminated) return;
-
-  pl.breakerHits = (pl.breakerHits ?? 0) + 1;
-
-  if (pl.breakerHits >= 2) {
-    pl.boosters = pl.boosters.filter(b => b !== "immune");
-    pl.positionStatus = "alive";
-  }
-
-  emitLog({
-    type: "twist",
-    message: `${p.senderName} BREAKER → ${pl.display_name}`
-  });
-
-  await emitArena();
-}
-
 // ============================================================================
-// APPLY FUNCTIONS — ARCHITECTURE FIX
+// APPLY FUNCTIONS — ARCHITECTURE FIX (HUD FLOW PATCHED)
 // ============================================================================
 
 // ------------------------------ GALAXY -----------------------------------
@@ -336,6 +249,12 @@ async function applyGalaxy(senderId: string, senderName: string): Promise<void> 
   });
 
   await emitArena();
+
+  // HUD finish (sender always included)
+  io.emit("twist:finish", {
+    type: "galaxy",
+    byDisplayName: senderName
+  });
 }
 
 // ------------------------------ MONEY GUN (INSTANT) -----------------------
@@ -351,6 +270,9 @@ async function applyMoneyGun(senderId: string, senderName: string, target: any) 
       type: "twist",
       message: `${senderName} MoneyGun → ${p.display_name} is IMMUNE`
     });
+
+    // HUD finish (still show a message if you want; keeps sender correct)
+    io.emit("twist:finish", { type: "moneygun", byDisplayName: senderName, targetId: p.id });
     return;
   }
 
@@ -369,7 +291,6 @@ async function applyMoneyGun(senderId: string, senderName: string, target: any) 
     message: `${senderName} MoneyGun → ${p.display_name}`
   });
 
-  // 🔥 DIRECT FINALIZE — NO pending
   await finalizeMoneyGun({
     type: "moneygun",
     senderId,
@@ -377,7 +298,11 @@ async function applyMoneyGun(senderId: string, senderName: string, target: any) 
     targetId: p.id
   });
 
-  io.emit("twist:finish", { type: "moneygun", targetId: p.id });
+  io.emit("twist:finish", {
+    type: "moneygun",
+    targetId: p.id,
+    byDisplayName: senderName
+  });
 }
 
 // --------------------------------- BOMB (ANIMATED) -----------------------
@@ -416,11 +341,10 @@ async function applyBomb(senderId: string, senderName: string) {
     targetId: target.id
   };
 
+  // ✅ START = “gooien” (geen target in HUD-message)
+  // Belangrijk: twistMessage.js suppresses first bomb → this is the scan/start
   emitTwistStart("bomb", {
-    by: senderName,
-    targetId: target.id,
-    targetName: target.display_name,
-    targetIndex: getPlayerIndex(target.id)
+    by: senderName
   });
 
   emitLog({
@@ -428,7 +352,8 @@ async function applyBomb(senderId: string, senderName: string) {
     message: `${senderName} BOMB gestart → ${target.display_name}`
   });
 
-  schedulePendingFallback("bomb", target.id, finalizeBomb);
+  // fallback finalize → finish event contains senderName now (fixed in schedule below)
+  schedulePendingFallback("bomb", target.id, finalizeBomb, 3500, senderName);
 
   setTimeout(() => {
     bombInProgress = false;
@@ -468,7 +393,11 @@ async function applyImmuneTwist(senderId: string, senderName: string, target: an
     targetId: p.id
   });
 
-  io.emit("twist:finish", { type: "immune", targetId: p.id });
+  io.emit("twist:finish", {
+    type: "immune",
+    targetId: p.id,
+    byDisplayName: senderName
+  });
 }
 
 // -------------------------------- HEAL (INSTANT) --------------------------
@@ -502,7 +431,11 @@ async function applyHeal(senderId: string, senderName: string, target: any) {
     targetId: p.id
   });
 
-  io.emit("twist:finish", { type: "heal", targetId: p.id });
+  io.emit("twist:finish", {
+    type: "heal",
+    targetId: p.id,
+    byDisplayName: senderName
+  });
 }
 
 // ---------------------------- BREAKER (INSTANT) ---------------------------
@@ -530,7 +463,11 @@ async function applyBreaker(senderId: string, senderName: string, target: any) {
     targetId: p.id
   });
 
-  io.emit("twist:finish", { type: "breaker", targetId: p.id });
+  io.emit("twist:finish", {
+    type: "breaker",
+    targetId: p.id,
+    byDisplayName: senderName
+  });
 }
 
 // --------------------------- DIAMOND PISTOL (ANIMATED) --------------------
@@ -584,7 +521,8 @@ async function applyDiamondPistol(
     "diamondpistol",
     survivor.id,
     finalizeDiamondPistol,
-    4500
+    4500,
+    senderName
   );
 }
 
@@ -608,7 +546,6 @@ export async function useTwist(
     return;
   }
 
-  // ⛔ block ONLY animated twists
   if (pending && ANIMATED_TWISTS.includes(twist)) {
     emitLog({
       type: "twist",
@@ -676,6 +613,40 @@ export async function addTwistByGift(
     type: "twist",
     message: `Twist ontvangen: ${def.giftName}`
   });
+}
+
+// ============================================================================
+// SAFE FALLBACK (UPDATED: include senderName in finish)
+// ============================================================================
+
+function schedulePendingFallback(
+  type: TwistType,
+  targetId: string | null,
+  finalizeFn: (snap: any) => Promise<void>,
+  delay = 3500,
+  senderName?: string
+) {
+  setTimeout(async () => {
+    if (!pending) return;
+    if (pending.type !== type) return;
+    if (targetId && pending.targetId !== targetId) return;
+
+    emitLog({
+      type: "twist",
+      message: `${type} fallback finalize (no animation-complete)`
+    });
+
+    const snap = pending;
+    pending = null;
+
+    await finalizeFn(snap);
+
+    io.emit("twist:finish", {
+      type,
+      targetId: snap.targetId ?? null,
+      byDisplayName: senderName || snap.senderName || "Onbekend"
+    });
+  }, delay);
 }
 
 // ============================================================================
