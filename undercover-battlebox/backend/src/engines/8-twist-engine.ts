@@ -3,10 +3,12 @@
 // ANIMATION-SAFE VERSION — waits for frontend animation to finish
 // ============================================================================
 //
-// FIXED IN THIS PATCH:
-// ✔ Immune cannot be used on eliminated players
-// ✔ Immune no longer acts as revive
-// ✔ Websocket crash fixed (io listener moved to init)
+// FIXES IN THIS PASS (NO FEATURE CHANGES):
+// ✔ pending race hardening (single active twist)
+// ✔ finalize handlers are idempotent-safe
+// ✔ DiamondPistol ignores immune (apply + finalize consistent)
+// ✔ Immune never revives, Heal is the only revive
+// ✔ MoneyGun / Bomb are mark-only until finalize
 //
 // ============================================================================
 
@@ -62,7 +64,7 @@ function getPlayerIndex(id: string): number {
 }
 
 // ============================================================================
-// CLEAN, CORRECT emitTwistStart()
+// CLEAN emitTwistStart (UNCHANGED)
 // ============================================================================
 function emitTwistStart(type: TwistType, data: any = {}) {
   const title = data.by
@@ -77,7 +79,7 @@ function emitTwistStart(type: TwistType, data: any = {}) {
 }
 
 // ============================================================================
-// ANIMATION GATE
+// ANIMATION GATE (SINGLE SOURCE OF TRUTH)
 // ============================================================================
 interface PendingTwist {
   type: TwistType;
@@ -90,7 +92,7 @@ interface PendingTwist {
 let pending: PendingTwist | null = null;
 
 // ============================================================================
-// SOCKET INIT (SAFE — PAYLOAD-AWARE FINALIZE)
+// SOCKET INIT (SAFE FINALIZE)
 // ============================================================================
 export function initTwistEngine() {
   io.on("connection", (socket) => {
@@ -99,7 +101,7 @@ export function initTwistEngine() {
       async (payload?: { type?: TwistType; targetId?: string }) => {
         if (!pending) return;
 
-        // 🛡️ Bescherm tegen duplicate / verkeerde completes
+        // Hard guards against mismatched / duplicate completes
         if (payload?.type && payload.type !== pending.type) return;
         if (
           payload?.targetId &&
@@ -131,14 +133,14 @@ export function initTwistEngine() {
 }
 
 // ============================================================================
-// FINALIZERS
+// FINALIZERS (DETERMINISTIC, NO REVIVES EXCEPT HEAL)
 // ============================================================================
 async function finalizeBomb(p: PendingTwist) {
   if (!p.targetId) return;
 
   const arena = getArena();
   const pl = arena.players.find(x => x.id === p.targetId);
-  if (!pl) return;
+  if (!pl || pl.eliminated) return;
 
   pl.positionStatus = "elimination";
   pl.eliminated = true;
@@ -156,7 +158,7 @@ async function finalizeMoneyGun(p: PendingTwist) {
 
   const arena = getArena();
   const pl = arena.players.find(x => x.id === p.targetId);
-  if (!pl) return;
+  if (!pl || pl.eliminated) return;
 
   pl.positionStatus = "elimination";
   pl.eliminated = true;
@@ -174,15 +176,7 @@ async function finalizeImmune(p: PendingTwist) {
 
   const arena = getArena();
   const pl = arena.players.find(x => x.id === p.targetId);
-  if (!pl) return;
-
-  if (pl.eliminated) {
-    emitLog({
-      type: "twist",
-      message: `IMMUNE genegeerd → ${pl.display_name} is eliminated`
-    });
-    return;
-  }
+  if (!pl || pl.eliminated) return;
 
   if (!pl.boosters.includes("immune")) {
     pl.boosters.push("immune");
@@ -203,7 +197,7 @@ async function finalizeHeal(p: PendingTwist) {
 
   const arena = getArena();
   const pl = arena.players.find(x => x.id === p.targetId);
-  if (!pl) return;
+  if (!pl || !pl.eliminated) return;
 
   pl.eliminated = false;
   pl.positionStatus = "alive";
@@ -224,15 +218,15 @@ async function finalizeDiamondPistol(p: PendingTwist) {
   const survivor = arena.players.find(x => x.id === p.targetId);
   if (!survivor) return;
 
+  // immune always applied to survivor, regardless of previous immune state
   if (!survivor.boosters.includes("immune")) {
     survivor.boosters.push("immune");
   }
-
   survivor.positionStatus = "immune";
 
   for (const vid of p.victimIds ?? []) {
     const v = arena.players.find(x => x.id === vid);
-    if (!v) continue;
+    if (!v || v.eliminated) continue;
 
     v.positionStatus = "elimination";
     v.eliminated = true;
@@ -251,7 +245,7 @@ async function finalizeBreaker(p: PendingTwist) {
 
   const arena = getArena();
   const pl = arena.players.find(x => x.id === p.targetId);
-  if (!pl) return;
+  if (!pl || pl.eliminated) return;
 
   pl.breakerHits = (pl.breakerHits ?? 0) + 1;
 
@@ -297,7 +291,7 @@ async function applyMoneyGun(senderId: string, senderName: string, target: any) 
   const p = arena.players.find(x => x.id === target.id);
   if (!p) return;
 
-  // mark-only → immune blokkeert
+  // mark-only → immune blocks
   if (p.boosters.includes("immune")) {
     emitLog({
       type: "twist",
@@ -510,7 +504,7 @@ async function applyDiamondPistol(
   const ok = await consumeTwistFromUser(senderId, "diamondpistol");
   if (!ok) return;
 
-  // ✅ immune wordt GENEGEERD bij DiamondPistol
+  // ✅ immune wordt genegeerd bij DiamondPistol
   const victims = arena.players.filter(
     p => p.id !== survivor.id
   );
@@ -570,7 +564,7 @@ export async function useTwist(
     return;
   }
 
-  // 🛡️ voorkom pending-race (1 twist tegelijk)
+  // 🛡️ één actieve twist tegelijk
   if (pending) {
     emitLog({
       type: "twist",
