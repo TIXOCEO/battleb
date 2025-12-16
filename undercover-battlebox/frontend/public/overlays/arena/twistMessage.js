@@ -41,7 +41,11 @@ export function initTwistMessage() {
     const now = Date.now();
     const bucket = Math.floor(now / 1200);
 
-    const hash = `${payload.type}|${payload.byDisplayName}|${payload.target}|${payload.survivor}|${bucket}`;
+    const baseHash = `${payload.type}|${payload.byDisplayName}`;
+    const hash =
+      payload.type === "bomb"
+    ? baseHash
+    : `${baseHash}|${payload.target}|${payload.survivor}|${bucket}`;
 
     // Diamond Gun always allowed
     const isDiamond = payload.type === "diamondpistol";
