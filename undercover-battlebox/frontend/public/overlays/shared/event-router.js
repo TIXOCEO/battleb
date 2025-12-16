@@ -28,6 +28,11 @@ const QUEUE_EVENTS = new Set(["join", "leave", "promote", "demote"]);
 let routerStarted = false;
 
 // ============================================================================
+// 🧠 NEW: remember last bomb sender (UI only, no gameplay impact)
+// ============================================================================
+let lastBombSender = null;
+
+// ============================================================================
 // NORMALIZER (arena)
 // ============================================================================
 function normalizeArena(pkt) {
@@ -154,12 +159,13 @@ function pushBattleEvent(evt) {
 // ============================================================================
 // ✅ NEW: helpers for TwistMessage bridge
 // - twistMessage.js luistert ALLEEN naar document event "twist:message"
-// - dus router moet 1x de backend payload naar dat format vertalen
 // ============================================================================
 function getArenaPlayerNameById(id) {
   if (!id) return null;
   const st = arenaStore.get();
-  const p = Array.isArray(st.players) ? st.players.find(x => x?.id === id) : null;
+  const p = Array.isArray(st.players)
+    ? st.players.find(x => x?.id === id)
+    : null;
   return p?.display_name || p?.username || null;
 }
 
@@ -174,11 +180,21 @@ function dispatchTwistMessage(detail) {
 function bridgeTwistTakeoverToTwistMessage(p) {
   if (!p || !p.type) return;
 
-  // Sender
-  const byDisplayName =
-    p.byDisplayName || p.by || p.byUsername || p.senderName || p.sender || "Onbekend";
+  const type = (p.type || "").toLowerCase();
 
-  // Target / Survivor / Victims (best-effort, twistMessage normalizer pakt veel varianten)
+  const byDisplayName =
+    p.byDisplayName ||
+    p.by ||
+    p.byUsername ||
+    p.senderName ||
+    p.sender ||
+    "Onbekend";
+
+  // 🧠 onthoud bomb sender voor finish-event
+  if (type === "bomb") {
+    lastBombSender = byDisplayName;
+  }
+
   const targetName =
     p.targetName ||
     p.targetDisplayName ||
@@ -191,30 +207,31 @@ function bridgeTwistTakeoverToTwistMessage(p) {
     null;
 
   dispatchTwistMessage({
-    type: (p.type || "").toLowerCase(),
+    type,
     byDisplayName,
     targetName,
     survivorName,
-    victimNames: p.victimNames || p.victims || [],
+    victimNames: p.victimNames || p.victims || []
   });
 }
 
 function bridgeTwistFinishToTwistMessage(finish) {
-  // twist:finish komt uit backend finalize
-  // Voor bomb is dit essentieel: 2e event = "hit" (twistMessage laat hem dan pas zien)
   if (!finish || !finish.type) return;
 
   const type = (finish.type || "").toLowerCase();
 
-  // We hebben bij finish meestal alleen type + targetId
-  const targetName = finish.targetName || (finish.targetId ? getArenaPlayerNameById(finish.targetId) : null);
+  const targetName =
+    finish.targetName ||
+    (finish.targetId ? getArenaPlayerNameById(finish.targetId) : null);
 
-  // Om bomb-suppressie correct te laten werken,
-  // moet 'byDisplayName' bij finish gelijk zijn aan takeover byDisplayName.
-  // Backend stuurt dat nu niet mee in twist:finish → daarom nemen we 'finish.by' als die bestaat,
-  // anders fallback "Onbekend". (Aanrader: backend twist:finish uitbreiden met byDisplayName.)
+  // 🔧 FIX: gebruik bewaarde bomb-sender
   const byDisplayName =
-    finish.byDisplayName || finish.by || finish.senderName || "Onbekend";
+    type === "bomb"
+      ? lastBombSender || "Onbekend"
+      : finish.byDisplayName ||
+        finish.by ||
+        finish.senderName ||
+        "Onbekend";
 
   dispatchTwistMessage({
     type,
@@ -231,7 +248,10 @@ export async function initEventRouter() {
   routerStarted = true;
 
   const socket = await getSocket();
-  console.log("%c[BattleBox] Event Router Ready v5.1 (HARD RESET) — PATCHED", "color:#0fffd7;font-weight:bold;");
+  console.log(
+    "%c[BattleBox] Event Router Ready v5.1 (HARD RESET) — PATCHED",
+    "color:#0fffd7;font-weight:bold;"
+  );
 
   // ------------------------------------------------------------------------
   // SNAPSHOT
@@ -294,7 +314,6 @@ export async function initEventRouter() {
   // ROUND EVENTS
   // ------------------------------------------------------------------------
   socket.on("round:start", (payload) => {
-    // ✅ resetAll mag hier (en alleen hier)
     arenaTwistStore.resetAll();
 
     const total = (payload.duration || 0) * 1000;
@@ -316,12 +335,12 @@ export async function initEventRouter() {
       reason: `Ronde ${payload.round} gestart (${payload.type}).`
     });
 
-    document.dispatchEvent(new CustomEvent("arena:roundStart", { detail: payload }));
+    document.dispatchEvent(
+      new CustomEvent("arena:roundStart", { detail: payload })
+    );
   });
 
   socket.on("round:grace", (payload) => {
-    // ❌ GEEN resetAll hier (fix: nooit resetten tijdens actieve twist flow)
-
     const total = (payload.grace || 5) * 1000;
     const endsAt = Date.now() + total;
 
@@ -341,12 +360,12 @@ export async function initEventRouter() {
       reason: "Grace periode gestart."
     });
 
-    document.dispatchEvent(new CustomEvent("arena:graceStart", { detail: payload }));
+    document.dispatchEvent(
+      new CustomEvent("arena:graceStart", { detail: payload })
+    );
   });
 
   socket.on("round:end", () => {
-    // ❌ GEEN resetAll hier (fix: nooit resetten tijdens twist animaties)
-
     arenaStore.set({
       status: "ended",
       totalMs: 0,
@@ -397,61 +416,34 @@ export async function initEventRouter() {
     });
   });
 
-  // ============================================================================
-// HUD POPUP BRIDGE — twist:takeover → twist:message
-// UI-only bridge (geen gameplay impact)
-// ============================================================================
-function bridgeTwistTakeoverToTwistMessage(payload) {
-  if (!payload || !payload.type) return;
+  // ========================================================================
+  // ⭐ TWIST EVENTS
+  // ========================================================================
+  socket.on("twist:takeover", (p) => {
+    pushBattleEvent({
+      type: `twist:${p.type}`,
+      display_name: p.byDisplayName || p.by || p.byUsername || "Onbekend",
+      username: p.byUsername || "unknown",
+      avatar_url: p.avatar_url,
+      reason: p.title || "Twist geactiveerd."
+    });
 
-  document.dispatchEvent(
-    new CustomEvent("twist:message", {
-      detail: payload
-    })
-  );
-}
+    arenaTwistStore.activate({
+      type: p.type,
+      title: p.title,
+      payload: p
+    });
 
-// ========================================================================
-// ⭐ TWIST EVENT FIX — SINGLE SOURCE: twist:takeover
-// + ✅ NEW: TwistMessage bridge (document event)
-// ========================================================================
-socket.on("twist:takeover", (p) => {
-  // battlelog
-  pushBattleEvent({
-    type: `twist:${p.type}`,
-    display_name: p.byDisplayName || p.by || p.byUsername || "Onbekend",
-    username: p.byUsername || "unknown",
-    avatar_url: p.avatar_url,
-    reason: p.title || "Twist geactiveerd."
+    bridgeTwistTakeoverToTwistMessage(p);
   });
 
-  // Activate twist store (payload unchanged)
-  arenaTwistStore.activate({
-    type: p.type,
-    title: p.title,
-    payload: p
-  });
-
-  // ✅ HUD popup trigger (twistMessage.js)
-  bridgeTwistTakeoverToTwistMessage(p);
-});
-
-  // ========================================================================
-  // ✅ NEW: twist:finish listener
-  // - Nodig voor bomb "HIT" melding (twistMessage suppresses first bomb)
-  // - Ook handig als backend fallback finalize pakt zonder animation-complete
-  // ========================================================================
   socket.on("twist:finish", (finish) => {
-    // NOTE: battlelog optioneel (kan spam geven) → we houden het licht
-    // Je kunt dit aanzetten als je finish-events wilt loggen:
-    // pushBattleEvent({ type: `twist:finish:${finish?.type}`, display_name: "Twist", username: "system", reason: "Twist finalized." });
-
     bridgeTwistFinishToTwistMessage(finish);
   });
 
   // ========================================================================
   // QUEUE UPDATE
-  // ============================================================================
+  // ========================================================================
   socket.on("updateQueue", (packet) => {
     if (!packet || !Array.isArray(packet.entries)) return;
     queueStore.setQueue(packet.entries);
@@ -490,14 +482,14 @@ socket.on("twist:takeover", (p) => {
 
   // ========================================================================
   // HUD TICKER
-  // ============================================================================
+  // ========================================================================
   socket.on("hudTickerUpdate", (text) => {
     tickerStore.setText(text || "");
   });
 
   // ========================================================================
   // LEGACY TWIST ROTATION
-  // ============================================================================
+  // ========================================================================
   let twistIndex = 0;
   function rotateLegacyTwists() {
     const slice = TWIST_KEYS.slice(0, 3);
@@ -510,7 +502,10 @@ socket.on("twist:takeover", (p) => {
 
   // ========================================================================
   // DEBUG BRIDGE
-  // ============================================================================
+  // ========================================================================
   window.bb = { socket, eventStore, arenaStore, arenaTwistStore, twistStore };
-  console.log("%c[BB DEBUG] Debug bridge active → window.bb", "color:#0fffd7");
+  console.log(
+    "%c[BB DEBUG] Debug bridge active → window.bb",
+    "color:#0fffd7"
+  );
 }
