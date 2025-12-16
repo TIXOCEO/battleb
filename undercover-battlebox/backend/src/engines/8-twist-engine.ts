@@ -321,6 +321,30 @@ async function applyMoneyGun(senderId: string, senderName: string, target: any) 
     type: "twist",
     message: `${senderName} MoneyGun gestart → ${p.display_name}`
   });
+
+  // -----------------------------------------------------------------------
+  // ⛑️ SAFETY FALLBACK — voorkomt permanente pending-lock
+  // -----------------------------------------------------------------------
+  setTimeout(async () => {
+    if (!pending) return;
+    if (pending.type !== "moneygun") return;
+    if (pending.targetId !== p.id) return;
+
+    emitLog({
+      type: "twist",
+      message: `MoneyGun fallback finalize (no animation-complete)`
+    });
+
+    const snap = pending;
+    pending = null;
+
+    await finalizeMoneyGun(snap);
+
+    io.emit("twist:finish", {
+      type: "moneygun",
+      targetId: snap.targetId
+    });
+  }, 3500); // > animatieduur
 }
 
 // --------------------------------- BOMB ---------------------------------
