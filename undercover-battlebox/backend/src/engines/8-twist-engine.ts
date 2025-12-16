@@ -474,6 +474,30 @@ async function applyHeal(senderId: string, senderName: string, target: any) {
     type: "twist",
     message: `${senderName} HEAL gestart → ${p.display_name}`
   });
+
+  // -----------------------------------------------------------------------
+  // ⛑️ SAFETY FALLBACK — voorkomt permanente pending-lock
+  // -----------------------------------------------------------------------
+  setTimeout(async () => {
+    if (!pending) return;
+    if (pending.type !== "heal") return;
+    if (pending.targetId !== p.id) return;
+
+    emitLog({
+      type: "twist",
+      message: `Heal fallback finalize (no animation-complete)`
+    });
+
+    const snap = pending;
+    pending = null;
+
+    await finalizeHeal(snap);
+
+    io.emit("twist:finish", {
+      type: "heal",
+      targetId: snap.targetId
+    });
+  }, 3500); // > animatieduur
 }
 
 // ---------------------------- BREAKER -----------------------------------
