@@ -230,6 +230,29 @@ async function finalizeDiamondPistol(p: PendingTwist) {
   await emitArena();
 }
 
+async function finalizeBreaker(p: PendingTwist) {
+  if (!p.targetId) return;
+
+  const arena = getArena();
+  const pl = arena.players.find(x => x.id === p.targetId);
+  if (!pl || pl.eliminated) return;
+
+  pl.breakerHits = (pl.breakerHits ?? 0) + 1;
+
+  if (pl.breakerHits >= 2) {
+    pl.boosters = pl.boosters.filter(b => b !== "immune");
+    pl.positionStatus = "alive";
+  }
+
+  emitLog({
+    type: "twist",
+    message: `${p.senderName} BREAKER → ${pl.display_name}`
+  });
+
+  await emitArena();
+}
+
+
 // ============================================================================
 // APPLY FUNCTIONS — ARCHITECTURE FIX (HUD FLOW PATCHED)
 // ============================================================================
