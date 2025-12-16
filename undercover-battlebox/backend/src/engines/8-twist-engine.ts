@@ -437,6 +437,30 @@ async function applyImmuneTwist(senderId: string, senderName: string, target: an
     type: "twist",
     message: `${senderName} IMMUNE gestart → ${p.display_name}`
   });
+
+  // -----------------------------------------------------------------------
+  // 🛡️ SAFETY FALLBACK — voorkomt permanente pending-lock
+  // -----------------------------------------------------------------------
+  setTimeout(async () => {
+    if (!pending) return;
+    if (pending.type !== "immune") return;
+    if (pending.targetId !== p.id) return;
+
+    emitLog({
+      type: "twist",
+      message: `Immune fallback finalize (no animation-complete)`
+    });
+
+    const snap = pending;
+    pending = null;
+
+    await finalizeImmune(snap);
+
+    io.emit("twist:finish", {
+      type: "immune",
+      targetId: snap.targetId
+    });
+  }, 3500); // > animatieduur
 }
 
 // -------------------------------- HEAL -----------------------------------
