@@ -37,8 +37,9 @@ function normalizeArena(pkt) {
 
   const totalMs = hud.totalMs || 0;
   const remainingMs =
-    hud.remainingMs ||
-    Math.max(0, (hud.endsAt || 0) - now);
+     typeof hud.remainingMs === "number"
+       ? hud.remainingMs
+       : Math.max(0, (hud.endsAt || 0) - now);
 
   return {
     ...pkt,
