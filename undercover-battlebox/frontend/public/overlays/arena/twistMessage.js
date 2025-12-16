@@ -1,5 +1,5 @@
 // ============================================================================
-// twistMessage.js — Broadcast Twist Messaging v4.5 (HUD Popup Version)
+// twistMessage.js — Broadcast Twist Messaging v4.6 (HUD Popup Version)
 // ============================================================================
 
 let box = null;
@@ -10,6 +10,9 @@ let lastTwistHash = null;
 
 // NEW: bomb scan suppression (HUD-only, no gameplay impact)
 let pendingBombHash = null;
+
+// NEW: persist bomb sender between START → HIT
+let lastBombSenderName = null;
 
 // All popup color classes
 const TWIST_COLOR_CLASSES = [
@@ -32,7 +35,7 @@ export function initTwistMessage() {
   if (!box) return console.warn("[TwistMessage] ❌ #bb-twist-hud missing");
   if (!textEl) return console.warn("[TwistMessage] ❌ #bb-twist-text missing");
 
-  console.log("%c[TwistMessage] Ready v4.5", "color:#00ffaa");
+  console.log("%c[TwistMessage] Ready v4.6", "color:#00ffaa");
 
   document.addEventListener("twist:message", (e) => {
     const payload = normalizePayload(e.detail);
@@ -44,30 +47,32 @@ export function initTwistMessage() {
     const baseHash = `${payload.type}|${payload.byDisplayName}`;
     const hash =
       payload.type === "bomb"
-    ? baseHash
-    : `${baseHash}|${payload.target}|${payload.survivor}|${bucket}`;
+        ? baseHash
+        : `${baseHash}|${payload.target}|${payload.survivor}|${bucket}`;
 
-    // Diamond Gun always allowed
     const isDiamond = payload.type === "diamondpistol";
 
     // ----------------------------------------------------------------------
-    // 💣 BOMB SPECIAL CASE
-    // - First bomb = scan → DO NOT SHOW
-    // - Second bomb = hit → SHOW
+    // 💣 BOMB SPECIAL CASE (START vs HIT)
     // ----------------------------------------------------------------------
     if (payload.type === "bomb") {
       if (pendingBombHash !== hash) {
-        // first occurrence → mark & suppress
+        // FIRST = START → suppress + remember sender
         pendingBombHash = hash;
-        console.log("[TwistMessage] Bomb scan suppressed (waiting for hit)");
+        lastBombSenderName = payload.byDisplayName || lastBombSenderName;
+        console.log("[TwistMessage] Bomb START suppressed, sender stored:", lastBombSenderName);
         return;
       }
-      // second occurrence → allow + reset
+
+      // SECOND = HIT → allow + restore sender
       pendingBombHash = null;
+      if (lastBombSenderName) {
+        payload.byDisplayName = lastBombSenderName;
+      }
     }
 
     // ----------------------------------------------------------------------
-    // DUPLICATE FILTER (unchanged logic)
+    // DUPLICATE FILTER
     // ----------------------------------------------------------------------
     if (!isDiamond && hash === lastTwistHash) {
       console.warn("[TwistMessage] Duplicate blocked:", hash);
@@ -94,8 +99,7 @@ function show(msg, type = null) {
   TWIST_COLOR_CLASSES.forEach((cls) => box.classList.remove(cls));
 
   if (type) {
-    const cls = "twist-" + type.toLowerCase();
-    box.classList.add(cls);
+    box.classList.add("twist-" + type.toLowerCase());
   }
 
   box.classList.add("show");
@@ -135,7 +139,7 @@ function normalizePayload(p) {
 }
 
 // ============================================================================
-// MESSAGE BUILDER (UNCHANGED)
+// MESSAGE BUILDER
 // ============================================================================
 export function showMessage(p) {
   if (!p || !p.type) return;
@@ -184,7 +188,7 @@ export function showMessage(p) {
 }
 
 // ============================================================================
-// 💎 DIAMOND GUN MESSAGE BUILDER (UNCHANGED)
+// 💎 DIAMOND GUN MESSAGE BUILDER
 // ============================================================================
 function buildDiamondGunMessage(sender, target, survivor) {
   if (survivor && target) {
