@@ -330,6 +330,28 @@ function triggerBreaker(targetIndex) {
   setTimeout(() => emitAnimationDone("breaker", targetIndex), 900);
 }
 
+function triggerImmune(targetIndex) {
+  // immune heeft geen animatie → backend moet toch vrijgegeven worden
+  setTimeout(() => {
+    if (targetIndex != null) {
+      emitAnimationDone("immune", targetIndex);
+    } else {
+      socket.emit("twist:animation-complete", { type: "immune" });
+    }
+  }, 400);
+}
+
+function triggerHeal(targetIndex) {
+  // heal idem → altijd animation-complete sturen
+  setTimeout(() => {
+    if (targetIndex != null) {
+      emitAnimationDone("heal", targetIndex);
+    } else {
+      socket.emit("twist:animation-complete", { type: "heal" });
+    }
+  }, 400);
+}
+
 function triggerDiamondPistol(survivorId, targetIndex) {
   if (survivorId)
     return setTimeout(
@@ -401,24 +423,32 @@ arenaTwistStore.subscribe(async (st) => {
   }
 
   switch (st.type) {
-    case "bomb":
-      if (targetIndex == null) startBombScan();
-      else finishBombScan(targetIndex);
-      break;
+  case "bomb":
+    if (targetIndex == null) startBombScan();
+    else finishBombScan(targetIndex);
+    break;
 
-    case "moneygun":
-      triggerMoneyGun(targetIndex);
-      break;
+  case "moneygun":
+    triggerMoneyGun(targetIndex);
+    break;
 
-    case "breaker":
-      triggerBreaker(targetIndex);
-      break;
+  case "immune":
+    triggerImmune(targetIndex);
+    break;
 
-    case "diamondpistol":
-      triggerDiamondPistol(payload.survivorId, targetIndex);
-      break;
-  }
+  case "heal":
+    triggerHeal(targetIndex);
+    break;
 
+  case "breaker":
+    triggerBreaker(targetIndex);
+    break;
+
+  case "diamondpistol":
+    triggerDiamondPistol(payload.survivorId, targetIndex);
+    break;
+}
+  
   twistOverlay.classList.remove("hidden");
   playTwistAnimation(twistOverlay, st.type, st.title, payload);
 
