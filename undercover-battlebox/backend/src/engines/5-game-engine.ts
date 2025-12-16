@@ -723,6 +723,20 @@ setInterval(async () => {
 }, 1000);
 
 /* ============================================================================ */
+/*                          FINALIZE ELIMINATION                                */
+/* ============================================================================ */
+
+export function finalizeElimination(id: string): boolean {
+  const p = arena.players.find((x) => x.id === id);
+  if (!p) return false;
+
+  p.positionStatus = "elimination";
+  p.eliminated = true;
+
+  return true;
+}
+
+/* ============================================================================ */
 /*                                   EXPORT                                     */
 /* ============================================================================ */
 
@@ -737,4 +751,5 @@ export default {
   arenaClear,
   forceSort,
   toggleGalaxyMode,
+  finalizeElimination,
 };
