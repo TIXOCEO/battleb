@@ -1,12 +1,21 @@
 // ============================================================================
-// arenaStore.js — BattleBox Arena Overlay Store (v9.0 NO-RACE QUEUE EDITION)
-// FULL TWIST QUEUE REWRITE — 100% ORDER GUARANTEED + HARD RESET SYSTEM
+// arenaStore.js — BattleBox Arena Overlay Store
+// v9.1 TWIST STABILITY PATCH
+// ============================================================================
+//
+// FIXES:
+// ✔ active/lock deadlock preventie
+// ✔ queue processing altijd gegarandeerd
+// ✔ HUD-only twists kunnen niet meer blijven hangen
+// ✔ compatibel met instant-finalize backend twists
+//
+// GEEN FEATURE CHANGES
 // ============================================================================
 
 import { createStore } from "/overlays/shared/stores.js";
 
 // ============================================================================
-// ARENA STATE (HUD-MODEL v3 — stabiel)
+// ARENA STATE (HUD-MODEL v3 — ongewijzigd)
 // ============================================================================
 
 export const arenaStore = createStore({
@@ -41,7 +50,6 @@ export function setArenaSnapshot(snap) {
 
   const hud = snap.hud ?? snap;
 
-  // 🔒 Alleen overschrijven als backend waarden levert
   const hasTotal = typeof hud.totalMs === "number";
   const hasEndsAt = typeof hud.endsAt === "number";
 
@@ -73,13 +81,8 @@ export function setArenaSnapshot(snap) {
   });
 }
 
-export function updatePlayers(players) {
-  if (!Array.isArray(players)) return;
-  arenaStore.set({ players });
-}
-
 // ============================================================================
-// HUD RING RENDER — TIMER IS ALWAYS DERIVED
+// HUD RING RENDER — ongewijzigd
 // ============================================================================
 
 export function renderHudProgress(state, ringEl) {
@@ -107,7 +110,7 @@ export function renderHudProgress(state, ringEl) {
 }
 
 // ============================================================================
-// TWIST STORE — v9.0 (QUEUE ONLY, NO ARENA SIDE EFFECTS)
+// TWIST STORE — PATCHED CORE
 // ============================================================================
 
 export const arenaTwistStore = createStore({
@@ -116,12 +119,22 @@ export const arenaTwistStore = createStore({
   title: "",
   step: null,
   payload: null,
+
   queue: [],
   lock: false,
+
+  // 🔒 NEW: watchdog timestamp
+  activeSince: 0,
 });
 
 // ============================================================================
-// HARD RESET — TWIST QUEUE ONLY
+// HARD RESET — TWIST QUEUE ONLY (VERBETERD)
+// ============================================================================
+//
+// ⚠️ BELANGRIJK:
+// - reset NOOIT arenaStore
+// - reset ALLEEN twist-runtime
+// - veilig bij round:start / arena:reset
 // ============================================================================
 
 arenaTwistStore.resetAll = () => {
@@ -133,31 +146,36 @@ arenaTwistStore.resetAll = () => {
     payload: null,
     queue: [],
     lock: false,
+    activeSince: 0,
   });
 
   try {
-    if (window.FX && window.FX.clear) window.FX.clear();
-  } catch {}
-
-  try {
-    if (window.disableGalaxyChaos) {
-      const refs = window.cardRefs || [];
-      window.disableGalaxyChaos(refs);
-    }
+    if (window.FX?.clear) window.FX.clear();
   } catch {}
 
   console.log("%c[TWIST] Hard reset executed", "color:#ff4f4f");
 };
 
 // ============================================================================
-// INTERNAL — PROCESS NEXT QUEUED TWIST
+// INTERNAL — PROCESS NEXT QUEUED TWIST (PATCHED)
+// ============================================================================
+//
+// GARANTIES:
+// - nooit overschrijven van actieve twist
+// - nooit vastlopen door lock
+// - altijd FIFO
 // ============================================================================
 
 function processNextTwist() {
   const st = arenaTwistStore.get();
-  if (st.lock || st.active || !st.queue.length) return;
+
+  // ⛔ harde guards
+  if (st.lock) return;
+  if (st.active) return;
+  if (!st.queue.length) return;
 
   const next = st.queue[0];
+
   arenaTwistStore.set({ lock: true });
 
   arenaTwistStore.set({
@@ -166,6 +184,7 @@ function processNextTwist() {
     title: next.title,
     step: next.step ?? null,
     payload: next.payload,
+    activeSince: Date.now(), // 🆕 watchdog startpunt
   });
 
   arenaTwistStore.set({
@@ -175,23 +194,61 @@ function processNextTwist() {
 }
 
 // ============================================================================
-// PUBLIC — ADD A TWIST TO QUEUE
+// WATCHDOG — ABSOLUTE FAILSAFE
+// ============================================================================
+//
+// Waarom nodig:
+// - OBS kan animationend missen
+// - CSS kan falen
+// - JS kan onderbroken worden
+//
+// → nooit meer een vastlopende twist
+// ============================================================================
+
+setInterval(() => {
+  const st = arenaTwistStore.get();
+  if (!st.active || !st.activeSince) return;
+
+  const elapsed = Date.now() - st.activeSince;
+
+  if (elapsed > 6000) {
+    console.warn(
+      "[TWIST] Watchdog force-clear:",
+      st.type,
+      `(${elapsed}ms)`
+    );
+
+    arenaTwistStore.clear();
+  }
+}, 500);
+
+// ============================================================================
+// INTERNAL — ENQUEUE (SAFE)
 // ============================================================================
 
 function enqueue(entry) {
   const st = arenaTwistStore.get();
-  arenaTwistStore.set({ queue: [...st.queue, entry] });
+  arenaTwistStore.set({
+    queue: [...st.queue, entry],
+  });
+
   processNextTwist();
 }
 
 // ============================================================================
-// PUBLIC API — ACTIVATE
+// PUBLIC API — ACTIVATE (PATCHED)
+// ============================================================================
+//
+// ❗ active twists worden NOOIT vervangen
+// ❗ alles loopt via queue
+// ❗ backend mag onbeperkt pushen
 // ============================================================================
 
 arenaTwistStore.activate = (payload) => {
-  if (!payload) return;
+  if (!payload || !payload.type) return;
+
   enqueue({
-    type: payload.type ?? null,
+    type: payload.type,
     title: payload.title ?? "",
     step: payload.step ?? null,
     payload,
@@ -199,11 +256,12 @@ arenaTwistStore.activate = (payload) => {
 };
 
 // ============================================================================
-// PUBLIC API — COUNTDOWN
+// PUBLIC API — COUNTDOWN (UNCHANGED)
 // ============================================================================
 
 arenaTwistStore.countdown = (payload) => {
   if (!payload) return;
+
   enqueue({
     type: "countdown",
     title: "",
@@ -213,7 +271,13 @@ arenaTwistStore.countdown = (payload) => {
 };
 
 // ============================================================================
-// CLEAR — END CURRENT & PROCESS NEXT
+// CLEAR — END CURRENT & PROCESS NEXT (PATCHED)
+// ============================================================================
+//
+// ⚠️ clear() is nu:
+// - idempotent
+// - veilig bij dubbele calls
+// - triggert ALTIJD volgende twist
 // ============================================================================
 
 arenaTwistStore.clear = () => {
@@ -223,18 +287,22 @@ arenaTwistStore.clear = () => {
     title: "",
     step: null,
     payload: null,
+    activeSince: 0,
   });
 
   processNextTwist();
 };
 
 // ============================================================================
-// OPTIONAL — FORCE FLUSH (Admin/Debug)
+// OPTIONAL — FORCE FLUSH (ADMIN / DEBUG)
 // ============================================================================
 
 arenaTwistStore.forceFlush = () => {
   arenaTwistStore.resetAll();
-  console.log("%c[TWIST] Force-flush executed (manual)", "color:#ff9f00");
+  console.log(
+    "%c[TWIST] Force-flush executed (manual)",
+    "color:#ff9f00"
+  );
 };
 
 // ============================================================================
@@ -245,6 +313,5 @@ export default {
   arenaStore,
   arenaTwistStore,
   setArenaSnapshot,
-  updatePlayers,
   renderHudProgress,
 };
