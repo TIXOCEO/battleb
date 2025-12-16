@@ -397,31 +397,44 @@ export async function initEventRouter() {
     });
   });
 
-  // ========================================================================
-  // ⭐ TWIST EVENT FIX — SINGLE SOURCE: twist:takeover
-  // + ✅ NEW: TwistMessage bridge (document event)
-  // ========================================================================
-  socket.on("twist:takeover", (p) => {
-    // battlelog
-    pushBattleEvent({
-      type: `twist:${p.type}`,
-      display_name: p.byDisplayName || p.by || p.byUsername || "Onbekend",
-      username: p.byUsername || "unknown",
-      avatar_url: p.avatar_url,
-      reason: p.title || "Twist geactiveerd."
-    });
+  // ============================================================================
+// HUD POPUP BRIDGE — twist:takeover → twist:message
+// UI-only bridge (geen gameplay impact)
+// ============================================================================
+function bridgeTwistTakeoverToTwistMessage(payload) {
+  if (!payload || !payload.type) return;
 
-    // Activate twist store (payload unchanged)
-    arenaTwistStore.activate({
-      type: p.type,
-      title: p.title,
-      payload: p
-    });
+  document.dispatchEvent(
+    new CustomEvent("twist:message", {
+      detail: payload
+    })
+  );
+}
 
-    // ✅ Bridge to TwistMessage HUD popup system
-    // (twistMessage.js luistert naar "twist:message")
-    bridgeTwistTakeoverToTwistMessage(p);
+// ========================================================================
+// ⭐ TWIST EVENT FIX — SINGLE SOURCE: twist:takeover
+// + ✅ NEW: TwistMessage bridge (document event)
+// ========================================================================
+socket.on("twist:takeover", (p) => {
+  // battlelog
+  pushBattleEvent({
+    type: `twist:${p.type}`,
+    display_name: p.byDisplayName || p.by || p.byUsername || "Onbekend",
+    username: p.byUsername || "unknown",
+    avatar_url: p.avatar_url,
+    reason: p.title || "Twist geactiveerd."
   });
+
+  // Activate twist store (payload unchanged)
+  arenaTwistStore.activate({
+    type: p.type,
+    title: p.title,
+    payload: p
+  });
+
+  // ✅ HUD popup trigger (twistMessage.js)
+  bridgeTwistTakeoverToTwistMessage(p);
+});
 
   // ========================================================================
   // ✅ NEW: twist:finish listener
