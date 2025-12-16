@@ -1,6 +1,6 @@
 // ============================================================================
 // arena.js — BattleBox Arena Overlay
-// BUILD v12.0 — Bomb FAST-SCAN Fixed + No Runtime Reset on Event 1
+// BUILD v12.1 — Bomb Lifecycle FIXED (idempotent, multi-bomb safe)
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -28,38 +28,48 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 /* ============================================================================ */
-/* SOCKET + RUNTIME RESET                                                       */
+/* SOCKET                                                                       */
 /* ============================================================================ */
 
 const socket = getSocket();
 
-// Bomb event flags
-let bombScanActive = false;
-let bombScanStopRequested = false;
+/* ============================================================================ */
+/* 💣 BOMB STATE — HARD RESETTABLE, PER SESSION                                  */
+/* ============================================================================ */
 
-// RESET ONLY ON ROUND or FULL ARENA RESET
-function resetArenaRuntime() {
-  console.warn("[ARENA RESET] Runtime flags cleared");
+// Each bomb gets its own session id → prevents stale state
+let bombSessionId = 0;
+let activeBombSession = null;
 
-  bombScanActive = false;
-  bombScanStopRequested = false;
+/**
+ * Reset ONLY bomb visuals & flags
+ * Safe to call multiple times
+ */
+function resetBombState() {
+  activeBombSession = null;
 
   cardRefs.forEach(ref => {
     ref.el.classList.remove(
       "bomb-scan",
-      "bomb-final-hit",
-      "card-shuffle",
-      "status-elimination",
-      "status-danger",
-      "status-immune-full",
-      "status-immune-partial",
-      "status-alive"
+      "bomb-final-hit"
     );
+  });
+}
+
+/* ============================================================================ */
+/* RUNTIME RESET (ROUND / ARENA ONLY)                                            */
+/* ============================================================================ */
+
+function resetArenaRuntime() {
+  console.warn("[ARENA RESET] Full runtime reset");
+
+  resetBombState();
+
+  cardRefs.forEach(ref => {
     ref.el.className = "bb-player-card";
   });
 }
 
-// ✅ ONLY valid reset triggers
 socket.on("round:start", () => {
   console.warn("[ARENA] round:start → runtime reset");
   resetArenaRuntime();
@@ -71,7 +81,7 @@ socket.on("arena:reset", () => {
 });
 
 /* ============================================================================ */
-/* ANIMATION COMPLETE → backend                                                 */
+/* ANIMATION COMPLETE → BACKEND                                                  */
 /* ============================================================================ */
 
 function emitAnimationDone(type, targetIndex) {
@@ -273,41 +283,50 @@ function triggerGalaxyEffect() {
 }
 
 /* ============================================================================ */
-/* BOMB — FAST SCAN (DUAL PHASE)                                                */
+/* 💣 BOMB — FAST SCAN (SESSION SAFE)                                           */
 /* ============================================================================ */
 
-async function startBombScan() {
-  if (bombScanActive) return;
+/**
+ * Start scan for a NEW bomb session
+ * - Fully isolated per bomb
+ * - Safe after overlay refresh
+ */
+async function startBombScan(sessionId) {
+  resetBombState();
 
-  bombScanActive = true;
-  bombScanStopRequested = false;
+  activeBombSession = sessionId;
 
   const cards = cardRefs.map(ref => ref.el);
   const delay = 100;
   const rounds = 3;
 
-  console.log("[BOMB] Scan STARTED");
+  console.log("[BOMB] Scan STARTED (session)", sessionId);
 
   for (let r = 0; r < rounds; r++) {
     for (let i = 0; i < cards.length; i++) {
-      if (bombScanStopRequested) return;
+      if (activeBombSession !== sessionId) return;
       cards[i].classList.add("bomb-scan");
       await new Promise(res => setTimeout(res, delay));
       cards[i].classList.remove("bomb-scan");
     }
   }
 
-  console.log("[BOMB] Scan finished → waiting on target...");
+  console.log("[BOMB] Scan finished → waiting for HIT");
 }
 
-function finishBombScan(targetIndex) {
-  bombScanStopRequested = true;
-  bombScanActive = false;
+/**
+ * Finish scan → HIT
+ * - Always works, even after refresh
+ */
+function finishBombScan(sessionId, targetIndex) {
+  if (activeBombSession !== sessionId) return;
+
+  activeBombSession = null;
 
   const target = cardRefs[targetIndex]?.el;
   if (!target) return;
 
-  console.log("[BOMB] Target HIT:", targetIndex);
+  console.log("[BOMB] HIT (session)", sessionId, "target", targetIndex);
 
   target.classList.add("bomb-final-hit");
 
@@ -319,7 +338,7 @@ function finishBombScan(targetIndex) {
 }
 
 /* ============================================================================ */
-/* SIMPLE TWISTS                                                                */
+/* SIMPLE TWISTS (UNCHANGED)                                                    */
 /* ============================================================================ */
 
 function triggerMoneyGun(targetIndex) {
@@ -331,24 +350,16 @@ function triggerBreaker(targetIndex) {
 }
 
 function triggerImmune(targetIndex) {
-  // immune heeft geen animatie → backend moet toch vrijgegeven worden
   setTimeout(() => {
-    if (targetIndex != null) {
-      emitAnimationDone("immune", targetIndex);
-    } else {
-      socket.emit("twist:animation-complete", { type: "immune" });
-    }
+    if (targetIndex != null) emitAnimationDone("immune", targetIndex);
+    else socket.emit("twist:animation-complete", { type: "immune" });
   }, 400);
 }
 
 function triggerHeal(targetIndex) {
-  // heal idem → altijd animation-complete sturen
   setTimeout(() => {
-    if (targetIndex != null) {
-      emitAnimationDone("heal", targetIndex);
-    } else {
-      socket.emit("twist:animation-complete", { type: "heal" });
-    }
+    if (targetIndex != null) emitAnimationDone("heal", targetIndex);
+    else socket.emit("twist:animation-complete", { type: "heal" });
   }, 400);
 }
 
@@ -393,7 +404,7 @@ async function runGalaxyShuffle() {
 }
 
 /* ============================================================================ */
-/* MAIN TWIST ENGINE                                                            */
+/* MAIN TWIST ENGINE — PATCHED                                                  */
 /* ============================================================================ */
 
 arenaTwistStore.subscribe(async (st) => {
@@ -422,33 +433,45 @@ arenaTwistStore.subscribe(async (st) => {
     return;
   }
 
+  /* ------------------------------------------------------------------------ */
+  /* 💣 BOMB — SESSION CONTROL                                                 */
+  /* ------------------------------------------------------------------------ */
+
+  if (st.type === "bomb") {
+    // New bomb session on FIRST event (no target yet)
+    if (targetIndex == null) {
+      const sessionId = ++bombSessionId;
+      startBombScan(sessionId);
+      st.__bombSessionId = sessionId;
+      return;
+    }
+
+    // HIT phase
+    finishBombScan(st.__bombSessionId ?? bombSessionId, targetIndex);
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* OTHER TWISTS                                                              */
+  /* ------------------------------------------------------------------------ */
+
   switch (st.type) {
-  case "bomb":
-    if (targetIndex == null) startBombScan();
-    else finishBombScan(targetIndex);
-    break;
+    case "moneygun":
+      triggerMoneyGun(targetIndex);
+      break;
+    case "immune":
+      triggerImmune(targetIndex);
+      break;
+    case "heal":
+      triggerHeal(targetIndex);
+      break;
+    case "breaker":
+      triggerBreaker(targetIndex);
+      break;
+    case "diamondpistol":
+      triggerDiamondPistol(payload.survivorId, targetIndex);
+      break;
+  }
 
-  case "moneygun":
-    triggerMoneyGun(targetIndex);
-    break;
-
-  case "immune":
-    triggerImmune(targetIndex);
-    break;
-
-  case "heal":
-    triggerHeal(targetIndex);
-    break;
-
-  case "breaker":
-    triggerBreaker(targetIndex);
-    break;
-
-  case "diamondpistol":
-    triggerDiamondPistol(payload.survivorId, targetIndex);
-    break;
-}
-  
   twistOverlay.classList.remove("hidden");
   playTwistAnimation(twistOverlay, st.type, st.title, payload);
 
