@@ -8,10 +8,10 @@ let textEl = null;
 // prevent duplicate spam (TLS-safe)
 let lastTwistHash = null;
 
-// NEW: bomb scan suppression (HUD-only, no gameplay impact)
+// bomb scan suppression (HUD-only)
 let pendingBombHash = null;
 
-// NEW: persist bomb sender between START → HIT
+// persist bomb sender between START → HIT
 let lastBombSenderName = null;
 
 // All popup color classes
@@ -52,32 +52,35 @@ export function initTwistMessage() {
 
     const isDiamond = payload.type === "diamondpistol";
 
-// ----------------------------------------------------------------------
-// 💣 BOMB SPECIAL CASE (START vs HIT)
-// ----------------------------------------------------------------------
-if (payload.type === "bomb") {
-  if (pendingBombHash !== hash) {
-    // FIRST = START → suppress + remember sender
-    pendingBombHash = hash;
-    lastBombSenderName = payload.byDisplayName || lastBombSenderName;
-    console.log(
-      "[TwistMessage] Bomb START suppressed, sender stored:",
-      lastBombSenderName
-    );
-    return;
-  }
+    // ----------------------------------------------------------------------
+    // 💣 BOMB SPECIAL CASE (START vs HIT)
+    // ----------------------------------------------------------------------
+    if (payload.type === "bomb") {
+      if (pendingBombHash !== hash) {
+        // FIRST = START → suppress
+        pendingBombHash = hash;
+        lastBombSenderName = payload.byDisplayName || lastBombSenderName;
+        console.log(
+          "[TwistMessage] Bomb START suppressed, sender stored:",
+          lastBombSenderName
+        );
+        return;
+      }
 
-  // SECOND = HIT → allow + restore sender
-  pendingBombHash = null;
-  if (lastBombSenderName) {
-    payload.byDisplayName = lastBombSenderName;
-  }
-}
+      // SECOND = HIT → allow
+      pendingBombHash = null;
+      if (lastBombSenderName) {
+        payload.byDisplayName = lastBombSenderName;
+      }
+
+      // 🔑 IMPORTANT: allow bomb HIT regardless of lastTwistHash
+      lastTwistHash = null;
+    }
 
     // ----------------------------------------------------------------------
-    // DUPLICATE FILTER
+    // DUPLICATE FILTER (NON-BOMB ONLY)
     // ----------------------------------------------------------------------
-    if (!isDiamond && hash === lastTwistHash) {
+    if (payload.type !== "bomb" && !isDiamond && hash === lastTwistHash) {
       console.warn("[TwistMessage] Duplicate blocked:", hash);
       return;
     }
