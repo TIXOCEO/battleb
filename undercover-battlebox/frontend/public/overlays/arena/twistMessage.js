@@ -1,15 +1,13 @@
 // ============================================================================
-// twistMessage.js — Broadcast Twist Messaging v4.6 (HUD Popup Version)
+// twistMessage.js — Broadcast Twist Messaging v4.7 (HUD Popup Version)
+// FINAL: Bomb START/HIT deterministic fix
 // ============================================================================
 
 let box = null;
 let textEl = null;
 
-// prevent duplicate spam (TLS-safe)
+// prevent duplicate spam (non-bomb only)
 let lastTwistHash = null;
-
-// bomb scan suppression (HUD-only)
-let pendingBombHash = null;
 
 // persist bomb sender between START → HIT
 let lastBombSenderName = null;
@@ -35,7 +33,7 @@ export function initTwistMessage() {
   if (!box) return console.warn("[TwistMessage] ❌ #bb-twist-hud missing");
   if (!textEl) return console.warn("[TwistMessage] ❌ #bb-twist-text missing");
 
-  console.log("%c[TwistMessage] Ready v4.6", "color:#00ffaa");
+  console.log("%c[TwistMessage] Ready v4.7", "color:#00ffaa");
 
   document.addEventListener("twist:message", (e) => {
     const payload = normalizePayload(e.detail);
@@ -53,34 +51,34 @@ export function initTwistMessage() {
     const isDiamond = payload.type === "diamondpistol";
 
     // ----------------------------------------------------------------------
-    // 💣 BOMB SPECIAL CASE (START vs HIT)
+    // 💣 BOMB — SINGLE SOURCE OF TRUTH
+    // START  = no target → suppress
+    // HIT    = target present → always show
     // ----------------------------------------------------------------------
     if (payload.type === "bomb") {
-      if (pendingBombHash !== hash) {
-        // FIRST = START → suppress
-        pendingBombHash = hash;
+      if (!payload.target) {
+        // START (scan)
         lastBombSenderName = payload.byDisplayName || lastBombSenderName;
-        console.log(
-          "[TwistMessage] Bomb START suppressed, sender stored:",
-          lastBombSenderName
-        );
+        console.log("[TwistMessage] Bomb START suppressed");
         return;
       }
 
-      // SECOND = HIT → allow
-      pendingBombHash = null;
-      if (lastBombSenderName) {
-        payload.byDisplayName = lastBombSenderName;
-      }
+      // HIT
+      payload.byDisplayName =
+        lastBombSenderName || payload.byDisplayName;
 
-      // 🔑 IMPORTANT: allow bomb HIT regardless of lastTwistHash
+      // Bomb must NEVER be blocked by duplicate filter
       lastTwistHash = null;
     }
 
     // ----------------------------------------------------------------------
     // DUPLICATE FILTER (NON-BOMB ONLY)
     // ----------------------------------------------------------------------
-    if (payload.type !== "bomb" && !isDiamond && hash === lastTwistHash) {
+    if (
+      payload.type !== "bomb" &&
+      !isDiamond &&
+      hash === lastTwistHash
+    ) {
       console.warn("[TwistMessage] Duplicate blocked:", hash);
       return;
     }
@@ -173,9 +171,10 @@ export function showMessage(p) {
         : show(`${sender} voert een HEAL uit!`, t);
 
     case "bomb":
-      return target
-        ? show(`${sender} laat een BOM ontploffen op ${target}!`, t)
-        : show(`${sender} gooit een BOM!`, t);
+      return show(
+        `${sender} laat een BOM ontploffen op ${target}!`,
+        t
+      );
 
     case "breaker":
       return target
