@@ -52,24 +52,27 @@ export function initTwistMessage() {
 
     const isDiamond = payload.type === "diamondpistol";
 
-    // ----------------------------------------------------------------------
-    // 💣 BOMB SPECIAL CASE (START vs HIT)
-    // ----------------------------------------------------------------------
-    if (payload.type === "bomb") {
-      if (pendingBombHash !== hash) {
-        // FIRST = START → suppress + remember sender
-        pendingBombHash = hash;
-        lastBombSenderName = payload.byDisplayName || lastBombSenderName;
-        console.log("[TwistMessage] Bomb START suppressed, sender stored:", lastBombSenderName);
-        return;
-      }
+// ----------------------------------------------------------------------
+// 💣 BOMB SPECIAL CASE (START vs HIT)
+// ----------------------------------------------------------------------
+if (payload.type === "bomb") {
+  if (pendingBombHash !== hash) {
+    // FIRST = START → suppress + remember sender
+    pendingBombHash = hash;
+    lastBombSenderName = payload.byDisplayName || lastBombSenderName;
+    console.log(
+      "[TwistMessage] Bomb START suppressed, sender stored:",
+      lastBombSenderName
+    );
+    return;
+  }
 
-      // SECOND = HIT → allow + restore sender
-      pendingBombHash = null;
-      if (lastBombSenderName) {
-        payload.byDisplayName = lastBombSenderName;
-      }
-    }
+  // SECOND = HIT → allow + restore sender
+  pendingBombHash = null;
+  if (lastBombSenderName) {
+    payload.byDisplayName = lastBombSenderName;
+  }
+}
 
     // ----------------------------------------------------------------------
     // DUPLICATE FILTER
