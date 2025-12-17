@@ -88,10 +88,6 @@ export function initTwistMessage() {
   });
 }
 
-window.addEventListener("DOMContentLoaded", () => {
-  initTwistMessage();
-});
-
 // ============================================================================
 // SHOW
 // ============================================================================
