@@ -1,5 +1,5 @@
 // ============================================================================
-// twists.js — 2 FULL-HEIGHT CARDS, CENTERED, BADGE ALIASES (FINAL)
+// twists.js — RANDOM 2 OF ALL TWISTS, AUTO ROTATE (DROP-IN FINAL)
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -9,11 +9,27 @@ initEventRouter();
 
 const stack = document.getElementById("twist-stack");
 
-twistStore.subscribe((state) => {
-  const all = state.visibleTwists || [];
-  const visibleTwists = all.slice(0, 2);
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-  // Fade out current cards
+function shuffle(arr) {
+  return [...arr].sort(() => Math.random() - 0.5);
+}
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+
+let allTwists = [];
+let rotationTimer = null;
+
+// ---------------------------------------------------------------------------
+// Render
+// ---------------------------------------------------------------------------
+
+function renderTwists(twists) {
+  // Fade out existing
   Array.from(stack.children).forEach((child) => {
     child.classList.add("twist-fade");
   });
@@ -21,14 +37,13 @@ twistStore.subscribe((state) => {
   setTimeout(() => {
     stack.innerHTML = "";
 
-    visibleTwists.forEach((tw) => {
+    twists.forEach((tw) => {
       const card = document.createElement("div");
       card.className = "bb-twist-card";
 
       const iconUrl = tw.icon || "/overlays/shared/default-icon.png";
 
-      // Build alias badge list
-      const aliasBadges = tw.aliases
+      const aliasBadges = (tw.aliases || [])
         .map(a => `<span class="alias-badge">!use ${a} @target</span>`)
         .join("");
 
@@ -51,10 +66,33 @@ twistStore.subscribe((state) => {
           <div class="twist-commands">
             ${aliasBadges}
           </div>
+
         </div>
       `;
 
       stack.appendChild(card);
     });
   }, 260);
+}
+
+// ---------------------------------------------------------------------------
+// Store subscription
+// ---------------------------------------------------------------------------
+
+twistStore.subscribe((state) => {
+  const incoming = state.visibleTwists || [];
+  if (!incoming.length) return;
+
+  allTwists = incoming;
+
+  // Start rotation once
+  if (rotationTimer) return;
+
+  // Initial render
+  renderTwists(shuffle(allTwists).slice(0, 2));
+
+  rotationTimer = setInterval(() => {
+    if (!allTwists.length) return;
+    renderTwists(shuffle(allTwists).slice(0, 2));
+  }, 5000); // 🔁 wissel elke 5 seconden
 });
