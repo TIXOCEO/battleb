@@ -140,17 +140,23 @@ async function recomputePositions() {
     for (const p of arena.players) {
       p.score = 0;
 
-      // FIX: eliminated is absolute, never overwritten
-      if (p.eliminated) {
-        p.positionStatus = "elimination";
-        continue;
-      }
+// 🔧 PATCH: survivorImmune ALWAYS wins
+if (p.survivorImmune) {
+  p.positionStatus = "immune";
+  continue;
+}
 
-      // FIX: immune only if NOT eliminated
-      if (p.tempImmune || p.survivorImmune || p.boosters.includes("immune")) {
-        p.positionStatus = "immune";
-        continue;
-      }
+// eliminated second
+if (p.eliminated) {
+  p.positionStatus = "elimination";
+  continue;
+}
+
+// immune boosters / temp immune
+if (p.tempImmune || p.boosters.includes("immune")) {
+  p.positionStatus = "immune";
+  continue;
+}
 
       p.positionStatus = "alive";
     }
@@ -174,16 +180,20 @@ async function recomputePositions() {
   if (status === "ended") {
     for (const p of arena.players) {
       // FIX: eliminated absolute priority
-      if (p.eliminated) {
-        p.positionStatus = "elimination";
-        continue;
-      }
+if (p.survivorImmune) {
+  p.positionStatus = "immune";
+  continue;
+}
 
-      // FIX: immune only if not eliminated
-      if (p.tempImmune || p.survivorImmune || p.boosters.includes("immune")) {
-        p.positionStatus = "immune";
-        continue;
-      }
+if (p.eliminated) {
+  p.positionStatus = "elimination";
+  continue;
+}
+
+if (p.tempImmune || p.boosters.includes("immune")) {
+  p.positionStatus = "immune";
+  continue;
+}
 
       p.positionStatus = "alive";
     }
@@ -197,15 +207,20 @@ async function recomputePositions() {
   if (arena.type === "quarter") {
     if (arena.players.length < 6) {
       for (const p of arena.players) {
-        if (p.eliminated) {
-          p.positionStatus = "elimination";
-          continue;
-        }
+if (p.survivorImmune) {
+  p.positionStatus = "immune";
+  continue;
+}
 
-        if (p.tempImmune || p.survivorImmune || p.boosters.includes("immune")) {
-          p.positionStatus = "immune";
-          continue;
-        }
+if (p.eliminated) {
+  p.positionStatus = "elimination";
+  continue;
+}
+
+if (p.tempImmune || p.boosters.includes("immune")) {
+  p.positionStatus = "immune";
+  continue;
+}
 
         p.positionStatus = "alive";
       }
@@ -218,16 +233,20 @@ async function recomputePositions() {
 
     for (const p of arena.players) {
       // FIX: eliminated always wins
-      if (p.eliminated) {
-        p.positionStatus = "elimination";
-        continue;
-      }
+if (p.survivorImmune) {
+  p.positionStatus = "immune";
+  continue;
+}
 
-      // FIX: immune blocks danger/alive recompute
-      if (p.tempImmune || p.survivorImmune || p.boosters.includes("immune")) {
-        p.positionStatus = "immune";
-        continue;
-      }
+if (p.eliminated) {
+  p.positionStatus = "elimination";
+  continue;
+}
+
+if (p.tempImmune || p.boosters.includes("immune")) {
+  p.positionStatus = "immune";
+  continue;
+}
 
       // FIX: danger computed ONLY for non-eliminated non-immune
       if (arena.reverseMode) {
@@ -248,15 +267,20 @@ async function recomputePositions() {
   for (let i = 0; i < totalFinal; i++) {
     const p = arena.players[i];
 
-    if (p.eliminated) {
-      p.positionStatus = "elimination";
-      continue;
-    }
+if (p.survivorImmune) {
+  p.positionStatus = "immune";
+  continue;
+}
 
-    if (p.tempImmune || p.survivorImmune || p.boosters.includes("immune")) {
-      p.positionStatus = "immune";
-      continue;
-    }
+if (p.eliminated) {
+  p.positionStatus = "elimination";
+  continue;
+}
+
+if (p.tempImmune || p.boosters.includes("immune")) {
+  p.positionStatus = "immune";
+  continue;
+}
 
     if (arena.reverseMode)
       p.positionStatus = i === 0 ? "danger" : "alive";
@@ -539,9 +563,20 @@ export async function endRound(forceEnd: boolean = false) {
     arena.status = "ended";
     (io as any).roundActive = false;
 
-    await recomputePositions();
+// 🔒 Stap 1: veranker danger → elimination
+if (arena.settings.forceEliminations) {
+  for (const p of arena.players) {
+    if (p.positionStatus === "danger") {
+      p.eliminated = true;
+      p.positionStatus = "elimination";
+    }
+  }
+}
 
-    const doomedMG = arena.players.filter((p) => p.eliminated);
+// 🔄 Stap 2: daarna pas recompute
+await recomputePositions();
+
+const doomedMG = arena.players.filter((p) => p.eliminated);
 
     /* ----------------------------- FINALE ----------------------------- */
 
