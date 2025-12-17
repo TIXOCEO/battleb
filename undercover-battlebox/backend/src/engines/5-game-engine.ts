@@ -451,7 +451,18 @@ export async function endRound(forceEnd: boolean = false) {
     arena.status = "ended";
     (io as any).roundActive = false;
 
-    await recomputePositions();
+    // 1️⃣ Veranker danger → eliminated (zoals bij timer)
+if (arena.settings.forceEliminations) {
+  for (const p of arena.players) {
+    if (p.positionStatus === "danger") {
+      p.eliminated = true;
+      p.positionStatus = "elimination";
+    }
+  }
+}
+
+// 2️⃣ Pas daarna herberekenen
+await recomputePositions();
     const total = arena.players.length;
 
     /* ----------------------------- FINALE ----------------------------- */
