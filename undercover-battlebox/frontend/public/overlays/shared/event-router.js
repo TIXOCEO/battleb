@@ -66,7 +66,7 @@ const TWIST_MAP = {
   galaxy: {
     giftName: "Galaxy",
     twistName: "Galaxy Twist",
-    icon: "http://http://178.251.232.12/overlays/icons/galaxy.webp",
+    icon: "http://178.251.232.12/overlays/icons/galaxy.webp",
     diamonds: 1000,
     description: "Reverse ranking!",
     aliases: ["galaxy", "gxy"]
