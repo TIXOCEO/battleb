@@ -161,8 +161,6 @@ function pushBattleEvent(evt) {
 // - twistMessage.js luistert ALLEEN naar document event "twist:message"
 // ============================================================================
 
-let lastBombSender = null;
-
 function getArenaPlayerNameById(id) {
   if (!id) return null;
   const st = arenaStore.get();
