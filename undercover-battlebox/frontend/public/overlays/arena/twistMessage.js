@@ -169,11 +169,11 @@ export function showMessage(p) {
         ? show(`${sender} herstelt ${target}!`, t)
         : show(`${sender} voert een HEAL uit!`, t);
 
-    case "bomb":
-      return show(
-        `${sender} laat een BOM ontploffen op ${target}!`,
-        t
-      );
+case "bomb":
+  // START (geen target) vs HIT (wel target)
+  return target
+    ? show(`${sender} laat een BOM ontploffen op ${target}!`, t)
+    : show(`${sender} gooit een BOM!`, t);
 
     case "breaker":
       return target
