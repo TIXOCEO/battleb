@@ -75,7 +75,7 @@ const TWIST_MAP = {
   moneygun: {
     giftName: "Money Gun",
     twistName: "Eliminatie",
-    icon: "http://http://178.251.232.12/overlays/icons/moneygun.webp",
+    icon: "http://178.251.232.12/overlays/icons/moneygun.webp",
     diamonds: 500,
     description: "Markeert target eliminatie.",
     aliases: ["moneygun", "mg"]
@@ -84,7 +84,7 @@ const TWIST_MAP = {
   bomb: {
     giftName: "Space Dog",
     twistName: "Bomb",
-    icon: "http://http://178.251.232.12/overlays/icons/spacedog.webp",
+    icon: "http://178.251.232.12/overlays/icons/spacedog.webp",
     diamonds: 2500,
     description: "Random BOOM.",
     aliases: ["bomb"]
@@ -93,7 +93,7 @@ const TWIST_MAP = {
   immune: {
     giftName: "Blooming Heart",
     twistName: "Immuniteit",
-    icon: "http://http://178.251.232.12/overlays/icons/bloomingheart.webp",
+    icon: "http://178.251.232.12/overlays/icons/bloomingheart.webp",
     diamonds: 1599,
     description: "Beschermt tegen eliminatie.",
     aliases: ["immune", "save"]
@@ -102,7 +102,7 @@ const TWIST_MAP = {
   heal: {
     giftName: "Galaxy Globe",
     twistName: "Heal",
-    icon: "http://http://178.251.232.12/overlays/icons/galaxyglobe.webp",
+    icon: "http://178.251.232.12/overlays/icons/galaxyglobe.webp",
     diamonds: 1500,
     description: "Herstelt een eliminatie.",
     aliases: ["heal"]
@@ -111,7 +111,7 @@ const TWIST_MAP = {
   diamondpistol: {
     giftName: "Diamond Gun",
     twistName: "Single Survivor",
-    icon: "http://http://178.251.232.12/overlays/icons/diamondgun.webp",
+    icon: "http://178.251.232.12/overlays/icons/diamondgun.webp",
     diamonds: 5000,
     description: "Laat één speler over.",
     aliases: ["dp", "pistol"]
@@ -120,7 +120,7 @@ const TWIST_MAP = {
   breaker: {
     giftName: "Train",
     twistName: "Immune Breaker",
-    icon: "http://http://178.251.232.12/overlays/icons/train.webp",
+    icon: "http://178.251.232.12/overlays/icons/train.webp",
     diamonds: 899,
     description: "Breekt immuniteit.",
     aliases: ["breaker"]
