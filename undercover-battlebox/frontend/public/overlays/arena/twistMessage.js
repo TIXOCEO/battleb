@@ -55,21 +55,24 @@ export function initTwistMessage() {
     // START  = no target → suppress
     // HIT    = target present → always show
     // ----------------------------------------------------------------------
-    if (payload.type === "bomb") {
-      if (!payload.target) {
-        // START (scan)
-        lastBombSenderName = payload.byDisplayName || lastBombSenderName;
-        console.log("[TwistMessage] Bomb START suppressed");
-        return;
-      }
+if (payload.type === "bomb") {
+  // START (scan)
+  if (!payload.target) {
+    lastBombSenderName = payload.byDisplayName || lastBombSenderName;
+    lastTwistHash = null; // nooit blokkeren
+    showMessage({
+      ...payload,
+      byDisplayName: lastBombSenderName
+    });
+    return;
+  }
 
-      // HIT
-      payload.byDisplayName =
-        lastBombSenderName || payload.byDisplayName;
+  // HIT
+  payload.byDisplayName =
+    lastBombSenderName || payload.byDisplayName;
 
-      // Bomb must NEVER be blocked by duplicate filter
-      lastTwistHash = null;
-    }
+  lastTwistHash = null; // HIT mag ook nooit geblokkeerd worden
+}
 
     // ----------------------------------------------------------------------
     // DUPLICATE FILTER (NON-BOMB ONLY)
