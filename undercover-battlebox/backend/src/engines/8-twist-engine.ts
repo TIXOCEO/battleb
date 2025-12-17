@@ -240,6 +240,7 @@ async function finalizeDiamondPistol(p: PendingTwist) {
 
   // ✅ survivor ALWAYS immune + overrides eliminated
   survivor.eliminated = false;
+  survivor.survivorImmune = true;     
   survivor.positionStatus = "immune";
 
   if (!survivor.boosters.includes("immune")) survivor.boosters.push("immune");
