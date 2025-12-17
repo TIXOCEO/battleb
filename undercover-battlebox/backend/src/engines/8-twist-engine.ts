@@ -8,6 +8,11 @@
 // ✔ Geen dubbele HUD-notificaties
 // ✔ Geen gameplay regressies
 //
+// PATCH (THIS PASS):
+// ✔ MoneyGun blocked on IMMUNE + ELIMINATED (no consume, no HUD)
+// ✔ Heal ONLY for MG/Bomb eliminated (mg/bomb marks)
+// ✔ DiamondGun survivor always immune + overrides eliminated
+//
 // ============================================================================
 
 import { io, emitLog } from "../server";
@@ -140,6 +145,9 @@ async function finalizeBomb(p: PendingTwist) {
   const pl = arena.players.find(x => x.id === p.targetId);
   if (!pl || pl.eliminated) return;
 
+  // ✅ mark cause for heal-eligibility
+  if (!pl.boosters.includes("bomb")) pl.boosters.push("bomb");
+
   pl.eliminated = true;
   pl.positionStatus = "elimination";
 
@@ -157,6 +165,9 @@ async function finalizeMoneyGun(p: PendingTwist) {
   const arena = getArena();
   const pl = arena.players.find(x => x.id === p.targetId);
   if (!pl || pl.eliminated) return;
+
+  // ✅ mark cause for heal-eligibility
+  if (!pl.boosters.includes("mg")) pl.boosters.push("mg");
 
   pl.eliminated = true;
   pl.positionStatus = "elimination";
@@ -194,8 +205,23 @@ async function finalizeHeal(p: PendingTwist) {
   const pl = arena.players.find(x => x.id === p.targetId);
   if (!pl || !pl.eliminated) return;
 
+  // ✅ HEAL ONLY for MG/Bomb eliminations
+  const healable =
+    pl.boosters.includes("mg") || pl.boosters.includes("bomb");
+
+  if (!healable) {
+    emitLog({
+      type: "twist",
+      message: `${p.senderName} HEAL geblokkeerd → ${pl.display_name} is niet MG/Bomb eliminated`
+    });
+    return;
+  }
+
   pl.eliminated = false;
   pl.positionStatus = "alive";
+
+  // clear marks
+  pl.boosters = pl.boosters.filter(b => b !== "mg" && b !== "bomb");
 
   emitLog({
     type: "twist",
@@ -212,12 +238,19 @@ async function finalizeDiamondPistol(p: PendingTwist) {
   const survivor = arena.players.find(x => x.id === p.targetId);
   if (!survivor) return;
 
-  if (!survivor.boosters.includes("immune")) survivor.boosters.push("immune");
+  // ✅ survivor ALWAYS immune + overrides eliminated
+  survivor.eliminated = false;
   survivor.positionStatus = "immune";
+
+  if (!survivor.boosters.includes("immune")) survivor.boosters.push("immune");
+  // clear any MG/Bomb marks if they existed
+  survivor.boosters = survivor.boosters.filter(b => b !== "mg" && b !== "bomb");
 
   for (const id of p.victimIds ?? []) {
     const v = arena.players.find(x => x.id === id);
     if (!v || v.eliminated) continue;
+
+    // NOTE: victims eliminated by diamondpistol are intentionally NOT healable
     v.eliminated = true;
     v.positionStatus = "elimination";
   }
@@ -273,7 +306,6 @@ async function applyGalaxy(senderId: string, senderName: string): Promise<void> 
 
   await emitArena();
 
-  // HUD finish (sender always included)
   io.emit("twist:finish", {
     type: "galaxy",
     byDisplayName: senderName
@@ -288,14 +320,21 @@ async function applyMoneyGun(senderId: string, senderName: string, target: any) 
   const p = arena.players.find(x => x.id === target.id);
   if (!p) return;
 
+  // ✅ BLOCK: eliminated (no consume, no HUD)
+  if (p.eliminated) {
+    emitLog({
+      type: "twist",
+      message: `${senderName} MoneyGun geblokkeerd → ${p.display_name} is ELIMINATED`
+    });
+    return;
+  }
+
+  // ✅ BLOCK: immune (no consume, no HUD)
   if (p.boosters.includes("immune")) {
     emitLog({
       type: "twist",
-      message: `${senderName} MoneyGun → ${p.display_name} is IMMUNE`
+      message: `${senderName} MoneyGun geblokkeerd → ${p.display_name} is IMMUNE`
     });
-
-    // HUD finish (still show a message if you want; keeps sender correct)
-    io.emit("twist:finish", { type: "moneygun", byDisplayName: senderName, targetId: p.id });
     return;
   }
 
@@ -339,7 +378,9 @@ async function applyBomb(senderId: string, senderName: string) {
 
   const arena = getArena();
   const candidates = arena.players.filter(
-    p => !p.boosters.includes("immune") && !p.eliminated
+    p =>
+      !p.eliminated &&
+      !p.boosters.includes("immune")
   );
 
   if (!candidates.length) {
@@ -364,8 +405,7 @@ async function applyBomb(senderId: string, senderName: string) {
     targetId: target.id
   };
 
-  // ✅ START = “gooien” (geen target in HUD-message)
-  // Belangrijk: twistMessage.js suppresses first bomb → this is the scan/start
+  // START — scan (geen target in HUD)
   emitTwistStart("bomb", {
     by: senderName
   });
@@ -375,8 +415,13 @@ async function applyBomb(senderId: string, senderName: string) {
     message: `${senderName} BOMB gestart → ${target.display_name}`
   });
 
-  // fallback finalize → finish event contains senderName now (fixed in schedule below)
-  schedulePendingFallback("bomb", target.id, finalizeBomb, 3500, senderName);
+  schedulePendingFallback(
+    "bomb",
+    target.id,
+    finalizeBomb,
+    3500,
+    senderName
+  );
 
   setTimeout(() => {
     bombInProgress = false;
@@ -384,7 +429,11 @@ async function applyBomb(senderId: string, senderName: string) {
 }
 
 // -------------------------------- IMMUNE (INSTANT) ------------------------
-async function applyImmuneTwist(senderId: string, senderName: string, target: any) {
+async function applyImmuneTwist(
+  senderId: string,
+  senderName: string,
+  target: any
+) {
   if (!target) return;
 
   const arena = getArena();
@@ -424,7 +473,11 @@ async function applyImmuneTwist(senderId: string, senderName: string, target: an
 }
 
 // -------------------------------- HEAL (INSTANT) --------------------------
-async function applyHeal(senderId: string, senderName: string, target: any) {
+async function applyHeal(
+  senderId: string,
+  senderName: string,
+  target: any
+) {
   if (!target) return;
 
   const arena = getArena();
@@ -433,6 +486,18 @@ async function applyHeal(senderId: string, senderName: string, target: any) {
     emitLog({
       type: "twist",
       message: `${senderName} Heal → ${p?.display_name} is niet eliminated`
+    });
+    return;
+  }
+
+  // ✅ ONLY heal MG / Bomb
+  const healable =
+    p.boosters.includes("mg") || p.boosters.includes("bomb");
+
+  if (!healable) {
+    emitLog({
+      type: "twist",
+      message: `${senderName} Heal geblokkeerd → ${p.display_name} is DiamondGun slachtoffer`
     });
     return;
   }
@@ -462,7 +527,11 @@ async function applyHeal(senderId: string, senderName: string, target: any) {
 }
 
 // ---------------------------- BREAKER (INSTANT) ---------------------------
-async function applyBreaker(senderId: string, senderName: string, target: any) {
+async function applyBreaker(
+  senderId: string,
+  senderName: string,
+  target: any
+) {
   if (!target) return;
 
   const arena = getArena();
@@ -550,7 +619,7 @@ async function applyDiamondPistol(
 }
 
 // ============================================================================
-// USE TWIST ENTRY — FIXED GATING
+// USE TWIST ENTRY
 // ============================================================================
 
 export async function useTwist(
@@ -621,7 +690,7 @@ export async function parseUseCommand(
 }
 
 // ============================================================================
-// ADD TWIST FROM GIFT — RESTORED (1-op-1 uit v7.3)
+// ADD TWIST FROM GIFT
 // ============================================================================
 
 export async function addTwistByGift(
@@ -639,7 +708,7 @@ export async function addTwistByGift(
 }
 
 // ============================================================================
-// SAFE FALLBACK (UPDATED: include senderName in finish)
+// SAFE FALLBACK
 // ============================================================================
 
 function schedulePendingFallback(
