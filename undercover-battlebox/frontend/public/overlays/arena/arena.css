@@ -480,6 +480,11 @@ body.twist-galaxy-spin .bb-player-card {
     inset 0 0 18px rgba(255,150,70,0.4);
 }
 
+.twist-message.purchase {
+  border-color: gold;
+  box-shadow: 0 0 40px rgba(255, 200, 0, 0.6);
+}
+
 /* COLOR VARIANTS */
 #bb-twist-hud.twist-moneygun #bb-twist-text { color:#ff5500; border-color:#ff5500; }
 #bb-twist-hud.twist-bomb #bb-twist-text { color:#ff0022; border-color:#ff0022; }
@@ -488,6 +493,11 @@ body.twist-galaxy-spin .bb-player-card {
 #bb-twist-hud.twist-breaker #bb-twist-text { color:#ff00aa; border-color:#ff00aa; }
 #bb-twist-hud.twist-diamondpistol #bb-twist-text { color:#63cfff; border-color:#63cfff; }
 #bb-twist-hud.twist-heal #bb-twist-text { color:#f6e07b; border-color:#f6e07b; }
+#bb-twist-hud.twist-purchase #bb-twist-text {
+  color: gold;
+  border-color: gold;
+}
+
 
 /* ========================================================================== */
 /* STACK FIX */
