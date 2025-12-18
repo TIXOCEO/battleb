@@ -310,13 +310,21 @@ async function processGift(evt: any, source: string) {
         (t) => TWIST_MAP[t].giftId === giftId
       ) || null;
 
-    if (twistType) {
-      await addTwistByGift(String(sender.tiktok_id), twistType);
-      emitLog({
-        type: "twist",
-        message: `${senderFmt} ontving twist: ${TWIST_MAP[twistType].giftName}`
-      });
-    }
+if (twistType) {
+  await addTwistByGift(String(sender.tiktok_id), twistType);
+
+  // 🔔 HUD: Twist gekocht
+  io.emit("twist:purchase", {
+    twist: twistType,
+    giftName: TWIST_MAP[twistType].giftName,
+    byDisplayName: senderFmt
+  });
+
+  emitLog({
+    type: "twist",
+    message: `${senderFmt} ontving twist: ${TWIST_MAP[twistType].giftName}`
+  });
+}
 
     // ROUND SYNC INSERT
     const is_round_gift = !isHostReceiver && roundActive;
