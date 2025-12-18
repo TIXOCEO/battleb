@@ -139,8 +139,8 @@
 }
 
 .bb-player-card {
-  width: 160px;
-  height: 160px;
+  width: 180px;
+  height: 180px;
   position: absolute;
 
   clip-path: polygon(
@@ -355,19 +355,19 @@
 }
 
 .bb-player-name {
-  font-size: 20px;
-  font-weight: 800;
+  font-size: 28px;
+  font-weight: 900;
   color: white;
   margin-bottom: 4px;
   text-shadow: 0 0 10px black;
-  max-width: 140px;
+  max-width: 160px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .bb-player-score {
-  font-size: 32px;
+  font-size: 38px;
   opacity: 0.95;
   font-weight: 800;
   text-shadow: 0 0 12px black;
