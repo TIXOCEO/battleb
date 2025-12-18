@@ -1,12 +1,12 @@
 // ============================================================================
-// twistMessage.js — Broadcast Twist Messaging v4.7 (HUD Popup Version)
-// FINAL: Bomb START/HIT deterministic fix
+// twistMessage.js — Broadcast Twist Messaging v4.8 (HUD Popup Version)
+// PATCH: Purchase HUD support
 // ============================================================================
 
 let box = null;
 let textEl = null;
 
-// prevent duplicate spam (non-bomb only)
+// prevent duplicate spam (non-bomb / non-purchase)
 let lastTwistHash = null;
 
 // persist bomb sender between START → HIT
@@ -20,7 +20,8 @@ const TWIST_COLOR_CLASSES = [
   "twist-immune",
   "twist-breaker",
   "twist-diamondpistol",
-  "twist-heal"
+  "twist-heal",
+  "twist-purchase" // ⭐ PATCH
 ];
 
 // ============================================================================
@@ -33,7 +34,7 @@ export function initTwistMessage() {
   if (!box) return console.warn("[TwistMessage] ❌ #bb-twist-hud missing");
   if (!textEl) return console.warn("[TwistMessage] ❌ #bb-twist-text missing");
 
-  console.log("%c[TwistMessage] Ready v4.7", "color:#00ffaa");
+  console.log("%c[TwistMessage] Ready v4.8", "color:#00ffaa");
 
   document.addEventListener("twist:message", (e) => {
     const payload = normalizePayload(e.detail);
@@ -44,41 +45,40 @@ export function initTwistMessage() {
 
     const baseHash = `${payload.type}|${payload.byDisplayName}`;
     const hash =
-      payload.type === "bomb"
+      payload.type === "bomb" || payload.type === "purchase"
         ? baseHash
         : `${baseHash}|${payload.target}|${payload.survivor}|${bucket}`;
 
     const isDiamond = payload.type === "diamondpistol";
 
     // ----------------------------------------------------------------------
-    // 💣 BOMB — SINGLE SOURCE OF TRUTH
-    // START  = no target → suppress
-    // HIT    = target present → always show
+    // 💣 BOMB — deterministic START/HIT
     // ----------------------------------------------------------------------
-if (payload.type === "bomb") {
-  // START (scan)
-  if (!payload.target) {
-    lastBombSenderName = payload.byDisplayName || lastBombSenderName;
-    lastTwistHash = null; // nooit blokkeren
-    showMessage({
-      ...payload,
-      byDisplayName: lastBombSenderName
-    });
-    return;
-  }
+    if (payload.type === "bomb") {
+      // START (scan)
+      if (!payload.target) {
+        lastBombSenderName = payload.byDisplayName || lastBombSenderName;
+        lastTwistHash = null;
+        showMessage({
+          ...payload,
+          byDisplayName: lastBombSenderName
+        });
+        return;
+      }
 
-  // HIT
-  payload.byDisplayName =
-    lastBombSenderName || payload.byDisplayName;
+      // HIT
+      payload.byDisplayName =
+        lastBombSenderName || payload.byDisplayName;
 
-  lastTwistHash = null; // HIT mag ook nooit geblokkeerd worden
-}
+      lastTwistHash = null;
+    }
 
     // ----------------------------------------------------------------------
-    // DUPLICATE FILTER (NON-BOMB ONLY)
+    // DUPLICATE FILTER (NON-BOMB / NON-PURCHASE)
     // ----------------------------------------------------------------------
     if (
       payload.type !== "bomb" &&
+      payload.type !== "purchase" &&
       !isDiamond &&
       hash === lastTwistHash
     ) {
@@ -135,6 +135,8 @@ function normalizePayload(p) {
       p.target ||
       null,
 
+    giftName: p.giftName || null, // ⭐ PATCH
+
     survivors: p.survivors || [],
     victims: p.victimNames || p.victims || [],
     survivor: p.survivorName || p.survivor || null
@@ -154,6 +156,12 @@ export function showMessage(p) {
   const t = p.type.toLowerCase();
 
   switch (t) {
+    case "purchase":
+      return show(
+        `${sender} kocht een ${p.giftName || "TWIST"}!`,
+        "purchase"
+      );
+
     case "moneygun":
       return target
         ? show(`${sender} vuurt de MoneyGun af op ${target}!`, t)
@@ -169,11 +177,10 @@ export function showMessage(p) {
         ? show(`${sender} herstelt ${target}!`, t)
         : show(`${sender} voert een HEAL uit!`, t);
 
-case "bomb":
-  // START (geen target) vs HIT (wel target)
-  return target
-    ? show(`${sender} laat een BOM ontploffen op ${target}!`, t)
-    : show(`${sender} gooit een BOM!`, t);
+    case "bomb":
+      return target
+        ? show(`${sender} laat een BOM ontploffen op ${target}!`, t)
+        : show(`${sender} gooit een BOM!`, t);
 
     case "breaker":
       return target
