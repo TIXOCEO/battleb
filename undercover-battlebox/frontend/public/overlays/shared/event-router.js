@@ -312,6 +312,18 @@ export async function initEventRouter() {
     document.dispatchEvent(new CustomEvent("arena:update", { detail: norm }));
   });
 
+  socket.on("twist:purchase", (data) => {
+  document.dispatchEvent(
+    new CustomEvent("twist:message", {
+      detail: {
+        title: `${data.byDisplayName} kocht een ${data.twist.toUpperCase()}`,
+        subtitle: data.giftName,
+        type: "purchase"
+      }
+    })
+  );
+});
+
   // ------------------------------------------------------------------------
   // ROUND EVENTS
   // ------------------------------------------------------------------------
