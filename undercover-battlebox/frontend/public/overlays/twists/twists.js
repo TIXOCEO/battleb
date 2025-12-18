@@ -66,9 +66,15 @@ function renderTwists(twists) {
 
       const iconUrl = tw.icon || "/overlays/shared/default-icon.png";
 
-      const aliasBadges = (tw.aliases || [])
-        .map(a => `<span class="alias-badge">!use ${a} @target</span>`)
-        .join("");
+// Twists die GEEN target nodig hebben
+const NO_TARGET_TWISTS = ["galaxy", "bomb"];
+
+const aliasBadges = (tw.aliases || [])
+  .map(a => {
+    const needsTarget = !NO_TARGET_TWISTS.includes(a.toLowerCase());
+    return `<span class="alias-badge">!use ${a}${needsTarget ? " @target" : ""}</span>`;
+  })
+  .join("");
 
       card.innerHTML = `
         <div class="twist-info">
