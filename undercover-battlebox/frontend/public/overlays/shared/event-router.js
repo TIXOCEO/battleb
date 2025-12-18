@@ -68,7 +68,7 @@ const TWIST_MAP = {
     twistName: "Galaxy Twist",
     icon: "http://178.251.232.12/overlays/icons/galaxy.webp",
     diamonds: 1000,
-    description: "Reverse ranking!",
+    description: "Draait de ranking om!",
     aliases: ["galaxy", "gxy"]
   },
 
@@ -77,7 +77,7 @@ const TWIST_MAP = {
     twistName: "Eliminatie",
     icon: "http://178.251.232.12/overlays/icons/moneygun.webp",
     diamonds: 500,
-    description: "Markeert target eliminatie.",
+    description: "Markeert @target voor eliminatie.",
     aliases: ["moneygun", "mg"]
   },
 
@@ -86,7 +86,7 @@ const TWIST_MAP = {
     twistName: "Bomb",
     icon: "http://178.251.232.12/overlays/icons/spacedog.webp",
     diamonds: 2500,
-    description: "Random BOOM.",
+    description: "Random BOOM, random speler eliminatie.",
     aliases: ["bomb"]
   },
 
@@ -95,7 +95,7 @@ const TWIST_MAP = {
     twistName: "Immuniteit",
     icon: "http://178.251.232.12/overlays/icons/bloomingheart.webp",
     diamonds: 1599,
-    description: "Beschermt tegen eliminatie.",
+    description: "Beschermt @target tegen eliminatie.",
     aliases: ["immune", "save"]
   },
 
@@ -104,7 +104,7 @@ const TWIST_MAP = {
     twistName: "Heal",
     icon: "http://178.251.232.12/overlays/icons/galaxyglobe.webp",
     diamonds: 1500,
-    description: "Herstelt een eliminatie.",
+    description: "Herstelt @target van een eliminatie.",
     aliases: ["heal"]
   },
 
@@ -113,7 +113,7 @@ const TWIST_MAP = {
     twistName: "Single Survivor",
     icon: "http://178.251.232.12/overlays/icons/diamondgun.webp",
     diamonds: 5000,
-    description: "Laat één speler over.",
+    description: "Alleen @target overleeft deze ronde!",
     aliases: ["dp", "pistol"]
   },
 
@@ -122,7 +122,7 @@ const TWIST_MAP = {
     twistName: "Immune Breaker",
     icon: "http://178.251.232.12/overlays/icons/train.webp",
     diamonds: 899,
-    description: "Breekt immuniteit.",
+    description: "Breekt immuniteit (2x nodig).",
     aliases: ["breaker"]
   }
 };
