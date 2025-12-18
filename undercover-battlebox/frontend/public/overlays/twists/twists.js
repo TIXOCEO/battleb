@@ -1,5 +1,5 @@
 // ============================================================================
-// twists.js — RANDOM 2 OF ALL TWISTS, AUTO ROTATE (DROP-IN FINAL)
+// twists.js — FAIR 2-OF-N ROTATION (NO REPEAT, DROP-IN FINAL)
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -10,18 +10,23 @@ initEventRouter();
 const stack = document.getElementById("twist-stack");
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Fisher–Yates shuffle (UNBIASED)
 // ---------------------------------------------------------------------------
-
 function shuffle(arr) {
-  return [...arr].sort(() => Math.random() - 0.5);
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
 }
 
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 
-let allTwists = [];
+let queue = [];
+let index = 0;
 let rotationTimer = null;
 
 // ---------------------------------------------------------------------------
@@ -50,23 +55,17 @@ function renderTwists(twists) {
       card.innerHTML = `
         <div class="twist-info">
 
-          <!-- 1. TWISTNAAM -->
           <div class="twist-name">${tw.twistName}</div>
-
-          <!-- 2. GIFTNAAM -->
           <div class="twist-gift">${tw.giftName}</div>
 
-          <!-- 3. ICON -->
-          <div class="twist-icon" style="background-image:url('${iconUrl}')"></div>
+          <div class="twist-icon"
+               style="background-image:url('${iconUrl}')"></div>
 
-          <!-- 4. DESCRIPTION -->
           <div class="twist-desc">${tw.description}</div>
 
-          <!-- 5. BADGE LIST -->
           <div class="twist-commands">
             ${aliasBadges}
           </div>
-
         </div>
       `;
 
@@ -76,23 +75,45 @@ function renderTwists(twists) {
 }
 
 // ---------------------------------------------------------------------------
+// Rotation logic
+// ---------------------------------------------------------------------------
+
+function nextPair() {
+  if (queue.length < 2) return [];
+
+  // If near end → reshuffle cleanly
+  if (index + 1 >= queue.length) {
+    queue = shuffle(queue);
+    index = 0;
+  }
+
+  const pair = [
+    queue[index],
+    queue[index + 1]
+  ];
+
+  index += 2;
+  return pair;
+}
+
+// ---------------------------------------------------------------------------
 // Store subscription
 // ---------------------------------------------------------------------------
 
 twistStore.subscribe((state) => {
   const incoming = state.visibleTwists || [];
-  if (!incoming.length) return;
+  if (incoming.length < 2) return;
 
-  allTwists = incoming;
+  // Init once or if twist set changed
+  if (!rotationTimer || incoming.length !== queue.length) {
+    queue = shuffle(incoming);
+    index = 0;
 
-  // Start rotation once
-  if (rotationTimer) return;
+    renderTwists(nextPair());
 
-  // Initial render
-  renderTwists(shuffle(allTwists).slice(0, 2));
-
-  rotationTimer = setInterval(() => {
-    if (!allTwists.length) return;
-    renderTwists(shuffle(allTwists).slice(0, 2));
-  }, 5000); // 🔁 wissel elke 5 seconden
+    clearInterval(rotationTimer);
+    rotationTimer = setInterval(() => {
+      renderTwists(nextPair());
+    }, 5000); // 🔁 elke 5s
+  }
 });
