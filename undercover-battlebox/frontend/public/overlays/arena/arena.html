@@ -63,23 +63,38 @@
     <!-- ⭐ NEW: Bomb roulette overlay (required for simple bomb effect) -->
     <div id="bomb-roulette"></div>
 
-    <!-- Central HUD -->
-    <div id="arena-hud" class="bb-hud">
+<!-- ⭐ ARENA STAGE (HUD + PLAYERS SHARE SAME CENTER) -->
+<div class="arena-stage">
+
+  <!-- Central HUD -->
+  <div id="arena-hud" class="bb-hud">
+    <div class="hud-core">
+
+      <!-- donkere ronde achtergrond -->
+      <div class="hud-backdrop"></div>
+
+      <!-- HUD TEXT -->
       <div class="hud-inner">
         <div id="hud-round" class="hud-round-text">UNDERGROUND</div>
         <div id="hud-type" class="hud-type-text">BATTLEBOX</div>
         <div id="hud-timer" class="hud-timer">00:00</div>
-
-        <svg class="hud-ring" width="360" height="360">
-          <circle cx="180" cy="180" r="170" stroke-width="12" class="hud-ring-bg"></circle>
-          <circle cx="180" cy="180" r="170" stroke-width="12" class="hud-ring-progress" id="hud-ring-progress"></circle>
-        </svg>
       </div>
-    </div>
 
-    <!-- Playercards -->
-    <div id="arena-players"></div>
-    <div id="roulette-beam"></div>
+      <!-- PROGRESS RING -->
+      <svg class="hud-ring" width="360" height="360">
+        <circle cx="180" cy="180" r="170" stroke-width="12" class="hud-ring-bg"></circle>
+        <circle cx="180" cy="180" r="170" stroke-width="12"
+                class="hud-ring-progress"
+                id="hud-ring-progress"></circle>
+      </svg>
+
+    </div>
+  </div>
+
+  <!-- Playercards -->
+  <div id="arena-players"></div>
+
+</div>
 
   </div>
 
