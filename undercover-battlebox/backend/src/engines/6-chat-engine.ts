@@ -213,11 +213,11 @@ export function initChatEngine(conn: any) {
       // !use <twist> [target]
       // =====================================================================
       if (cmd === "!use") {
-        await parseUseCommand(
-          String(userId),
-          user.display_name,
-          rawText
-        );
+await parseUseCommand(
+  String(userId),
+  user.display_name,
+  text   // 👈 GECLEANDE COMMAND STRING
+);
         return;
       }
 
