@@ -98,8 +98,8 @@
    ICON
 --------------------------------------------------------- */
 .twist-icon {
-  width: 60px;
-  height: 60px;
+  width: 75px;
+  height: 75px;
 
   background-size: cover;
   background-position: center;
@@ -128,20 +128,20 @@
 }
 
 .twist-name {
-  font-weight: 800;
-  font-size: 24px;
+  font-weight: 900;
+  font-size: 32px;
   color: var(--neon-turquoise);
   text-shadow: var(--neon-turquoise-glow);
 }
 
 .twist-gift {
-  font-size: 20px;
+  font-size: 28px;
   color: white;
   opacity: 0.95;
 }
 
 .twist-desc {
-  font-size: 16px;     /* BIGGER */
+  font-size: 24px;     /* BIGGER */
   opacity: 0.9;
   max-width: 210px;
   line-height: 1.38;
@@ -158,8 +158,8 @@
 }
 
 .alias-badge {
-  font-size: 16px;
-  font-weight: 800;
+  font-size: 26px;
+  font-weight: 900;
 
   padding: 6px 10px;
   background: rgba(255,77,79,0.25);
