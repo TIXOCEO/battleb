@@ -59,7 +59,6 @@
     0 0 18px rgba(255,77,79,0.55),
     0 0 28px rgba(255,77,79,0.35);
 
-  padding-left: 1200px;
 
   animation:
     tickerScroll 18s linear infinite,
@@ -67,9 +66,14 @@
 }
 
 @keyframes tickerScroll {
-  0% { transform: translateX(0); }
-  100% { transform: translateX(-240%); }
+  0% {
+    transform: translateX(100%);
+  }
+  100% {
+    transform: translateX(-100%);
+  }
 }
+
 
 @keyframes tickerGlow {
   0%, 100% { opacity: 1; }
