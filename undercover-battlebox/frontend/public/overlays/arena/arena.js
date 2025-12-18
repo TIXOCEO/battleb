@@ -1,6 +1,6 @@
 // ============================================================================
 // arena.js — BattleBox Arena Overlay
-// BUILD v12.1 — Bomb Lifecycle FIXED (idempotent, multi-bomb safe)
+// BUILD v12.2 — CENTERED STAGE + BOMB LIFECYCLE SAFE
 // ============================================================================
 
 import { initEventRouter } from "/overlays/shared/event-router.js";
@@ -34,54 +34,35 @@ window.addEventListener("DOMContentLoaded", () => {
 const socket = getSocket();
 
 /* ============================================================================ */
-/* 💣 BOMB STATE — HARD RESETTABLE, PER SESSION                                  */
+/* 💣 BOMB STATE — HARD RESETTABLE                                               */
 /* ============================================================================ */
 
-// Each bomb gets its own session id → prevents stale state
 let bombSessionId = 0;
 let activeBombSession = null;
 
-/**
- * Reset ONLY bomb visuals & flags
- * Safe to call multiple times
- */
 function resetBombState() {
   activeBombSession = null;
-
   cardRefs.forEach(ref => {
-    ref.el.classList.remove(
-      "bomb-scan",
-      "bomb-final-hit"
-    );
+    ref.el.classList.remove("bomb-scan", "bomb-final-hit");
   });
 }
 
 /* ============================================================================ */
-/* RUNTIME RESET (ROUND / ARENA ONLY)                                            */
+/* RUNTIME RESET                                                                */
 /* ============================================================================ */
 
 function resetArenaRuntime() {
-  console.warn("[ARENA RESET] Full runtime reset");
-
   resetBombState();
-
   cardRefs.forEach(ref => {
     ref.el.className = "bb-player-card";
   });
 }
 
-socket.on("round:start", () => {
-  console.warn("[ARENA] round:start → runtime reset");
-  resetArenaRuntime();
-});
-
-socket.on("arena:reset", () => {
-  console.warn("[ARENA] arena:reset → runtime reset");
-  resetArenaRuntime();
-});
+socket.on("round:start", resetArenaRuntime);
+socket.on("arena:reset", resetArenaRuntime);
 
 /* ============================================================================ */
-/* ANIMATION COMPLETE → BACKEND                                                  */
+/* BACKEND ACK                                                                  */
 /* ============================================================================ */
 
 function emitAnimationDone(type, targetIndex) {
@@ -101,9 +82,10 @@ function emitAnimationDoneDirect(type, targetId) {
 const hudRound = document.getElementById("hud-round");
 const hudType = document.getElementById("hud-type");
 const hudTimer = document.getElementById("hud-timer");
-const hudRing = document.getElementById("hud-ring-progress");
+const hudRing  = document.getElementById("hud-ring-progress");
+
 const playersContainer = document.getElementById("arena-players");
-const twistOverlay = document.getElementById("twist-takeover");
+const twistOverlay     = document.getElementById("twist-takeover");
 
 const EMPTY_AVATAR = "https://i.imgur.com/x6v5tkX.jpeg";
 
@@ -119,16 +101,15 @@ function fadeInCards() {
 }
 
 /* ============================================================================ */
-/* waitForAnimation                                                             */
+/* WAIT                                                                         */
 /* ============================================================================ */
 
 function waitForAnimation(el) {
-  return new Promise((resolve) => {
-    let ended = false;
+  return new Promise(resolve => {
+    let done = false;
     const end = () => {
-      if (ended) return;
-      ended = true;
-      el.removeEventListener("animationend", end);
+      if (done) return;
+      done = true;
       resolve();
     };
     el.addEventListener("animationend", end, { once: true });
@@ -137,7 +118,7 @@ function waitForAnimation(el) {
 }
 
 /* ============================================================================ */
-/* POSITIONS / CARDS                                                            */
+/* POSITIONS                                                                    */
 /* ============================================================================ */
 
 const POSITIONS = [
@@ -155,7 +136,7 @@ const RADIUS = 300;
 
 function getArenaCenter() {
   const stage = document.querySelector(".arena-stage");
-  if (!stage) return { x: 600, y: 400 }; // fallback
+  if (!stage) return { x: 600, y: 400 };
 
   const rect = stage.getBoundingClientRect();
   return {
@@ -163,6 +144,10 @@ function getArenaCenter() {
     y: rect.height / 2
   };
 }
+
+/* ============================================================================ */
+/* PLAYER CARDS                                                                 */
+/* ============================================================================ */
 
 const cardRefs = [];
 
@@ -204,12 +189,12 @@ function createPlayerCards() {
 createPlayerCards();
 
 /* ============================================================================ */
-/* RENDER LOOP                                                                  */
+/* RENDER                                                                       */
 /* ============================================================================ */
 
-arenaStore.subscribe((state) => {
+arenaStore.subscribe(state => {
   hudRound.textContent = `RONDE ${state.round}`;
-  hudType.textContent = state.type === "finale" ? "FINALE" : "VOORRONDE";
+  hudType.textContent  = state.type === "finale" ? "FINALE" : "VOORRONDE";
 
   for (let i = 0; i < 8; i++) {
     const ref = cardRefs[i];
@@ -234,7 +219,7 @@ arenaStore.subscribe((state) => {
 });
 
 /* ============================================================================ */
-/* STATUS LOGIC                                                                 */
+/* STATUS                                                                       */
 /* ============================================================================ */
 
 function applyStatus(el, p) {
@@ -244,17 +229,15 @@ function applyStatus(el, p) {
   if (p.positionStatus === "danger") return el.classList.add("status-danger");
 
   if (p.positionStatus === "immune") {
-    if ((p.breakerHits ?? 0) === 0)
-      return el.classList.add("status-immune-full");
-    if ((p.breakerHits ?? 0) === 1)
-      return el.classList.add("status-immune-partial");
+    if ((p.breakerHits ?? 0) === 0) return el.classList.add("status-immune-full");
+    if ((p.breakerHits ?? 0) === 1) return el.classList.add("status-immune-partial");
   }
 
   el.classList.add("status-alive");
 }
 
 /* ============================================================================ */
-/* POSITIONING                                                                  */
+/* POSITIONING — 🔥 FIXED CENTER                                                */
 /* ============================================================================ */
 
 function positionCard(el, pos) {
@@ -283,7 +266,7 @@ setInterval(() => {
 }, 100);
 
 /* ============================================================================ */
-/* GALAXY EFFECT                                                                */
+/* GALAXY                                                                       */
 /* ============================================================================ */
 
 function triggerGalaxyEffect() {
@@ -294,50 +277,32 @@ function triggerGalaxyEffect() {
 }
 
 /* ============================================================================ */
-/* 💣 BOMB — FAST SCAN (SESSION SAFE)                                           */
+/* 💣 BOMB                                                                      */
 /* ============================================================================ */
 
-/**
- * Start scan for a NEW bomb session
- * - Fully isolated per bomb
- * - Safe after overlay refresh
- */
 async function startBombScan(sessionId) {
   resetBombState();
-
   activeBombSession = sessionId;
 
-  const cards = cardRefs.map(ref => ref.el);
+  const cards = cardRefs.map(r => r.el);
   const delay = 100;
-  const rounds = 3;
 
-  console.log("[BOMB] Scan STARTED (session)", sessionId);
-
-  for (let r = 0; r < rounds; r++) {
-    for (let i = 0; i < cards.length; i++) {
+  for (let r = 0; r < 3; r++) {
+    for (const card of cards) {
       if (activeBombSession !== sessionId) return;
-      cards[i].classList.add("bomb-scan");
+      card.classList.add("bomb-scan");
       await new Promise(res => setTimeout(res, delay));
-      cards[i].classList.remove("bomb-scan");
+      card.classList.remove("bomb-scan");
     }
   }
-
-  console.log("[BOMB] Scan finished → waiting for HIT");
 }
 
-/**
- * Finish scan → HIT
- * - Always works, even after refresh
- */
 function finishBombScan(sessionId, targetIndex) {
   if (activeBombSession !== sessionId) return;
-
   activeBombSession = null;
 
   const target = cardRefs[targetIndex]?.el;
   if (!target) return;
-
-  console.log("[BOMB] HIT (session)", sessionId, "target", targetIndex);
 
   target.classList.add("bomb-final-hit");
 
@@ -349,44 +314,14 @@ function finishBombScan(sessionId, targetIndex) {
 }
 
 /* ============================================================================ */
-/* SIMPLE TWISTS (UNCHANGED)                                                    */
+/* SIMPLE TWISTS                                                                */
 /* ============================================================================ */
 
-function triggerMoneyGun(targetIndex) {
-  setTimeout(() => emitAnimationDone("moneygun", targetIndex), 900);
-}
+const trigger = (t, i, d = 900) =>
+  setTimeout(() => emitAnimationDone(t, i), d);
 
-function triggerBreaker(targetIndex) {
-  setTimeout(() => emitAnimationDone("breaker", targetIndex), 900);
-}
-
-function triggerImmune(targetIndex) {
-  setTimeout(() => {
-    if (targetIndex != null) emitAnimationDone("immune", targetIndex);
-    else socket.emit("twist:animation-complete", { type: "immune" });
-  }, 400);
-}
-
-function triggerHeal(targetIndex) {
-  setTimeout(() => {
-    if (targetIndex != null) emitAnimationDone("heal", targetIndex);
-    else socket.emit("twist:animation-complete", { type: "heal" });
-  }, 400);
-}
-
-function triggerDiamondPistol(survivorId, targetIndex) {
-  if (survivorId)
-    return setTimeout(
-      () => emitAnimationDoneDirect("diamondpistol", survivorId),
-      900
-    );
-
-  const p = arenaStore.get().players[targetIndex];
-  if (p)
-    setTimeout(
-      () => emitAnimationDoneDirect("diamondpistol", p.id),
-      900
-    );
+function triggerDiamondPistol(id) {
+  setTimeout(() => emitAnimationDoneDirect("diamondpistol", id), 900);
 }
 
 /* ============================================================================ */
@@ -394,31 +329,18 @@ function triggerDiamondPistol(survivorId, targetIndex) {
 /* ============================================================================ */
 
 async function runGalaxyShuffle() {
-  const steps = 14;
-  const interval = 2600 / steps;
-
-  for (let i = 0; i < steps; i++) {
-    const shuffled = [...POSITIONS].sort(() => Math.random() - 0.5);
-
-    shuffled.forEach((pos, idx) => {
-      positionCard(cardRefs[idx].el, pos);
-      cardRefs[idx].el.classList.add("card-shuffle");
-    });
-
-    await new Promise(r => setTimeout(r, interval));
+  for (let i = 0; i < 14; i++) {
+    [...POSITIONS].sort(() => Math.random() - 0.5)
+      .forEach((p, idx) => positionCard(cardRefs[idx].el, p));
+    await new Promise(r => setTimeout(r, 185));
   }
-
-  POSITIONS.forEach((pos, idx) => {
-    positionCard(cardRefs[idx].el, pos);
-    cardRefs[idx].el.classList.remove("card-shuffle");
-  });
 }
 
 /* ============================================================================ */
-/* MAIN TWIST ENGINE — PATCHED                                                  */
+/* MAIN TWIST LOOP                                                              */
 /* ============================================================================ */
 
-arenaTwistStore.subscribe(async (st) => {
+arenaTwistStore.subscribe(async st => {
   if (!st.active || !st.type) return;
 
   const payload = st.payload || {};
@@ -444,50 +366,28 @@ arenaTwistStore.subscribe(async (st) => {
     return;
   }
 
-  /* ------------------------------------------------------------------------ */
-  /* 💣 BOMB — SESSION CONTROL                                                 */
-  /* ------------------------------------------------------------------------ */
-
   if (st.type === "bomb") {
-    // New bomb session on FIRST event (no target yet)
     if (targetIndex == null) {
-      const sessionId = ++bombSessionId;
-      startBombScan(sessionId);
-      st.__bombSessionId = sessionId;
+      const sid = ++bombSessionId;
+      startBombScan(sid);
+      st.__bombSessionId = sid;
       return;
     }
-
-    // HIT phase
     finishBombScan(st.__bombSessionId ?? bombSessionId, targetIndex);
   }
 
-  /* ------------------------------------------------------------------------ */
-  /* OTHER TWISTS                                                              */
-  /* ------------------------------------------------------------------------ */
-
   switch (st.type) {
-    case "moneygun":
-      triggerMoneyGun(targetIndex);
-      break;
-    case "immune":
-      triggerImmune(targetIndex);
-      break;
-    case "heal":
-      triggerHeal(targetIndex);
-      break;
-    case "breaker":
-      triggerBreaker(targetIndex);
-      break;
+    case "moneygun": trigger("moneygun", targetIndex); break;
+    case "immune":   trigger("immune", targetIndex, 400); break;
+    case "heal":     trigger("heal", targetIndex, 400); break;
+    case "breaker":  trigger("breaker", targetIndex); break;
     case "diamondpistol":
-      triggerDiamondPistol(payload.survivorId, targetIndex);
+      triggerDiamondPistol(payload.survivorId);
       break;
   }
 
-  twistOverlay.classList.remove("hidden");
   playTwistAnimation(twistOverlay, st.type, st.title, payload);
-
   await waitForAnimation(twistOverlay);
-
   clearTwistAnimation(twistOverlay);
   arenaTwistStore.clear();
 });
