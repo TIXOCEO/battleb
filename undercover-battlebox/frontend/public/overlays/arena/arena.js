@@ -151,9 +151,18 @@ const POSITIONS = [
   { x: -0.7071, y: -0.7071 },
 ];
 
-const CENTER_X = 600;
-const CENTER_Y = 400;
 const RADIUS = 300;
+
+function getArenaCenter() {
+  const stage = document.querySelector(".arena-stage");
+  if (!stage) return { x: 600, y: 400 }; // fallback
+
+  const rect = stage.getBoundingClientRect();
+  return {
+    x: rect.width / 2,
+    y: rect.height / 2
+  };
+}
 
 const cardRefs = [];
 
@@ -249,10 +258,12 @@ function applyStatus(el, p) {
 /* ============================================================================ */
 
 function positionCard(el, pos) {
+  const { x: cx, y: cy } = getArenaCenter();
   const dx = pos.x * RADIUS;
   const dy = pos.y * RADIUS;
-  el.style.left = `${CENTER_X + dx - 80}px`;
-  el.style.top = `${CENTER_Y + dy - 80}px`;
+
+  el.style.left = `${cx + dx - 80}px`;
+  el.style.top  = `${cy + dy - 80}px`;
 }
 
 /* ============================================================================ */
