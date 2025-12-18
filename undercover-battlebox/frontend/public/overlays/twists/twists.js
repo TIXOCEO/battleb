@@ -75,25 +75,29 @@ function renderTwists(twists) {
 }
 
 // ---------------------------------------------------------------------------
-// Rotation logic
+// State
 // ---------------------------------------------------------------------------
 
-function nextPair() {
-  if (queue.length < 2) return [];
+let deck = [];
+let rotationTimer = null;
 
-  // If near end → reshuffle cleanly
-  if (index + 1 >= queue.length) {
-    queue = shuffle(queue);
-    index = 0;
+// ---------------------------------------------------------------------------
+// Deck helpers
+// ---------------------------------------------------------------------------
+
+function refillDeck(source) {
+  deck = shuffle(source);
+}
+
+function drawPair(source) {
+  if (deck.length < 2) {
+    refillDeck(source);
   }
 
-  const pair = [
-    queue[index],
-    queue[index + 1]
+  return [
+    deck.shift(),
+    deck.shift()
   ];
-
-  index += 2;
-  return pair;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,16 +108,15 @@ twistStore.subscribe((state) => {
   const incoming = state.visibleTwists || [];
   if (incoming.length < 2) return;
 
-  // Init once or if twist set changed
-  if (!rotationTimer || incoming.length !== queue.length) {
-    queue = shuffle(incoming);
-    index = 0;
+  // First time or twist set changed
+  if (!rotationTimer || incoming.length !== deck.length + deck.length % 2) {
+    refillDeck(incoming);
 
-    renderTwists(nextPair());
+    renderTwists(drawPair(incoming));
 
     clearInterval(rotationTimer);
     rotationTimer = setInterval(() => {
-      renderTwists(nextPair());
-    }, 5000); // 🔁 elke 5s
+      renderTwists(drawPair(incoming));
+    }, 5000);
   }
 });
