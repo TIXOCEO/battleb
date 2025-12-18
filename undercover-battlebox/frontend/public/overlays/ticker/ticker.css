@@ -4,8 +4,8 @@
    BATTLEBOX BROADCAST TICKER PANEL (1200 × 100)
 --------------------------------------------------------- */
 .bb-ticker {
-  width: 1200px;
-  height: 100px;
+  width: 600px;
+  height: 50px;
 
   background:
     linear-gradient(
