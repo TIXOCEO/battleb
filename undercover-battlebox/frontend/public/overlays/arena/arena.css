@@ -19,12 +19,11 @@
 }
 
 .arena-stage {
-  position: relative;
+  position: absolute;
+  inset: 0;
+
   width: 100%;
   height: 100%;
-
-  display: grid;
-  place-items: center;
 }
 
 /* ========================================================================== */
@@ -174,19 +173,9 @@
 /* PLAYER CARDS */
 /* ========================================================================== */
 #arena-players {
-  position: relative;
-  z-index: 1;
-}
-
-#arena-hud {
   position: absolute;
   inset: 0;
-
-  display: grid;
-  place-items: center;
-
-  pointer-events: none;
-  z-index: 10;
+  z-index: 1;
 }
 
 .bb-player-card {
