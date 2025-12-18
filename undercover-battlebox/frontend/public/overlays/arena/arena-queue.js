@@ -8,7 +8,7 @@ import { initEventRouter } from "/overlays/shared/event-router.js";
 initEventRouter();
 
 const list = document.getElementById("arena-queue-list");
-const LIMIT = 15;
+const LIMIT = 10;
 
 // HELPER: trim displayname
 const trim = (s) =>
@@ -41,7 +41,7 @@ queueStore.subscribe((state) => {
       <div class="queue-entry ${item.is_vip ? "vip" : ""} ${highlight}">
         <div>${pos}. ${trim(item.display_name)}${vip}</div>
         <div class="queue-user">@${item.username}</div>
-      </div>
+      </div><br>
     `;
   }
 });
