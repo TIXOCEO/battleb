@@ -277,7 +277,7 @@ export async function initEventRouter() {
       }
     }
 
-    twistStore.setTwists(TWIST_KEYS.slice(0, 3));
+    twistStore.setTwists(TWIST_KEYS);
   });
 
   // ------------------------------------------------------------------------
@@ -500,19 +500,6 @@ export async function initEventRouter() {
   socket.on("hudTickerUpdate", (text) => {
     tickerStore.setText(text || "");
   });
-
-  // ========================================================================
-  // LEGACY TWIST ROTATION
-  // ========================================================================
-  let twistIndex = 0;
-  function rotateLegacyTwists() {
-    const slice = TWIST_KEYS.slice(0, 3);
-    twistStore.setTwists(slice);
-    twistIndex = (twistIndex + 3) % TWIST_KEYS.length;
-  }
-
-  rotateLegacyTwists();
-  setInterval(rotateLegacyTwists, 10000);
 
   // ========================================================================
   // DEBUG BRIDGE
