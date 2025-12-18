@@ -22,19 +22,37 @@ function shuffle(arr) {
 }
 
 // ---------------------------------------------------------------------------
-// State
+// STATE (SINGLE SOURCE OF TRUTH)
 // ---------------------------------------------------------------------------
 
-let queue = [];
-let index = 0;
+let deck = [];
 let rotationTimer = null;
+
+// ---------------------------------------------------------------------------
+// Deck helpers
+// ---------------------------------------------------------------------------
+
+function refillDeck(source) {
+  deck = shuffle(source);
+}
+
+function drawPair(source) {
+  if (deck.length < 2) {
+    refillDeck(source);
+  }
+
+  return [
+    deck.shift(),
+    deck.shift()
+  ];
+}
 
 // ---------------------------------------------------------------------------
 // Render
 // ---------------------------------------------------------------------------
 
 function renderTwists(twists) {
-  // Fade out existing
+  // Fade out existing cards
   Array.from(stack.children).forEach((child) => {
     child.classList.add("twist-fade");
   });
@@ -66,6 +84,7 @@ function renderTwists(twists) {
           <div class="twist-commands">
             ${aliasBadges}
           </div>
+
         </div>
       `;
 
@@ -75,48 +94,21 @@ function renderTwists(twists) {
 }
 
 // ---------------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------------
-
-let deck = [];
-let rotationTimer = null;
-
-// ---------------------------------------------------------------------------
-// Deck helpers
-// ---------------------------------------------------------------------------
-
-function refillDeck(source) {
-  deck = shuffle(source);
-}
-
-function drawPair(source) {
-  if (deck.length < 2) {
-    refillDeck(source);
-  }
-
-  return [
-    deck.shift(),
-    deck.shift()
-  ];
-}
-
-// ---------------------------------------------------------------------------
-// Store subscription
+// Store subscription (INIT ONCE, ROTATE FAIRLY)
 // ---------------------------------------------------------------------------
 
 twistStore.subscribe((state) => {
   const incoming = state.visibleTwists || [];
   if (incoming.length < 2) return;
 
-  // First time or twist set changed
-  if (!rotationTimer || incoming.length !== deck.length + deck.length % 2) {
+  // First init only
+  if (!rotationTimer) {
     refillDeck(incoming);
 
     renderTwists(drawPair(incoming));
 
-    clearInterval(rotationTimer);
     rotationTimer = setInterval(() => {
       renderTwists(drawPair(incoming));
-    }, 5000);
+    }, 5000); // 🔁 wissel elke 5s
   }
 });
