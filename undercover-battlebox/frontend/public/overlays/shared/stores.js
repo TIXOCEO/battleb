@@ -78,7 +78,7 @@ twistStore.setTwists = (arr) => {
 // TICKER STORE
 // ============================================================================
 export const tickerStore = createStore({
-  text: "BattleBox — The Ultimate Underground Arena",
+  text: "Welkom bij Underground BattleBox — The Ultimate Arena | Strijd mee om de winst, of strijd tegen de winst! | Koop je twists bij de hosts en bedenk je strategie | Ledenhartje + !join om de wachtrij te joinen | !use [twist] [@target] om Twist te gebruiken! | Winnaar pakt 40% van de totale opbrengst van de stream | ",
 });
 
 tickerStore.setText = (txt) => {
