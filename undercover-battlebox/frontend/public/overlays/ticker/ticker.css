@@ -47,6 +47,7 @@
    INNER MARQUEE
 --------------------------------------------------------- */
 .bb-ticker-inner {
+  position: relative;
   display: inline-block;
   white-space: nowrap;
 
@@ -60,23 +61,13 @@
     0 0 18px rgba(255,77,79,0.55),
     0 0 28px rgba(255,77,79,0.35);
 
-  padding-left: 100%;
   will-change: transform;
-
-  animation:
-    tickerScroll 16s linear infinite,
-    tickerGlow 3.6s ease-in-out infinite;
 }
 
 @keyframes tickerScroll {
-  0% {
-    transform: translateX(0);
-  }
-  100% {
-    transform: translateX(-100%);
-  }
+  from { transform: translateX(var(--from)); }
+  to   { transform: translateX(var(--to)); }
 }
-
 
 @keyframes tickerGlow {
   0%, 100% { opacity: 1; }
