@@ -64,7 +64,7 @@
   will-change: transform;
 
   animation:
-    tickerScroll 22s linear infinite,
+    tickerScroll 16s linear infinite,
     tickerGlow 3.6s ease-in-out infinite;
 }
 
